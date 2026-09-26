@@ -6,7 +6,7 @@
 
 import type { ReactNode } from "react";
 import { cx } from "./cx";
-import type { UiIcon } from "./Icon";
+import type { UiIcon } from "./icon-base";
 import { renderIcon } from "./render-icon";
 
 export function EmptyState({

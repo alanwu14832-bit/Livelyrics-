@@ -1,35 +1,58 @@
 "use client";
 
+// Home (UI-AUDIT §3.5 首頁): apple.com product-page rhythm. One 56 px headline, a two-line intro,
+// a quiet status line (offline is a normal mode), and the dropzone as the hero object; the
+// library below. The hero fades up once per document load (3.4.1 item 6), not on every return.
+
+import { useEffect, useState } from "react";
+import { AppHeader, cx, pageContainerClass } from "@/components/ui";
 import { UploadFlow } from "@/components/upload/UploadFlow";
 import { Brand } from "./Brand";
 import { ProjectLibrary } from "./ProjectLibrary";
-import { OfflineNotice, ServerStatusPill, useServerStatus } from "./ServerStatus";
+import { ConnectClaudeSheet, ServerStatusButton, ServerStatusLine, useServerStatus } from "./ServerStatus";
+
+let introPlayed = false;
+
+/** One-shot fade-up (spring), 60 ms apart; opacity only with reduced motion (data-motion="move"). */
+function reveal(step: number) {
+  return cx("animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_both]", step === 1 && "[animation-delay:60ms]", step === 2 && "[animation-delay:120ms]", step === 3 && "[animation-delay:180ms]");
+}
 
 export function HomeClient() {
   const { state, reload } = useServerStatus();
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [intro] = useState(() => !introPlayed);
+  useEffect(() => {
+    introPlayed = true;
+  }, []);
+  const motion = intro ? "move" : undefined;
+  const openConnect = () => setConnectOpen(true);
+
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-line/70 bg-bg/85 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6">
-          <Brand />
-          <ServerStatusPill state={state} onRetry={reload} />
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl space-y-10 px-6 pb-16 pt-8">
-        <OfflineNotice state={state} onRetry={reload} />
-        <section aria-labelledby="new-song-title" className="space-y-4">
-          <div>
-            <h1 id="new-song-title" className="text-2xl font-semibold tracking-tight text-fg">
+    <div className="min-h-dvh">
+      <AppHeader leading={<Brand />} actions={<ServerStatusButton state={state} onRetry={reload} onConnect={openConnect} />} />
+      <main className={cx(pageContainerClass, "pb-32")}>
+        <section aria-labelledby="new-song-title" className="pt-[72px]">
+          <div className="text-center">
+            <h1 id="new-song-title" data-motion={motion} className={cx("text-hero text-label max-md:text-[40px] max-md:leading-[48px]", intro && reveal(0))}>
               讓歌詞退居幕後，讓視覺托起樂團
             </h1>
-            <p className="mt-1 max-w-4xl text-sm leading-6 text-muted">
-              上傳一首歌，AI 以樂團專職舞台視覺設計師的角度研究歌曲與樂團，設計主視覺、每一段的畫面，以及歌詞如何跟著主視覺出場。
+            <p data-motion={motion} className={cx("mx-auto mt-4 max-w-[34em] text-intro text-label-2", intro && reveal(1))}>
+              上傳一首歌，AI 以樂團專職舞台視覺設計師的角度，
+              <br className="max-md:hidden" />
+              設計主視覺與每一段的畫面。
             </p>
+            <div data-motion={motion} className={cx("mt-3", intro && reveal(2))}>
+              <ServerStatusLine state={state} onRetry={reload} onConnect={openConnect} />
+            </div>
           </div>
-          <UploadFlow />
+          <div data-motion={motion} className={cx("mt-10", intro && reveal(3))}>
+            <UploadFlow />
+          </div>
         </section>
-        <ProjectLibrary />
+        <ProjectLibrary className="mt-24" />
       </main>
+      <ConnectClaudeSheet open={connectOpen} onClose={() => setConnectOpen(false)} state={state} onRecheck={reload} />
     </div>
   );
 }

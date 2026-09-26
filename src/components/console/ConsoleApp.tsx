@@ -2,16 +2,20 @@
 
 // Operator console (/p/[id]): everything the visual operator needs during the show.
 // The projection window (/p/[id]/output) mirrors only the stage.
+//
+// Pro-app dark layout (UI-AUDIT §3.5): #000 page, --surface panes 6 px apart with radius 12 and no
+// borders, a solid 52 px top bar. Keyboard first: every hotkey acts in the same frame and answers
+// with the HUD over the preview (0 ms in, 900 ms hold, 250 ms fade) plus the top bar's status
+// capsules. None of that feedback ever reaches the projection window.
 
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Banner, Button, ToastStack, type HudHandle, type ToastItem } from "@/components/ui";
 import { useConsoleController, useConsoleSnapshot } from "@/lib/console/hooks";
-import { hotkeyAction, targetOwnsKey, type TargetLike } from "@/lib/console/hotkeys";
+import { hotkeyAction, targetOwnsKey, type HotkeyAction, type TargetLike } from "@/lib/console/hotkeys";
 import { CuePanel } from "./CuePanel";
+import { hudForAction } from "./feedback";
 import { HelpOverlay } from "./HelpOverlay";
-import { IconWarning } from "./icons";
 import { LyricsList } from "./LyricsList";
-import { Notices } from "./Notices";
 import { PanelBoundary } from "./PanelBoundary";
 import { PreviewPanel, StageReadout } from "./Preview";
 import { RedesignDialog } from "./RedesignDialog";
@@ -20,18 +24,29 @@ import { ConsoleSkeleton, LoadErrorState, NotFoundState, NotReadyState } from ".
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
 
+/** What the server already knows about the song, so the loading state shows its title and art. */
+export interface ConsoleIntro {
+  title: string;
+  artist: string;
+  palette: string[];
+}
+
 function asTarget(t: EventTarget | null): TargetLike | null {
   if (!t || typeof (t as Element).tagName !== "string") return null;
   const el = t as HTMLElement;
   return { tagName: el.tagName, type: (el as HTMLInputElement).type, isContentEditable: el.isContentEditable, role: el.getAttribute("role") };
 }
 
-export function ConsoleApp({ id }: { id: string }) {
+/** Hotkeys that also work while the shortcut help sheet is open (it only explains them). */
+const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode"]);
+
+export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | null }) {
   const controller = useConsoleController(id);
   const snap = useConsoleSnapshot(controller);
   const [helpOpen, setHelpOpen] = useState(false);
   const [redesignOpen, setRedesignOpen] = useState(false);
   const [openAnyway, setOpenAnyway] = useState(false);
+  const hud = useRef<HudHandle>(null);
 
   const project = snap.project;
   const notReady = !!project && !project.plan && (project.status === "new" || project.status === "processing") && !openAnyway;
@@ -39,19 +54,21 @@ export function ConsoleApp({ id }: { id: string }) {
 
   useEffect(() => {
     const title = project?.meta?.title;
-    document.title = title ? `${title} — 控制台 · Livelyrics` : "控制台 · Livelyrics";
+    document.title = title ? `${title}｜控制台` : "控制台｜Livelyrics";
   }, [project?.meta?.title]);
 
-  // keyboard-first operation
+  // the toast stack owns notice lifetimes (it pauses while hovered, focused or hidden)
   useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
-      if (redesignOpen) return; // the dialog is modal and handles its own keys
-      const target = asTarget(e.target);
-      if (targetOwnsKey(target, e.code)) return;
-      const action = hotkeyAction(e);
-      if (!action) return;
+    controller.setNoticeAutoDismiss(false);
+    return () => controller.setNoticeAutoDismiss(true);
+  }, [controller]);
+  const toasts = useMemo<ToastItem[]>(() => snap.notices.map((n) => ({ id: String(n.id), tone: n.tone, message: n.message })), [snap.notices]);
+  const dismissToast = useCallback((toastId: string) => controller.dismissNotice(Number(toastId)), [controller]);
+
+  /** Run a hotkey action and answer with the HUD in the same frame. */
+  const dispatch = useCallback(
+    (action: HotkeyAction) => {
+      const noticesBefore = controller.getSnapshot().notices.length;
       switch (action.type) {
         case "togglePlay":
           controller.spaceAction();
@@ -97,17 +114,39 @@ export function ConsoleApp({ id }: { id: string }) {
           break;
         case "help":
           setHelpOpen((v) => !v);
-          break;
+          return;
         case "escape":
-          if (helpOpen) setHelpOpen(false);
-          else controller.clearLine();
-          break;
+          controller.clearLine();
+          return;
       }
+      // a blocked popup already explains itself in a notice: no 「已開啟」 HUD then
+      const after = controller.getSnapshot().notices;
+      if (action.type === "openOutput" && after.length > noticesBefore && after[after.length - 1]?.tone === "error") return;
+      const content = hudForAction(action, controller);
+      if (content) hud.current?.show(content);
+    },
+    [controller],
+  );
+
+  // keyboard-first operation
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      if (redesignOpen || helpOpen) return; // the sheets are modal and pass through their own keys
+      const target = asTarget(e.target);
+      if (targetOwnsKey(target, e.code)) return;
+      const action = hotkeyAction(e);
+      if (!action) return;
+      dispatch(action);
       e.preventDefault();
+      // a hotkey answers with the HUD: dismiss the focused control's tooltip (e.g. the one shown
+      // when a sheet returned focus to its opener). Non-bubbling, so no hotkey handler sees it.
+      if (e.target instanceof HTMLElement && e.target !== document.body) e.target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: false }));
     };
     // Space on a focused button would also "click" it on keyup: Space belongs to the transport
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || redesignOpen) return;
+      if (e.code !== "Space" || redesignOpen || helpOpen) return;
       if (!targetOwnsKey(asTarget(e.target), e.code)) e.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
@@ -116,7 +155,7 @@ export function ConsoleApp({ id }: { id: string }) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [active, controller, helpOpen, redesignOpen]);
+  }, [active, dispatch, helpOpen, redesignOpen]);
 
   // A mouse click must not leave focus on a control: Enter (cue) or arrows (next line) would
   // otherwise re-trigger that button / move that slider. Keyboard (Tab) focus is kept.
@@ -125,7 +164,7 @@ export function ConsoleApp({ id }: { id: string }) {
     const onClick = (e: MouseEvent) => {
       if (e.detail === 0) return; // keyboard activation
       const el = document.activeElement;
-      if (!(el instanceof HTMLElement) || el === document.body || el.closest('[role="dialog"]')) return;
+      if (!(el instanceof HTMLElement) || el === document.body || el.closest('dialog, [role="dialog"]')) return;
       const tag = el.tagName;
       if (tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable) return;
       if (tag === "INPUT" && !["range", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type)) return;
@@ -135,18 +174,36 @@ export function ConsoleApp({ id }: { id: string }) {
     return () => window.removeEventListener("click", onClick);
   }, [active]);
 
+  // B from inside the re-design sheet (outside its text field): blackout, with the HUD
+  const blackoutFromSheet = useCallback(() => dispatch({ type: "blackout" }), [dispatch]);
+  const helpKey = useCallback(
+    (e: ReactKeyboardEvent) => {
+      if (e.nativeEvent.isComposing) return;
+      const action = hotkeyAction(e);
+      if (!action) return;
+      if (action.type === "help") {
+        e.preventDefault();
+        setHelpOpen(false);
+      } else if (HELP_PASSTHROUGH.has(action.type)) {
+        e.preventDefault();
+        dispatch(action);
+      }
+    },
+    [dispatch],
+  );
+
   if (snap.load.status === "not-found") return <NotFoundState id={id} />;
   if (snap.load.status === "error" && !project) return <LoadErrorState message={snap.load.message} onRetry={() => void controller.reload()} />;
-  if (!project) return <ConsoleSkeleton />;
+  if (!project) return <ConsoleSkeleton id={id} intro={intro ?? null} />;
   if (notReady) return <NotReadyState project={project} onOpenAnyway={() => setOpenAnyway(true)} />;
 
   const openRedesign = () => setRedesignOpen(true);
 
   return (
-    <div className="flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg text-fg">
+    <div className="flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg text-label">
       <TopBar controller={controller} snap={snap} onRedesign={openRedesign} onHelp={() => setHelpOpen(true)} />
       <main
-        className="grid min-h-0 flex-1 gap-2 p-2"
+        className="grid min-h-0 flex-1 gap-1.5 p-1.5"
         style={{
           gridTemplateAreas: '"lyrics center panel" "timeline timeline cues"',
           gridTemplateColumns: "clamp(280px, 20vw, 340px) minmax(0, 1fr) clamp(340px, 24vw, 400px)",
@@ -157,22 +214,28 @@ export function ConsoleApp({ id }: { id: string }) {
           <LyricsList controller={controller} project={project} mode={snap.mode} selectedIndex={snap.selectedIndex} duration={snap.duration} />
         </PanelBoundary>
         <PanelBoundary area="center" label="預覽">
-          <section className="flex min-h-0 min-w-0 flex-col gap-2" style={{ gridArea: "center" }} aria-label="投影預覽">
+          <div className="flex min-h-0 min-w-0 flex-col gap-1.5" style={{ gridArea: "center" }}>
             {snap.mode === "track" && snap.audio.status === "error" && (
-              <div className="flex shrink-0 items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-fg" role="alert">
-                <IconWarning className="shrink-0 text-danger" />
-                <span className="flex-1">{snap.audio.error ?? "音檔無法載入。"} 仍可切到 LIVE 模式手動送出歌詞。</span>
-                <Button size="sm" variant="secondary" onClick={() => controller.retryAudio()}>
-                  重新載入音檔
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => controller.setMode("live")}>
-                  切到 LIVE
-                </Button>
-              </div>
+              <Banner
+                tone="error"
+                className="shrink-0 py-2.5"
+                title="音檔無法載入"
+                description={`${snap.audio.error ?? "音檔無法載入。"} 仍可切到 LIVE 模式手動送出歌詞。`}
+                actions={
+                  <>
+                    <Button size="sm" variant="gray" onClick={() => controller.retryAudio()}>
+                      重新載入音檔
+                    </Button>
+                    <Button size="sm" variant="plain" onClick={() => controller.setMode("live")}>
+                      切到 LIVE
+                    </Button>
+                  </>
+                }
+              />
             )}
-            <PreviewPanel controller={controller} project={project} output={snap.output} />
+            <PreviewPanel controller={controller} project={project} output={snap.output} hudRef={hud} />
             <StageReadout controller={controller} project={project} mode={snap.mode} />
-          </section>
+          </div>
         </PanelBoundary>
         <PanelBoundary area="panel" label="設計與控制">
           <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} />
@@ -184,9 +247,17 @@ export function ConsoleApp({ id }: { id: string }) {
           <CuePanel controller={controller} project={project} />
         </PanelBoundary>
       </main>
-      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
-      {redesignOpen && <RedesignDialog controller={controller} redesign={snap.redesign} hasPlan={!!project.plan} hasResearch={!!project.research} onClose={() => setRedesignOpen(false)} />}
-      <Notices controller={controller} notices={snap.notices} />
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} onKeyDown={helpKey} />
+      <RedesignDialog
+        open={redesignOpen}
+        controller={controller}
+        redesign={snap.redesign}
+        hasPlan={!!project.plan}
+        hasResearch={!!project.research}
+        onBlackout={blackoutFromSheet}
+        onClose={() => setRedesignOpen(false)}
+      />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

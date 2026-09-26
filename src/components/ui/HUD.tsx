@@ -17,7 +17,7 @@
 
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { cx } from "./cx";
-import type { UiIcon } from "./Icon";
+import type { UiIcon } from "./icon-base";
 import { HUD_FADE_MS, HUD_HOLD_MS } from "./interaction";
 import { renderIcon } from "./render-icon";
 

@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
 import { cx } from "./cx";
-import { MinusIcon, PlusIcon } from "./Icon";
+import { MinusIcon, PlusIcon } from "./kit-icons";
 import { AUTO_REPEAT_DELAY_MS, AUTO_REPEAT_INTERVAL_MS, stepValue } from "./interaction";
 
 export function Stepper({

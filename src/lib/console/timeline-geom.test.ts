@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   clampView,
   followPlayhead,
+  followStart,
+  maxStart,
+  spanForZoom,
+  stepZoom,
+  zoomOf,
   fullView,
   peaksForView,
   tickLabel,
@@ -41,6 +46,25 @@ describe("timeline geometry", () => {
     expect(followPlayhead(v, 5, 60)).toBe(v);
     expect(followPlayhead(v, 9, 60)).toEqual({ start: 7.5, span: 10 });
     expect(followPlayhead({ start: 0, span: 60 }, 59, 60)).toEqual({ start: 0, span: 60 });
+  });
+
+  it("follows continuously with the playhead at 35 %", () => {
+    expect(followStart(20, 10, 60)).toBeCloseTo(16.5);
+    expect(followStart(1, 10, 60)).toBe(0);
+    expect(followStart(59, 10, 60)).toBe(50);
+    expect(maxStart(60, 60)).toBe(0);
+  });
+
+  it("maps continuous zoom factors to spans and preset steps", () => {
+    expect(spanForZoom(1, 60)).toBe(60);
+    expect(spanForZoom(4, 60)).toBe(15);
+    expect(spanForZoom(100, 60)).toBe(4);
+    expect(zoomOf(15, 60)).toBe(4);
+    expect(stepZoom(1, 1)).toBe(2);
+    expect(stepZoom(2.5, 1)).toBe(4);
+    expect(stepZoom(2.5, -1)).toBe(2);
+    expect(stepZoom(1, -1)).toBe(1);
+    expect(stepZoom(16, 1)).toBe(16);
   });
 
   it("picks readable ruler steps", () => {

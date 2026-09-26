@@ -10,10 +10,10 @@
 
 import type { CSSProperties } from "react";
 import { cx } from "./cx";
-import { SpinnerIcon } from "./Icon";
+import { SpinnerIcon } from "./kit-icons";
 
 // 8 sectors of 45°, centred on the spokes: the head is opaque, the trail fades clockwise-behind
-const MASK = `conic-gradient(from -22.5deg, #000 0deg 45deg, rgb(0 0 0 / 0.28) 45deg 90deg, rgb(0 0 0 / 0.36) 90deg 135deg, rgb(0 0 0 / 0.46) 135deg 180deg, rgb(0 0 0 / 0.56) 180deg 225deg, rgb(0 0 0 / 0.68) 225deg 270deg, rgb(0 0 0 / 0.8) 270deg 315deg, rgb(0 0 0 / 0.9) 315deg 360deg)`;
+const MASK = `conic-gradient(from -22.5deg, rgb(0 0 0) 0deg 45deg, rgb(0 0 0 / 0.28) 45deg 90deg, rgb(0 0 0 / 0.36) 90deg 135deg, rgb(0 0 0 / 0.46) 135deg 180deg, rgb(0 0 0 / 0.56) 180deg 225deg, rgb(0 0 0 / 0.68) 225deg 270deg, rgb(0 0 0 / 0.8) 270deg 315deg, rgb(0 0 0 / 0.9) 315deg 360deg)`;
 const maskStyle: CSSProperties = { WebkitMaskImage: MASK, maskImage: MASK };
 
 export function Spinner({

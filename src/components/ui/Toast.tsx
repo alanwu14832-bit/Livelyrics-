@@ -19,12 +19,13 @@
 //
 // A toast without `duration` lives TOAST_DURATION_MS[tone] (4.5 s; errors 9 s); Infinity is sticky.
 
-import { animate, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { createVelocityTracker, rubberband, shouldDismiss, springSnappy } from "@/lib/motion";
 import { Button } from "./Button";
 import { cx } from "./cx";
-import { CheckCircleIcon, InfoIcon, WarningCircleIcon, WarningIcon, XIcon } from "./Icon";
+import { springTo, type Playback } from "./spring";
+import { useReducedMotion } from "./use-reduced-motion";
+import { CheckCircleIcon, InfoIcon, WarningCircleIcon, WarningIcon, XIcon } from "./kit-icons";
 import { mergePresence, stackOffsets, TOAST_DURATION_MS, type Presence } from "./interaction";
 
 export type ToastTone = "info" | "ok" | "warn" | "error";
@@ -192,7 +193,7 @@ function ToastSlot({
   const duration = toast.duration ?? TOAST_DURATION_MS[tone];
   const remaining = useRef(duration);
   const swipe = useRef<{ x0: number; dx: number; w: number; tracker: ReturnType<typeof createVelocityTracker> } | null>(null);
-  const fling = useRef<ReturnType<typeof animate> | null>(null);
+  const fling = useRef<Playback | null>(null);
   const hoverRef = useRef(false);
   const hover = (h: boolean) => {
     hoverRef.current = h;
@@ -255,10 +256,10 @@ function ToastSlot({
       el.style.translate = `${x}px 0`;
     };
     if (shouldDismiss(s.dx, v, s.w, { threshold: 0.4 })) {
-      fling.current = animate(s.dx, s.w + 40, { type: "spring", bounce: 0, visualDuration: 0.2, velocity: Math.max(0, v), onUpdate: set, onComplete: () => onDismiss(toast.id) });
+      fling.current = springTo({ from: s.dx, to: s.w + 40, velocity: Math.max(0, v), response: 0.2, onUpdate: set, onComplete: () => onDismiss(toast.id) });
     } else {
       el.style.opacity = "";
-      fling.current = animate(s.dx, 0, { ...springSnappy, velocity: v, onUpdate: set, onComplete: () => (el.style.translate = "") });
+      fling.current = springTo({ from: s.dx, to: 0, velocity: v, response: springSnappy.visualDuration, onUpdate: set, onComplete: () => (el.style.translate = "") });
     }
   };
 

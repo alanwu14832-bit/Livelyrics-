@@ -22,7 +22,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { cx } from "./cx";
-import { CaretLeftIcon } from "./Icon";
+import { CaretLeftIcon } from "./kit-icons";
 
 /** The page container the header aligns to (home and process). */
 export const pageContainerClass = "mx-auto w-full max-w-[1200px] px-(--page-gutter)";

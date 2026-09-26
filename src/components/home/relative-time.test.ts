@@ -17,7 +17,7 @@ describe("formatRelativeTime", () => {
   });
 
   it("handles invalid timestamps", () => {
-    expect(formatRelativeTime("not a date", now)).toBe("—");
+    expect(formatRelativeTime("not a date", now)).toBe("");
     expect(formatAbsoluteTime("nope")).toBe("");
   });
 

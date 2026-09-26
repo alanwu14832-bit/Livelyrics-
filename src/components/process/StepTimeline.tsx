@@ -1,10 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { cx } from "@/components/ui";
+// The processing steps as an iOS inset grouped list (UI-AUDIT §3.5 處理頁, UI-30): each row has a
+// status accessory (running: the activity indicator; done: a green check that draws itself in
+// 200 ms when the step has just finished while you watched; error: a red WarningCircle; waiting: a
+// hollow label-3 circle), a 15 / 500 title, a 13 px label-2 detail and the status or duration on
+// the right. Nothing glows and nothing loops except the spinner.
+
+import { useState, type ReactNode } from "react";
+import { Spinner, cx } from "@/components/ui";
+import { WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
 import { formatTimeShort } from "@/lib/timeline";
 import type { AudioAnalysis } from "@/lib/types";
-import { AlertIcon, CheckIcon, SearchIcon, SpinnerIcon } from "@/components/home/icons";
 import type { StepState, StepStatus } from "./pipeline-state";
 import type { ProcessStep } from "./steps";
 
@@ -27,69 +33,103 @@ const STATUS_TEXT: Record<StepStatus, string> = {
   done: "完成",
   skipped: "略過",
   error: "失敗",
-  kept: "未執行",
+  kept: "沿用",
 };
 
-function StatusDot({ status }: { status: StepStatus | "warn" }) {
-  const base = "relative z-[1] flex size-7 shrink-0 items-center justify-center rounded-full border";
+const ORDER: ProcessStep[] = ["lyrics", "research", "design"];
+
+type RowStatus = StepStatus | "warn";
+
+/** Green check in a filled circle; `draw` plays the one-shot stroke (scale .9 -> 1, no bounce). */
+function DoneIcon({ draw, muted = false }: { draw: boolean; muted?: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" className="shrink-0 overflow-visible">
+      <circle
+        cx="10"
+        cy="10"
+        r="10"
+        className={cx(
+          "origin-center [transform-box:fill-box]",
+          muted ? "fill-label-3" : "fill-green",
+          draw && "transition-transform duration-200 ease-out starting:scale-90 motion-reduce:transition-none",
+        )}
+      />
+      <path
+        d="M5.8 10.4l2.9 2.9 5.6-6"
+        fill="none"
+        stroke="white"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        pathLength={1}
+        className={cx("[stroke-dasharray:1] [stroke-dashoffset:0]", draw && "transition-[stroke-dashoffset] delay-50 duration-200 ease-out starting:[stroke-dashoffset:1] motion-reduce:transition-none")}
+      />
+    </svg>
+  );
+}
+
+function StatusIcon({ status, draw, hollow }: { status: RowStatus; draw: boolean; hollow?: boolean }) {
+  if (hollow) return <span aria-hidden="true" className="size-5 rounded-full border-[1.5px] border-label-3" />;
   switch (status) {
-    case "done":
-      return (
-        <span className={cx(base, "border-ok/40 bg-ok/15 text-ok")}>
-          <CheckIcon size={14} />
-        </span>
-      );
-    case "skipped":
-      return (
-        <span className={cx(base, "border-ok/30 bg-panel-2 text-ok/80")}>
-          <CheckIcon size={13} />
-        </span>
-      );
     case "running":
-      return (
-        <span className={cx(base, "border-accent/60 bg-accent/15 text-accent shadow-[0_0_14px] shadow-accent/40")}>
-          <SpinnerIcon size={14} />
-        </span>
-      );
+      return <Spinner size={20} />;
+    case "done":
+    case "skipped":
+      return <DoneIcon draw={draw} />;
+    case "kept":
+      return <DoneIcon draw={false} muted />;
     case "error":
-      return (
-        <span className={cx(base, "border-danger/50 bg-danger/15 text-danger")}>
-          <AlertIcon size={13} />
-        </span>
-      );
+      return <WarningCircleIcon size={20} weight="fill" className="text-red" />;
     case "warn":
-      return (
-        <span className={cx(base, "border-warn/40 bg-warn/10 text-warn")}>
-          <AlertIcon size={13} />
-        </span>
-      );
+      return <WarningIcon size={20} weight="fill" className="text-orange" />;
     default:
-      return <span className={cx(base, "border-line bg-panel-2")}><span className="size-1.5 rounded-full bg-faint" /></span>;
+      return <span aria-hidden="true" className="size-5 rounded-full border-[1.5px] border-label-3" />;
   }
 }
 
 function duration(step: StepState): string | null {
-  if (step.startedAt == null) return null;
-  const end = step.endedAt ?? null;
-  if (end == null) return null;
-  const s = Math.max(0, (end - step.startedAt) / 1000);
-  return s < 1 ? "<1 秒" : s < 60 ? `${Math.round(s)} 秒` : `${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒`;
+  if (step.startedAt == null || step.endedAt == null) return null;
+  const s = Math.max(0, (step.endedAt - step.startedAt) / 1000);
+  return s < 1 ? "不到 1 秒" : s < 60 ? `${Math.round(s)} 秒` : `${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒`;
 }
 
-function Row({ status, title, detail, meta, children, last }: { status: StepStatus | "warn"; title: string; detail?: ReactNode; meta?: string | null; children?: ReactNode; last?: boolean }) {
+function Row({
+  status,
+  draw,
+  hollow,
+  title,
+  detail,
+  meta,
+  statusText,
+  children,
+}: {
+  status: RowStatus;
+  draw: boolean;
+  hollow?: boolean;
+  title: string;
+  detail?: ReactNode;
+  meta?: string | null;
+  statusText?: string;
+  children?: ReactNode;
+}) {
+  const quiet = status === "pending" || status === "kept";
+  const right = statusText ?? (status === "warn" ? "注意" : status === "done" && meta ? meta : STATUS_TEXT[status as StepStatus]);
   return (
-    <li className="relative flex gap-3 pb-5 last:pb-0">
-      {!last && <span aria-hidden="true" className={cx("absolute left-[13px] top-7 bottom-0 w-px", status === "done" || status === "skipped" ? "bg-ok/30" : "bg-line")} />}
-      <StatusDot status={status} />
-      <div className="min-w-0 flex-1 pt-0.5">
-        <div className="flex items-baseline justify-between gap-2">
-          <p className={cx("text-sm font-medium", status === "pending" || status === "kept" ? "text-muted" : "text-fg")}>{title}</p>
-          <span className={cx("shrink-0 text-[11px]", status === "error" ? "text-danger" : status === "running" ? "text-accent" : "text-faint")}>
-            {status === "warn" ? "注意" : STATUS_TEXT[status]}
-            {meta && ` · ${meta}`}
-          </span>
+    <li
+      className={cx(
+        "relative flex min-w-0 gap-3 px-4 py-3",
+        "after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:left-12 after:h-(--hairline) after:bg-separator last:after:hidden",
+      )}
+    >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <StatusIcon status={status} draw={draw} hollow={hollow} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline justify-between gap-3">
+          <p className={cx("min-w-0 text-[15px] leading-5 font-medium", quiet ? "text-label-2" : "text-label")}>{title}</p>
+          <span className={cx("shrink-0 text-[13px] leading-5 tabular", status === "error" ? "text-red-text" : "text-label-2")}>{right}</span>
         </div>
-        {detail && <div className="mt-0.5 text-xs leading-5 text-muted">{detail}</div>}
+        {detail && <div className="mt-0.5 text-[13px] leading-[18px] break-words text-label-2">{detail}</div>}
         {children}
       </div>
     </li>
@@ -99,46 +139,67 @@ function Row({ status, title, detail, meta, children, last }: { status: StepStat
 export function StepTimeline({
   analysis,
   steps,
-  searches,
   lyricsEmpty,
+  footer,
 }: {
   analysis: AudioAnalysis | null;
   steps: Record<ProcessStep, StepState>;
-  searches: string[];
+  /** kept for older callers; the searches now show in the research stream panel */
+  searches?: string[];
   /** the project has no lyrics (a "kept" lyrics step then means "add them later") */
   lyricsEmpty: boolean;
+  footer?: ReactNode;
 }) {
-  const order: ProcessStep[] = ["lyrics", "research", "design"];
+  // steps that finished while this page watched them get the one-shot check animation
+  const [prev, setPrev] = useState(steps);
+  const [fresh, setFresh] = useState<ReadonlySet<ProcessStep>>(() => new Set());
+  if (steps !== prev) {
+    const next = new Set(fresh);
+    for (const id of ORDER) {
+      if (prev[id].status === "running" && steps[id].status === "done") next.add(id);
+      if (steps[id].status === "running") next.delete(id);
+    }
+    setPrev(steps);
+    setFresh(next);
+  }
+
   return (
-    <ol aria-label="處理步驟" className="relative">
-      <Row
-        status={analysis ? "done" : "warn"}
-        title={STEP_TITLE.analyze}
-        detail={
-          analysis
-            ? `長度 ${formatTimeShort(analysis.duration)}${analysis.bpm > 0 ? ` · ${Math.round(analysis.bpm)} BPM` : ""} · ${analysis.sections.length} 個段落邊界（上傳時已在瀏覽器完成）`
-            : "沒有音訊分析資料：畫面不會跟著音樂能量變化"
-        }
-      />
-      {order.map((id, i) => {
-        const s = steps[id];
-        const detail =
-          s.message ?? (s.status === "kept" ? (id === "lyrics" && lyricsEmpty ? "這次不處理歌詞，之後可在歌詞編輯器加入" : "沿用先前的結果") : STEP_HINT[id]);
-        return (
-          <Row key={id} status={s.status} title={STEP_TITLE[id]} detail={detail} meta={duration(s)} last={i === order.length - 1}>
-            {id === "research" && searches.length > 0 && (
-              <ul aria-label="網路搜尋" className="mt-2 flex flex-wrap gap-1.5">
-                {searches.map((q) => (
-                  <li key={q} className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-muted" title={q}>
-                    <SearchIcon size={10} className="shrink-0 text-faint" />
-                    <span className="truncate">{q}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Row>
-        );
-      })}
-    </ol>
+    <section aria-labelledby="steps-title" className="min-w-0">
+      <h2 id="steps-title" className="mb-1.5 px-4 text-[13px] leading-5 text-label-2">
+        處理步驟
+      </h2>
+      <ol className="overflow-hidden rounded-lg bg-surface">
+        <Row
+          status={analysis ? "done" : "warn"}
+          draw={false}
+          title={STEP_TITLE.analyze}
+          meta="完成"
+          detail={
+            analysis
+              ? `${formatTimeShort(analysis.duration)}${analysis.bpm > 0 ? `，${Math.round(analysis.bpm)} BPM` : ""}，${analysis.sections.length} 個段落邊界。上傳時已在瀏覽器完成。`
+              : "沒有音訊分析資料：畫面不會跟著音樂能量變化。"
+          }
+        />
+        {ORDER.map((id) => {
+          const s = steps[id];
+          const detail =
+            s.message ?? (s.status === "kept" ? (id === "lyrics" && lyricsEmpty ? "這次不處理歌詞，之後可在歌詞編輯器加入" : "沿用先前的結果") : STEP_HINT[id]);
+          const noLyrics = s.status === "kept" && id === "lyrics" && lyricsEmpty;
+          return (
+            <Row
+              key={id}
+              status={s.status}
+              hollow={noLyrics}
+              statusText={noLyrics ? "未處理" : undefined}
+              draw={fresh.has(id)}
+              title={STEP_TITLE[id]}
+              detail={detail}
+              meta={duration(s)}
+            />
+          );
+        })}
+      </ol>
+      {footer && <p className="mt-1.5 px-4 text-[12px] leading-4 text-label-2">{footer}</p>}
+    </section>
   );
 }

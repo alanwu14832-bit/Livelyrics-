@@ -2,16 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui";
+import { Button, ProgressBar, cx } from "@/components/ui";
+import { MusicNotesIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
 import { analyzeFile, AudioAnalysisError, isAbortError } from "@/lib/audio/analyze";
 import { readAudioMetadata, type AudioFileMetadata } from "@/lib/audio/metadata";
 import { distributeLines, parseLyricsText } from "@/lib/lyrics/lrc";
 import type { AudioAnalysis } from "@/lib/types";
-import { AlertIcon, MusicIcon, XIcon } from "@/components/home/icons";
 import { processHref, type ProcessStep } from "@/components/process/steps";
 import { checkAudioFile, formatBytes, pickAudioFile } from "./accept";
-import { Dropzone } from "./Dropzone";
+import { Dropzone, heroTileClass, phaseEnterClass } from "./Dropzone";
 import { storeLyricsHandoff } from "./handoff";
 import { resultToLyricsText } from "./lyrics-choice";
 import { NewProjectCard, type NewProjectInput } from "./NewProjectCard";
@@ -201,66 +201,48 @@ export function UploadFlow() {
 
   if (phase.kind === "analyzing" || phase.kind === "failed") {
     const failed = phase.kind === "failed";
-    const pct = phase.kind === "analyzing" ? Math.round(phase.progress * 100) : 0;
+    const title = phase.meta?.title || phase.file.name.replace(/\.[^.]+$/, "");
     return (
-      <section aria-label="分析音訊" className="rounded-2xl border border-line bg-panel px-6 py-8">
-        <div className="mx-auto flex max-w-2xl flex-col gap-5">
-          <div className="flex items-center gap-4">
-            <span className={failed ? "flex size-12 shrink-0 items-center justify-center rounded-xl bg-danger/15 text-danger" : "flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"}>
-              {failed ? <AlertIcon size={22} /> : <MusicIcon size={22} />}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-semibold text-fg">
-                {phase.meta?.title || phase.file.name}
-                {phase.meta?.artist && <span className="font-normal text-muted"> — {phase.meta.artist}</span>}
-              </p>
-              <p className="truncate text-xs text-muted">
-                {phase.file.name} · {formatBytes(phase.file.size)}
-              </p>
-            </div>
-            {!failed && (
-              <Button variant="ghost" size="sm" onClick={reset}>
-                <XIcon size={14} />
-                取消
-              </Button>
-            )}
-          </div>
+      <section aria-label="分析音訊" className={heroTileClass}>
+        <div key={phase.kind} data-motion="move" className={cx("flex w-full max-w-[520px] min-w-0 flex-col items-center", phaseEnterClass)}>
+          <span aria-hidden="true" className={cx("grid size-[88px] place-items-center rounded-full", failed ? "bg-red-soft text-red" : "bg-tint-soft text-tint")}>
+            {failed ? <WarningCircleIcon size={44} /> : <MusicNotesIcon size={44} />}
+          </span>
+          <h2 className="mt-6 max-w-full truncate text-title-2 text-label" title={title}>
+            {title}
+          </h2>
+          {phase.meta?.artist && <p className="max-w-full truncate text-[17px] leading-6 text-label-2">{phase.meta.artist}</p>}
+          <p className="mt-1 max-w-full truncate text-[12px] leading-[18px] text-label-2" title={phase.file.name}>
+            {phase.file.name}，{formatBytes(phase.file.size)}
+          </p>
 
           {failed ? (
-            <div role="alert" className="space-y-4">
-              <p className="rounded-lg border border-danger/30 bg-danger/[0.07] px-4 py-3 text-sm text-fg">
-                <span className="font-medium text-danger">無法分析這個音檔。</span> {phase.message}
+            <div role="alert" className="mt-6 flex w-full flex-col items-center">
+              <p className="text-[15px] leading-[22px] text-label">
+                <span className="font-semibold text-red-text">無法分析這個音檔。</span>
+                {phase.message}
               </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="primary" onClick={reset}>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <Button variant="filled" size="lg" onClick={reset}>
                   重新選擇檔案
                 </Button>
-                {phase.canSkip && <Button onClick={skipAnalysis}>略過分析，直接建立</Button>}
+                {phase.canSkip && (
+                  <Button variant="gray" size="lg" onClick={skipAnalysis}>
+                    略過分析，直接建立
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
-            <div>
-              <div className="mb-2 flex items-baseline justify-between text-sm">
-                <span className="text-fg" aria-live="polite">
-                  {phase.label}…
-                </span>
-                <span className="font-mono text-muted tabular">{pct}%</span>
+            <>
+              <div className="mt-8 w-full" aria-live="polite">
+                <ProgressBar value={phase.progress} label={`${phase.label}…`} showValue aria-label="音訊分析進度" />
               </div>
-              <div
-                role="progressbar"
-                aria-label="音訊分析進度"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={pct}
-                className="h-2 overflow-hidden rounded-full bg-panel-3"
-              >
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-200 ease-out"
-                  style={{ width: `${Math.max(2, pct)}%` }}
-                />
-              </div>
-              <p className="mt-3 text-xs text-faint">在瀏覽器裡分析節奏、能量、段落與波形（檔案不會上傳到網路）。</p>
-            </div>
+              <p className="mt-3 text-[12px] leading-[18px] text-label-2">在瀏覽器裡分析節奏、能量、段落與波形，檔案不會上傳到網路。</p>
+              <Button variant="plain" onClick={reset} className="mt-4">
+                取消
+              </Button>
+            </>
           )}
         </div>
       </section>

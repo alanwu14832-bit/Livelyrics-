@@ -10,7 +10,7 @@
 
 import type { ReactNode } from "react";
 import { cx } from "./cx";
-import { CheckCircleIcon, InfoIcon, WarningCircleIcon, WarningIcon } from "./Icon";
+import { CheckCircleIcon, InfoIcon, WarningCircleIcon, WarningIcon } from "./kit-icons";
 
 export type BannerTone = "success" | "error" | "warning" | "info";
 

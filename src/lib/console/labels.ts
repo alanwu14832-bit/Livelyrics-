@@ -97,15 +97,24 @@ export const CUE_KIND_LABELS: Record<CueNote["kind"], string> = {
   warning: "注意",
 };
 
-/** Marker colors for cue kinds on the timeline / cue list (independent of the song palette). */
-export const CUE_KIND_COLORS: Record<CueNote["kind"], string> = {
-  drop: "#ff5a36",
-  singalong: "#f5c542",
-  quiet: "#6cb6ff",
-  transition: "#8b6cff",
-  highlight: "#34d17c",
-  warning: "#ff4d5e",
+/**
+ * Cue marker colours by urgency, as design tokens (never the song palette, never red: red means
+ * blackout / on-air / error): orange = act now, yellow = a moment to catch, label-2 = calm.
+ * Non-text marks only (diamonds on the timeline and in the cue list); the kind name stays label-2 text.
+ */
+export const CUE_KIND_TOKENS: Record<CueNote["kind"], "--orange" | "--yellow" | "--label-2"> = {
+  drop: "--orange",
+  warning: "--orange",
+  singalong: "--yellow",
+  highlight: "--yellow",
+  quiet: "--label-2",
+  transition: "--label-2",
 };
+
+/** CSS colour for a cue kind's marker. */
+export function cueColor(kind: CueNote["kind"]): string {
+  return `var(${CUE_KIND_TOKENS[kind] ?? "--label-2"})`;
+}
 
 export const LYRICS_SOURCE_LABELS: Record<string, string> = {
   "lrclib-synced": "LRCLIB 同步歌詞",

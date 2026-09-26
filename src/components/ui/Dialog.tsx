@@ -25,11 +25,12 @@
 // ones that must pass (the console blackout B) in `onKeyDown`. `preview` renders the surface
 // inline without a dialog (for /ui-lab).
 
-import { animate, useReducedMotion } from "motion/react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { createVelocityTracker, rubberband, shouldDismiss, springSnappy } from "@/lib/motion";
 import { Button } from "./Button";
 import { cx } from "./cx";
+import { springTo, type Playback } from "./spring";
+import { useReducedMotion } from "./use-reduced-motion";
 
 const EXIT_FALLBACK_MS = 320;
 
@@ -236,7 +237,7 @@ export function Sheet({
   const [scrolled, setScrolled] = useState(false);
   const downOnBackdrop = useRef(false);
   const drag = useRef<{ startY: number; y: number; moved: boolean; height: number; tracker: ReturnType<typeof createVelocityTracker> } | null>(null);
-  const flight = useRef<ReturnType<typeof animate> | null>(null);
+  const flight = useRef<Playback | null>(null);
   const canDrag = dragToDismiss && !instant && !reduce && dismissible;
 
   useEffect(() => () => flight.current?.stop(), []);
@@ -278,11 +279,11 @@ export function Sheet({
     if (shouldDismiss(d.y, v, d.height)) {
       const to = d.height + 48;
       const from = d.y;
-      flight.current = animate(from, to, {
-        type: "spring",
-        bounce: 0,
-        visualDuration: 0.25,
+      flight.current = springTo({
+        from,
+        to,
         velocity: Math.max(v, 0),
+        response: springSnappy.visualDuration,
         onUpdate: (y) => {
           set(y);
           el.style.opacity = String(Math.max(0, 1 - (y - from) / (to - from)));
@@ -290,9 +291,11 @@ export function Sheet({
         onComplete: onClose,
       });
     } else {
-      flight.current = animate(d.y, 0, {
-        ...springSnappy,
+      flight.current = springTo({
+        from: d.y,
+        to: 0,
         velocity: v,
+        response: springSnappy.visualDuration,
         onUpdate: set,
         onComplete: () => {
           el.style.transform = "";

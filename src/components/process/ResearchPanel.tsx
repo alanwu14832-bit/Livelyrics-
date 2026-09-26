@@ -1,9 +1,13 @@
 "use client";
 
-import { Badge } from "@/components/ui";
+// The stored research brief (UI-AUDIT §3.5 處理頁, UI-31): a --surface group whose header is a
+// Disclosure row (the Apple › turns 90°, the content fades and drops 4 px, the height animates on
+// this page only). Sources are rows with an ArrowSquareOut.
+
+import { Disclosure, Tag } from "@/components/ui";
+import { ArrowSquareOutIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import type { Research } from "@/lib/types";
-import { ExternalIcon } from "@/components/home/icons";
 import { formatAbsoluteTime } from "@/components/home/relative-time";
 
 function hostname(url: string): string {
@@ -15,44 +19,48 @@ function hostname(url: string): string {
 }
 
 export function ResearchPanel({ research, defaultOpen = false }: { research: Research; defaultOpen?: boolean }) {
+  const engine = research.engine === "claude" ? `Claude${research.model ? `（${research.model}）` : ""}` : "離線研究";
   return (
-    <details className="group overflow-hidden rounded-xl border border-line bg-panel" open={defaultOpen}>
-      <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-5 py-3 hover:bg-panel-2/50">
-        <span className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-fg">研究簡報</span>
-          <Badge tone={research.engine === "claude" ? "accent" : "neutral"}>
-            {research.engine === "claude" ? `Claude${research.model ? ` · ${research.model}` : ""}` : "離線研究"}
-          </Badge>
-          {research.sources.length > 0 && <span className="text-xs text-faint">{research.sources.length} 個來源</span>}
-        </span>
-        <span className="text-xs text-faint">
-          {formatAbsoluteTime(research.createdAt)}
-          <span className="ml-2 inline-block transition-transform group-open:rotate-180" aria-hidden="true">
-            ▾
+    <section aria-label="研究簡報" className="min-w-0 rounded-lg bg-surface">
+      <Disclosure
+        defaultOpen={defaultOpen}
+        animateHeight
+        summaryClassName="min-h-12! gap-2! rounded-lg px-5 text-[15px]! leading-5! font-semibold! hover:bg-fill-4"
+        contentClassName="grid min-w-0 gap-x-8 gap-y-5 px-5 pt-1 pb-5 lg:grid-cols-[minmax(0,1fr)_15rem]"
+        summary={
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="shrink-0">研究簡報</span>
+            <Tag className="min-w-0">
+              <span className="truncate">{engine}</span>
+            </Tag>
+            {research.sources.length > 0 && <span className="shrink-0 text-[13px] font-normal text-label-2">{research.sources.length} 個來源</span>}
+            <span className="ml-auto shrink-0 text-[13px] font-normal text-label-2 tabular max-sm:hidden">{formatAbsoluteTime(research.createdAt)}</span>
           </span>
-        </span>
-      </summary>
-      <div className="grid gap-6 border-t border-line px-5 py-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
-        <Markdown>{research.brief || "（沒有內容）"}</Markdown>
+        }
+      >
+        <Markdown className="min-w-0">{research.brief || "（沒有內容）"}</Markdown>
         {research.sources.length > 0 && (
-          <aside>
-            <h3 className="mb-2 text-xs font-semibold text-muted">來源</h3>
-            <ol className="space-y-1.5">
+          <aside className="min-w-0">
+            <h3 className="mb-1.5 text-[13px] leading-5 text-label-2">來源</h3>
+            <ol className="overflow-hidden rounded-md bg-fill-4">
               {research.sources.map((s, i) => (
-                <li key={`${s.url}-${i}`}>
-                  <a href={s.url} target="_blank" rel="noreferrer noopener" className="group/link block rounded-md px-2 py-1.5 hover:bg-panel-2">
-                    <span className="flex items-start gap-1.5 text-xs text-fg/90 group-hover/link:text-accent">
-                      <span className="line-clamp-2">{s.title || hostname(s.url)}</span>
-                      <ExternalIcon size={11} className="mt-0.5 shrink-0 opacity-60" />
+                <li
+                  key={`${s.url}-${i}`}
+                  className="relative after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:left-3 after:h-(--hairline) after:bg-separator last:after:hidden"
+                >
+                  <a href={s.url} target="_blank" rel="noreferrer noopener" className="focus-inset flex min-w-0 items-start gap-2 px-3 py-2 hover:bg-fill-4 active:bg-fill-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-2 text-[13px] leading-[18px] text-label">{s.title || hostname(s.url)}</span>
+                      <span className="block truncate text-[12px] leading-4 text-label-2">{hostname(s.url)}</span>
                     </span>
-                    <span className="block truncate text-[11px] text-faint">{hostname(s.url)}</span>
+                    <ArrowSquareOutIcon size={14} className="mt-0.5 shrink-0 text-label-2" />
                   </a>
                 </li>
               ))}
             </ol>
           </aside>
         )}
-      </div>
-    </details>
+      </Disclosure>
+    </section>
   );
 }

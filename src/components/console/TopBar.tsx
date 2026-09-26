@@ -1,17 +1,25 @@
 "use client";
 
-import { HandPalmIcon, SpinnerIcon as PhSpinner } from "@phosphor-icons/react";
-import Link from "next/link";
-import { useRef } from "react";
-import { Badge, Button, cx } from "@/components/ui";
+// Console top bar (UI-AUDIT §3.3 Toolbar console variant, §3.5): 52 px solid --surface with a
+// bottom hairline, no material (nothing scrolls beneath it). Left: 「‹ 作品庫」, the key-visual
+// thumbnail and the title (shared elements with the library card), the status capsules. Centre:
+// TRACK / LIVE, the transport (prev 32, play 36 white circle, next 32) and the clock. Right: the
+// projection split control, 重新設計, help. The centre stays centred: the left column shrinks (the
+// title truncates) instead of pushing the transport around when a capsule appears.
+
+import { useEffect, useRef, useState, ViewTransition, type ReactNode } from "react";
+import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
+import { PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
-import { formatOffset } from "@/lib/console/format";
+import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
 import { formatTime } from "@/lib/timeline";
-import { IconBack, IconHelp, IconMonitor, IconNextLine, IconPause, IconPlay, IconPrevLine, IconSparkles, IconWarning } from "./icons";
-import { Segmented } from "./controls";
+import { artBackground, projectArtName, projectTitleName } from "./art";
+import { capsuleItems } from "./feedback";
+import { Dot } from "./ui";
 import { useRafLoop } from "./useRaf";
 
+/** Per-frame clock: writes textContent, never re-renders React. */
 function TimeReadout({ controller, duration }: { controller: ConsoleController; duration: number }) {
   const ref = useRef<HTMLSpanElement>(null);
   const last = useRef("");
@@ -25,41 +33,142 @@ function TimeReadout({ controller, duration }: { controller: ConsoleController; 
     }
   });
   return (
-    <div className="flex items-baseline gap-1.5 font-mono tabular" aria-label="播放時間">
-      <span ref={ref} className="text-[22px] leading-none font-semibold tracking-tight text-fg">
+    <div className="flex items-baseline gap-1.5" role="timer" aria-label="播放時間">
+      <span ref={ref} className="font-numeric text-c-clock text-label">
         0:00.00
       </span>
-      <span className="text-xs text-faint">/ {formatTime(duration).slice(0, -3)}</span>
+      <span className="font-numeric text-c-footnote text-label-2">/ {formatTime(duration).slice(0, -3)}</span>
     </div>
   );
 }
 
-function OutputPill({ snap, onOpen }: { snap: ConsoleSnapshot; onOpen: () => void }) {
-  const o = snap.output;
+/** The thumbnail + title pair, also rendered by the loading skeleton (same view-transition names). */
+export function TitleBlock({ id, title, subtitle, palette }: { id: string; title: string; subtitle?: ReactNode; palette: readonly string[] }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={o.connected ? "投影視窗已連線（點擊聚焦）" : "投影視窗未連線（點擊開啟）"}
-      className={cx(
-        "flex h-9 items-center gap-2 rounded-md border px-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent",
-        o.connected ? "border-ok/40 bg-ok/10 hover:bg-ok/15" : "border-line bg-panel-2 hover:border-faint",
+    <div className="flex min-w-0 items-center gap-2.5">
+      <ViewTransition name={projectArtName(id)} share="morph" default="none">
+        <span aria-hidden="true" className="size-7 shrink-0 rounded-[7px] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.12)]" style={{ background: artBackground(palette) }} />
+      </ViewTransition>
+      <div className="flex min-w-0 flex-col justify-center">
+        <ViewTransition name={projectTitleName(id)} share="morph" default="none">
+          <h1 className="min-w-0 truncate text-c-headline text-label">{title}</h1>
+        </ViewTransition>
+        {subtitle != null && <div className="flex min-w-0 items-center text-c-footnote text-label-2">{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** A red text button in the subtitle slot (the only alerts: another console, save failed). */
+function AlertLink({ children, onClick, tip }: { children: ReactNode; onClick: () => void; tip: string }) {
+  return (
+    <Tooltip content={tip} placement="bottom-start">
+      <button type="button" onClick={onClick} className="press-fade -mx-1 -my-1.5 inline-flex h-7 min-w-0 items-center rounded-xs px-1 font-semibold text-red-text hover:bg-red-soft">
+        <span className="truncate">{children}</span>
+      </button>
+    </Tooltip>
+  );
+}
+
+const SAVED_SHOWN_MS = 2500;
+
+/** One informational line under the title: the artist and at most one status (one 「・」). */
+function Subtitle({ controller, snap }: { controller: ConsoleController; snap: ConsoleSnapshot }) {
+  const project = snap.project;
+  const save = snap.save;
+  // 「已儲存」 is a moment, not a state: show it briefly after each save
+  const [savedFresh, setSavedFresh] = useState(false);
+  const [prevStatus, setPrevStatus] = useState(save.status);
+  if (save.status !== prevStatus) {
+    setPrevStatus(save.status);
+    setSavedFresh(save.status === "saved");
+  }
+  useEffect(() => {
+    if (!savedFresh) return;
+    const t = setTimeout(() => setSavedFresh(false), SAVED_SHOWN_MS);
+    return () => clearTimeout(t);
+  }, [savedFresh]);
+
+  if (snap.otherConsole) {
+    return (
+      <AlertLink tip="另一個分頁的控制台也在送出畫面，投影可能會閃爍。請關掉多餘的控制台。" onClick={() => controller.notify("另一個分頁的控制台也在送出畫面，投影可能會閃爍。請關掉多餘的控制台。", "warn")}>
+        另一個控制台也在控制
+      </AlertLink>
+    );
+  }
+  if (save.status === "error") {
+    return (
+      <AlertLink tip={save.error ? `儲存失敗：${save.error}` : "修改沒有存進這台電腦，按一下再試一次"} onClick={() => void controller.flushSave()}>
+        儲存失敗・重試
+      </AlertLink>
+    );
+  }
+
+  const lyrics = project?.lyrics;
+  const untimed = lyrics ? untimedCount(lyrics) : 0;
+  let status: ReactNode = null;
+  let tone: "label-2" | "orange" | "red" = "label-2";
+  if (save.status === "saving" || save.status === "pending") status = "儲存中…";
+  else if (savedFresh) status = "已儲存";
+  else if (project?.status === "error") {
+    status = "上次處理失敗";
+    tone = "red";
+  } else if (project?.status === "processing") status = "處理中…";
+  else if (lyrics && lyrics.lines.length === 0) {
+    status = "無歌詞";
+    tone = "orange";
+  } else if (untimed > 0) {
+    status = `${untimed} 行未對時`;
+    tone = "orange";
+  } else if (project?.research) status = project.research.engine === "claude" ? "Claude 設計" : "離線設計";
+
+  const artist = project?.meta?.artist || "未知藝人";
+  return (
+    <span className="min-w-0 truncate" title={project?.status === "error" ? project.error : undefined}>
+      {artist}
+      {status != null && (
+        <>
+          ・<span className={cx(tone === "orange" && "text-orange-text", tone === "red" && "text-red-text")}>{status}</span>
+        </>
       )}
-    >
-      <span className="relative flex size-2.5 items-center justify-center" aria-hidden="true">
-        <span className={cx("relative inline-flex size-1.5 rounded-full", o.connected ? "bg-ok" : "bg-label-3")} />
-        {/* mounts when the output connects, so the ring plays once per connection */}
-        {o.connected && <span className="absolute inset-0 m-auto size-1.5 animate-halo rounded-full" />}
-      </span>
-      <span className="flex flex-col leading-tight">
-        <span className={cx("text-xs font-semibold", o.connected ? "text-ok" : "text-muted")}>
-          {o.connected ? (o.count > 1 ? `投影已連線 ×${o.count}` : "投影已連線") : "投影未連線"}
-        </span>
-        <span className="font-mono text-[11px] text-faint tabular">
-          {o.connected ? `${o.width}×${o.height}${o.fullscreen ? " · 全螢幕" : " · 視窗"}` : "按 O 開啟"}
-        </span>
-      </span>
-    </button>
+    </span>
+  );
+}
+
+/** The projection as one split control: status segment (dot, 「投影已連線」, size) + 「開啟」. */
+function OutputControl({ snap, onOpen }: { snap: ConsoleSnapshot; onOpen: () => void }) {
+  const o = snap.output;
+  const detail = o.connected ? `投影視窗已連線：${o.width}×${o.height}，${o.fullscreen ? "全螢幕" : "視窗模式"}${o.count > 1 ? `，共 ${o.count} 個視窗` : ""}` : "投影視窗未連線。開啟後拖到投影機或 LED 螢幕上。";
+  return (
+    <div className="flex h-8 shrink-0 items-stretch rounded-sm bg-fill-3">
+      <Tooltip content={detail} placement="bottom-end">
+        <div role="status" className="flex min-w-0 items-center gap-2 pr-2.5 pl-3">
+          <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+            <span className={cx("size-1.5 rounded-full", o.connected ? "bg-green" : "bg-label-3")} />
+            {/* mounts when the output connects: one 600 ms ring per connection, never a loop */}
+            {o.connected && <span className="absolute inset-0 animate-halo rounded-full" />}
+          </span>
+          <span className="text-c-footnote font-medium whitespace-nowrap text-label">{o.connected ? (o.count > 1 ? `投影已連線 ×${o.count}` : "投影已連線") : "投影未連線"}</span>
+          {o.connected && (
+            <span className="hidden font-numeric text-c-footnote whitespace-nowrap text-label-2 min-[1400px]:inline">
+              {o.width}×{o.height}
+            </span>
+          )}
+        </div>
+      </Tooltip>
+      <span aria-hidden="true" className="my-[7px] w-(--hairline) bg-separator" />
+      <Tooltip content={o.connected ? "聚焦投影視窗" : "開啟投影視窗"} shortcut="O" placement="bottom-end">
+        <button
+          type="button"
+          aria-label="開啟投影視窗"
+          onClick={onOpen}
+          className="press-fade flex items-center gap-1.5 rounded-r-sm pr-3 pl-2.5 text-c-footnote font-semibold whitespace-nowrap text-tint-text hover:bg-fill-4"
+        >
+          <ProjectorScreenIcon size={16} />
+          開啟
+        </button>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -75,168 +184,117 @@ export function TopBar({
   onHelp: () => void;
 }) {
   const project = snap.project;
-  const meta = project?.meta;
-  const lyrics = project?.lyrics;
-  const untimed = lyrics ? untimedCount(lyrics) : 0;
   const live = snap.mode === "live";
-  const save = snap.save;
+  const held = live && snap.liveHeld;
+  const ov = useStageValue(controller.store, selectOverrides);
+  const capsules = capsuleItems(ov, snap);
+  const palette = (project?.plan?.keyVisual.palette ?? []).map((p) => p.hex);
+
+  const status = live
+    ? held
+      ? "LIVE・等待下一句"
+      : snap.playing
+        ? "LIVE・時脈運行中"
+        : "LIVE・手動提詞"
+    : snap.audio.status === "error"
+      ? "音檔錯誤"
+      : snap.audio.buffering
+        ? "緩衝中…"
+        : snap.audio.status === "loading"
+          ? "載入音檔中…"
+          : snap.playbackRate !== 1
+            ? `TRACK・${snap.playbackRate}× 速度`
+            : "TRACK・跟隨音檔";
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel px-3">
-      <Link
-        href="/"
-        onClick={(e) => {
-          if (!controller.confirmLeave()) e.preventDefault();
-        }}
-        className="flex h-9 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-panel-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <IconBack />
-        專案庫
-      </Link>
-      <div className="h-6 w-px shrink-0 bg-line" aria-hidden="true" />
+    <header
+      className="relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] items-center gap-4 bg-surface px-3 border-b-hairline"
+      style={{ viewTransitionName: "app-header" }}
+    >
+      {/* left: back, title, capsules (pushed right, next to the transport) */}
+      <div className="flex min-w-0 items-center gap-3">
+        <BackLink
+          onNavigate={(e) => {
+            if (!controller.confirmLeave()) e.preventDefault();
+          }}
+        />
+        <TitleBlock id={controller.id} title={project?.meta?.title || "未命名歌曲"} palette={palette} subtitle={<Subtitle controller={controller} snap={snap} />} />
+        <StatusCapsules items={capsules} className="ml-auto shrink-0" aria-label="目前狀態" />
+      </div>
 
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-sm leading-tight font-semibold text-fg" title={meta?.title}>
-            {meta?.title || "未命名歌曲"}
-          </h1>
-          <p className="truncate text-[11px] leading-tight text-muted" title={meta?.artist}>
-            {meta?.artist || "未知藝人"}
-            {meta?.album ? ` · ${meta.album}` : ""}
-          </p>
+      {/* centre: mode, transport, clock */}
+      <div className="flex items-center gap-4">
+        <Tooltip content={live ? "LIVE：由你逐句送出" : "TRACK：跟著音檔時間自動播放"} shortcut="M">
+          <span className="inline-flex">
+            <SegmentedControl
+              label="播放模式"
+              value={snap.mode}
+              onChange={(m) => controller.setMode(m)}
+              blurOnPointer
+              fullWidth
+              className="w-[136px]"
+              options={[
+                { value: "track", label: <span className="t-latin">TRACK</span>, ariaLabel: "TRACK" },
+                {
+                  value: "live",
+                  ariaLabel: "LIVE",
+                  label: (
+                    <span className="inline-flex items-center gap-1.5 t-latin">
+                      {live && <Dot className="bg-red" label="on-air" />}
+                      LIVE
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </span>
+        </Tooltip>
+
+        <div className="flex items-center gap-1" role="group" aria-label="播放控制">
+          <Tooltip content="上一句" shortcut="ArrowLeft">
+            <Button variant="quiet" size="icon" aria-label="上一句" icon={SkipBackIcon} className="text-label!" onClick={() => controller.prev()} />
+          </Tooltip>
+          <Tooltip content={live ? (snap.playing ? "停止 LIVE 時脈" : "啟動 LIVE 時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
+            <Button
+              size="circle"
+              aria-label={snap.playing ? "暫停" : "播放"}
+              icon={snap.playing ? PauseIcon : PlayIcon}
+              onClick={() => controller.togglePlay()}
+              disabled={!live && snap.audio.status === "error"}
+            />
+          </Tooltip>
+          <Tooltip content={held ? "送出下一句" : "下一句"} shortcut={held ? "Space" : "ArrowRight"}>
+            <Button
+              variant="quiet"
+              size="icon"
+              aria-label="下一句"
+              icon={SkipForwardIcon}
+              className={cx("text-label!", held && "bg-orange-soft text-orange-text! ring-2 ring-orange ring-inset")}
+              onClick={() => controller.next()}
+            />
+          </Tooltip>
         </div>
-        <div className="hidden min-w-0 items-center gap-1 min-[1440px]:flex">
-          {project?.research && (
-            <Badge tone={project.research.engine === "claude" ? "accent" : "neutral"} title={project.research.model ?? undefined}>
-              {project.research.engine === "claude" ? "Claude 設計" : "離線設計"}
-            </Badge>
-          )}
-          {lyrics && lyrics.lines.length === 0 && <Badge tone="warn">無歌詞</Badge>}
-          {lyrics && lyrics.lines.length > 0 && untimed === 0 && <Badge tone="ok">歌詞已對時</Badge>}
-          {lyrics && untimed > 0 && <Badge tone="warn">{untimed} 行未對時</Badge>}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {live && (
-            <span
-              aria-hidden={!snap.liveHeld}
-              className={cx(
-                "inline-flex h-6 items-center gap-1 rounded-pill bg-orange-soft px-2.5 text-xs font-semibold text-orange-text",
-                // appears in 0 ms (keyboard-driven), fades out in 150 ms
-                snap.liveHeld ? "opacity-100 transition-none" : "invisible opacity-0 transition-[opacity,visibility] duration-(--dur-exit) ease-[ease]",
-              )}
-            >
-              <HandPalmIcon size={12} weight="bold" aria-hidden="true" />
-              等待下一句
-            </span>
-          )}
-          {project?.status === "processing" && <Badge tone="accent">處理中…</Badge>}
-          {project?.status === "error" && (
-            <Badge tone="danger" title={project.error}>
-              上次處理失敗
-            </Badge>
-          )}
-          {snap.redesign.running && (
-            <button type="button" onClick={onRedesign} className="focus-visible:outline-2 focus-visible:outline-accent">
-              <Badge tone="accent">
-                <PhSpinner size={12} weight="bold" className="animate-spinner" aria-hidden="true" />
-                重新設計中…
-              </Badge>
-            </button>
-          )}
-          {save.status === "saving" || save.status === "pending" ? (
-            <Badge>儲存中…</Badge>
-          ) : save.status === "error" ? (
-            <button type="button" onClick={() => void controller.flushSave()} title={save.error ?? undefined}>
-              <Badge tone="danger">儲存失敗・重試</Badge>
-            </button>
-          ) : save.status === "saved" ? (
-            <Badge tone="ok">已儲存</Badge>
-          ) : null}
-          {snap.otherConsole && (
-            <Badge tone="danger" title="另一個分頁的控制台也在送出畫面，投影可能會閃爍。請關掉多餘的控制台。">
-              <IconWarning size={12} />
-              另一個控制台也在控制
-            </Badge>
-          )}
+
+        <div className="flex w-[150px] flex-col justify-center">
+          <TimeReadout controller={controller} duration={snap.duration} />
+          <span className="truncate text-c-footnote text-label-2" aria-live="polite">
+            {status}
+          </span>
         </div>
       </div>
 
-      <Segmented
-        label="播放模式"
-        value={snap.mode}
-        onChange={(m) => controller.setMode(m)}
-        options={[
-          { value: "track", label: "TRACK", title: "跟著音檔時間自動播放（M 切換）" },
-          { value: "live", label: "LIVE", title: "樂團現場：手動逐句送出（M 切換）" },
-        ]}
-      />
-
-      <div className="flex shrink-0 items-center gap-1" role="group" aria-label="播放控制">
-        <Button variant="ghost" size="md" className="w-9 px-0 text-fg/80" onClick={() => controller.prev()} aria-label="上一句" title="上一句（← / ↑）">
-          <IconPrevLine size={18} />
-        </Button>
-        <Button
-          variant="primary"
-          size="md"
-          className="w-12 px-0"
-          onClick={() => controller.togglePlay()}
-          aria-label={snap.playing ? "暫停" : "播放"}
-          title={live ? (snap.playing ? "停止 LIVE 時脈" : "啟動 LIVE 時脈") : "播放／暫停（Space）"}
-          disabled={!live && snap.audio.status === "error"}
-        >
-          {snap.playing ? <IconPause size={18} /> : <IconPlay size={18} />}
-        </Button>
-        <Button
-          variant="ghost"
-          size="md"
-          className={cx("w-9 px-0 text-fg/80", live && snap.liveHeld && "bg-orange-soft text-orange-text! ring-2 ring-orange")}
-          onClick={() => controller.next()}
-          aria-label="下一句"
-          title="下一句（→ / ↓）"
-        >
-          <IconNextLine size={18} />
-        </Button>
+      {/* right: projection, re-design, help */}
+      <div className="flex min-w-0 items-center justify-end gap-2">
+        <OutputControl snap={snap} onOpen={() => controller.openOutput()} />
+        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
+          <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
+            重新設計
+          </Button>
+        </Tooltip>
+        <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
+          <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={onHelp} />
+        </Tooltip>
       </div>
-
-      <div className="flex w-[168px] shrink-0 flex-col items-start justify-center">
-        <TimeReadout controller={controller} duration={snap.duration} />
-        <span className="text-[11px] leading-tight text-faint">
-          {live
-            ? snap.liveHeld
-              ? "LIVE · 等待下一句"
-              : snap.playing
-                ? "LIVE · 時脈運行中"
-                : "LIVE · 手動提詞"
-            : snap.audio.status === "error"
-              ? "音檔錯誤"
-              : snap.audio.buffering
-                ? "緩衝中…"
-                : snap.audio.status === "loading"
-                  ? "載入音檔中…"
-                  : [
-                      "TRACK",
-                      snap.playbackRate !== 1 ? `${snap.playbackRate}× 速度` : "跟隨音檔",
-                      snap.offset !== 0 ? `偏移 ${formatOffset(snap.offset)}` : null,
-                      snap.muted ? "靜音" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-        </span>
-      </div>
-
-      <div className="h-6 w-px shrink-0 bg-line" aria-hidden="true" />
-      <OutputPill snap={snap} onOpen={() => controller.openOutput()} />
-      <Button variant="secondary" onClick={() => controller.openOutput()} title="開啟投影視窗（O）" className="shrink-0">
-        <IconMonitor />
-        開啟投影視窗
-      </Button>
-      <Button variant="secondary" onClick={onRedesign} className="shrink-0" title="用一句話請 AI 設計師調整方案">
-        <IconSparkles />
-        重新設計
-      </Button>
-      <Button variant="ghost" className="w-9 shrink-0 px-0 text-fg/80" onClick={onHelp} aria-label="快捷鍵說明" title="快捷鍵說明（?）">
-        <IconHelp size={18} />
-      </Button>
     </header>
   );
 }

@@ -1,7 +1,8 @@
 // InsetGroup, ListRow and FormRow (UI-AUDIT §3.3 InsetGroupedList / ListRow). Server-safe.
 // Density follows the theme scope: pages get 44 px rows, 17 / 13 px text, 20 px icons on
 // --surface groups (radius 12); inside data-theme="console" rows are 32 px, 13 / 12 px text,
-// 16 px icons on --surface-2 groups (radius 10). No borders, no shadows: rows are separated by a
+// 16 px icons on --surface-2 groups (radius 10); inside sheets and popovers groups are a fill-4
+// tint of the elevated surface. No borders, no shadows: rows are separated by a
 // hairline that starts where the text starts (not under the leading icon); the last row has none.
 //
 //   <InsetGroup header="歌曲資訊" footer="時間碼可稍後在歌詞編輯器調整。">
@@ -22,11 +23,15 @@
 import Link from "next/link";
 import { isValidElement, type CSSProperties, type HTMLAttributes, type MouseEventHandler, type ReactNode } from "react";
 import { cx } from "./cx";
-import { CaretRightIcon, CheckIcon, type UiIcon } from "./Icon";
+import { CaretRightIcon, CheckIcon } from "./kit-icons";
+import type { UiIcon } from "./icon-base";
 import { renderIcon } from "./render-icon";
 
 const CONSOLE = {
   group: "in-data-[theme=console]:rounded-md in-data-[theme=console]:bg-surface-2",
+  // inside a sheet, alert or popover (--elevated) a surface-coloured group would vanish: use a
+  // translucent fill instead (macOS form groups), in every theme
+  floating: "[dialog_&]:bg-fill-4 [[popover]_&]:bg-fill-4",
   header: "in-data-[theme=console]:text-[12px] in-data-[theme=console]:leading-4 in-data-[theme=console]:font-semibold",
   title: "in-data-[theme=console]:text-[13px] in-data-[theme=console]:leading-[18px]",
   subtitle: "in-data-[theme=console]:text-[12px] in-data-[theme=console]:leading-4",
@@ -51,7 +56,7 @@ export function InsetGroup({
   return (
     <section {...rest} className={cx("min-w-0", className)}>
       {header && <H className={cx("mb-1.5 px-(--row-pad-x) text-[13px] leading-5 font-normal text-label-2", CONSOLE.header)}>{header}</H>}
-      <div className={cx("overflow-hidden rounded-lg bg-surface", CONSOLE.group, bodyClassName)}>{children}</div>
+      <div className={cx("overflow-hidden rounded-lg bg-surface", CONSOLE.group, CONSOLE.floating, bodyClassName)}>{children}</div>
       {footer && <p className="mt-1.5 px-(--row-pad-x) text-[12px] leading-4 text-label-2">{footer}</p>}
     </section>
   );
@@ -152,7 +157,7 @@ export function ListRow({
         {subtitle && <span className={cx("min-w-0 text-[13px] leading-[18px] text-label-2", CONSOLE.subtitle)}>{subtitle}</span>}
         {children}
       </span>
-      {value != null && <span className={cx("shrink-0 text-[17px] leading-[22px] text-label-2 tabular", CONSOLE.title)}>{value}</span>}
+      {value != null && <span className={cx("shrink-0 text-[17px] leading-[22px] tabular", state === "current" ? "text-label-2-on-material" : "text-label-2", CONSOLE.title)}>{value}</span>}
       {accessory != null && accessoryNode(accessory)}
     </>
   );

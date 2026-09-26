@@ -7,9 +7,16 @@ export function formatOffset(offset: number): string {
   return `${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(2)} s`;
 }
 
-/** Countdown to a cue: "12.3 秒後", "現在", "3 分 05 秒後". */
+/** The offset for the HUD and status capsules: "+0.15 秒" / "−0.10 秒" / "0.00 秒". */
+export function formatOffsetSeconds(offset: number): string {
+  const v = Number.isFinite(offset) ? Math.round(offset * 100) / 100 : 0;
+  if (v === 0) return "0.00 秒";
+  return `${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(2)} 秒`;
+}
+
+/** Countdown to a cue: "12.3 秒後", "現在", "3 分 05 秒後" ("" when unknown). */
 export function formatCountdown(seconds: number): string {
-  if (!Number.isFinite(seconds)) return "—";
+  if (!Number.isFinite(seconds)) return "";
   if (seconds <= 0.05) return "現在";
   if (seconds < 60) return `${seconds.toFixed(1)} 秒後`;
   const m = Math.floor(seconds / 60);
@@ -17,8 +24,9 @@ export function formatCountdown(seconds: number): string {
   return `${m} 分 ${String(s).padStart(2, "0")} 秒後`;
 }
 
+/** "120" / "92.4"; "" when there is no tempo (the caller says so in words, never a dash). */
 export function formatBpm(bpm: number | null | undefined): string {
-  return typeof bpm === "number" && Number.isFinite(bpm) && bpm > 0 ? bpm.toFixed(bpm >= 100 ? 0 : 1) : "—";
+  return typeof bpm === "number" && Number.isFinite(bpm) && bpm > 0 ? bpm.toFixed(bpm >= 100 ? 0 : 1) : "";
 }
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;

@@ -158,7 +158,7 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
       { keys: ["B"], label: "一鍵黑場" },
       { keys: ["L"], label: "歌詞顯示／隱藏" },
       { keys: ["F"], label: "凍結畫面" },
-      { keys: ["1", "…", "9"], label: "場景覆寫（場景庫第 1–9 格）" },
+      { keys: ["1", "…", "9"], label: "場景覆寫（場景庫第 1 到 9 格）" },
       { keys: ["0"], label: "回到設計方案的場景" },
       { keys: ["O"], label: "開啟／聚焦投影視窗" },
     ],

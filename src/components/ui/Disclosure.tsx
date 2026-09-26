@@ -10,7 +10,7 @@
 
 import type { ReactNode } from "react";
 import { cx } from "./cx";
-import { CaretRightIcon } from "./Icon";
+import { CaretRightIcon } from "./kit-icons";
 
 export function Disclosure({
   summary,

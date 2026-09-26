@@ -1,16 +1,26 @@
 "use client";
 
+// A calm streaming panel (UI-AUDIT §3.5 處理頁): a --surface group with 13 / 20 text. Each new
+// paragraph fades in from a 4 px blur (3.4.1 item 6); the caret is a 2 px tint bar that blinks in
+// two steps (static with reduced motion). Web searches fold into one label-2 line. It follows the
+// bottom only while the reader has not scrolled up; the caller batches the SSE deltas.
+
 import { useEffect, useRef, type ReactNode } from "react";
-import { cx } from "@/components/ui";
+import { Spinner, cx } from "@/components/ui";
 import { Markdown } from "@/components/ui/Markdown";
 
-/** Streaming Markdown that follows the bottom while the user has not scrolled up. */
+const PARAGRAPH_IN =
+  "[&>*]:transition-[opacity,filter] [&>*]:duration-300 [&>*]:ease-out [&>*]:starting:opacity-0 [&>*]:starting:blur-[4px] motion-reduce:[&>*]:starting:blur-none";
+const CARET =
+  "[&>:last-child]:after:ml-0.5 [&>:last-child]:after:inline-block [&>:last-child]:after:h-[1.05em] [&>:last-child]:after:w-0.5 [&>:last-child]:after:translate-y-[0.15em] [&>:last-child]:after:bg-tint [&>:last-child]:after:content-[''] [&>:last-child]:after:animate-caret motion-reduce:[&>:last-child]:after:animate-none";
+
 export function StreamPanel({
   title,
   text,
   live,
   placeholder,
   badge,
+  searches,
   className,
   maxHeight = "32rem",
 }: {
@@ -19,6 +29,8 @@ export function StreamPanel({
   live: boolean;
   placeholder?: ReactNode;
   badge?: ReactNode;
+  /** web searches made so far, shown as one line */
+  searches?: readonly string[];
   className?: string;
   maxHeight?: string;
 }) {
@@ -31,32 +43,32 @@ export function StreamPanel({
   }, [text]);
 
   return (
-    <section className={cx("flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel", className)}>
-      <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-line px-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-fg">
-          {live && <span className="size-2 rounded-full bg-accent" aria-hidden="true" />}
-          {title}
-        </h2>
-        {badge}
+    <section className={cx("flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg bg-surface", className)}>
+      <header className="flex min-h-12 shrink-0 items-center gap-2 px-5 pt-1">
+        <h2 className="text-[15px] leading-5 font-semibold text-label">{title}</h2>
+        {live && <Spinner size={14} label="撰寫中" labelClassName="text-[13px] leading-5" className="ml-1" />}
+        {badge && <span className="ml-auto shrink-0 text-[13px] leading-5 text-label-2">{badge}</span>}
       </header>
+      {searches && searches.length > 0 && (
+        <p className="-mt-1 truncate px-5 pb-1 text-[13px] leading-5 text-label-2" title={searches.join("、")}>
+          搜尋：{searches.join("、")}
+        </p>
+      )}
       <div
         ref={scroller}
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
         }}
-        className="min-h-0 flex-1 overflow-y-auto px-5 py-3"
+        className="min-h-0 flex-1 overflow-y-auto px-5 pt-1 pb-4"
         style={{ maxHeight }}
         aria-live={live ? "polite" : undefined}
         aria-busy={live}
       >
         {text ? (
-          <>
-            <Markdown>{text}</Markdown>
-            {live && <span aria-hidden="true" className="ml-0.5 inline-block h-4 w-0.5 animate-caret bg-tint align-middle" />}
-          </>
+          <Markdown className={cx("text-[13px]! leading-5! [&_h1]:text-[15px]! [&_h2]:text-[13px]! [&_h2]:leading-5!", PARAGRAPH_IN, live && CARET)}>{text}</Markdown>
         ) : (
-          <div className="py-6 text-sm text-muted">{placeholder}</div>
+          <p className="py-4 text-[13px] leading-5 text-label-2">{placeholder}</p>
         )}
       </div>
     </section>

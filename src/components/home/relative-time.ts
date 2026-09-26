@@ -12,7 +12,7 @@ function startOfDay(ms: number): number {
 
 export function formatRelativeTime(iso: string, now: number = Date.now()): string {
   const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "—";
+  if (!Number.isFinite(t)) return "";
   const diff = now - t;
   // clock skew between server and browser: treat the near future as "now"
   if (diff < 45_000) return "剛剛";

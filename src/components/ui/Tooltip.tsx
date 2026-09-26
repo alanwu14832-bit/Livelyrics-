@@ -14,10 +14,10 @@
 // shortcut is also exposed as aria-keyshortcuts; the text is linked with aria-describedby while
 // shown (icon-only triggers still need their own aria-label).
 
-import { useReducedMotion } from "motion/react";
 import { Children, cloneElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "./cx";
+import { useReducedMotion } from "./use-reduced-motion";
 import { floatingLayer, positionFloating, themeOf } from "./Floating";
 import { ariaKeyShortcut, tooltipTiming, type Placement } from "./interaction";
 import { Kbd } from "./Kbd";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, formatBpm, formatCountdown, formatOffset, hostOf, motifDataUrl, readableTextOn, withAlpha } from "./format";
+import { contrast, formatBpm, formatCountdown, formatOffset, formatOffsetSeconds, hostOf, motifDataUrl, readableTextOn, withAlpha } from "./format";
 import { peaksFromChannels } from "./peaks";
 
 describe("format helpers", () => {
@@ -8,6 +8,9 @@ describe("format helpers", () => {
     expect(formatOffset(0.25)).toBe("+0.25 s");
     expect(formatOffset(-0.1)).toBe("−0.10 s");
     expect(formatOffset(0.001)).toBe("±0.00 s");
+    expect(formatOffsetSeconds(0.15)).toBe("+0.15 秒");
+    expect(formatOffsetSeconds(-0.1)).toBe("−0.10 秒");
+    expect(formatOffsetSeconds(0)).toBe("0.00 秒");
   });
 
   it("formats countdowns and bpm", () => {
@@ -16,7 +19,9 @@ describe("format helpers", () => {
     expect(formatCountdown(185)).toBe("3 分 05 秒後");
     expect(formatBpm(120)).toBe("120");
     expect(formatBpm(92.44)).toBe("92.4");
-    expect(formatBpm(0)).toBe("—");
+    expect(formatBpm(0)).toBe("");
+    expect(formatBpm(null)).toBe("");
+    expect(formatCountdown(Number.NaN)).toBe("");
   });
 
   it("chooses readable text colors", () => {

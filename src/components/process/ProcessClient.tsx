@@ -1,13 +1,18 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, cx } from "@/components/ui";
+// The design overview (UI-AUDIT §3.5 處理頁): an iOS step list with a calm streaming panel while
+// the pipeline runs, then the key visual as a showcase. One filled button per screen: 「進入控制台」
+// in the header once there is a plan, moving into the 「設計完成」 banner right after a run (the
+// header copy turns plain). Kept for the e2e: role="status" containing 「設計完成」, ?run=1 stripped.
+
+import { ViewTransition, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AppHeader, BackLink, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
+import { MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import type { PipelineEvent, Project } from "@/lib/types";
-import { AlertIcon, ArrowRightIcon, CheckIcon, ClockIcon, MonitorIcon, PenIcon, RefreshIcon, SparklesIcon } from "@/components/home/icons";
-import { ServerStatusPill, useServerStatus } from "@/components/home/ServerStatus";
-import { TopBar } from "@/components/home/TopBar";
+import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
+import { useServerStatus } from "@/components/home/ServerStatus";
+import { PUSH, artTransitionName, titleTransitionName } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
 import { KeyVisualSummary } from "./KeyVisualSummary";
 import {
@@ -27,14 +32,14 @@ import { StepTimeline } from "./StepTimeline";
 import { PROCESS_STEPS, processHref, stepsFrom, type ProcessStep } from "./steps";
 import { StreamPanel } from "./StreamPanel";
 
-type LoadState = { kind: "loading" } | { kind: "ok" } | { kind: "error"; message: string; notFound: boolean };
+/** What the server page already knows, so the header (and its shared-element morph) renders at once. */
+export interface ProcessHeaderInfo {
+  title: string;
+  artist: string;
+  palette: string[];
+}
 
-const STATUS_BADGE: Record<Project["status"], { label: string; tone: "neutral" | "accent" | "ok" | "danger" }> = {
-  new: { label: "尚未處理", tone: "neutral" },
-  processing: { label: "處理中", tone: "accent" },
-  ready: { label: "可上台", tone: "ok" },
-  error: { label: "處理失敗", tone: "danger" },
-};
+type LoadState = { kind: "loading" } | { kind: "ok" } | { kind: "error"; message: string; notFound: boolean };
 
 const STEP_NAME: Record<string, string> = { lyrics: "歌詞", research: "研究", design: "設計", analyze: "分析", done: "完成" };
 
@@ -54,7 +59,19 @@ function cleanRequest(req: ProcessRequest): ProcessRequest {
   return out;
 }
 
-export function ProcessClient({ id, run, steps, instruction }: { id: string; run: boolean; steps?: ProcessStep[]; instruction?: string }) {
+export function ProcessClient({
+  id,
+  run,
+  steps,
+  instruction,
+  initial,
+}: {
+  id: string;
+  run: boolean;
+  steps?: ProcessStep[];
+  instruction?: string;
+  initial?: ProcessHeaderInfo | null;
+}) {
   const [project, setProject] = useState<Project | null>(null);
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [runState, setRunState] = useState<RunState>(initialRunState);
@@ -222,14 +239,60 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
 
   // ---------------------------------------------------------------------------
 
+  const consoleHref = `/p/${encodeURIComponent(id)}`;
+  const lyricsHref = `/p/${encodeURIComponent(id)}/lyrics`;
+  const headerTitle = project?.meta.title || initial?.title || "";
+  const headerArtist = project?.meta.artist ?? initial?.artist ?? "";
+  const headerPalette = project ? validPalette(project.plan?.keyVisual.palette.map((c) => c.hex)) : (initial?.palette ?? []);
+
+  const header = (actions?: ReactNode, titleOverride?: string) => (
+    <AppHeader
+      leading={
+        <span className="flex items-center gap-3">
+          <BackLink />
+          {(project || initial) && (
+            <ViewTransition name={artTransitionName(id)} share="morph" default="none">
+              <span className="block">
+                <ProjectArt id={id} palette={headerPalette} placeholderIconSize={16} className="size-8 rounded-[7px]" />
+              </span>
+            </ViewTransition>
+          )}
+        </span>
+      }
+      title={
+        titleOverride ?? (
+          <ViewTransition name={titleTransitionName(id)} share="morph" default="none">
+            <span className="inline-block max-w-full truncate align-top">{headerTitle || "載入中…"}</span>
+          </ViewTransition>
+        )
+      }
+      subtitle={titleOverride ? undefined : headerArtist || undefined}
+      actions={actions}
+    />
+  );
+
   if (load.kind === "loading") {
     return (
-      <div className="min-h-screen">
-        <TopBar crumbs={[{ label: "作品庫", href: "/" }]} title="載入中…" />
-        <div className="mx-auto grid max-w-[1400px] gap-6 p-6 lg:grid-cols-[340px_minmax(0,1fr)]" aria-busy="true">
-          <div className="h-80 animate-pulse rounded-xl border border-line bg-panel" />
-          <div className="h-[32rem] animate-pulse rounded-xl border border-line bg-panel" />
-        </div>
+      <div className="min-h-dvh">
+        {header()}
+        <SkeletonGroup label="載入設計總覽" className={cx(pageContainerClass, "grid items-start gap-x-10 gap-y-8 pt-6 pb-24 lg:grid-cols-[360px_minmax(0,1fr)]")}>
+          <div className="min-w-0">
+            <Skeleton className="mb-2 ml-4 h-3 w-16" />
+            <div className="space-y-4 rounded-lg bg-surface p-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex gap-3">
+                  <Skeleton className="size-5 rounded-full!" />
+                  <SkeletonText lines={2} size="caption" className="flex-1" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="min-w-0 space-y-6">
+            <Skeleton className="h-10 w-2/5" />
+            <SkeletonText lines={2} />
+            <Skeleton className="aspect-video rounded-2xl!" />
+          </div>
+        </SkeletonGroup>
       </div>
     );
   }
@@ -237,23 +300,25 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
   if (load.kind === "error" || !project) {
     const notFound = load.kind === "error" && load.notFound;
     return (
-      <div className="min-h-screen">
-        <TopBar crumbs={[{ label: "作品庫", href: "/" }]} title={notFound ? "找不到作品" : "無法載入"} />
-        <div className="mx-auto mt-16 max-w-md rounded-xl border border-line bg-panel p-6 text-center">
-          <AlertIcon size={28} className="mx-auto text-danger" />
-          <p className="mt-3 text-base font-semibold text-fg">{notFound ? "找不到這個作品" : "無法載入這個作品"}</p>
-          <p className="mt-1 text-sm text-muted">{notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}</p>
-          <div className="mt-5 flex justify-center gap-2">
-            <Link href="/" className="inline-flex h-9 items-center rounded-md border border-line bg-panel-3 px-3.5 text-sm text-fg hover:bg-line">
-              回作品庫
-            </Link>
-            {!notFound && (
-              <Button variant="primary" onClick={() => window.location.reload()}>
+      <div className="min-h-dvh">
+        {header(undefined, notFound ? "找不到作品" : "無法載入")}
+        <EmptyState
+          icon={WarningCircleIcon}
+          title={notFound ? "找不到這個作品" : "無法載入這個作品"}
+          description={notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}
+          action={
+            notFound ? (
+              <Button href="/" transitionTypes={["pop"]} variant="tinted">
+                回到作品庫
+              </Button>
+            ) : (
+              <Button variant="tinted" onClick={() => window.location.reload()}>
                 重新載入
               </Button>
-            )}
-          </div>
-        </div>
+            )
+          }
+          className="mt-16"
+        />
       </div>
     );
   }
@@ -267,102 +332,105 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
   const plan = project.plan;
   const showSummary = !running && plan != null;
   const elapsed = runState.startedAt != null ? (runState.endedAt ?? now) - runState.startedAt : 0;
-  const status = running ? STATUS_BADGE.processing : STATUS_BADGE[project.status] ?? STATUS_BADGE.new;
   const offline = server.state.kind === "ok" && !server.state.status.claude;
   const research = runState.steps.research;
   const design = runState.steps.design;
   const showResearchStream = running || (phase === "error" && (research.text || research.status === "error"));
-  const consoleHref = `/p/${encodeURIComponent(id)}`;
-  const lyricsHref = `/p/${encodeURIComponent(id)}/lyrics`;
+  const showDone = justFinished && plan != null && phase === "done";
+  const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || /粗略/.test(runState.steps.lyrics.message ?? ""));
 
   return (
-    <div className="min-h-screen">
-      <TopBar
-        crumbs={[{ label: "作品庫", href: "/" }, { label: "設計總覽" }]}
-        title={project.meta.title}
-        subtitle={project.meta.artist}
-        status={
-          <Badge tone={status.tone} className="ml-1">
-            {status.label}
-          </Badge>
-        }
-        actions={
-          <>
-            {observed && runState.startedAt != null && (
-              <span className="mr-1 inline-flex items-center gap-1.5 font-mono text-xs text-muted tabular" title="這次處理的經過時間">
-                <ClockIcon size={13} />
-                {formatElapsed(elapsed)}
-              </span>
-            )}
-            <ServerStatusPill state={server.state} onRetry={server.reload} />
-            <Link href={lyricsHref} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-panel-3 px-3 text-sm text-fg hover:bg-line">
-              <PenIcon size={14} />
-              編輯歌詞
-            </Link>
-            <Link
-              href={consoleHref}
-              aria-disabled={!plan}
-              className={cx(
-                "inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-sm font-semibold transition",
-                plan ? "bg-accent text-white hover:brightness-110" : "border border-line bg-panel-3 text-muted hover:text-fg",
-              )}
-            >
-              <MonitorIcon size={15} />
-              進入控制台
-            </Link>
-          </>
-        }
-      />
-
-      <div className="mx-auto grid max-w-[1400px] items-start gap-6 p-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="space-y-4 lg:sticky lg:top-20">
-          <section aria-label="處理進度" className="rounded-xl border border-line bg-panel p-4">
-            <StepTimeline analysis={project.analysis} steps={stepStates} searches={runState.searches} lyricsEmpty={project.lyrics.lines.length === 0} />
-            {running && <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-faint">可以離開這個頁面：處理會在背景繼續，回來時會自動接上進度。</p>}
-          </section>
-
-          {error && (
-            <section role="alert" className="space-y-3 rounded-xl border border-danger/35 bg-danger/[0.06] p-4">
-              <p className="flex items-start gap-2 text-sm text-fg">
-                <AlertIcon size={16} className="mt-0.5 shrink-0 text-danger" />
-                <span>
-                  <span className="font-medium text-danger">處理失敗</span>
-                  <span className="mt-0.5 block text-muted">{error}</span>
-                  {plan && <span className="mt-1 block text-xs text-faint">目前的設計方案沒有變更，仍可進入控制台使用。</span>}
-                </span>
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="primary" size="sm" onClick={retry}>
-                  <RefreshIcon size={14} />
-                  重試
-                </Button>
-                <Button size="sm" onClick={rerunAll}>
-                  全部重新執行
-                </Button>
-              </div>
-            </section>
+    <div className="min-h-dvh">
+      {header(
+        <>
+          {observed && runState.startedAt != null && (
+            <span className="mr-1 text-[13px] leading-5 text-label-2 tabular" title="這次處理的經過時間">
+              {formatElapsed(elapsed)}
+            </span>
           )}
+          <Button href={lyricsHref} transitionTypes={PUSH} variant="gray" icon={PencilSimpleIcon}>
+            編輯歌詞
+          </Button>
+          <Button href={consoleHref} transitionTypes={PUSH} variant={showDone ? "plain" : plan && !running ? "filled" : "gray"} icon={MonitorPlayIcon} disabled={!plan}>
+            進入控制台
+          </Button>
+        </>,
+      )}
+
+      <div className={cx(pageContainerClass, "grid items-start gap-x-10 gap-y-8 pt-6 pb-24 lg:grid-cols-[360px_minmax(0,1fr)]")}>
+        <aside className="min-w-0 space-y-8 lg:sticky lg:top-[68px]">
+          <StepTimeline
+            analysis={project.analysis}
+            steps={stepStates}
+            lyricsEmpty={project.lyrics.lines.length === 0}
+            footer={running ? "可以離開這個頁面：處理會在背景繼續，回來時會自動接上進度。" : undefined}
+          />
 
           {(plan || project.research) && <RedesignBox disabled={running} hasResearch={project.research != null} offline={offline} onRedesign={redesign} />}
 
           {runState.logs.length > 0 && <LogPanel logs={runState.logs} startedAt={runState.startedAt ?? 0} />}
         </aside>
 
-        <main className="min-w-0 space-y-6">
-          {justFinished && plan && phase === "done" && (
-            <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-ok/30 bg-ok/[0.07] px-4 py-3">
-              <span className="flex size-8 items-center justify-center rounded-full bg-ok/20 text-ok">
-                <CheckIcon size={16} />
-              </span>
-              <p className="flex-1 text-sm text-fg">
-                {lastRequest?.instruction ? `已依指示「${lastRequest.instruction}」重新設計` : "設計完成"}
-                {elapsed >= 1000 && <span className="text-muted">（用時 {formatElapsed(elapsed)}）</span>}。檢查主視覺與段落安排，沒問題就進入控制台準備上台。
-              </p>
-              <Link href={consoleHref} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-sm font-semibold text-white hover:brightness-110">
-                進入控制台
-                <ArrowRightIcon size={14} />
-              </Link>
-            </div>
+        <main className="min-w-0 space-y-8">
+          {error && (
+            <Banner
+              tone="error"
+              title="處理失敗"
+              animateIn
+              description={
+                <>
+                  {error}
+                  {plan && <span className="mt-1 block">目前的設計方案沒有變更，仍可進入控制台使用。</span>}
+                </>
+              }
+              actions={
+                <>
+                  <Button variant="gray" onClick={rerunAll}>
+                    全部重新執行
+                  </Button>
+                  <Button variant="filled" onClick={retry}>
+                    重試
+                  </Button>
+                </>
+              }
+            />
+          )}
+
+          {showDone && (
+            <Banner
+              tone="success"
+              title="設計完成"
+              animateIn
+              description={
+                <>
+                  {lastRequest?.instruction ? `已依指示「${lastRequest.instruction}」重新設計` : "主視覺與每一段的畫面都準備好了"}
+                  {elapsed >= 1000 && `，用時 ${formatElapsed(elapsed)}`}。檢查段落安排，沒問題就進入控制台準備上台。
+                </>
+              }
+              actions={
+                <Button href={consoleHref} transitionTypes={PUSH} variant="filled" icon={MonitorPlayIcon}>
+                  進入控制台
+                </Button>
+              }
+            />
+          )}
+
+          {needsLyrics && (
+            <Banner
+              tone="info"
+              icon={<PencilSimpleIcon size={20} className="text-label-2" />}
+              title={project.lyrics.lines.length === 0 ? "這首歌還沒有歌詞" : "歌詞的時間是粗略分配的"}
+              description={
+                project.lyrics.lines.length === 0
+                  ? "畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
+                  : "時間是依音訊能量估的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"
+              }
+              actions={
+                <Button href={lyricsHref} transitionTypes={PUSH} variant="gray">
+                  前往歌詞編輯器
+                </Button>
+              }
+            />
           )}
 
           {showResearchStream && (
@@ -370,7 +438,8 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
               title="研究簡報"
               text={research.text}
               live={research.status === "running"}
-              badge={runState.searches.length > 0 ? <span className="text-xs text-faint">{runState.searches.length} 次搜尋</span> : undefined}
+              searches={runState.searches}
+              badge={runState.searches.length > 0 ? `${runState.searches.length} 次搜尋` : undefined}
               placeholder={
                 research.status === "pending"
                   ? "等歌詞處理完成後開始研究樂團與歌曲…"
@@ -393,32 +462,20 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
             />
           )}
 
-          {showSummary && (project.lyrics.lines.length === 0 || /粗略/.test(runState.steps.lyrics.message ?? "")) && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-accent-2/30 bg-accent-2/[0.07] px-4 py-3 text-sm">
-              <PenIcon size={16} className="shrink-0 text-accent-2" />
-              <p className="min-w-0 flex-1 text-fg">
-                {project.lyrics.lines.length === 0
-                  ? "這首歌還沒有歌詞，畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
-                  : "歌詞的時間是依音訊能量粗略分配的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"}
-              </p>
-              <Link href={lyricsHref} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-panel-3 px-3 text-xs font-medium text-fg hover:bg-line">
-                前往歌詞編輯器
-                <ArrowRightIcon size={13} />
-              </Link>
-            </div>
-          )}
-
-          {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} />}
+          {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} reveal={showDone} />}
 
           {!running && !plan && !error && (
-            <div className="rounded-xl border border-dashed border-line bg-panel/50 p-8 text-center">
-              <SparklesIcon size={28} className="mx-auto text-accent" />
-              <p className="mt-3 text-base font-semibold text-fg">還沒有設計方案</p>
-              <p className="mt-1 text-sm text-muted">開始處理：取得歌詞、研究樂團與歌曲、設計主視覺與段落。</p>
-              <Button variant="primary" className="mt-4" onClick={() => execute({ lyricsText: readLyricsHandoff(id) ?? undefined })}>
-                開始製作
-              </Button>
-            </div>
+            <EmptyState
+              icon={SparkleIcon}
+              title="還沒有設計方案"
+              description="開始處理：取得歌詞、研究樂團與歌曲、設計主視覺與段落。"
+              action={
+                <Button variant="filled" size="lg" onClick={() => execute({ lyricsText: readLyricsHandoff(id) ?? undefined })}>
+                  開始製作
+                </Button>
+              }
+              className="rounded-lg bg-surface"
+            />
           )}
 
           {project.research && !showResearchStream && <ResearchPanel research={project.research} defaultOpen={!plan} />}
@@ -431,24 +488,25 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
 function LogPanel({ logs, startedAt }: { logs: LogEntry[]; startedAt: number }) {
   const errors = logs.filter((l) => l.tone === "error").length;
   return (
-    <details className="group rounded-xl border border-line bg-panel">
-      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-2.5 text-xs font-medium text-muted hover:text-fg">
-        <span>
-          處理紀錄（{logs.length}）{errors > 0 && <span className="ml-1 text-danger">{errors} 個錯誤</span>}
-        </span>
-        <span aria-hidden="true" className="transition-transform group-open:rotate-180">
-          ▾
-        </span>
-      </summary>
-      <ol className="max-h-72 space-y-1 overflow-y-auto border-t border-line px-4 py-2 text-[11px] leading-5">
-        {logs.map((l) => (
-          <li key={l.id} className="flex gap-2">
-            <span className="w-9 shrink-0 font-mono text-faint tabular">{formatElapsed(l.at - startedAt)}</span>
-            {l.step && <span className="w-7 shrink-0 text-faint">{STEP_NAME[l.step] ?? l.step}</span>}
-            <span className={cx("min-w-0 flex-1 break-words", l.tone === "error" ? "text-danger" : l.tone === "success" ? "text-ok/90" : "text-muted")}>{l.message}</span>
-          </li>
-        ))}
-      </ol>
-    </details>
+    <section aria-label="處理紀錄" className="min-w-0 rounded-lg bg-surface">
+      <Disclosure
+        summaryClassName="min-h-11! rounded-lg px-4 font-normal! text-label-2! hover:bg-fill-4"
+        summary={
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            處理紀錄（{logs.length}）{errors > 0 && <span className="text-red-text">{errors} 個錯誤</span>}
+          </span>
+        }
+      >
+        <ol className="max-h-72 space-y-1 overflow-y-auto px-4 pt-1 pb-3 text-[12px] leading-[18px]">
+          {logs.map((l) => (
+            <li key={l.id} className="flex min-w-0 gap-2">
+              <span className="w-9 shrink-0 text-label-2 tabular">{formatElapsed(l.at - startedAt)}</span>
+              {l.step && <span className="w-7 shrink-0 text-label-2">{STEP_NAME[l.step] ?? l.step}</span>}
+              <span className={cx("min-w-0 flex-1 break-words", l.tone === "error" ? "text-red-text" : "text-label")}>{l.message}</span>
+            </li>
+          ))}
+        </ol>
+      </Disclosure>
+    </section>
   );
 }

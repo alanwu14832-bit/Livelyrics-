@@ -4,6 +4,8 @@
 // the failing panel is replaced by a small notice with a retry button.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Button } from "@/components/ui";
+import { WarningCircleIcon } from "@/components/ui/Icon";
 
 interface Props {
   /** grid-area of the panel, so the fallback occupies the same slot */
@@ -30,20 +32,13 @@ export class PanelBoundary extends Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <section
-        role="alert"
-        className="flex min-h-0 flex-col items-center justify-center gap-2 rounded-lg border border-danger/40 bg-panel p-4 text-center"
-        style={{ gridArea: this.props.area }}
-      >
-        <p className="text-sm font-semibold text-fg">「{this.props.label}」面板發生錯誤</p>
-        <p className="max-w-sm text-xs leading-relaxed text-muted">播放與投影不受影響。{this.state.error.message ? `（${this.state.error.message}）` : ""}</p>
-        <button
-          type="button"
-          onClick={() => this.setState({ error: null })}
-          className="rounded-md border border-line bg-panel-3 px-3 py-1 text-xs text-fg hover:bg-line"
-        >
+      <section role="alert" className="flex min-h-0 flex-col items-center justify-center rounded-lg bg-surface p-4 text-center" style={{ gridArea: this.props.area }}>
+        <WarningCircleIcon size={32} weight="fill" className="mb-2 text-red" />
+        <p className="text-c-headline text-label">「{this.props.label}」面板發生錯誤</p>
+        <p className="mt-1 max-w-sm text-c-body text-label-2">播放與投影不受影響。{this.state.error.message ? `（${this.state.error.message}）` : ""}</p>
+        <Button size="sm" variant="gray" className="mt-3" onClick={() => this.setState({ error: null })}>
           重新載入面板
-        </button>
+        </Button>
       </section>
     );
   }

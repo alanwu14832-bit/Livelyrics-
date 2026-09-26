@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cx } from "./cx";
-import type { UiIcon } from "./Icon";
+import type { UiIcon } from "./icon-base";
 import { capsuleOverflow, mergePresence, type Presence } from "./interaction";
 import { StatusCapsule, type CapsuleTone } from "./Tag";
 import { Tooltip } from "./Tooltip";

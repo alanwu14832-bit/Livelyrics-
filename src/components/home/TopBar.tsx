@@ -1,14 +1,23 @@
-import Link from "next/link";
+"use client";
+
+// Deprecated: the pre-redesign sub-page top bar, now a thin wrapper over the kit's AppHeader
+// (UI-AUDIT UI-07: one 52 px header on every page, the back link always 「‹ 作品庫」, the title always
+// in the same place). New code uses AppHeader from @/components/ui directly; this stays only
+// until the lyrics editor has moved over.
+//
+// Mapping: crumbs -> the back link (the first crumb with an href; the label is always 作品庫);
+// title / subtitle -> the title block; status -> next to the title; actions -> the right slot;
+// onNavigate(e, href) runs before the back link navigates (call e.preventDefault() to stay).
+
 import type { MouseEvent, ReactNode } from "react";
-import { cx } from "@/components/ui";
-import { Brand } from "./Brand";
+import { AppHeader } from "@/components/ui";
 
 export interface Crumb {
   label: string;
   href?: string;
 }
 
-/** Top bar for the project sub-pages: brand · breadcrumb · title, actions on the right. */
+/** @deprecated use AppHeader from @/components/ui */
 export function TopBar({
   crumbs,
   title,
@@ -23,38 +32,20 @@ export function TopBar({
   subtitle?: ReactNode;
   status?: ReactNode;
   actions?: ReactNode;
-  /** called before following a crumb link; call e.preventDefault() to stay (unsaved changes) */
+  /** called before following the back link; call e.preventDefault() to stay (unsaved changes) */
   onNavigate?: (e: MouseEvent<HTMLAnchorElement>, href: string) => void;
   className?: string;
 }) {
+  const href = crumbs.find((c) => c.href)?.href ?? "/";
   return (
-    <header className={cx("sticky top-0 z-20 border-b border-line/70 bg-bg/90 backdrop-blur", className)}>
-      <div className="flex min-h-14 items-center gap-4 px-5 py-2">
-        <Brand compact onClick={onNavigate ? (e) => onNavigate(e, "/") : undefined} />
-        <span aria-hidden="true" className="h-6 w-px bg-line" />
-        <div className="min-w-0 flex-1">
-          <nav aria-label="路徑" className="flex items-center gap-1 text-[11px] text-faint">
-            {crumbs.map((c, i) => (
-              <span key={`${c.label}-${i}`} className="flex items-center gap-1">
-                {i > 0 && <span aria-hidden="true">/</span>}
-                {c.href ? (
-                  <Link href={c.href} onClick={(e) => onNavigate?.(e, c.href!)} className="hover:text-fg">
-                    {c.label}
-                  </Link>
-                ) : (
-                  <span>{c.label}</span>
-                )}
-              </span>
-            ))}
-          </nav>
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-base font-semibold text-fg">{title}</h1>
-            {subtitle && <span className="truncate text-sm text-muted">{subtitle}</span>}
-            {status}
-          </div>
-        </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
-      </div>
-    </header>
+    <AppHeader
+      back={{ href, onNavigate: onNavigate ? (e) => onNavigate(e, href) : undefined }}
+      title={title}
+      subtitle={subtitle}
+      titleAccessory={status}
+      actions={actions}
+      width="full"
+      className={className}
+    />
   );
 }

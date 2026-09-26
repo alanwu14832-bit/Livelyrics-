@@ -29,7 +29,8 @@ import { createContext, useContext, useId, useRef, type KeyboardEvent, type Reac
 import { createPortal } from "react-dom";
 import { cx } from "./cx";
 import { useAnchoredSurface } from "./Floating";
-import { CheckIcon, type UiIcon } from "./Icon";
+import { CheckIcon } from "./kit-icons";
+import type { UiIcon } from "./icon-base";
 import { createTypeahead, rovingIndex, type Placement } from "./interaction";
 import { Kbd } from "./Kbd";
 import { renderIcon } from "./render-icon";

@@ -17,17 +17,28 @@
 
 import type { HTMLAttributes, ReactNode } from "react";
 import { cx } from "./cx";
-import type { UiIcon } from "./Icon";
+import type { UiIcon } from "./icon-base";
 import { renderIcon } from "./render-icon";
 
 export type TagTone = "neutral" | "tint" | "orange" | "red";
 
+/**
+ * Text on a soft (12 to 18 %) fill of its own hue. The raw text tokens reach only 4.2 to 4.4:1 on
+ * the light page background (and red 4.1:1 on the console's surface-2), so they are pulled 15 %
+ * towards --label: 4.6 to 5.3:1 everywhere, still clearly the hue.
+ */
+export const SOFT_TEXT = {
+  tint: "text-[color-mix(in_srgb,var(--tint-text-on-soft)_85%,var(--label))]",
+  orange: "text-[color-mix(in_srgb,var(--orange-text)_85%,var(--label))]",
+  red: "text-[color-mix(in_srgb,var(--red-text)_85%,var(--label))]",
+} as const;
+
 const TAG_TONE: Record<TagTone, string> = {
   // label-2 on fill-3 is only 4.0:1 in light; the on-material secondary label is 6.4:1 (and 7:1+ in dark)
   neutral: "bg-fill-3 text-label-2-on-material",
-  tint: "bg-tint-soft text-tint-text-on-soft",
-  orange: "bg-orange-soft text-orange-text",
-  red: "bg-red-soft text-red-text",
+  tint: `bg-tint-soft ${SOFT_TEXT.tint}`,
+  orange: `bg-orange-soft ${SOFT_TEXT.orange}`,
+  red: `bg-red-soft ${SOFT_TEXT.red}`,
 };
 
 export function Tag({ tone = "neutral", icon, className, children, ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: TagTone; icon?: UiIcon | ReactNode }) {
@@ -46,9 +57,9 @@ export type CapsuleTone = "blackout" | "red" | "orange" | "tint" | "neutral";
 
 const CAPSULE_TONE: Record<CapsuleTone, string> = {
   blackout: "bg-red-fill text-white",
-  red: "bg-red-soft text-red-text",
-  orange: "bg-orange-soft text-orange-text",
-  tint: "bg-tint-soft text-tint-text-on-soft",
+  red: `bg-red-soft ${SOFT_TEXT.red}`,
+  orange: `bg-orange-soft ${SOFT_TEXT.orange}`,
+  tint: `bg-tint-soft ${SOFT_TEXT.tint}`,
   neutral: "bg-fill-3 text-label-2-on-material",
 };
 

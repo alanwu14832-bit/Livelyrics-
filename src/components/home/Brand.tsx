@@ -25,6 +25,10 @@ export function BrandMark({ size = 28, className }: { size?: number; className?:
   );
 }
 
+/**
+ * The brand in the home header (UI-AUDIT §3.5): the 28 px app-icon mark + a 17 / 600 wordmark.
+ * `compact` (24 px mark, 15 px name) is kept for older callers.
+ */
 export function Brand({
   compact = false,
   className,
@@ -38,14 +42,12 @@ export function Brand({
     <Link
       href="/"
       onClick={onClick}
-      className={cx("group inline-flex items-center gap-2.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", className)}
+      transitionTypes={["pop"]}
+      className={cx("press-fade inline-flex items-center gap-2 rounded-sm", className)}
       aria-label="Livelyrics 作品庫"
     >
-      <BrandMark size={compact ? 24 : 34} />
-      <span className="flex flex-col leading-none">
-        <span className={cx("font-semibold tracking-tight text-fg", compact ? "text-sm" : "text-xl")}>Livelyrics</span>
-        {!compact && <span className="mt-1 text-xs text-muted">為樂團打造的舞台歌詞視覺</span>}
-      </span>
+      <BrandMark size={compact ? 24 : 28} />
+      <span className={cx("font-semibold text-label", compact ? "text-[15px] leading-5" : "text-[17px] leading-[22px]")}>Livelyrics</span>
     </Link>
   );
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import Link from "next/link";
+// 研究: the designer's brief (Markdown) and its sources as an inset list of links.
+
 import { memo } from "react";
-import { Badge } from "@/components/ui";
+import { Button, EmptyState, Tag } from "@/components/ui";
+import { ArrowSquareOutIcon, BooksIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import { hostOf } from "@/lib/console/format";
 import type { Project } from "@/lib/types";
-import { SectionTitle } from "./controls";
-import { IconExternal } from "./icons";
+import { Footnote, Group, GroupTitle } from "./ui";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -23,54 +24,58 @@ function ResearchTabImpl({ project }: { project: Project }) {
   const research = project.research;
   if (!research) {
     return (
-      <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-        <p className="text-sm text-muted">還沒有研究資料</p>
-        <p className="text-xs leading-relaxed text-faint">研究會整理樂團的視覺歷史、歌曲意象與情緒弧線，作為設計的依據。</p>
-        <Link href={`/p/${encodeURIComponent(project.id)}/process`} className="rounded-md border border-line bg-panel-3 px-3 py-1.5 text-xs text-fg hover:bg-line">
-          前往處理頁面
-        </Link>
-      </div>
+      <EmptyState
+        compact
+        icon={BooksIcon}
+        title="還沒有研究資料"
+        description="研究會整理樂團的視覺歷史、歌曲意象與情緒弧線，作為設計的依據。"
+        action={
+          <Button size="sm" variant="tinted" href={`/p/${encodeURIComponent(project.id)}/process`} transitionTypes={["push"]}>
+            前往設計總覽
+          </Button>
+        }
+      />
     );
   }
   const sources = research.sources ?? [];
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={research.engine === "claude" ? "accent" : "neutral"}>{research.engine === "claude" ? "Claude 研究" : "離線設計（未連網研究）"}</Badge>
-        {research.model && <Badge className="font-mono">{research.model}</Badge>}
-        {research.createdAt && <span className="text-[11px] text-faint">{formatDate(research.createdAt)}</span>}
-      </div>
-      {research.engine === "offline" && (
-        <p className="rounded-md border border-line bg-panel-2 px-2.5 py-2 text-[11px] leading-relaxed text-faint">
-          這份簡報由離線設計師依音訊分析與歌詞產生，沒有查詢網路資料。設定 ANTHROPIC_API_KEY 後重新處理，即可得到樂團視覺歷史的完整研究。
-        </p>
-      )}
-      <div className="rounded-lg border border-line bg-panel-2/50 px-3 py-1">
-        {research.brief.trim() ? <Markdown>{research.brief}</Markdown> : <p className="py-3 text-xs text-faint">研究內容是空的。</p>}
-      </div>
-      {sources.length > 0 && (
-        <div>
-          <SectionTitle>參考來源（{sources.length}）</SectionTitle>
-          <ul className="mt-1.5 flex flex-col gap-1">
-            {sources.map((s, i) => (
-              <li key={`${s.url}-${i}`}>
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="group flex items-start gap-2 rounded-md border border-line bg-panel-2 px-2.5 py-1.5 hover:border-faint focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  <span className="mt-0.5 font-mono text-[10px] text-faint tabular">{String(i + 1).padStart(2, "0")}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs text-fg group-hover:text-accent">{s.title || s.url}</span>
-                    <span className="block truncate text-[10px] text-faint">{hostOf(s.url) || s.url}</span>
-                  </span>
-                  <IconExternal size={12} className="mt-0.5 shrink-0 text-faint" />
-                </a>
-              </li>
-            ))}
-          </ul>
+    <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
+      <div>
+        <div className="flex min-h-7 flex-wrap items-center gap-1.5">
+          <Tag tone={research.engine === "claude" ? "tint" : "neutral"}>{research.engine === "claude" ? "Claude 研究" : "離線設計（未連網研究）"}</Tag>
+          {research.model && <Tag className="t-latin">{research.model}</Tag>}
+          {research.createdAt && <span className="text-c-footnote text-label-2 tabular">{formatDate(research.createdAt)}</span>}
         </div>
+        {research.engine === "offline" && (
+          <Footnote className="mt-1">這份簡報由離線設計師依音訊分析與歌詞產生，沒有查詢網路資料。設定 ANTHROPIC_API_KEY 後重新處理，即可得到樂團視覺歷史的完整研究。</Footnote>
+        )}
+      </div>
+      <Group className="px-3 py-1">{research.brief.trim() ? <Markdown>{research.brief}</Markdown> : <p className="py-3 text-c-body text-label-2">研究內容是空的。</p>}</Group>
+      {sources.length > 0 && (
+        <section aria-labelledby="research-sources">
+          <GroupTitle id="research-sources">參考來源（{sources.length}）</GroupTitle>
+          <Group className="mt-1">
+            <ul>
+              {sources.map((s, i) => (
+                <li key={`${s.url}-${i}`}>
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="group relative flex min-h-(--row-min-h) items-center gap-2.5 px-3 py-1.5 transition-none after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:left-[38px] after:h-(--hairline) after:bg-separator hover:bg-fill-4 focus-inset active:bg-fill-3 [li:last-child_&]:after:hidden"
+                  >
+                    <span className="w-4 shrink-0 text-c-footnote text-label-2 tabular">{i + 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-c-body text-label">{s.title || s.url}</span>
+                      <span className="block truncate text-c-footnote text-label-2">{hostOf(s.url) || s.url}</span>
+                    </span>
+                    <ArrowSquareOutIcon size={14} className="shrink-0 text-label-3 group-hover:text-label-2" />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </Group>
+        </section>
       )}
     </div>
   );

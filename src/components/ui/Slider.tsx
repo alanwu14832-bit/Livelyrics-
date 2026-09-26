@@ -16,10 +16,11 @@
 //   Navigation keys do not bubble to page hotkeys.
 // Reduced motion: no glide, no rubber band.
 
-import { animate, useReducedMotion } from "motion/react";
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
-import { easeOut, rubberband } from "@/lib/motion";
+import { rubberband } from "@/lib/motion";
 import { cx } from "./cx";
+import { tweenTo, type Playback } from "./spring";
+import { useReducedMotion } from "./use-reduced-motion";
 import { percentOf, sliderKeyDelta, stepValue } from "./interaction";
 
 const NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
@@ -66,7 +67,7 @@ export function Slider({
   const hintId = `${inputId}-hint`;
   const reduce = useReducedMotion();
   const [glide, setGlide] = useState<number | null>(null);
-  const glideRef = useRef<ReturnType<typeof animate> | null>(null);
+  const glideRef = useRef<Playback | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const shown = glide ?? value;
   const changed = resetValue != null && Math.abs(value - resetValue) > 1e-9;
@@ -81,9 +82,10 @@ export function Slider({
     else onChange(resetValue);
     glideRef.current?.stop();
     if (reduce) return;
-    glideRef.current = animate(from, resetValue, {
-      duration: 0.2,
-      ease: easeOut,
+    glideRef.current = tweenTo({
+      from,
+      to: resetValue,
+      duration: 200,
       onUpdate: (v) => setGlide(v),
       onComplete: () => setGlide(null),
     });

@@ -58,6 +58,37 @@ export function followPlayhead(view: TimeView, t: number, duration: number): Tim
   return clampView({ start: t - view.span * 0.15, span: view.span }, duration);
 }
 
+/** Largest start (seconds) that keeps a `span` view inside the song. */
+export function maxStart(span: number, duration: number): number {
+  return Math.max(0, Math.max(duration, 1) - span);
+}
+
+/** Visible seconds for a (continuous) zoom factor: 1 = whole song, never below MIN_SPAN. */
+export function spanForZoom(zoom: number, duration: number): number {
+  const total = Math.max(duration, 1);
+  return Math.min(total, Math.max(Math.min(MIN_SPAN, total), total / Math.max(1, zoom)));
+}
+
+/** Zoom factor shown for a span (1 = whole song). */
+export function zoomOf(span: number, duration: number): number {
+  return Math.max(1, Math.max(duration, 1) / Math.max(1e-6, span));
+}
+
+/** The next preset zoom level above (+1) or below (−1) a continuous zoom factor. */
+export function stepZoom(zoom: number, dir: 1 | -1): number {
+  const eps = 1e-3;
+  if (dir > 0) return ZOOM_LEVELS.find((z) => z > zoom + eps) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+  return [...ZOOM_LEVELS].reverse().find((z) => z < zoom - eps) ?? ZOOM_LEVELS[0];
+}
+
+/**
+ * Continuous follow while playing (UI-35): the view start that keeps the playhead at `anchor`
+ * (35 %) of a zoomed view, clamped to the song so the ends do not scroll past.
+ */
+export function followStart(t: number, span: number, duration: number, anchor = 0.35): number {
+  return Math.min(maxStart(span, duration), Math.max(0, t - span * anchor));
+}
+
 const TICK_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 
 /** Ruler step (seconds) so labels are at least `minPx` apart. */

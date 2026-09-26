@@ -1,17 +1,29 @@
 import type { Metadata } from "next";
-import { ProcessClient } from "@/components/process/ProcessClient";
+import { ViewTransition, cache } from "react";
+import { PAGE_TRANSITION } from "@/components/home/transitions";
+import { ProcessClient, type ProcessHeaderInfo } from "@/components/process/ProcessClient";
 import { firstParam, parseRunParam, parseStepsParam } from "@/components/process/steps";
 import { getProject, isValidProjectId } from "@/lib/server/storage";
 
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** One read per request for both the title and the header info; load errors are the page's to report. */
+const loadHeader = cache(async (id: string): Promise<ProcessHeaderInfo | null> => {
+  try {
+    if (!isValidProjectId(id)) return null;
+    const p = await getProject(id);
+    if (!p) return null;
+    const palette = (p.plan?.keyVisual.palette ?? []).map((c) => c.hex).filter((c) => typeof c === "string" && HEX.test(c)).slice(0, 4);
+    return { title: p.meta.title || p.meta.fileName || "", artist: p.meta.artist || "", palette };
+  } catch {
+    return null;
+  }
+});
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  let song = "";
-  try {
-    if (isValidProjectId(id)) song = (await getProject(id))?.meta.title ?? "";
-  } catch {
-    /* the page itself reports load errors */
-  }
-  return { title: song ? `${song} · 設計總覽 — Livelyrics` : "設計總覽 — Livelyrics" };
+  const song = (await loadHeader(id))?.title ?? "";
+  return { title: song ? `${song}｜設計總覽` : "設計總覽｜Livelyrics" };
 }
 
 /**
@@ -27,13 +39,17 @@ export default async function ProcessPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  const initial = await loadHeader(id);
   return (
-    <ProcessClient
-      key={id}
-      id={id}
-      run={parseRunParam(query.run)}
-      steps={parseStepsParam(query.steps)}
-      instruction={firstParam(query.instruction)?.slice(0, 4000)}
-    />
+    <ViewTransition enter={PAGE_TRANSITION} exit={PAGE_TRANSITION} default="none">
+      <ProcessClient
+        key={id}
+        id={id}
+        run={parseRunParam(query.run)}
+        steps={parseStepsParam(query.steps)}
+        instruction={firstParam(query.instruction)?.slice(0, 4000)}
+        initial={initial}
+      />
+    </ViewTransition>
   );
 }

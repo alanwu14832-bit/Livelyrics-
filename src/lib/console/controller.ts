@@ -238,6 +238,8 @@ export class ConsoleController {
   private logSeq = 0;
   private noticeSeq = 0;
   private readonly noticeTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  /** false while the UI's toast stack owns notice lifetimes (it pauses on hover, focus and a hidden tab) */
+  private noticeAutoDismiss = true;
 
   constructor(id: string) {
     this.id = id;
@@ -1474,11 +1476,27 @@ export class ConsoleController {
 
   notify(message: string, tone: NoticeTone = "info"): void {
     const id = ++this.noticeSeq;
-    const notices = [...this.snapshot.notices.filter((n) => n.message !== message), { id, tone, message }].slice(-4);
+    // a UI-owned stack shows three at most: older notices leave instead of resurfacing later
+    const keep = this.noticeAutoDismiss ? 4 : 3;
+    const notices = [...this.snapshot.notices.filter((n) => n.message !== message), { id, tone, message }].slice(-keep);
     this.set({ notices });
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !this.noticeAutoDismiss) return;
     const timer = setTimeout(() => this.dismissNotice(id), tone === "error" ? NOTICE_MS * 2 : NOTICE_MS);
     this.noticeTimers.set(id, timer);
+  }
+
+  /**
+   * Let the UI own notice lifetimes (false): notices then stay until dismissNotice(), so a toast
+   * stack can pause its timers while hovered, focused or hidden. true restores the built-in
+   * 4.5 s (errors 9 s) timers for notices raised from then on.
+   */
+  setNoticeAutoDismiss(enabled: boolean): void {
+    if (enabled === this.noticeAutoDismiss) return;
+    this.noticeAutoDismiss = enabled;
+    if (!enabled) {
+      for (const t of this.noticeTimers.values()) clearTimeout(t);
+      this.noticeTimers.clear();
+    }
   }
 
   dismissNotice(id: number): void {

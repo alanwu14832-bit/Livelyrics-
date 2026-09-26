@@ -22,9 +22,10 @@
 import Link from "next/link";
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, type Ref } from "react";
 import { cx } from "./cx";
-import type { UiIcon } from "./Icon";
+import type { UiIcon } from "./icon-base";
 import { renderIcon } from "./render-icon";
 import { Spinner } from "./Spinner";
+import { SOFT_TEXT } from "./Tag";
 
 export type ButtonVariant = "filled" | "tinted" | "gray" | "plain" | "quiet" | "destructive" | "destructive-filled";
 /** @deprecated names from the pre-redesign kit */
@@ -64,7 +65,7 @@ const ICON_PX: Record<ButtonSize, number> = { sm: 14, md: 16, lg: 20, "icon-sm":
 
 const VARIANT: Record<ButtonVariant, string> = {
   filled: "bg-tint-fill text-on-tint hover:bg-tint-fill-hover active:brightness-[.94]",
-  tinted: "bg-tint-soft text-tint-text-on-soft hover:bg-[color-mix(in_srgb,var(--tint-soft)_93%,var(--tint))]",
+  tinted: `bg-tint-soft ${SOFT_TEXT.tint} hover:bg-[color-mix(in_srgb,var(--tint-soft)_93%,var(--tint))]`,
   gray: "bg-fill-3 text-label hover:bg-fill-2",
   plain: "text-tint-text hover:bg-fill-4",
   quiet: "text-label-2 hover:bg-fill-4 hover:text-label",
@@ -85,7 +86,7 @@ export function buttonClasses({ variant = "gray", size = "md", active = false, c
       "disabled:pointer-events-none disabled:opacity-35 aria-disabled:pointer-events-none aria-disabled:opacity-35",
       SIZE[size],
       weight,
-      size === "circle" ? "bg-label text-bg hover:opacity-90" : active ? "bg-tint-soft text-tint-text-on-soft" : VARIANT[v],
+      size === "circle" ? "bg-label text-bg hover:opacity-90" : active ? `bg-tint-soft ${SOFT_TEXT.tint}` : VARIANT[v],
       fades ? "press-fade" : "press",
       className,
     ),

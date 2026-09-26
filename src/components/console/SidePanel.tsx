@@ -1,7 +1,13 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { cx } from "@/components/ui";
+// Side panel: a full-width SegmentedControl (tabs) over one scroll container per view (UI-16):
+// only the active view is mounted (the 同步 meters run rAF loops), each view remembers its own
+// scroll position, and 控制 always opens at the top so the safety controls are in view. A pointer
+// switch cross-fades the new view in with a 12 px drift from the side it came from; keyboard
+// switches are instant.
+
+import { useLayoutEffect, useRef, useState } from "react";
+import { SegmentedControl, cx } from "@/components/ui";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { useStageValue } from "@/lib/console/hooks";
 import type { StageState } from "@/lib/stage/protocol";
@@ -10,6 +16,7 @@ import { ControlTab } from "./ControlTab";
 import { DesignTab } from "./DesignTab";
 import { ResearchTab } from "./ResearchTab";
 import { SyncTab } from "./SyncTab";
+import { Dot, Pane, useScrollEdge } from "./ui";
 
 type TabId = "design" | "research" | "control" | "sync";
 
@@ -33,6 +40,12 @@ function readTab(): TabId {
   return "design";
 }
 
+/** Any override is active: a 6 px red dot on 控制 (so it is never forgotten). */
+const selectAnyOverride = (s: StageState) => {
+  const o = s.overrides;
+  return o.blackout || !o.lyricsVisible || o.freeze || o.scene != null || o.lyricStyle != null || o.testPattern || o.intensity !== 1 || o.lyricScale !== 1;
+};
+
 export function SidePanel({
   controller,
   snap,
@@ -46,11 +59,12 @@ export function SidePanel({
 }) {
   // only rendered on the client once the project has loaded, so reading storage here is safe
   const [tab, setTab] = useState<TabId>(readTab);
-  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ design: null, research: null, control: null, sync: null });
-  // UI-16: only the active panel is mounted (the sync meters run rAF loops), but each tab keeps
-  // its own scroll position. 控制 always opens at the top so the safety controls are in view.
+  const [enter, setEnter] = useState<"none" | "forward" | "back">("none");
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollTops = useRef<Record<TabId, number>>({ design: 0, research: 0, control: 0, sync: 0 });
+  const anyOverride = useStageValue(controller.store, selectAnyOverride);
+  const scrolled = useScrollEdge(panelRef, [tab]);
+  const lastPointer = useRef(0);
 
   useLayoutEffect(() => {
     const el = panelRef.current;
@@ -58,7 +72,13 @@ export function SidePanel({
   }, [tab]);
 
   const choose = (id: TabId) => {
+    if (id === tab) return;
     if (panelRef.current) scrollTops.current[tab] = panelRef.current.scrollTop;
+    const from = TABS.findIndex((t) => t.id === tab);
+    const to = TABS.findIndex((t) => t.id === id);
+    // only a pointer pick animates (keyboard-initiated changes never do)
+    const byPointer = performance.now() - lastPointer.current < 800;
+    setEnter(byPointer ? (to > from ? "forward" : "back") : "none");
     setTab(id);
     try {
       window.localStorage.setItem(TAB_KEY, id);
@@ -67,45 +87,37 @@ export function SidePanel({
     }
   };
 
-  const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
-    e.preventDefault();
-    e.stopPropagation();
-    const i = TABS.findIndex((t) => t.id === tab);
-    const next = e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + TABS.length) % TABS.length;
-    choose(TABS[next].id);
-    tabRefs.current[TABS[next].id]?.focus();
-  };
-
   return (
-    <section className="flex min-h-0 flex-col rounded-lg border border-line bg-panel" style={{ gridArea: "panel" }} aria-label="設計與控制">
-      <div role="tablist" aria-label="面板" className="flex h-10 shrink-0 items-stretch gap-1 border-b border-line px-2" onKeyDown={onTabKey}>
-        {TABS.map((t) => {
-          const active = t.id === tab;
-          return (
-            <button
-              key={t.id}
-              ref={(el) => {
-                tabRefs.current[t.id] = el;
-              }}
-              type="button"
-              role="tab"
-              id={`console-tab-${t.id}`}
-              aria-selected={active}
-              aria-controls={`console-tabpanel-${t.id}`}
-              tabIndex={active ? 0 : -1}
-              onClick={() => choose(t.id)}
-              className={cx(
-                "relative px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
-                active ? "text-fg" : "text-faint hover:text-muted",
-              )}
-            >
-              {t.label}
-              {t.id === "control" && snap.project && <ControlDot controller={controller} />}
-              <span className={cx("absolute inset-x-2 bottom-0 h-0.5 rounded-full", active ? "bg-accent" : "bg-transparent")} aria-hidden="true" />
-            </button>
-          );
-        })}
+    <Pane area="panel" label="設計與控制" order={3}>
+      <div
+        className={cx("relative z-20 shrink-0 p-2 transition-shadow duration-(--dur-fast) ease-[ease]", scrolled && "scroll-edge")}
+        onPointerDown={() => {
+          lastPointer.current = performance.now();
+        }}
+      >
+        <SegmentedControl
+          kind="tabs"
+          fullWidth
+          blurOnPointer
+          label="面板"
+          value={tab}
+          onChange={choose}
+          getTabId={(v) => `console-tab-${v}`}
+          getPanelId={(v) => `console-tabpanel-${v}`}
+          options={TABS.map((t) => ({
+            value: t.id,
+            ariaLabel: t.id === "control" && anyOverride ? "控制（有覆寫生效中）" : undefined,
+            label:
+              t.id === "control" && anyOverride ? (
+                <span className="inline-flex items-start gap-1">
+                  {t.label}
+                  <Dot className="mt-px bg-red" />
+                </span>
+              ) : (
+                t.label
+              ),
+          }))}
+        />
       </div>
       <div
         key={tab}
@@ -113,25 +125,19 @@ export function SidePanel({
         role="tabpanel"
         id={`console-tabpanel-${tab}`}
         aria-labelledby={`console-tab-${tab}`}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        data-motion={enter !== "none" ? "move" : undefined}
+        className={cx(
+          "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+          enter !== "none" && "transition-[opacity,translate] duration-(--dur-base) ease-out starting:opacity-0",
+          enter === "forward" && "starting:translate-x-3",
+          enter === "back" && "starting:-translate-x-3",
+        )}
       >
         {tab === "design" && <DesignTab controller={controller} project={project} redesigning={snap.redesign.running} onRedesign={onRedesign} />}
         {tab === "research" && <ResearchTab project={project} />}
         {tab === "control" && <ControlTab controller={controller} project={project} />}
         {tab === "sync" && <SyncTab controller={controller} snap={snap} project={project} />}
       </div>
-    </section>
+    </Pane>
   );
-}
-
-/** A small red dot on the 控制 tab while any override is active (so it is never forgotten). */
-const selectAnyOverride = (s: StageState) => {
-  const o = s.overrides;
-  return o.blackout || !o.lyricsVisible || o.freeze || o.scene != null || o.lyricStyle != null || o.testPattern || o.intensity !== 1 || o.lyricScale !== 1;
-};
-
-function ControlDot({ controller }: { controller: ConsoleController }) {
-  const active = useStageValue(controller.store, selectAnyOverride);
-  if (!active) return null;
-  return <span className="absolute top-2 right-1 size-1.5 rounded-full bg-danger" aria-label="有覆寫生效中" />;
 }

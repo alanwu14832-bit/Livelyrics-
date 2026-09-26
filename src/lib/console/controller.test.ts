@@ -121,6 +121,28 @@ async function ready(): Promise<ConsoleController> {
 }
 
 describe("ConsoleController", () => {
+  it("lets the UI own notice lifetimes (no auto-dismiss, three at most)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const c = new ConsoleController("ctrltest");
+      c.notify("a");
+      c.setNoticeAutoDismiss(false);
+      c.notify("b");
+      c.notify("c");
+      c.notify("d");
+      vi.advanceTimersByTime(20000);
+      expect(c.getSnapshot().notices.map((n) => n.message)).toEqual(["b", "c", "d"]);
+      c.dismissNotice(c.getSnapshot().notices[0].id);
+      expect(c.getSnapshot().notices.map((n) => n.message)).toEqual(["c", "d"]);
+      c.setNoticeAutoDismiss(true);
+      c.notify("e");
+      vi.advanceTimersByTime(5000);
+      expect(c.getSnapshot().notices.map((n) => n.message)).toEqual(["c", "d"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("loads the project and announces project + state on the channel", async () => {
     const c = await ready();
     expect(received.some((m) => m.type === "project" && m.project.id === "ctrltest")).toBe(true);

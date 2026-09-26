@@ -9,7 +9,7 @@
 
 import type { ComponentProps } from "react";
 import { cx } from "./cx";
-import { CaretUpDownIcon } from "./Icon";
+import { CaretUpDownIcon } from "./kit-icons";
 
 const BASE =
   "w-full min-w-0 bg-fill-3 text-label placeholder:text-label-2 transition-[background-color,box-shadow] duration-(--dur-fast) ease-[ease] hover:bg-fill-2 focus-visible:outline-offset-0 disabled:pointer-events-none disabled:opacity-35";
