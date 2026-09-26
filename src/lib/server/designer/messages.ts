@@ -76,9 +76,8 @@ export function canonicalUrl(raw: string): string | null {
   u.hash = "";
   u.hostname = u.hostname.toLowerCase().replace(/^www\./, "");
   for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
-  let s = u.toString();
-  if (u.pathname !== "/" && s.endsWith("/")) s = s.slice(0, -1);
-  return s;
+  if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, "");
+  return u.toString();
 }
 
 function cleanTitle(title: string | null | undefined, url: string): string {

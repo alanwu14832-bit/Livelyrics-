@@ -3,7 +3,7 @@
 // band's dedicated stage-visual director, and every user-facing field is 繁中.
 
 import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
-import type { DesignPlan, Research } from "@/lib/types";
+import type { DesignPlan, Research, SongMeta } from "@/lib/types";
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
@@ -26,7 +26,7 @@ function clip(s: string, n: number): string {
 }
 
 function songBlock(input: DesignerInput, duration: number): string {
-  const m = input.meta;
+  const m: Partial<SongMeta> = input.meta ?? {};
   const rows = [
     `- 歌名：${m.title?.trim() || "（未提供）"}`,
     `- 樂團／歌手：${m.artist?.trim() || "（未提供）"}`,
@@ -52,7 +52,10 @@ function lineRange(st: SongStructure, ids: string[]): string {
 export function analysisSummary(input: DesignerInput, st: SongStructure): string {
   const a = input.analysis;
   const rows: string[] = [];
-  if (a && a.bpm > 0) rows.push(`- 速度：約 ${Math.round(a.bpm)} BPM（信心 ${a.bpmConfidence.toFixed(2)}）`);
+  if (a && Number.isFinite(a.bpm) && a.bpm > 0) {
+    const conf = Number.isFinite(a.bpmConfidence) ? `（信心 ${a.bpmConfidence.toFixed(2)}）` : "";
+    rows.push(`- 速度：約 ${Math.round(a.bpm)} BPM${conf}`);
+  }
   else rows.push("- 速度：未知");
   if (!a) rows.push("- 沒有音訊分析：段落是依歌詞時間" + (st.source === "even" ? "平均切分" : "間隔推測") + "的，能量是依段落種類估計的。");
   rows.push("- 段落推測（邊界來自音訊的變化點，種類是依歌詞重複與能量推測，僅供參考）：");
@@ -141,11 +144,11 @@ ${RESEARCH_HEADINGS.map((h) => `  ## ${h}`).join("\n")}
 export function lyricExcerpt(input: DesignerInput, st: SongStructure): string {
   const lines = input.lyrics?.lines ?? [];
   if (!lines.length) return "- 沒有歌詞（可能是器樂曲或尚未匯入）。";
-  const rows = [`- 共 ${lines.length} 行，${input.lyrics.synced ? "已對時" : "尚未對時"}${input.lyrics.language ? `，語言 ${input.lyrics.language}` : ""}。`];
+  const rows = [`- 共 ${lines.length} 行，${input.lyrics.synced ? "已對時" : "尚未對時"}。`];
   const first = lines.find((l) => l.text.trim());
-  if (first) rows.push(`- 開頭：「${clip(first.text, 12)}」`);
+  if (first) rows.push(`- 開頭：「${clip(first.text, 8)}」`);
   const hook = st.hookCluster != null ? st.lines.find((l) => l.cluster === st.hookCluster) : undefined;
-  if (hook && hook.text !== first?.text) rows.push(`- 最常重複的句子（可能是 hook）：「${clip(hook.text, 12)}」，出現 ${hook.repeats} 次`);
+  if (hook && hook.text !== first?.text) rows.push(`- 最常重複的句子（可能是 hook）：「${clip(hook.text, 10)}」，出現 ${hook.repeats} 次`);
   const imagery = findImagery(lines.map((l) => l.text)).slice(0, 6);
   if (imagery.length) rows.push(`- 歌詞中的意象詞：${imagery.map((h) => h.words[0]).join("、")}`);
   const units = lines.reduce((a, l) => a + readingUnits(l.text), 0);

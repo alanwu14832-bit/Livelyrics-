@@ -67,7 +67,6 @@ function num(x: unknown): number | null {
 function text(x: unknown, fallback: string, max: number): string {
   if (typeof x !== "string") return fallback;
   // strip control characters, keep newlines for Markdown fields
-  // eslint-disable-next-line no-control-regex
   const s = x.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
   if (!s) return fallback;
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;

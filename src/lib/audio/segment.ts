@@ -138,7 +138,7 @@ function dist2(fm: FeatureMatrix, i: number, j: number): number {
 }
 
 /** Foote novelty: mean within-block similarity minus mean cross-block similarity, in [-1, 1]. */
-export function noveltyCurve(fm: FeatureMatrix, half: number): Float64Array {
+function noveltyCurve(fm: FeatureMatrix, half: number): Float64Array {
   const { n } = fm;
   const band = 2 * half;
   // banded similarity: sim[i * band + δ] = S(i, i + δ), δ in [0, band)
@@ -332,7 +332,6 @@ export function detectSections(input: SegmentInput, options: SegmentOptions = {}
   const raw = buildFeatures(input);
   const half = Math.round(KERNEL_S * SEG_RATE);
   const nov = noveltyCurve(raw, half);
-  if (process.env.SEG_DEBUG) console.log("nov", Array.from(nov).map((v, i) => (i % 4 === 0 ? `${i / 4}:${v.toFixed(2)}` : "")).filter(Boolean).join(" "));
 
   // local maxima (±2 s) above the absolute threshold
   const radius = 2 * SEG_RATE;

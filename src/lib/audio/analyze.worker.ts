@@ -22,13 +22,15 @@ scope.addEventListener("message", (event: MessageEvent<AnalyzeRequest>) => {
   try {
     if (!(req.samples instanceof Float32Array)) throw new TypeError("samples must be a Float32Array");
     let lastSent = 0;
+    let lastLabel = "";
     const analysis = analyzeSamples(req.samples, req.sampleRate, {
       sourceSampleRate: req.sourceSampleRate,
       onProgress: (progress, label) => {
-        // at most ~30 messages per second
+        // at most ~30 messages per second, but never drop a stage change
         const now = Date.now();
-        if (progress < 1 && now - lastSent < 33) return;
+        if (progress < 1 && label === lastLabel && now - lastSent < 33) return;
         lastSent = now;
+        lastLabel = label;
         send({ type: "progress", id: req.id, progress, label });
       },
     });

@@ -28,7 +28,7 @@ export const ANALYSIS_RATE = 22050;
 const SILENCE_DB = -75;
 /**
  * The onset envelope of a flux frame peaks slightly before the acoustic attack reaches the
- * window centre; measured on click tracks (see analyze.test.ts) and compensated here.
+ * window centre; measured on click tracks (see analysis.test.ts) and compensated here.
  */
 const ONSET_LATENCY_S = 0.006;
 /** below this tempo confidence the beats are a plain grid instead of the DP beat track */

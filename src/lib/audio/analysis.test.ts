@@ -175,6 +175,70 @@ describe("analyzeSamples: sections", () => {
     }
   });
 
+  it("segments a pop arrangement (intro/verse/pre/chorus/bridge/outro with vocals, fills, chord changes)", { timeout: 30_000 }, () => {
+    const sr = 22050;
+    const beat = 60 / 96;
+    const bar = 4 * beat;
+    type Part = { bars: number; gain: number; drums: boolean; bass: boolean; vocal: number };
+    const intro: Part = { bars: 4, gain: 0.3, drums: false, bass: false, vocal: 0 };
+    const verse: Part = { bars: 8, gain: 0.55, drums: true, bass: true, vocal: 0.5 };
+    const pre: Part = { bars: 4, gain: 0.7, drums: true, bass: true, vocal: 0.7 };
+    const chorus: Part = { bars: 8, gain: 1, drums: true, bass: true, vocal: 1 };
+    const bridge: Part = { bars: 4, gain: 0.4, drums: false, bass: true, vocal: 0.6 };
+    const outro: Part = { bars: 4, gain: 0.25, drums: false, bass: false, vocal: 0 };
+    const plan = [intro, verse, pre, chorus, verse, chorus, bridge, chorus, outro];
+    const totalBars = plan.reduce((acc, p) => acc + p.bars, 0);
+    const n = Math.round((totalBars * bar + 2) * sr);
+    const out = new Float32Array(n);
+    const rand = prng(21);
+    const chords = [
+      [220, 261.63, 329.63],
+      [174.61, 220, 261.63],
+      [196, 246.94, 293.66],
+      [164.81, 196, 246.94],
+    ];
+    const add = (t: number, len: number, fn: (tt: number, abs: number) => number) => {
+      const i0 = Math.round(t * sr);
+      for (let k = 0; k < len * sr && i0 + k < n; k++) out[i0 + k] += fn(k / sr, t + k / sr);
+    };
+    const truth: number[] = [];
+    let t = 0;
+    for (const part of plan) {
+      if (t > 0) truth.push(t);
+      for (let b = 0; b < part.bars; b++) {
+        const bt = t + b * bar;
+        const ch = chords[b % 4];
+        add(bt, bar, (tt, abs) => ch.reduce((acc, f) => acc + Math.sin(2 * Math.PI * f * abs) + 0.3 * Math.sin(4 * Math.PI * f * abs), 0) * 0.035 * (0.5 + part.gain) * Math.min(1, tt * 20));
+        for (let q = 0; q < 4; q++) {
+          const qt = bt + q * beat;
+          if (part.drums) {
+            if (q % 2 === 0) add(qt, 0.2, (tt) => Math.sin(2 * Math.PI * (50 + 90 * Math.exp(-tt * 35)) * tt) * Math.exp(-tt * 18) * 0.7 * part.gain);
+            else add(qt, 0.15, (tt) => (rand() * 2 - 1) * Math.exp(-tt * 22) * 0.4 * part.gain);
+            for (let h = 0; h < 2; h++) add(qt + (h * beat) / 2, 0.04, (tt) => (rand() * 2 - 1) * Math.exp(-tt * 90) * 0.12 * part.gain);
+            // drum fill at the end of each part
+            if (b === part.bars - 1 && q === 3) for (let f = 1; f < 4; f++) add(qt + (f * beat) / 4, 0.1, (tt) => (rand() * 2 - 1) * Math.exp(-tt * 30) * 0.3 * part.gain);
+          }
+          if (part.bass) add(qt, beat * 0.9, (tt) => Math.sin(Math.PI * ch[0] * tt) * Math.min(1, tt * 80) * Math.exp(-tt * 2) * 0.3 * part.gain);
+        }
+        // sung phrases with vibrato, resting every fourth bar
+        if (part.vocal > 0 && b % 4 !== 3) {
+          [ch[2], ch[1], ch[2], ch[0]].forEach((f, i) =>
+            add(bt + i * beat, beat * 0.95, (tt) => Math.sin(4 * Math.PI * f * tt + 3 * Math.sin(2 * Math.PI * 5.5 * tt)) * Math.min(1, tt * 15) * 0.12 * part.vocal * (0.5 + part.gain)),
+          );
+        }
+      }
+      t += part.bars * bar;
+    }
+    const a = analyzeSamples(out, sr);
+    expect(Math.abs(a.bpm - 96)).toBeLessThan(1);
+    const starts = a.sections.slice(1).map((s) => s.start);
+    expect(starts).toHaveLength(truth.length);
+    truth.forEach((b, i) => expect(Math.abs(starts[i] - b)).toBeLessThan(2));
+    const e = a.sections.map((s) => s.energy);
+    expect(e[3]).toBeGreaterThan(e[1]); // chorus > verse
+    expect(e[1]).toBeGreaterThan(e[0]); // verse > intro
+  });
+
   it("detects a harmony-only change (same loudness, new chord)", () => {
     const sr = 22050;
     const out = new Float32Array(sr * 60);

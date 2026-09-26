@@ -130,3 +130,42 @@ describe("offlineResearch", () => {
     expect(offlineResearch(demoInput(), "Claude 暫時無法使用").brief).toContain("Claude 暫時無法使用");
   });
 });
+
+describe("robustness", () => {
+  it("never throws on malformed analysis or lyrics", () => {
+    const base = demoAnalysis();
+    const analyses = [
+      { ...base, sections: [{ start: NaN, end: 5, energy: 2 }, { start: 30, end: 10, energy: -1 }] },
+      { ...base, energy: [], onset: [], brightness: [], bass: [], envelopeRate: 0 },
+      { ...base, duration: NaN, bpm: NaN, bpmConfidence: NaN },
+      { ...base, sections: Array.from({ length: 80 }, (_, i) => ({ start: i, end: i + 1, energy: (i % 7) / 7 })) },
+    ];
+    for (const analysis of analyses) {
+      const p = offlineDesign({ ...demoInput(), analysis });
+      expect(DesignPlanSchema.safeParse(p).success).toBe(true);
+      expect(p.sections[0].start).toBe(0);
+      for (let i = 1; i < p.sections.length; i++) expect(p.sections[i].start).toBe(p.sections[i - 1].end);
+      offlineResearch({ ...demoInput(), analysis });
+    }
+    const weirdLines: Lyrics = {
+      source: "user",
+      synced: true,
+      lines: [
+        { id: "l0", text: "", start: 5, end: 3 },
+        { id: "l1", text: "🎸🎸🎸", start: -4, end: null },
+        { id: "l2", text: "x".repeat(400), start: 1e9, end: null },
+        { id: "l2", text: "重複的 id", start: 10, end: 12 },
+      ],
+    };
+    const p = offlineDesign({ ...demoInput(), lyrics: weirdLines });
+    expect(DesignPlanSchema.safeParse(p).success).toBe(true);
+  });
+
+  it("designs English songs without vertical text", () => {
+    const lyrics = demoLyrics();
+    lyrics.lines = lyrics.lines.map((l, i) => ({ ...l, text: i >= 4 && i <= 7 ? `Sing along tonight ${i}` : i >= 9 && i <= 12 ? `Sing along tonight ${i - 5}` : `Walking down the empty street ${i}` }));
+    const p = offlineDesign({ ...demoInput(), lyrics });
+    expect(p.sections.every((s) => s.lyricStyle !== "vertical" && !s.lyricPlacement.startsWith("vertical"))).toBe(true);
+    expect(p.sections.map((s) => s.kind)).toContain("chorus");
+  });
+});

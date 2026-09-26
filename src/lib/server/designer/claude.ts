@@ -132,11 +132,16 @@ function logFallback(block: BetaContentBlock, cb: Callbacks) {
 // research
 // ---------------------------------------------------------------------------
 
-/** Strip a short chatty preamble before the first heading. */
+/**
+ * Drop narration written before the brief itself ("我先搜尋…" between searches, a chatty
+ * preamble): everything before the first fixed heading, or before a first heading that
+ * follows a short preamble.
+ */
 export function tidyBrief(text: string): string {
   let t = text.replace(/\r\n/g, "\n").trim();
-  const first = t.search(/^#{1,3}\s/m);
-  if (first > 0 && first < 300) t = t.slice(first);
+  const fixed = t.search(new RegExp(`^#{1,3}\\s*${RESEARCH_HEADINGS[0]}`, "m"));
+  const first = fixed >= 0 ? fixed : t.search(/^#{1,3}\s/m);
+  if (first > 0 && (fixed >= 0 || first < 600)) t = t.slice(first);
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
