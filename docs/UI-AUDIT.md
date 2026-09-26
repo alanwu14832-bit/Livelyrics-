@@ -193,7 +193,7 @@ LIVE 等待時主播放鈕一直閃。
 2. **用填色與間距分層，不用線。**背景、表面、群組三層填色；列與列之間才用 hairline。
 3. **每個顏色只有一個意思。**藍 = 可操作與選取；紅 = 黑場、on-air、錄製、錯誤、刪除；橘 = 警告與等待；綠 = 已連線、完成、開關打開。
 4. **系統字、系統節奏。**SF / PingFang TC，Apple 的字級表，中文不加字距。
-5. **回饋立即出現，動態只給空間關係。**按下立刻有反應；鍵盤動作零動畫；穩定狀態不動；彈簧預設不回彈。
+5. **回饋在同一幀開始，位置變化用彈簧連續完成（Apple motion，見 3.4.1）。**按下立刻有反應；快捷鍵的狀態同一幀生效；穩定狀態不動；彈簧預設不回彈、可中斷、帶速度；空間轉場（頁面、共享元素、sheet）要有連續感。
 
 ### 3.1 外觀與色彩
 
@@ -817,6 +817,81 @@ dialog.ui-sheet::backdrop { background: var(--scrim); transition: opacity var(--
 - JS：`const reduce = useReducedMotion()`；所有 `scrollTo` 用 `behavior: reduce ? "auto" : "smooth"`；motion 動畫在 `reduce` 時改用 `fadeReduced`、不做 layout 與 stagger。
 - 減少動態仍保留：顏色與透明度變化、Spinner 旋轉、HUD 淡出（它只有 opacity）。
 - 外觀切換（淺色與深色）時背景顏色 200ms `ease`，避免亮度突跳（apple-design §14）。
+
+### 3.4.1 Apple Motion 加強（使用者追加要求，優先於上面較保守的規則）
+
+使用者明確要求「加入 Apple 的 motion 感」。上面的時長表仍是下限與安全規則；在它之上，把動態從「只是不出錯」提升到
+Apple 那種**連續、有物理感、可中斷**的感覺。依據：emilkowalski `apple-design`（§1 到 §12、§14）、`animate` + `RECIPES.md`、
+`find-animation-opportunities`、`animation-vocabulary`、`improve-animations`；Next.js 16 的 `<ViewTransition>`
+（`node_modules/next/dist/docs/01-app/02-guides/view-transitions.md`，App Router 內建，不需設定；`<Link transitionTypes>`）。
+
+**調整上面的規則**
+
+- 原則 5 改為：**回饋在同一幀開始，位置變化用彈簧連續完成。**快捷鍵造成的「狀態」（黑場、歌詞開關、凍結、場景覆寫）
+  仍然在同一幀生效、指示也同一幀出現；但指示的「外觀」可以有 ≤250ms 的臨界阻尼彈簧（例如 HUD 從 scale(.92)、blur(8px)
+  materialize 到定位，第一幀就已可讀：opacity 起點 0.6 以上）。
+- 「300ms 可見時間上限」只限一般 UI 回饋；**空間轉場**（頁面之間、共享元素、sheet、摘要揭示）可以到 400 到 550ms 的
+  彈簧（視覺完成約 350ms），但必須可中斷、不阻擋輸入。
+- 彈簧一律從**目前的呈現值**開始（interrupt 時讀即時 transform，不從目標值），並帶入速度（apple-design §3、§5）。
+
+**要加入的 Apple 動態（依頁面）**
+
+1. **跨頁空間連續性（ViewTransition）**
+   - 作品庫卡片的主視覺縮圖 ↔ 處理頁／控制台頂欄的縮圖、歌名：同一個 `name`（例如 `project-art-<id>`、`project-title-<id>`）做
+     shared element morph。
+   - 前進（進入作品、進入控制台、進入歌詞編輯器）＝新頁從右側 24px 滑入加淡入、舊頁往左 12px 並稍微變暗；返回「‹ 作品庫」
+     反向（iOS navigation push／pop 的網頁版，用 `transitionTypes={["push"]}`／`["pop"]`）。
+   - 同頁內容切換（側欄分段、處理頁步驟）用 cross-fade 加依方向 ±12px 位移：分段往右切就從右邊進來（空間一致性 §7）。
+   - 減少動態：全部改成 150ms cross-fade。
+2. **Materialize，而不只是淡入**（apple-design §12）
+   - Sheet、Popover、Menu、Tooltip、HUD、Toast：進場同時動畫 `opacity`、`scale`（.96 或 .98 起）、`filter: blur(6px→0)`；
+     Menu／Popover 的 `transform-origin` 設在觸發元件（§7）。
+   - 控制台上方的浮層不對 WebGL 預覽做 backdrop-filter（效能），用實色材質加陰影即可；非控制台頁面可以用真實材質。
+3. **彈簧控制項**
+   - SegmentedControl thumb、Switch knob、Tabs 指示器：可中斷的彈簧滑動（`spring`，按住時 thumb 稍微放大 1.04 到 1.06，
+     iOS 26 的「拿起來」感覺）。
+   - Slider：拖曳時 thumb 放大、軌道 1:1；超出範圍用 rubber-band（§9 的公式），放開用彈簧回到邊界。
+   - 按鈕、卡片、列表列：pointerdown 立即 scale(.97)（卡片 .98），放開用 `springSnappy` 回彈到 1（不是 CSS 線性回去）。
+   - 作品卡 hover：陰影加深、縮圖極輕微放大 1.02（apple.com 產品卡片），200ms `--ease-out`。
+4. **手勢物理**
+   - 重新設計、匯入等 Sheet：可以抓住往下拖關閉（pointer capture、保留抓取偏移、速度投射 §6 決定關閉或回彈、回彈帶速度 §5、
+     往上拖 rubber-band）。
+   - 控制台時間軸放大後：拖曳平移放手有慣性（`project()` 衰減、`d≈0.998`），到兩端 rubber-band；縮放（+／−／ctrl+滾輪）用
+     `animate()` 彈簧重定向視窗，連按可以中斷。播放頭跟隨改成彈簧捲動視窗，不再整頁跳。
+   - 播放頭、時間軸拖曳本身、標記拖曳仍然 1:1、無緩動（不可破壞）。
+5. **列表與版面的連續性**
+   - 控制台歌詞列表的「目前這句」高亮用一個共享的高亮層在列之間**滑動**（motion `layoutId` 或 CSS transform，
+     `springSnappy`，約 200ms），自動捲動用彈簧而不是瀏覽器 smooth（減少動態時瞬移）。
+   - 作品庫：刪除卡片時其餘卡片用 layout 彈簧補位；新作品出現時從上方 materialize。
+   - 歌詞編輯器：新增、刪除、合併、分割列時，列的高度與位置用 layout 彈簧過渡；對拍時被標記的列有一次性的高亮掃過
+     （不是循環），對拍大按鈕每按一次 Space 就有按鍵式的壓下與回彈（iOS 鍵盤按鍵的感覺）。
+   - 通知堆疊：新通知從上方滑入，其餘通知用 layout 彈簧往下讓位；滑鼠停留時暫停計時；可以往右滑掉（手勢加速度）。
+6. **罕見時刻（值得多花一點動態）**
+   - 首頁第一次載入：標題與 dropzone 一次性 fade-up stagger（每項 60ms，`spring`），只在首次；作品庫卡片用 CSS
+     scroll-driven `animation-timeline: view()` 輕微淡入上移（apple.com 產品頁的捲動揭示），減少動態時關閉。
+   - 拖檔案進 dropzone：dropzone 以彈簧放大到 1.01、邊框與圖示變化；放下時圖示 morph 成音樂圖示並縮進卡片。
+   - 分析完成：偵測到的 BPM、時長、段落數用數字滾動（一次，約 600ms，`--ease-out`），迷你波形從左到右揭示。
+   - 處理頁：步驟完成的勾勾用 stroke 繪製（200ms），執行中的步驟用 iOS activity indicator；研究文字每段以 opacity 加
+     blur(4px→0) 輕柔浮現；設計完成時主視覺摘要 materialize：色票從中心依序展開（stagger 40ms、`spring`）、motif SVG 以
+     stroke 繪製、段落條由左至右生長。
+   - 控制台首次載入：面板依序淡入（一次，總長 ≤400ms），之後永遠不再有入場動畫。
+
+**不可破壞（安全規則，優先於本節）**
+
+- 投影視窗與舞台渲染完全不動；HUD 與所有 UI 動態永遠不會出現在投影。
+- 演出中（播放中或 LIVE）不出現任何無限循環動畫；Spinner 只在真的等待時出現。
+- 所有動態只用 `transform`、`opacity`、`filter`（小範圍 blur），控制台不做 layout thrash；控制台的 DOM 動態優先用 CSS／WAAPI，
+  `motion` 用在需要可中斷彈簧、手勢或 layout 的地方，寫完整的 `transform` 字串。
+- 每一個動畫都要有 `prefers-reduced-motion` 的替代（短 cross-fade 或瞬間）。
+
+**驗收加項**
+
+- 路由之間有 ViewTransition（Chromium），作品卡縮圖與控制台頂欄縮圖是共享元素；返回方向相反。
+- SegmentedControl、Switch、Slider、Tabs 指示器是彈簧且可中斷（快速連點兩次，thumb 不會先跑完第一段）。
+- Sheet 可拖曳關閉，快速下滑（速度）即使位移不到一半也會關閉；慢拖不到一半會彈回。
+- 時間軸放大後平移放手有慣性、到邊界 rubber-band；縮放可中斷。
+- 歌詞列表目前列高亮是滑動的；通知堆疊用 layout 讓位。
+- 減少動態下以上全部退化為 cross-fade 或瞬間。
 
 ### 3.5 各頁重設計
 
