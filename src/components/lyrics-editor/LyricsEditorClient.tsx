@@ -1,33 +1,50 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Badge, Button, Kbd, cx } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import {
+  Alert,
+  AppHeader,
+  Banner,
+  Button,
+  EmptyState,
+  Kbd,
+  Menu,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  Popover,
+  Skeleton,
+  SkeletonGroup,
+  Switch,
+  ToastStack,
+  Tooltip,
+  useToasts,
+} from "@/components/ui";
+import {
+  ArrowUUpLeftIcon,
+  ArrowUUpRightIcon,
+  CheckIcon,
+  DotsThreeIcon,
+  ExportIcon,
+  FileTextIcon,
+  KeyboardIcon,
+  MonitorPlayIcon,
+  MusicNotesIcon,
+  PlusIcon,
+  SparkleIcon,
+  WarningCircleIcon,
+  XIcon,
+} from "@/components/ui/Icon";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { api } from "@/lib/api-client";
 import { distributeLines, normalizeLyrics, toLrc } from "@/lib/lyrics/lrc";
 import type { Lyrics, Project } from "@/lib/types";
-import { Dialog } from "@/components/home/Dialog";
-import {
-  AlertIcon,
-  CheckIcon,
-  DownloadIcon,
-  FileIcon,
-  InfoIcon,
-  MonitorIcon,
-  PlusIcon,
-  RedoIcon,
-  SaveIcon,
-  SortIcon,
-  SparklesIcon,
-  SpinnerIcon,
-  UndoIcon,
-  WandIcon,
-  XIcon,
-} from "@/components/home/icons";
 import { formatRelativeTime } from "@/components/home/relative-time";
-import { TopBar } from "@/components/home/TopBar";
 import { LYRICS_SOURCE_LABEL } from "@/components/process/labels";
 import { processHref } from "@/components/process/steps";
+import { useAppearance, type Appearance } from "./appearance";
+import { MagicWandIcon, SortByTimeIcon } from "./icons";
 import { clearDraft, draftToLines, loadDraft, saveDraft, type LyricsDraft } from "./draft";
 import {
   clearAllTimes,
@@ -51,7 +68,7 @@ import { editorReducer, initialEditorState } from "./editor-state";
 import { ImportDialog } from "./ImportDialog";
 import { LineTable, type CellField, type RowHandlers } from "./LineTable";
 import { Playhead, usePlayheadError, usePlayheadPlaying, usePlayheadSelector } from "./playhead";
-import { TapSyncBar } from "./TapSyncBar";
+import { TapSyncBand, TapSyncCard, TapSyncStart } from "./TapSyncBar";
 import { beginTap, DEFAULT_TAP_LATENCY, MAX_TAP_LATENCY, preRollTime, tapSkip, tapUndo, tapMark, type TapSession } from "./tap-sync";
 import { Timeline } from "./Timeline";
 import { Transport } from "./Transport";
@@ -126,8 +143,11 @@ export function LyricsEditorClient({ id }: { id: string }) {
   const [importOpen, setImportOpen] = useState(false);
   const [distributeOpen, setDistributeOpen] = useState(false);
   const [follow, setFollow] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
+  const toasts = useToasts();
   const [playhead] = useState(() => new Playhead());
+  const [appearance, setAppearance] = useAppearance();
+  const reduceMotion = useReducedMotion();
+  const router = useRouter();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef(new Map<string, number | null>());
@@ -161,12 +181,8 @@ export function LyricsEditorClient({ id }: { id: string }) {
     loadedRef.current = load.kind === "ok";
   });
 
-  const showToast = useCallback((message: string) => setToast(message), []);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2600);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const pushToast = toasts.push;
+  const showToast = useCallback((message: string, tone: "info" | "ok" | "warn" = "info") => void pushToast({ tone, message, duration: 3200 }), [pushToast]);
 
   // ---- load -----------------------------------------------------------------
   useEffect(() => {
@@ -227,6 +243,13 @@ export function LyricsEditorClient({ id }: { id: string }) {
   const guardLeave = useCallback((e: ReactMouseEvent<HTMLAnchorElement>) => {
     if (dirtyRef.current && !window.confirm(LEAVE_MESSAGE)) e.preventDefault();
   }, []);
+  const navigate = useCallback(
+    (href: string) => {
+      if (dirtyRef.current && !window.confirm(LEAVE_MESSAGE)) return;
+      router.push(href, { transitionTypes: ["push"] });
+    },
+    [router],
+  );
 
   // ---- editing ----------------------------------------------------------------
   const edit = useCallback((fn: (l: EditorLine[]) => EditorLine[], opts: { tag?: string; at?: number; record?: boolean } = {}) => {
@@ -338,7 +361,7 @@ export function LyricsEditorClient({ id }: { id: string }) {
     if (!cur) return;
     setTap(null);
     playhead.pause();
-    if (cur.marked.length) showToast(`已標記 ${cur.marked.length} 句的開始時間`);
+    if (cur.marked.length) showToast(`已標記 ${cur.marked.length} 句的開始時間`, "ok");
   }, [playhead, setTap, showToast]);
 
   const markTap = useCallback(() => {
@@ -349,6 +372,14 @@ export function LyricsEditorClient({ id }: { id: string }) {
     linesRef.current = r.lines;
     dispatch({ type: "edit", lines: r.lines, record: false, source: "user" });
     setTap(r.session);
+    // one sweep of tint over the row that was just marked (never a loop)
+    const markedIndex = cur.pointer;
+    requestAnimationFrame(() => {
+      const row = scrollRef.current?.querySelector<HTMLElement>(`[role="row"][data-row="${markedIndex}"]`);
+      if (!row || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const tint = getComputedStyle(row).getPropertyValue("--tint").trim() || "#0071e3";
+      row.animate([{ backgroundColor: `color-mix(in srgb, ${tint} 22%, transparent)` }, { backgroundColor: "transparent" }], { duration: 700, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    });
   }, [playhead, setTap]);
 
   const undoTap = useCallback(() => {
@@ -381,10 +412,13 @@ export function LyricsEditorClient({ id }: { id: string }) {
     if (!root || !row) return;
     const r = row.getBoundingClientRect();
     const box = root.getBoundingClientRect();
-    if (r.top < box.top + 48 || r.bottom > box.bottom - 24) {
-      root.scrollTo({ top: root.scrollTop + (r.top - box.top) - box.height / 3, behavior: "smooth" });
+    // the sticky column captions cover the top ~72 px of the scroller
+    if (r.top < box.top + 88 || r.bottom > box.bottom - 24) {
+      // tap-sync moves with the keyboard (Space): no animated scroll; playback follow glides
+      const behavior = tapPointer != null || reduceMotion ? "auto" : "smooth";
+      root.scrollTo({ top: root.scrollTop + (r.top - box.top) - box.height / 3, behavior });
     }
-  }, [tapPointer, currentIndex, follow, playing]);
+  }, [tapPointer, currentIndex, follow, playing, reduceMotion]);
 
   // ---- save / import / export ------------------------------------------------------
   const save = useCallback(async () => {
@@ -421,7 +455,7 @@ export function LyricsEditorClient({ id }: { id: string }) {
     if (sessionRef.current) setTap(null);
     setSavedInfo(null);
     dispatch({ type: "edit", lines: fromLyrics(lyrics), source: lyrics.source === "none" ? "user" : lyrics.source });
-    showToast(`已匯入 ${lyrics.lines.length} 行${lyrics.synced ? "（含時間碼）" : ""}`);
+    showToast(`已匯入 ${lyrics.lines.length} 行${lyrics.synced ? "（含時間碼）" : ""}`, "ok");
   };
 
   const distribute = (mode: "untimed" | "all") => {
@@ -547,102 +581,243 @@ export function LyricsEditorClient({ id }: { id: string }) {
 
   // ---------------------------------------------------------------------------------
 
+  const themeAttr = appearance === "system" ? undefined : appearance;
+
   if (load.kind === "loading") {
     return (
-      <div className="flex h-screen flex-col">
-        <TopBar crumbs={[{ label: "作品庫", href: "/" }]} title="載入中…" />
-        <div className="m-5 h-40 animate-pulse rounded-xl border border-line bg-panel" aria-busy="true" />
-      </div>
+      <EditorRoot theme={themeAttr}>
+        <AppHeader back width="full" title={<span className="text-label-2">載入中…</span>} />
+        <SkeletonGroup label="載入歌詞" className="flex min-h-0 flex-1 flex-col gap-4 px-(--page-gutter) pt-2">
+          <Skeleton className="h-[188px] rounded-lg" />
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="min-h-0 flex-1 rounded-lg" />
+        </SkeletonGroup>
+      </EditorRoot>
     );
   }
   if (load.kind === "error" || !project) {
     const notFound = load.kind === "error" && load.notFound;
     return (
-      <div className="min-h-screen">
-        <TopBar crumbs={[{ label: "作品庫", href: "/" }]} title={notFound ? "找不到作品" : "無法載入"} />
-        <div className="mx-auto mt-16 max-w-md rounded-xl border border-line bg-panel p-6 text-center">
-          <AlertIcon size={28} className="mx-auto text-danger" />
-          <p className="mt-3 text-base font-semibold text-fg">{notFound ? "找不到這個作品" : "無法載入歌詞"}</p>
-          <p className="mt-1 text-sm text-muted">{notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}</p>
-          <Link href="/" className="mt-5 inline-flex h-9 items-center rounded-md border border-line bg-panel-3 px-3.5 text-sm text-fg hover:bg-line">
-            回作品庫
-          </Link>
-        </div>
-      </div>
+      <EditorRoot theme={themeAttr}>
+        <AppHeader back width="full" title={notFound ? "找不到作品" : "無法載入"} />
+        <EmptyState
+          className="mt-16"
+          icon={<WarningCircleIcon size={44} />}
+          title={notFound ? "找不到這個作品" : "無法載入歌詞"}
+          description={notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}
+          action={
+            <Button variant="tinted" href="/" transitionTypes={["pop"]}>
+              回到作品庫
+            </Button>
+          }
+        />
+      </EditorRoot>
     );
   }
 
   const tapActive = session != null;
   const redesignHref = processHref(id, { run: true, steps: project.research ? ["design"] : ["research", "design"] });
   const analysisPeaks = project.analysis?.peaks ?? [];
-  const toolBtn =
-    "inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted transition-colors hover:bg-panel-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40";
+  const canSave = dirty || !!saveError;
+  const untimed = lines.length - timed;
+  const summary = (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[13px] leading-5 text-label-2">
+      <span>
+        共 <span className="t-latin tabular">{lines.length}</span> 行，
+        {timed === lines.length ? "全部已定時" : timed === 0 ? "都還沒有時間" : `${timed} 行已定時，${untimed} 行未定時`}
+      </span>
+      <span>歌詞來源：{LYRICS_SOURCE_LABEL[state.source] ?? state.source}</span>
+    </div>
+  );
 
-  return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      <TopBar
-        crumbs={[
-          { label: "作品庫", href: "/" },
-          { label: "設計總覽", href: processHref(id) },
-          { label: "歌詞編輯" },
-        ]}
-        onNavigate={guardLeave}
-        title={project.meta.title}
-        subtitle={project.meta.artist}
-        status={
-          <span className="ml-1 flex items-center gap-1.5">
-            <Badge tone={lines.length > 0 && timed === lines.length ? "ok" : timed > 0 ? "warn" : "neutral"} title="已定時的行數">
-              {timed}/{lines.length} 行已定時
-            </Badge>
-            <Badge title="歌詞來源">{LYRICS_SOURCE_LABEL[state.source] ?? state.source}</Badge>
-            {dirty && <Badge tone="accent">未儲存</Badge>}
-          </span>
-        }
+  const banners: ReactNode[] = [];
+  if (project.status === "processing") {
+    banners.push(
+      <Banner key="processing" tone="warning" title="這首歌正在處理中" description="處理的歌詞步驟可能會覆寫你在這裡儲存的內容，建議等處理完成再儲存。" />,
+    );
+  }
+  if (draft) {
+    banners.push(
+      <Banner
+        key="draft"
+        tone="info"
+        title="找到尚未儲存的編輯"
+        description={`${formatRelativeTime(new Date(draft.savedAt).toISOString())}留下的 ${draft.lines.length} 行${draft.baseUpdatedAt !== project.updatedAt ? "；之後歌詞在別處被更新過，恢復前請確認" : ""}。`}
         actions={
           <>
-            <button type="button" className={toolBtn} onClick={() => dispatch({ type: "undo" })} disabled={tapActive || state.past.length === 0} aria-label="復原" title="復原（Ctrl+Z）">
-              <UndoIcon size={15} />
-            </button>
-            <button type="button" className={toolBtn} onClick={() => dispatch({ type: "redo" })} disabled={tapActive || state.future.length === 0} aria-label="重做" title="重做（Ctrl+Shift+Z）">
-              <RedoIcon size={15} />
-            </button>
-            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
-            <button type="button" className={toolBtn} onClick={() => setImportOpen(true)} disabled={tapActive}>
-              <FileIcon size={15} />
-              匯入
-            </button>
-            <button type="button" className={toolBtn} onClick={() => setDistributeOpen(true)} disabled={tapActive || lines.length === 0} title="依音訊能量粗略分配時間">
-              <WandIcon size={15} />
-              自動分配
-            </button>
-            <button type="button" className={toolBtn} onClick={exportLrc} disabled={lines.length === 0} title="下載 .lrc 檔">
-              <DownloadIcon size={15} />
-              匯出 .lrc
-            </button>
-            <Button variant="primary" onClick={() => void save()} disabled={saving || tapActive || (!dirty && !saveError)} title="儲存（Ctrl+S）">
-              {saving ? <SpinnerIcon size={15} /> : <SaveIcon size={15} />}
-              {saving ? "儲存中…" : "儲存"}
+            <Button
+              variant="plain"
+              onClick={() => {
+                clearDraft(id);
+                setDraft(null);
+              }}
+            >
+              捨棄
             </Button>
+            <Button
+              variant="tinted"
+              onClick={() => {
+                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source });
+                setDraft(null);
+              }}
+            >
+              恢復草稿
+            </Button>
+          </>
+        }
+      />,
+    );
+  }
+  if (saveError) {
+    banners.push(
+      <Banner
+        key="save-error"
+        tone="error"
+        title="儲存失敗"
+        description={saveError}
+        actions={
+          <Button variant="gray" onClick={() => void save()}>
+            重試
+          </Button>
+        }
+      />,
+    );
+  }
+  if (savedInfo) {
+    banners.push(
+      <Banner
+        key="saved"
+        tone="success"
+        animateIn
+        title={`已儲存 ${savedInfo.lines} 行`}
+        description={`${savedInfo.removed > 0 ? `移除了 ${savedInfo.removed} 個空白行。` : ""}${project.plan ? "目前的主視覺與段落是依照舊歌詞設計的，可以用新歌詞重新設計。" : "還沒有設計方案，可以開始設計。"}`}
+        actions={
+          <>
+            <Button variant="gray" icon={MonitorPlayIcon} href={`/p/${encodeURIComponent(id)}`} transitionTypes={["push"]}>
+              進入控制台
+            </Button>
+            <Button variant="tinted" icon={SparkleIcon} href={redesignHref} transitionTypes={["push"]}>
+              {project.plan ? "用新歌詞重新設計" : "開始設計"}
+            </Button>
+            <Button variant="quiet" size="icon-sm" aria-label="關閉提示" icon={<XIcon size={16} />} onClick={() => setSavedInfo(null)} />
+          </>
+        }
+      />,
+    );
+  }
+  if (anyOutOfOrder && !tapActive) {
+    banners.push(
+      <Banner
+        key="order"
+        tone="warning"
+        title="有幾行的時間早於前一行"
+        description="標著紅色圓點的行。儲存時會自動依時間排序，也可以現在就整理。"
+        actions={
+          <Button variant="gray" icon={SortByTimeIcon} onClick={() => edit((l) => sortByTime(l))}>
+            依時間排序
+          </Button>
+        }
+      />,
+    );
+  }
+
+  const appearanceItem = (value: Appearance, label: string) => (
+    <MenuItem checked={appearance === value} onSelect={() => setAppearance(value)} textValue={label}>
+      {label}
+    </MenuItem>
+  );
+
+  return (
+    <EditorRoot theme={themeAttr}>
+      <AppHeader
+        back={{ onNavigate: guardLeave }}
+        width="full"
+        title={project.meta.title}
+        subtitle={project.meta.artist || undefined}
+        titleAccessory={dirty ? <span className="shrink-0 text-[12px] leading-4 text-label-2">尚未儲存</span> : undefined}
+        actions={
+          <>
+            <UndoRedo
+              canUndo={!tapActive && state.past.length > 0}
+              canRedo={!tapActive && state.future.length > 0}
+              onUndo={() => dispatch({ type: "undo" })}
+              onRedo={() => dispatch({ type: "redo" })}
+            />
+            <Button variant="gray" icon={FileTextIcon} onClick={() => setImportOpen(true)} disabled={tapActive}>
+              匯入
+            </Button>
+            <Tooltip content="依音訊能量粗略分配開始時間">
+              <Button variant="gray" icon={MagicWandIcon} onClick={() => setDistributeOpen(true)} disabled={tapActive || lines.length === 0}>
+                自動分配
+              </Button>
+            </Tooltip>
+            <Tooltip content="下載 .lrc 檔">
+              <Button variant="gray" icon={ExportIcon} onClick={exportLrc} disabled={lines.length === 0}>
+                匯出 .lrc
+              </Button>
+            </Tooltip>
+            {canSave || saving ? (
+              <Tooltip content="儲存" shortcut="Meta+S">
+                <Button variant="filled" onClick={() => void save()} loading={saving} disabled={saving || tapActive} className="min-w-[4.5rem]">
+                  儲存
+                </Button>
+              </Tooltip>
+            ) : (
+              <span className="inline-flex h-8 min-w-[4.5rem] items-center justify-center gap-1 px-2 text-[13px] leading-[18px] font-medium text-label-2" role="status">
+                <CheckIcon size={14} />
+                已儲存
+              </span>
+            )}
+            <Menu
+              label="更多"
+              placement="bottom-end"
+              trigger={(p) => <Button {...p} variant="quiet" size="icon" aria-label="更多" icon={<DotsThreeIcon size={20} />} />}
+            >
+              <MenuItem onSelect={() => navigate(processHref(id))} textValue="設計總覽">
+                設計總覽
+              </MenuItem>
+              <MenuItem onSelect={() => navigate(`/p/${encodeURIComponent(id)}`)} textValue="進入控制台">
+                進入控制台
+              </MenuItem>
+              <MenuSeparator />
+              <MenuLabel>外觀</MenuLabel>
+              {appearanceItem("system", "跟隨系統")}
+              {appearanceItem("light", "淺色")}
+              {appearanceItem("dark", "深色")}
+            </Menu>
           </>
         }
       />
 
       <audio ref={audioRef} src={api.audioUrl(id)} preload="auto" className="hidden" />
 
-      <section aria-label="播放與時間軸" className="shrink-0 space-y-2 border-b border-line bg-panel px-5 pb-3 pt-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <TapSyncBand
+        session={session}
+        lines={lines}
+        latency={latency}
+        onLatency={changeLatency}
+        onMark={markTap}
+        onUndo={undoTap}
+        onSkip={skipTap}
+        onExit={exitTap}
+      />
+
+      <section aria-label="播放與時間軸" className="mx-(--page-gutter) mt-3 shrink-0 space-y-3 rounded-lg bg-surface px-4 pt-3 pb-4">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <Transport playhead={playhead} duration={duration} disabled={!!audioError} />
-          <div className="flex items-center gap-3 text-xs text-muted">
+          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
             {audioError && (
-              <span className="flex items-center gap-1 text-danger" role="alert">
-                <AlertIcon size={13} />
+              <span className="flex items-center gap-1.5 text-[13px] leading-5 text-red-text" role="alert">
+                <WarningCircleIcon size={16} weight="fill" className="text-red" />
                 {audioError}
               </span>
             )}
-            <label className="flex cursor-pointer items-center gap-1.5">
-              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} className="accent-[var(--color-accent)]" />
+            <label htmlFor="lyrics-follow" className="flex cursor-pointer items-center gap-2.5 text-[13px] leading-5 text-label select-none">
               表格跟著播放捲動
+              <Switch id="lyrics-follow" checked={follow} onChange={setFollow} />
             </label>
+            {!tapActive && <TapSyncStart onStart={() => startTap(0)} latency={latency} onLatency={changeLatency} disabled={!!audioError || lines.length === 0} />}
+            <ShortcutsPopover />
           </div>
         </div>
         <Timeline
@@ -668,148 +843,53 @@ export function LyricsEditorClient({ id }: { id: string }) {
           labels
           onDragMarker={tapActive ? undefined : onDragMarker}
           className="h-20"
-          label="局部時間軸（跟著播放位置）：拖曳標記精細調整"
+          label="局部時間軸（跟著播放位置）：拖曳標記精細調整，按住 Alt 更精細"
         />
       </section>
 
-      <TapSyncBar
+      <TapSyncCard
         session={session}
         lines={lines}
         latency={latency}
         onLatency={changeLatency}
-        onStart={() => startTap(0)}
         onMark={markTap}
         onUndo={undoTap}
         onSkip={skipTap}
         onExit={exitTap}
-        disabled={!!audioError}
       />
 
-      <div className="shrink-0 space-y-0 empty:hidden">
-        {project.status === "processing" && (
-          <Notice tone="warn" icon={<InfoIcon size={15} />}>
-            這首歌正在處理中；處理的歌詞步驟可能會覆寫你在這裡儲存的內容，建議等處理完成再儲存。
-          </Notice>
-        )}
-        {draft && (
-          <Notice tone="accent" icon={<InfoIcon size={15} />}>
-            <span className="flex-1">
-              找到 {formatRelativeTime(new Date(draft.savedAt).toISOString())}未儲存的編輯（{draft.lines.length} 行）
-              {draft.baseUpdatedAt !== project.updatedAt && "；之後歌詞在別處被更新過，恢復前請確認"}。
-            </span>
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => {
-                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source });
-                setDraft(null);
-              }}
-            >
-              恢復草稿
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                clearDraft(id);
-                setDraft(null);
-              }}
-            >
-              捨棄
-            </Button>
-          </Notice>
-        )}
-        {saveError && (
-          <Notice tone="danger" icon={<AlertIcon size={15} />}>
-            <span className="flex-1">儲存失敗：{saveError}</span>
-            <Button size="sm" onClick={() => void save()}>
-              重試
-            </Button>
-          </Notice>
-        )}
-        {savedInfo && (
-          <Notice tone="ok" icon={<CheckIcon size={15} />}>
-            <span className="flex-1">
-              已儲存 {savedInfo.lines} 行{savedInfo.removed > 0 && `（移除了 ${savedInfo.removed} 個空白行）`}。
-              {project.plan ? "目前的主視覺與段落是依照舊歌詞設計的，可以用新歌詞重新設計。" : "還沒有設計方案，可以開始設計。"}
-            </span>
-            <Link href={redesignHref} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-accent px-2.5 text-xs font-semibold text-white hover:brightness-110">
-              <SparklesIcon size={13} />
-              {project.plan ? "用新歌詞重新設計" : "開始設計"}
-            </Link>
-            <Link href={`/p/${encodeURIComponent(id)}`} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-line bg-panel-3 px-2.5 text-xs text-fg hover:bg-line">
-              <MonitorIcon size={13} />
-              進入控制台
-            </Link>
-            <button type="button" onClick={() => setSavedInfo(null)} aria-label="關閉提示" className="rounded p-1 text-muted hover:text-fg">
-              <XIcon size={13} />
-            </button>
-          </Notice>
-        )}
-        {anyOutOfOrder && !tapActive && (
-          <Notice tone="warn" icon={<AlertIcon size={15} />}>
-            <span className="flex-1">有幾行的時間早於前面的行（紅色）。儲存時會自動依時間排序，或現在就整理。</span>
-            <Button size="sm" onClick={() => edit((l) => sortByTime(l))}>
-              <SortIcon size={13} />
-              依時間排序
-            </Button>
-          </Notice>
-        )}
-      </div>
+      {banners.length > 0 && <div className="mx-(--page-gutter) mt-3 flex shrink-0 flex-col gap-2">{banners}</div>}
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-(--page-gutter) pb-6">
         <LineTable
           lines={lines}
           currentIndex={currentIndex}
           tapPointer={tapPointer}
           outOfOrder={flags}
           handlers={handlers}
+          summary={summary}
           empty={
-            <div className="mx-auto mt-16 max-w-md text-center">
-              <p className="text-base font-semibold text-fg">還沒有歌詞</p>
-              <p className="mt-1 text-sm text-muted">貼上 LRC 或純文字、到 LRCLIB 搜尋，或一行一行輸入。</p>
-              <div className="mt-5 flex justify-center gap-2">
-                <Button variant="primary" onClick={() => setImportOpen(true)}>
-                  <FileIcon size={15} />
-                  匯入歌詞
-                </Button>
-                <Button onClick={() => handlers.insertAt(0)}>
-                  <PlusIcon size={15} />
-                  新增一行
-                </Button>
-              </div>
-            </div>
+            <EmptyState
+              className="mt-8"
+              icon={MusicNotesIcon}
+              title="還沒有歌詞"
+              description="貼上 LRC 或純文字、到 LRCLIB 搜尋，或一行一行輸入。"
+              action={
+                <div className="flex items-center gap-2">
+                  <Button variant="plain" icon={PlusIcon} onClick={() => handlers.insertAt(0)}>
+                    新增一行
+                  </Button>
+                  <Button variant="tinted" icon={FileTextIcon} onClick={() => setImportOpen(true)}>
+                    匯入歌詞
+                  </Button>
+                </div>
+              }
+            />
           }
         />
       </div>
 
-      <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-line bg-panel px-5 py-2 text-[11px] text-faint">
-        <span>
-          <Kbd>Space</Kbd> 播放／暫停
-        </span>
-        <span>
-          <Kbd>←</Kbd>
-          <Kbd className="ml-0.5">→</Kbd> 跳 2 秒
-        </span>
-        <span>
-          <Kbd>T</Kbd> 開始對拍
-        </span>
-        <span>
-          時間欄 <Kbd>↑</Kbd>
-          <Kbd className="ml-0.5">↓</Kbd> 微調 0.1 秒
-        </span>
-        <span>
-          歌詞欄 <Kbd>Enter</Kbd> 下一行、<Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> 插入
-        </span>
-        <span>
-          <Kbd>Ctrl</Kbd>+<Kbd>S</Kbd> 儲存、<Kbd>Ctrl</Kbd>+<Kbd>Z</Kbd> 復原
-        </span>
-        {toast && (
-          <span role="status" className="ml-auto rounded-md bg-panel-3 px-2.5 py-1 text-xs text-fg shadow">
-            {toast}
-          </span>
-        )}
-      </footer>
+      <ToastStack toasts={toasts.toasts} onDismiss={toasts.dismiss} placement="bottom-center" />
 
       <ImportDialog
         open={importOpen}
@@ -821,44 +901,131 @@ export function LyricsEditorClient({ id }: { id: string }) {
         hasLines={lines.length > 0}
       />
 
-      <Dialog
+      <DistributeAlert
         open={distributeOpen}
-        onClose={() => setDistributeOpen(false)}
-        title="自動分配時間"
-        description={
-          project.analysis
-            ? "依音訊的能量起伏找出像是有人聲的段落，按每行的長短粗略分配開始時間。之後建議用對拍或拖曳標記校正。"
-            : "這首歌沒有音訊分析資料，會在整首歌裡平均分配。"
-        }
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setDistributeOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => distribute("all")}>清除全部時間後重新分配</Button>
-            <Button variant="primary" onClick={() => distribute("untimed")} disabled={timed === lines.length}>
-              {timed === lines.length ? "所有行都已定時" : `只分配 ${lines.length - timed} 行未定時的歌詞`}
-            </Button>
-          </>
-        }
+        onCancel={() => setDistributeOpen(false)}
+        onConfirm={distribute}
+        hasAnalysis={!!project.analysis}
+        timed={timed}
+        total={lines.length}
       />
+    </EditorRoot>
+  );
+}
+
+/** The editor's theme scope: follows the system unless the 外觀 menu picked light or dark. */
+function EditorRoot({ theme, children }: { theme?: "light" | "dark"; children: ReactNode }) {
+  return (
+    <div
+      data-theme={theme}
+      // a nested theme scope has to re-resolve the focus ring (it is declared on :root only)
+      className="flex h-screen flex-col overflow-hidden bg-bg text-label transition-[background-color] duration-200 ease-[ease] [--focus-ring:var(--tint)]"
+    >
+      {children}
     </div>
   );
 }
 
-function Notice({ tone, icon, children }: { tone: "ok" | "warn" | "danger" | "accent"; icon: React.ReactNode; children: React.ReactNode }) {
+/** 復原 / 重做 as one two-segment control (macOS toolbar). */
+function UndoRedo({ canUndo, canRedo, onUndo, onRedo }: { canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void }) {
+  const seg =
+    "press-fade focus-inset inline-flex h-8 w-9 items-center justify-center text-label hover:bg-fill-4 disabled:pointer-events-none disabled:text-label-3";
   return (
-    <div
-      className={cx(
-        "flex flex-wrap items-center gap-2 border-b px-5 py-2 text-sm",
-        tone === "ok" && "border-ok/25 bg-ok/[0.07] text-fg [&>svg:first-child]:text-ok",
-        tone === "warn" && "border-warn/25 bg-warn/[0.06] text-fg [&>svg:first-child]:text-warn",
-        tone === "danger" && "border-danger/30 bg-danger/[0.07] text-fg [&>svg:first-child]:text-danger",
-        tone === "accent" && "border-accent-2/30 bg-accent-2/[0.08] text-fg [&>svg:first-child]:text-accent-2",
+    <div role="group" aria-label="復原與重做" className="relative inline-flex overflow-hidden rounded-sm bg-fill-3">
+      <Tooltip content="復原" shortcut="Meta+Z">
+        <button type="button" className={seg} onClick={onUndo} disabled={!canUndo} aria-label="復原">
+          <ArrowUUpLeftIcon size={16} />
+        </button>
+      </Tooltip>
+      <span aria-hidden="true" className="my-[7px] w-(--hairline) bg-separator" />
+      <Tooltip content="重做" shortcut="Meta+Shift+Z">
+        <button type="button" className={seg} onClick={onRedo} disabled={!canRedo} aria-label="重做">
+          <ArrowUUpRightIcon size={16} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+const SHORTCUTS: [string, string[]][] = [
+  ["播放或暫停", ["Space"]],
+  ["跳 2 秒（Shift 5 秒）", ["ArrowLeft", "ArrowRight"]],
+  ["開始對拍", ["T"]],
+  ["時間欄微調 0.1 秒（Shift 1 秒、Alt 0.01 秒）", ["ArrowUp", "ArrowDown"]],
+  ["歌詞欄移到下一行", ["Enter"]],
+  ["在下方插入一行", ["Ctrl+Enter"]],
+  ["儲存", ["Meta+S"]],
+  ["復原", ["Meta+Z"]],
+];
+
+function ShortcutsPopover() {
+  return (
+    <Popover
+      label="鍵盤快捷鍵"
+      placement="bottom-end"
+      width={340}
+      trigger={(p) => (
+        <Tooltip content="鍵盤快捷鍵">
+          <Button {...p} variant="quiet" size="icon" aria-label="鍵盤快捷鍵" icon={<KeyboardIcon size={20} />} />
+        </Tooltip>
       )}
     >
-      {icon}
-      {children}
-    </div>
+      <div className="p-3">
+        <p className="mb-2 text-[12px] leading-4 font-semibold text-label-2">鍵盤快捷鍵</p>
+        <ul className="space-y-1.5">
+          {SHORTCUTS.map(([label, keys]) => (
+            <li key={label} className="flex items-center justify-between gap-3 text-[13px] leading-5 text-label">
+              {label}
+              <span className="flex shrink-0 gap-1">
+                {keys.map((k) => (
+                  <Kbd key={k} keys={k} />
+                ))}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-[12px] leading-4 text-label-2">Ctrl 與 ⌘ 都可以用。拖曳時間軸上的標記可以改時間，按住 Alt 會更精細。</p>
+      </div>
+    </Popover>
+  );
+}
+
+/** Auto-distribute: a yes/no Alert; a Switch decides whether already timed lines are redone. */
+function DistributeAlert({
+  open,
+  onCancel,
+  onConfirm,
+  hasAnalysis,
+  timed,
+  total,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: (mode: "untimed" | "all") => void;
+  hasAnalysis: boolean;
+  timed: number;
+  total: number;
+}) {
+  const [redoAll, setRedoAll] = useState(false);
+  const untimed = total - timed;
+  const mixed = timed > 0 && untimed > 0;
+  const all = untimed === 0 || (mixed && redoAll);
+  const how = hasAnalysis ? "依音訊的能量起伏找出有人聲的段落，按每行的長短粗略分配開始時間。" : "這首歌沒有音訊分析資料，會在整首歌裡平均分配。";
+  return (
+    <Alert
+      open={open}
+      title="自動分配時間"
+      message={`${how}${untimed === 0 ? "所有行都已定時，會清除後重新分配。" : ""}之後建議用對拍或拖曳標記校正。`}
+      confirmLabel={all ? `重新分配全部 ${total} 行` : `分配 ${untimed} 行`}
+      onCancel={onCancel}
+      onConfirm={() => onConfirm(all ? "all" : "untimed")}
+    >
+      {mixed && (
+        <label htmlFor="distribute-all" className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-md bg-fill-4 px-3 py-2 text-left text-[13px] leading-5 text-label">
+          同時清除已定時的 {timed} 行
+          <Switch id="distribute-all" checked={redoAll} onChange={setRedoAll} />
+        </label>
+      )}
+    </Alert>
   );
 }

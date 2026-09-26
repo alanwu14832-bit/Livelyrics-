@@ -15,6 +15,7 @@ export function TimeInput({
   onEnter,
   invalidHint,
   warn,
+  dim,
   className,
   "aria-label": ariaLabel,
   ...data
@@ -26,6 +27,8 @@ export function TimeInput({
   onEnter?: (shift: boolean) => void;
   invalidHint?: string;
   warn?: boolean;
+  /** secondary text (rows that are not the tap-sync target) */
+  dim?: boolean;
   className?: string;
   "aria-label": string;
   [key: `data-${string}`]: string | number | undefined;
@@ -100,10 +103,10 @@ export function TimeInput({
       }}
       onKeyDown={onKeyDown}
       className={cx(
-        "h-8 w-[5.5rem] rounded-md border bg-transparent px-2 text-right font-mono text-[13px] tabular outline-none transition-colors",
-        "placeholder:text-left placeholder:font-sans placeholder:text-xs placeholder:text-warn/80",
-        "focus:border-accent focus:bg-panel-2",
-        invalid || error ? "border-danger text-danger" : warn ? "border-danger/40 text-danger" : "border-transparent text-fg hover:border-line",
+        "focus-inset h-8 w-[5.75rem] rounded-sm bg-transparent px-2 text-right font-numeric text-[15px] leading-5 tabular",
+        "transition-[background-color,color] duration-(--dur-fast) ease-[ease] hover:bg-fill-4 focus-visible:bg-fill-4",
+        "placeholder:text-left placeholder:text-[13px] placeholder:text-orange-text",
+        invalid || error ? "text-red-text outline-2 outline-offset-[-2px] outline-red outline-solid" : warn ? "text-red-text" : dim ? "text-label-2" : "text-label",
         className,
       )}
     />

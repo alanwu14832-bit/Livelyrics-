@@ -10,7 +10,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   } catch {
     /* the page itself reports load errors */
   }
-  return { title: song ? `${song} · 歌詞編輯 — Livelyrics` : "歌詞編輯 — Livelyrics" };
+  return { title: song ? `${song}｜歌詞編輯` : "歌詞編輯｜Livelyrics" };
 }
 
 /** Lyrics editor: timing table, import/export, LRCLIB, tap-sync, auto-distribute. */

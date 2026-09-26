@@ -11,7 +11,7 @@ import type { Playhead } from "./playhead";
 
 /** Canvas colours come from the design tokens of the canvas's own theme scope. */
 const TOKENS = {
-  bg: ["--surface", "#ffffff"],
+  bg: ["--fill-4", "rgba(116,116,128,0.08)"],
   wave: ["--label-3", "rgba(60,60,67,0.3)"],
   tint: ["--tint", "#0071e3"],
   tintSoft: ["--tint-soft", "rgba(0,113,227,0.12)"],
@@ -86,6 +86,7 @@ export function Timeline(props: TimelineProps) {
   const drag = useRef<Drag | null>(null);
   const drawRef = useRef<() => void>(() => {});
   const rafRef = useRef(0);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     propsRef.current = props;
@@ -208,8 +209,21 @@ export function Timeline(props: TimelineProps) {
         ctx.fill();
       }
 
-      // readout for hovered marker / hover time
-      if (hv) {
+      // time bubble above the dragged marker (DOM, positioned 1:1 with the pointer, no easing)
+      const bubble = bubbleRef.current;
+      const dm = drag.current;
+      if (bubble) {
+        if (dm?.kind === "marker") {
+          const text = p.lines[dm.index]?.text ?? "";
+          bubble.textContent = `${formatTimeInput(dm.value)}${text ? `  ${text.length > 16 ? text.slice(0, 16) + "…" : text}` : ""}`;
+          bubble.style.visibility = "visible";
+          const half = bubble.offsetWidth / 2;
+          bubble.style.left = `${Math.max(half, Math.min(W - half, x(dm.value)))}px`;
+        } else if (bubble.style.visibility !== "hidden") bubble.style.visibility = "hidden";
+      }
+
+      // readout for hovered marker / hover time (not while dragging: the bubble shows it)
+      if (hv && dm?.kind !== "marker") {
         const time = a + (hv.x / W) * (b - a);
         const label = hv.marker != null ? `${formatTimeInput(p.lines[hv.marker]?.start ?? time)}  ${p.lines[hv.marker]?.text ?? ""}` : formatTimeInput(time);
         ctx.font = `500 12px ${pal.fontUi}`;
@@ -348,11 +362,14 @@ export function Timeline(props: TimelineProps) {
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      role="img"
-      aria-label={props.label}
-      className={cx("block w-full touch-none select-none rounded-md border border-line", props.className)}
-    />
+    <div className="relative">
+      <canvas ref={canvasRef} role="img" aria-label={props.label} className={cx("block w-full touch-none select-none rounded-sm", props.className)} />
+      <div
+        ref={bubbleRef}
+        aria-hidden="true"
+        style={{ visibility: "hidden" }}
+        className="pointer-events-none absolute -top-8 z-10 -translate-x-1/2 rounded-xs px-2 py-1 text-[12px] leading-4 font-medium whitespace-pre text-label tabular shadow-overlay material-thick"
+      />
+    </div>
   );
 }

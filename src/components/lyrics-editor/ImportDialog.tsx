@@ -1,17 +1,16 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Badge, Button, cx } from "@/components/ui";
+import { Button, SegmentedControl, Sheet, Tag, TextArea } from "@/components/ui";
+import { FileTextIcon } from "@/components/ui/Icon";
 import { parseLyricsText } from "@/lib/lyrics/lrc";
 import type { Lyrics } from "@/lib/types";
-import { Dialog } from "@/components/home/Dialog";
-import { FileIcon } from "@/components/home/icons";
 import { withoutTimings } from "@/components/upload/lyrics-choice";
 import { LyricsSearchPicker, type LyricsPick } from "@/components/upload/LyricsSearchPicker";
 
 type Tab = "paste" | "lrclib";
 
-/** Replace the lyrics from pasted text / a file (LRC or plain) or an LRCLIB result. */
+/** Replace the lyrics from pasted text / a file (LRC or plain) or an LRCLIB result. An iOS sheet. */
 export function ImportDialog({
   open,
   onClose,
@@ -34,6 +33,7 @@ export function ImportDialog({
   const [pick, setPick] = useState<LyricsPick | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const parsed = useMemo(() => (text.trim() ? parseLyricsText(text, "user") : null), [text]);
   const timed = parsed ? parsed.lines.filter((l) => l.start != null).length : 0;
 
@@ -50,62 +50,63 @@ export function ImportDialog({
   };
 
   const canImport = tab === "paste" ? !!parsed && parsed.lines.length > 0 : !!pick;
-  const tabCls = (t: Tab) =>
-    cx("h-8 rounded-md px-3 text-sm transition-colors", tab === t ? "bg-panel-3 text-fg ring-1 ring-line" : "text-muted hover:text-fg");
+  const replaceNote = hasLines ? "匯入會取代目前所有的歌詞行，可以用 Ctrl+Z 復原。" : undefined;
 
   return (
-    <Dialog
+    <Sheet
       open={open}
       onClose={onClose}
-      className="w-[min(94vw,44rem)]"
       title="匯入歌詞"
-      description={hasLines ? "匯入會取代目前所有的歌詞行（可以用 Ctrl+Z 復原）。" : "貼上 LRC／純文字，或到 LRCLIB 搜尋。"}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" onClick={confirm} disabled={!canImport}>
-            {hasLines ? "取代並匯入" : "匯入"}
-          </Button>
-        </>
+      width={600}
+      initialFocus={tab === "paste" ? textRef : undefined}
+      action={
+        <Button variant="filled" onClick={confirm} disabled={!canImport}>
+          {hasLines ? "取代並匯入" : "匯入"}
+        </Button>
       }
     >
-      <div role="tablist" aria-label="匯入方式" className="mb-4 inline-flex gap-1 rounded-lg border border-line bg-panel-2 p-1">
-        <button type="button" role="tab" aria-selected={tab === "paste"} className={tabCls("paste")} onClick={() => setTab("paste")}>
-          貼上或開啟檔案
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "lrclib"} className={tabCls("lrclib")} onClick={() => setTab("lrclib")}>
-          LRCLIB 搜尋
-        </button>
-      </div>
+      <SegmentedControl
+        label="匯入方式"
+        kind="tabs"
+        fullWidth
+        value={tab}
+        onChange={setTab}
+        getTabId={(v) => `import-tab-${v}`}
+        getPanelId={(v) => `import-panel-${v}`}
+        options={[
+          { value: "paste", label: "貼上或開啟檔案", caption: replaceNote ?? "LRC（含逐字時間碼、雙語同時間碼）或一行一句的純文字。" },
+          { value: "lrclib", label: "LRCLIB 搜尋", caption: replaceNote ?? "用歌名與樂團到 LRCLIB 找現成的歌詞。" },
+        ]}
+      />
 
       {tab === "paste" && (
-        <div role="tabpanel" className="space-y-2">
-          <textarea
+        <div role="tabpanel" id="import-panel-paste" aria-labelledby="import-tab-paste" className="mt-4 space-y-2.5">
+          <TextArea
+            ref={textRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={12}
             spellCheck={false}
             aria-label="歌詞文字"
             placeholder={"[00:12.30]第一句歌詞\n[00:16.05]第二句歌詞\n\n或一行一句的純文字歌詞"}
-            className="block w-full resize-y rounded-lg border border-line bg-panel-2 px-3 py-2.5 font-mono text-[13px] leading-6 text-fg outline-none placeholder:text-faint focus:border-accent"
+            className="block font-mono text-[13px]! leading-6!"
           />
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="text-muted" aria-live="polite">
-              {!parsed && "支援 LRC（含逐字時間碼、雙語同時間碼）與純文字；作詞作曲等資訊行會自動略過。"}
-              {parsed && parsed.lines.length === 0 && <span className="text-warn">沒有可用的歌詞行。</span>}
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-2 text-[13px] leading-5 text-label-2" aria-live="polite">
+              {!parsed && "作詞、作曲等資訊行會自動略過。"}
+              {parsed && parsed.lines.length === 0 && <span className="text-orange-text">沒有可用的歌詞行。</span>}
               {parsed && parsed.lines.length > 0 && (
-                <span className="inline-flex items-center gap-1.5">
-                  {parsed.synced ? <Badge tone="ok">同步歌詞</Badge> : timed > 0 ? <Badge tone="warn">部分有時間碼</Badge> : <Badge>純文字</Badge>}
-                  {parsed.lines.length} 行{timed > 0 && !parsed.synced && `（${timed} 行有時間）`}
-                </span>
+                <>
+                  {parsed.synced ? <Tag tone="tint">同步歌詞</Tag> : timed > 0 ? <Tag tone="orange">部分有時間碼</Tag> : <Tag>純文字</Tag>}
+                  <span className="text-label">
+                    <span className="t-latin tabular">{parsed.lines.length}</span> 行{timed > 0 && !parsed.synced && `（${timed} 行有時間）`}
+                  </span>
+                </>
               )}
-              {fileError && <span className="ml-2 text-danger">{fileError}</span>}
+              {fileError && <span className="text-red-text">{fileError}</span>}
             </span>
-            <Button size="sm" variant="ghost" onClick={() => fileRef.current?.click()}>
-              <FileIcon size={14} />
-              開啟 .lrc / .txt
+            <Button variant="plain" icon={FileTextIcon} onClick={() => fileRef.current?.click()}>
+              開啟 .lrc 或 .txt
             </Button>
             <input
               ref={fileRef}
@@ -135,10 +136,10 @@ export function ImportDialog({
       )}
 
       {tab === "lrclib" && (
-        <div role="tabpanel">
+        <div role="tabpanel" id="import-panel-lrclib" aria-labelledby="import-tab-lrclib" className="mt-4">
           <LyricsSearchPicker title={title} artist={artist} duration={duration} value={pick} onChange={setPick} editableQuery allowNone={false} />
         </div>
       )}
-    </Dialog>
+    </Sheet>
   );
 }
