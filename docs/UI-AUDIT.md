@@ -1069,6 +1069,7 @@ Apple 那種**連續、有物理感、可中斷**的感覺。依據：emilkowals
 - `prefers-contrast: more`：分隔線變不透明、次要文字變主文字色、焦點環 3px。
 
 **動態與回饋**
+- 3.4.1「Apple Motion 加強」的**驗收加項**全部通過（ViewTransition 與共享元素、可中斷彈簧控制項、可拖曳關閉的 sheet、時間軸慣性與 rubber-band、滑動的目前列高亮、通知 layout 讓位、減少動態退化）。
 - 所有按鈕 mousedown 後 100ms 的 computed transform 為 scale(.97)（大磚 .98、icon 與 plain 為 opacity .6）；列表列只有底色變化。
 - 按 B、L、F、1、0、]、T、M 後下一幀：HUD 已完全不透明、頂欄膠囊已出現（0ms）；900ms 後開始淡出；HUD 不出現在投影視窗（檢查 `window.__last` 與投影 DOM）。
 - LIVE 等待下一句時播放鈕沒有動畫，「下一句」有橘環，頂欄有「等待下一句」膠囊。
