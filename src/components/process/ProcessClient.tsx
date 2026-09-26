@@ -282,7 +282,7 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
         title={project.meta.title}
         subtitle={project.meta.artist}
         status={
-          <Badge tone={status.tone} className={cx("ml-1", running && "animate-pulse")}>
+          <Badge tone={status.tone} className="ml-1">
             {status.label}
           </Badge>
         }

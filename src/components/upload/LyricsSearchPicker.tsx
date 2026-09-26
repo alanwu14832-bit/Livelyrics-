@@ -115,7 +115,7 @@ export function LyricsSearchPicker({
   const results = state.kind === "done" ? state.results : [];
 
   return (
-    <div className={cx("space-y-3", className)}>
+    <div className={cx("min-w-0 space-y-3", className)}>
       {editableQuery && (
         <form
           className="flex flex-wrap items-end gap-2"
@@ -183,7 +183,7 @@ export function LyricsSearchPicker({
             const open = expanded === r.id;
             return (
               <li key={r.id} className={cx("rounded-lg border transition-colors", selected ? "border-accent/60 bg-accent/[0.06]" : "border-line bg-panel-2/50 hover:border-faint")}>
-                <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
+                <label className="flex min-w-0 cursor-pointer items-start gap-3 px-3 py-2.5">
                   <input
                     type="radio"
                     name={group}

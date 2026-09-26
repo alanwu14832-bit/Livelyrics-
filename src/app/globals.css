@@ -1,47 +1,1087 @@
 @import "tailwindcss";
 
 /*
-  Operator UI design tokens (dark, low-glare — consoles live in dark venues).
-  Use the Tailwind utilities generated from @theme: bg-bg, bg-panel, bg-panel-2,
-  border-line, text-fg, text-muted, text-accent, bg-accent, text-ok, text-warn, text-danger ...
-  The projection output does NOT use these; it is styled by the design plan.
-*/
-@theme {
-  --color-bg: #0b0c10;
-  --color-panel: #12141a;
-  --color-panel-2: #191c24;
-  --color-panel-3: #222633;
-  --color-line: #2a2f3c;
-  --color-fg: #e9ebf1;
-  --color-muted: #8d93a3;
-  --color-faint: #5b6172;
-  --color-accent: #ff5a36;
-  --color-accent-2: #8b6cff;
-  --color-ok: #34d17c;
-  --color-warn: #f5c542;
-  --color-danger: #ff4d5e;
+  Livelyrics operator UI design system (docs/UI-AUDIT.md §3). Apple / iOS system colours,
+  SF-style type scale, springs. The projection output does NOT use any of this: the stage is
+  styled by the design plan (src/components/stage/**).
 
+  Appearance
+    - :root is light (apple.com); prefers-color-scheme: dark switches it unless the root has
+      data-theme="light".
+    - data-theme="light" | "dark" | "console" on any element scopes a theme to that subtree.
+      The console (/p/[id]) is always dark: its page wrapper carries data-theme="console".
+    - Canvas code must read tokens from its own element (src/lib/ui/canvas-tokens.ts).
+
+  Utilities (Tailwind v4)
+    colours    bg-bg bg-surface bg-surface-2 bg-surface-3 bg-elevated text-label text-label-2
+               text-label-3 bg-fill..bg-fill-4 border-separator bg-tint bg-tint-fill text-tint-text
+               bg-tint-soft text-on-tint bg-red text-red-text bg-red-fill bg-red-soft bg-orange
+               text-orange-text bg-orange-soft bg-green bg-green-switch bg-segment-thumb
+    type       text-hero text-large-title text-title-1/2/3 text-intro text-headline text-body
+               text-callout text-subheadline text-footnote text-caption text-caption-2
+               console: text-c-caption text-c-footnote text-c-body text-c-headline text-c-title
+               text-c-clock text-c-now; t-latin (SF tracking for Latin / digits), tabular,
+               font-numeric (time codes), font-mono (colour codes, LRC only)
+    surfaces   material-thin/regular/thick, border-hairline border-t/b/l/r-hairline
+               divide-y-hairline ring-hairline scroll-edge, shadow-card/lift/overlay/sheet/thumb,
+               rounded-xs..3xl rounded-pill
+    states     press press-tile press-fade focus-inset row-current row-standby row-selected skeleton
+    motion     ease-out ease-in-out ease-drawer ease-spring (always name the curve), duration-(--dur-*), animate-spinner
+               animate-caret animate-halo
+*/
+
+/* ------------------------------------------------------------------ theme scale */
+
+@theme static {
+  /* radius (continuous-corner feel, by component size) */
+  --radius-xs: 6px; /* tag, kbd, menu item, segmented thumb */
+  --radius-sm: 8px; /* buttons sm/md, inputs, segmented container, small tiles */
+  --radius-md: 10px; /* console groups, menu, popover */
+  --radius-lg: 12px; /* page inset groups, console panes, cards */
+  --radius-xl: 14px; /* alert, toast, HUD, project card art */
+  --radius-2xl: 20px; /* sheet, new-project card, key visual tile */
+  --radius-3xl: 28px; /* home dropzone hero tile */
+  --radius-pill: 980px; /* apple.com capsule CTA, status capsules */
+
+  /* easing: strong curves; never the built-in ease-in */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* enter, press, most UI */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* on-screen movement */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* drawers, iOS sheet feel */
+  /* critically damped spring (damping 1.0, response 0.35 s): x(t) = 1 - (1 + wt)e^(-wt), sampled over 500 ms */
+  --ease-spring: linear(0, 0.075, 0.227, 0.39, 0.536, 0.656, 0.75, 0.821, 0.873, 0.911, 0.938, 0.957, 0.971, 0.98, 0.986, 0.991, 0.994, 0.996, 0.997, 0.998, 1);
+
+  /* Tailwind's default transition timing stays as shipped: the projection window's waiting hint
+     relies on it. UI code names the curve: ease-[ease] (hover, colour), ease-out, ease-spring. */
+
+  /* the only loop allowed site-wide (UIActivityIndicator: 8 spokes) */
+  --animate-spinner: ui-spinner 0.8s steps(8) infinite;
+  /* streaming text caret (process page); static with reduced motion */
+  --animate-caret: ui-caret 1s step-end infinite;
+  /* one-shot ring when the projection connects; never loops */
+  --animate-halo: ui-halo 600ms cubic-bezier(0.23, 1, 0.32, 1) 1;
+
+  @keyframes ui-spinner {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes ui-caret {
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes ui-halo {
+    from {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--halo-color, var(--green)) 55%, transparent);
+    }
+    to {
+      box-shadow: 0 0 0 7px transparent;
+    }
+  }
+}
+
+/* Tailwind v4: inline, so utilities reference var(--token) directly and a nested
+   [data-theme] can override (non-inline would resolve the value once at :root). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-elevated: var(--elevated);
+  --color-label: var(--label);
+  --color-label-2: var(--label-2);
+  --color-label-3: var(--label-3);
+  --color-label-4: var(--label-4);
+  --color-label-2-on-material: var(--label-2-on-material);
+  --color-fill: var(--fill);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
+  --color-fill-4: var(--fill-4);
+  --color-separator: var(--separator);
+  --color-separator-opaque: var(--separator-opaque);
+  --color-tint: var(--tint);
+  --color-tint-fill: var(--tint-fill);
+  --color-tint-fill-hover: var(--tint-fill-hover);
+  --color-tint-text: var(--tint-text);
+  --color-tint-text-on-soft: var(--tint-text-on-soft);
+  --color-tint-soft: var(--tint-soft);
+  --color-on-tint: var(--on-tint);
+  --color-red: var(--red);
+  --color-red-text: var(--red-text);
+  --color-red-fill: var(--red-fill);
+  --color-red-soft: var(--red-soft);
+  --color-orange: var(--orange);
+  --color-orange-text: var(--orange-text);
+  --color-orange-soft: var(--orange-soft);
+  --color-yellow: var(--yellow);
+  --color-green: var(--green);
+  --color-green-switch: var(--green-switch);
+  --color-segment-thumb: var(--segment-thumb);
+  --color-scrim: var(--scrim);
+
+  /* Transitional aliases (stage 1): the old utility names point at the new tokens so every
+     page changes colour at once. Removed in stage 5 (see docs/UI-AUDIT.md §4). */
+  --color-panel: var(--surface);
+  --color-panel-2: var(--surface-2);
+  --color-panel-3: var(--surface-3);
+  --color-line: var(--separator);
+  --color-fg: var(--label);
+  --color-muted: var(--label-2);
+  --color-faint: var(--label-2); /* faint was used as text: promoted to label-2 */
+  --color-accent: var(--tint);
+  --color-accent-2: var(--tint);
+  --color-ok: var(--green);
+  --color-warn: var(--orange);
+  --color-danger: var(--red);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+}
+
+/* ------------------------------------------------------------------ tokens: light (default, apple.com) */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* backgrounds and surfaces */
+  --bg: #f5f5f7; /* page */
+  --surface: #ffffff; /* grouped lists, cards, sheets */
+  --surface-2: #fbfbfd; /* inside a group: inputs, nested blocks */
+  --surface-3: #f2f2f7; /* table headers, selected row base */
+  --elevated: #ffffff; /* popover, menu, toast, alert */
+
+  /* labels */
+  --label: #1d1d1f; /* 16.83:1 on #fff */
+  --label-2: #6e6e73; /* 5.07:1 on #fff, 4.66:1 on --bg: every readable secondary text, placeholders */
+  --label-3: rgba(60, 60, 67, 0.3); /* non-text only: ticks, disabled icons, decorative rules */
+  --label-4: rgba(60, 60, 67, 0.18);
+  --label-2-on-material: #515154; /* secondary text on a material, worst case 4.93:1 */
+
+  /* fills (iOS systemFill ladder) */
+  --fill: rgba(120, 120, 128, 0.2);
+  --fill-2: rgba(120, 120, 128, 0.16);
+  --fill-3: rgba(118, 118, 128, 0.12);
+  --fill-4: rgba(116, 116, 128, 0.08);
+
+  /* separators */
+  --separator: rgba(60, 60, 67, 0.29);
+  --separator-opaque: #c6c6c8;
+
+  /* tint (systemBlue): the only accent */
+  --tint: #0071e3; /* non-text: focus ring, selection bar, progress, slider fill; 4.31:1 on --bg */
+  --tint-fill: #0071e3; /* filled button base, white text 4.70:1 */
+  --tint-fill-hover: #0077ed;
+  --tint-text: #0066cc; /* links, plain and tinted button text; 5.57:1 on #fff */
+  --tint-text-on-soft: #0066cc;
+  --tint-soft: rgba(0, 113, 227, 0.12); /* tinted buttons, selected row base */
+  --on-tint: #ffffff;
+
+  /* semantic: red = blackout, on-air, recording, error, delete; orange = warning, waiting; green = connected, done, on */
+  --red: #ff3b30; /* dots, icons */
+  --red-text: #d70015; /* 5.38:1 on #fff */
+  --red-fill: #d70015; /* solid red with white text 5.38:1 */
+  --red-soft: rgba(255, 59, 48, 0.12);
+  --orange: #ff9500;
+  --orange-text: #c93400; /* 5.28:1 on #fff */
+  --orange-soft: rgba(255, 149, 0, 0.14);
+  --yellow: #ffcc00;
+  --green: #248a3d; /* icons and dots; never small text */
+  --green-switch: #34c759; /* switch track when on */
+
+  --focus-ring: var(--tint);
+
+  /* materials (background + backdrop-filter) */
+  --material-thin: rgba(255, 255, 255, 0.6);
+  --material-regular: rgba(255, 255, 255, 0.8); /* apple.com global nav */
+  --material-thick: rgba(250, 250, 252, 0.92);
+  --blur-thin: saturate(180%) blur(16px);
+  --blur-regular: saturate(180%) blur(20px);
+  --blur-thick: saturate(180%) blur(30px);
+  --scrim: rgba(0, 0, 0, 0.3);
+
+  /* shadows */
+  --shadow-card: none; /* light grouped lists use --bg vs --surface, no shadow */
+  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.12); /* project card hover */
+  --shadow-overlay: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 12px 40px rgba(0, 0, 0, 0.12); /* menu, popover, toast */
+  --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 24px 80px rgba(0, 0, 0, 0.18); /* sheet, alert */
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04); /* segmented thumb, switch knob, slider knob */
+  --segment-thumb: #ffffff;
+
+  /* spacing (4 px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --page-gutter: 24px; /* home, process, editor sides */
+  --group-gap: 24px; /* between groups */
+  --row-min-h: 44px; /* inset grouped row */
+  --row-pad-x: 16px;
+}
+
+/* theme-independent tokens (inherited everywhere) */
+:root {
+  --hairline: 1px;
+
+  /* type: system font first; bundled Noto Sans TC only where PingFang TC is missing (Windows, Linux) */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang TC", var(--font-noto-sans-tc, "Noto Sans TC"), "Microsoft JhengHei", system-ui, sans-serif;
+  /* time codes, BPM, percentages (always with tabular-nums) */
+  --font-numeric: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable", "Segoe UI", var(--font-geist-mono, ui-monospace), ui-monospace, sans-serif;
+  /* colour codes and the LRC text box only */
+  --font-code: ui-monospace, "SF Mono", var(--font-geist-mono, Menlo), Menlo, monospace;
+  /* The stage (src/components/stage/overlays.ts: test pattern, guides) reads these two variables
+     directly, so they keep their pre-redesign values and the projection never changes. UI code
+     uses the font-sans / font-mono utilities, which resolve to --font-ui / --font-code (inline). */
   --font-sans: var(--font-noto-sans-tc), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* motion */
+  --dur-spring: 500ms; /* visually 87 % at 200 ms, 97 % at 300 ms */
+  --dur-press: 80ms;
+  --dur-release: 160ms;
+  --dur-fast: 150ms; /* hover, colour */
+  --dur-base: 200ms; /* enter */
+  --dur-exit: 150ms; /* exit */
+  --dur-toast: 250ms;
 }
 
-html,
-body {
-  background: var(--color-bg);
-  color: var(--color-fg);
-  font-family: var(--font-sans);
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
 }
 
-::selection {
-  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+/* ------------------------------------------------------------------ tokens: dark */
+/* The two blocks carry identical values: system dark on the root, and explicit dark scopes. */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --surface-3: #3a3a3c;
+    --elevated: #2c2c2e;
+
+    --label: #f5f5f7;
+    --label-2: rgba(235, 235, 245, 0.6);
+    --label-3: rgba(235, 235, 245, 0.3);
+    --label-4: rgba(235, 235, 245, 0.18);
+    --label-2-on-material: rgba(235, 235, 245, 0.75);
+
+    --fill: rgba(120, 120, 128, 0.36);
+    --fill-2: rgba(120, 120, 128, 0.32);
+    --fill-3: rgba(118, 118, 128, 0.24);
+    --fill-4: rgba(118, 118, 128, 0.18);
+
+    --separator: rgba(84, 84, 88, 0.65);
+    --separator-opaque: #38383a;
+
+    --tint: #0a84ff;
+    --tint-fill: #0071e3;
+    --tint-fill-hover: #0077ed;
+    --tint-text: #409cff;
+    --tint-text-on-soft: #64b5ff;
+    --tint-soft: rgba(10, 132, 255, 0.18);
+    --on-tint: #ffffff;
+
+    --red: #ff453a;
+    --red-text: #ff6961;
+    --red-fill: #d70015;
+    --red-soft: rgba(255, 69, 58, 0.18);
+    --orange: #ff9f0a;
+    --orange-text: #ff9f0a;
+    --orange-soft: rgba(255, 159, 10, 0.18);
+    --yellow: #ffd60a;
+    --green: #30d158;
+    --green-switch: #30d158;
+
+    --material-thin: rgba(44, 44, 46, 0.6);
+    --material-regular: rgba(28, 28, 30, 0.8);
+    --material-thick: rgba(28, 28, 30, 0.92);
+    --scrim: rgba(0, 0, 0, 0.55);
+
+    --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-overlay: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 12px 40px rgba(0, 0, 0, 0.5);
+    --shadow-sheet: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 24px 80px rgba(0, 0, 0, 0.6);
+    --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.3), 0 3px 1px rgba(0, 0, 0, 0.1);
+    --segment-thumb: #636366;
+  }
 }
 
-/* thin dark scrollbars for dense operator panels */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-line) transparent;
+/* html follows a page-level dark scope too (overscroll, scrollbars, native controls) */
+[data-theme="dark"],
+[data-theme="console"],
+:root:has(> body > [data-theme="dark"]),
+:root:has(> body > [data-theme="console"]) {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --surface-3: #3a3a3c;
+  --elevated: #2c2c2e;
+
+  --label: #f5f5f7; /* apple.com dark text */
+  --label-2: rgba(235, 235, 245, 0.6); /* 5.94:1 on #1c1c1e, 5.29:1 on #2c2c2e, 4.58:1 on #3a3a3c */
+  --label-3: rgba(235, 235, 245, 0.3); /* non-text */
+  --label-4: rgba(235, 235, 245, 0.18);
+  --label-2-on-material: rgba(235, 235, 245, 0.75);
+
+  --fill: rgba(120, 120, 128, 0.36);
+  --fill-2: rgba(120, 120, 128, 0.32);
+  --fill-3: rgba(118, 118, 128, 0.24);
+  --fill-4: rgba(118, 118, 128, 0.18);
+
+  --separator: rgba(84, 84, 88, 0.65);
+  --separator-opaque: #38383a;
+
+  --tint: #0a84ff; /* non-text; focus ring 5.76:1 on #000, 3.82:1 on #2c2c2e */
+  --tint-fill: #0071e3; /* white text 4.70:1 (#0a84ff with white is only 3.65:1) */
+  --tint-fill-hover: #0077ed;
+  --tint-text: #409cff; /* 7.42 on #000, 6.01 on #1c1c1e, 4.92 on #2c2c2e; not on #3a3a3c */
+  --tint-text-on-soft: #64b5ff; /* tinted button on #2c2c2e 5.17:1 */
+  --tint-soft: rgba(10, 132, 255, 0.18);
+  --on-tint: #ffffff;
+
+  --red: #ff453a;
+  --red-text: #ff6961; /* 6.03 on #1c1c1e, 4.94 on #2c2c2e */
+  --red-fill: #d70015;
+  --red-soft: rgba(255, 69, 58, 0.18);
+  --orange: #ff9f0a;
+  --orange-text: #ff9f0a; /* 8.28 on #1c1c1e, 5.52 on #3a3a3c */
+  --orange-soft: rgba(255, 159, 10, 0.18);
+  --yellow: #ffd60a;
+  --green: #30d158;
+  --green-switch: #30d158;
+
+  --material-thin: rgba(44, 44, 46, 0.6);
+  --material-regular: rgba(28, 28, 30, 0.8);
+  --material-thick: rgba(28, 28, 30, 0.92);
+  --scrim: rgba(0, 0, 0, 0.55);
+
+  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-sheet: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 24px 80px rgba(0, 0, 0, 0.6);
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.3), 0 3px 1px rgba(0, 0, 0, 0.1);
+  --segment-thumb: #636366; /* iOS dark segmented thumb, white text 5.99:1 */
 }
 
-.tabular {
+/* console: dark + desktop density (Final Cut Pro / Logic Pro) */
+[data-theme="console"],
+:root:has(> body > [data-theme="console"]) {
+  --label: #ffffff; /* iOS system label */
+  --page-gutter: 6px; /* gap between panes, showing #000 */
+  --group-gap: 12px;
+  --row-min-h: 32px; /* console rows (hit area stays >= 28 px) */
+  --row-pad-x: 12px;
+  /* the stage preview's guide labels use the UI font here (no Noto download on a Mac);
+     the projection window keeps the stage's own values set on :root */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+}
+
+/* The --color-* names are also real variables, re-declared in every theme scope, so code that
+   writes var(--color-accent) directly resolves inside the nearest scope, not at :root. */
+:root,
+[data-theme] {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-elevated: var(--elevated);
+  --color-label: var(--label);
+  --color-label-2: var(--label-2);
+  --color-label-3: var(--label-3);
+  --color-fill: var(--fill);
+  --color-fill-3: var(--fill-3);
+  --color-separator: var(--separator);
+  --color-tint: var(--tint);
+  --color-tint-soft: var(--tint-soft);
+  --color-red: var(--red);
+  --color-orange: var(--orange);
+  --color-green: var(--green);
+  --color-panel: var(--surface);
+  --color-panel-2: var(--surface-2);
+  --color-panel-3: var(--surface-3);
+  --color-line: var(--separator);
+  --color-fg: var(--label);
+  --color-muted: var(--label-2);
+  --color-faint: var(--label-2);
+  --color-accent: var(--tint);
+  --color-accent-2: var(--tint);
+  --color-ok: var(--green);
+  --color-warn: var(--orange);
+  --color-danger: var(--red);
+}
+
+/* Transitional, removed with the aliases: the bare text-warn / text-danger classes are text, so
+   they take the legible text variants (#ff9500 / #ff3b30 text on white is only 2.2 / 3.6:1);
+   bg-, border- and variant forms keep the true orange / red. */
+@layer utilities {
+  .text-warn {
+    color: var(--orange-text);
+  }
+  .text-danger {
+    color: var(--red-text);
+  }
+}
+
+/* ------------------------------------------------------------------ base */
+
+@layer base {
+  html,
+  body {
+    background-color: var(--bg);
+    color: var(--label);
+    font-family: var(--font-ui);
+    /* ease appearance switches instead of a brightness jump */
+    transition: background-color var(--dur-base) ease;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-code);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--tint) 30%, transparent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill) transparent;
+  }
+
+  /* Focus: 2 px tint, never transitioned. The colour is constant on every element, so a
+     transition-colors on a control cannot fade the ring in (it includes outline-color). */
+  *,
+  ::before,
+  ::after {
+    outline-color: var(--focus-ring);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  /* listbox with aria-activedescendant: focus stays on the container, the ring is drawn on the active option */
+  [role="listbox"]:focus-visible {
+    outline: none;
+  }
+  [role="listbox"]:focus-visible [role="option"][aria-selected="true"] {
+    outline: 2px solid var(--tint);
+    outline-offset: -2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+/* ------------------------------------------------------------------ type scale */
+/* Pages (iOS Dynamic Type defaults). CJK and mixed text use 0 tracking; only headings of 28 px
+   and up apply the SF value by default. --tracking holds the SF value for `t-latin`
+   (pure Latin / digits: time codes, BPM, TRACK/LIVE, key names). Weight, leading and tracking
+   yield to font-*, leading-* and tracking-* utilities on the same element. */
+
+@utility text-hero {
+  font-size: 56px;
+  line-height: var(--tw-leading, 64px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, -0.005em);
+  --tracking: -0.005em;
+}
+@utility text-large-title {
+  font-size: 34px;
+  line-height: var(--tw-leading, 44px);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: var(--tw-tracking, 0.011em);
+  --tracking: 0.011em;
+}
+@utility text-title-1 {
+  font-size: 28px;
+  line-height: var(--tw-leading, 36px);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: var(--tw-tracking, 0.013em);
+  --tracking: 0.013em;
+}
+@utility text-title-2 {
+  font-size: 22px;
+  line-height: var(--tw-leading, 30px);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.016em;
+}
+@utility text-title-3 {
+  font-size: 20px;
+  line-height: var(--tw-leading, 28px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.019em;
+}
+@utility text-intro {
+  font-size: 21px;
+  line-height: var(--tw-leading, 30px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.011em;
+}
+@utility text-headline {
+  font-size: 17px;
+  line-height: var(--tw-leading, 24px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.024em;
+}
+@utility text-body {
+  font-size: 17px;
+  line-height: var(--tw-leading, 26px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.024em;
+}
+@utility text-callout {
+  font-size: 16px;
+  line-height: var(--tw-leading, 24px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.02em;
+}
+@utility text-subheadline {
+  font-size: 15px;
+  line-height: var(--tw-leading, 22px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.016em;
+}
+@utility text-footnote {
+  font-size: 13px;
+  line-height: var(--tw-leading, 20px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.006em;
+}
+@utility text-caption {
+  font-size: 12px;
+  line-height: var(--tw-leading, 18px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0em;
+}
+@utility text-caption-2 {
+  font-size: 11px; /* the smallest size anywhere: tags and tick labels only */
+  line-height: var(--tw-leading, 16px);
+  font-weight: var(--tw-font-weight, 500);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.006em;
+}
+
+/* Console (desktop density, macOS-like) */
+@utility text-c-caption {
+  font-size: 11px;
+  line-height: var(--tw-leading, 14px);
+  font-weight: var(--tw-font-weight, 500);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.006em;
+}
+@utility text-c-footnote {
+  font-size: 12px;
+  line-height: var(--tw-leading, 16px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0em;
+}
+@utility text-c-body {
+  font-size: 13px;
+  line-height: var(--tw-leading, 18px);
+  font-weight: var(--tw-font-weight, 400);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.006em;
+}
+@utility text-c-headline {
+  font-size: 15px;
+  line-height: var(--tw-leading, 20px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.016em;
+}
+@utility text-c-title {
+  font-size: 17px;
+  line-height: var(--tw-leading, 22px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: -0.024em;
+}
+@utility text-c-clock {
+  font-size: 22px;
+  line-height: var(--tw-leading, 26px);
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.016em;
+}
+@utility text-c-now {
+  font-size: 28px;
+  line-height: var(--tw-leading, 36px);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: var(--tw-tracking, 0);
+  --tracking: 0.013em;
+}
+
+/* SF size-specific tracking for Latin and digits; put it on the element with the text-* class */
+@utility t-latin {
+  --tw-tracking: var(--tracking, 0);
+  letter-spacing: var(--tracking, 0);
+}
+@utility tabular {
   font-variant-numeric: tabular-nums;
+}
+@utility font-numeric {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ surfaces */
+
+@utility material-thin {
+  background-color: var(--material-thin);
+  -webkit-backdrop-filter: var(--blur-thin);
+  backdrop-filter: var(--blur-thin);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--elevated);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--separator-opaque);
+  }
+}
+@utility material-regular {
+  background-color: var(--material-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  backdrop-filter: var(--blur-regular);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--elevated);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--separator-opaque);
+  }
+}
+@utility material-thick {
+  background-color: var(--material-thick);
+  -webkit-backdrop-filter: var(--blur-thick);
+  backdrop-filter: var(--blur-thick);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--elevated);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--separator-opaque);
+  }
+}
+
+/* hairline separators: 1 px, 0.5 px on 2x screens */
+@utility border-hairline {
+  border: var(--hairline) solid var(--separator);
+}
+@utility border-t-hairline {
+  border-top: var(--hairline) solid var(--separator);
+}
+@utility border-b-hairline {
+  border-bottom: var(--hairline) solid var(--separator);
+}
+@utility border-l-hairline {
+  border-left: var(--hairline) solid var(--separator);
+}
+@utility border-r-hairline {
+  border-right: var(--hairline) solid var(--separator);
+}
+@utility divide-y-hairline {
+  & > :not(:last-child) {
+    border-bottom: var(--hairline) solid var(--separator);
+  }
+}
+@utility ring-hairline {
+  box-shadow: 0 0 0 var(--hairline) var(--separator);
+}
+/* scroll-edge: the hairline under a sticky bar once content scrolls beneath it */
+@utility scroll-edge {
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--separator);
+}
+
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+@utility shadow-lift {
+  box-shadow: var(--shadow-lift);
+}
+@utility shadow-overlay {
+  box-shadow: var(--shadow-overlay);
+}
+@utility shadow-sheet {
+  box-shadow: var(--shadow-sheet);
+}
+@utility shadow-thumb {
+  box-shadow: var(--shadow-thumb);
+}
+
+/* ------------------------------------------------------------------ states */
+
+/* press feedback: 80 ms down, 160 ms release (asymmetric), strong ease-out */
+@utility press {
+  transition-property: color, background-color, box-shadow, transform, opacity, filter;
+  transition-duration: var(--dur-release);
+  transition-timing-function: var(--ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+    transition-duration: var(--dur-press);
+  }
+}
+/* large tiles (console lock tiles, scene grid) */
+@utility press-tile {
+  transition-property: color, background-color, box-shadow, transform, opacity;
+  transition-duration: var(--dur-release);
+  transition-timing-function: var(--ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+    transition-duration: var(--dur-press);
+  }
+}
+/* icon-only and plain buttons dim instead of shrinking */
+@utility press-fade {
+  transition-property: color, background-color, opacity;
+  transition-duration: var(--dur-release);
+  transition-timing-function: var(--ease-out);
+  &:active:not(:disabled) {
+    opacity: 0.6;
+    transition-duration: var(--dur-press);
+  }
+}
+/* focus ring inside clipped containers (list rows, table rows, segments) */
+@utility focus-inset {
+  &:focus-visible {
+    outline-offset: -2px;
+  }
+}
+/* the one "current row" look (console lyrics, editor table, timelines) */
+@utility row-current {
+  background-color: var(--tint-soft);
+  box-shadow: inset 3px 0 0 var(--tint);
+  font-weight: 600;
+}
+@utility row-standby {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--tint) 40%, transparent);
+}
+@utility row-selected {
+  outline: 2px solid var(--tint);
+  outline-offset: -2px;
+}
+/* static skeleton that only appears after 300 ms (the local API is usually faster) */
+@utility skeleton {
+  background-color: var(--fill-4);
+  border-radius: 6px;
+  transition: opacity var(--dur-fast) var(--ease-out) 300ms;
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ primitives that need real CSS */
+
+@property --p {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+@layer components {
+  /* Sheet and Alert: native <dialog> + showModal(); keep content mounted until transitionend */
+  dialog.ui-sheet,
+  dialog.ui-alert {
+    margin: auto;
+    padding: 0;
+    border: 0;
+    max-width: calc(100vw - 32px);
+    background: var(--elevated);
+    color: var(--label);
+    box-shadow: var(--shadow-sheet);
+    opacity: 1;
+    transform: none;
+  }
+  dialog.ui-sheet {
+    max-height: 85vh;
+    border-radius: var(--radius-2xl);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-spring) var(--ease-spring),
+      overlay var(--dur-spring) allow-discrete,
+      display var(--dur-spring) allow-discrete;
+  }
+  dialog.ui-alert {
+    width: 340px;
+    border-radius: var(--radius-xl);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out),
+      overlay var(--dur-base) allow-discrete,
+      display var(--dur-base) allow-discrete;
+  }
+  @starting-style {
+    dialog.ui-sheet[open] {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    dialog.ui-alert[open] {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  dialog.ui-sheet:not([open]) {
+    opacity: 0;
+    transform: scale(0.98);
+    transition-duration: var(--dur-exit);
+    transition-timing-function: var(--ease-out);
+  }
+  dialog.ui-alert:not([open]) {
+    opacity: 0;
+    transform: scale(0.96);
+    transition-duration: var(--dur-exit);
+  }
+  dialog.ui-sheet::backdrop,
+  dialog.ui-alert::backdrop {
+    background: var(--scrim, rgba(0, 0, 0, 0.3));
+    transition:
+      opacity var(--dur-base) ease,
+      overlay var(--dur-base) allow-discrete,
+      display var(--dur-base) allow-discrete;
+  }
+  @starting-style {
+    dialog.ui-sheet[open]::backdrop,
+    dialog.ui-alert[open]::backdrop {
+      opacity: 0;
+    }
+  }
+  dialog.ui-sheet:not([open])::backdrop,
+  dialog.ui-alert:not([open])::backdrop {
+    opacity: 0;
+    transition-duration: var(--dur-exit);
+  }
+  /* keyboard-opened sheets (? help) open and close instantly */
+  dialog.ui-instant,
+  dialog.ui-instant::backdrop {
+    transition: none;
+  }
+
+  /* Popover / menu (popover attribute, top layer); set --popover-origin to the trigger side */
+  .ui-popover {
+    margin: 0;
+    padding: 5px;
+    border: 0;
+    min-width: 200px;
+    border-radius: var(--radius-md);
+    color: var(--label);
+    background-color: var(--material-thick);
+    -webkit-backdrop-filter: var(--blur-thick);
+    backdrop-filter: var(--blur-thick);
+    box-shadow: var(--shadow-overlay);
+    transform-origin: var(--popover-origin, top left);
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out),
+      overlay var(--dur-fast) allow-discrete,
+      display var(--dur-fast) allow-discrete;
+  }
+  @starting-style {
+    .ui-popover:popover-open {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  .ui-popover:not(:popover-open) {
+    opacity: 0;
+    transition-duration: 100ms;
+  }
+
+  /* Slider: native range (keeps native accessibility); set --p (0%..100%) on the input */
+  input[type="range"].ui-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 28px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  input[type="range"].ui-slider:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* animate --p only for "reset" (drag stays 1:1) */
+  input[type="range"].ui-slider[data-resetting] {
+    transition: --p var(--dur-base) var(--ease-out);
+  }
+  .ui-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--tint) var(--p), var(--fill) var(--p));
+  }
+  .ui-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--fill);
+  }
+  .ui-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--tint);
+  }
+  .ui-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    margin-top: -8px;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+      0 0.5px 4px rgba(0, 0, 0, 0.12),
+      0 6px 13px rgba(0, 0, 0, 0.12);
+  }
+  .ui-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+      0 0.5px 4px rgba(0, 0, 0, 0.12),
+      0 6px 13px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* ------------------------------------------------------------------ user preferences */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+  /* decorative entrance offsets: fade only. Two rules on purpose: in one rule the production
+     minifier folds transform/translate/scale: none into a single transform and drops the
+     translate / scale resets that Tailwind v4's translate-* and scale-* utilities need. */
+  [data-motion="move"],
+  dialog.ui-sheet,
+  dialog.ui-alert,
+  .ui-popover {
+    transform: none !important;
+  }
+  [data-motion="move"] {
+    translate: none !important;
+    scale: none !important;
+  }
+  /* stages 3-4 remove these loops; this is the safety net (the spinner keeps turning, as on iOS) */
+  .animate-pulse,
+  .animate-ping,
+  .animate-bounce,
+  .animate-caret,
+  .animate-halo {
+    animation: none !important;
+  }
+  /* slides become short fades or instant */
+  :root {
+    --dur-spring: 150ms;
+    --ease-spring: ease;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .material-thin,
+  .material-regular,
+  .material-thick,
+  .ui-popover {
+    background-color: var(--elevated);
+  }
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root,
+  :root:not([data-theme="light"]),
+  [data-theme],
+  :root:has(> body > [data-theme]) {
+    --separator: var(--separator-opaque);
+    --label-2: var(--label);
+    --label-2-on-material: var(--label);
+    --fill-3: var(--fill);
+  }
+  :focus-visible,
+  [role="listbox"]:focus-visible [role="option"][aria-selected="true"] {
+    outline-width: 3px;
+  }
+  .ui-popover {
+    background-color: var(--elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--separator-opaque);
+  }
+  .ui-button[data-variant="gray"],
+  .ui-button[data-variant="plain"] {
+    box-shadow: inset 0 0 0 1px var(--separator-opaque);
+  }
+}
+
+/* Windows high contrast: selection and "current" must not rely on a background colour alone */
+@media (forced-colors: active) {
+  [role="option"][aria-selected="true"],
+  [role="option"][aria-current="true"],
+  [role="tab"][aria-selected="true"],
+  [role="radio"][aria-checked="true"],
+  [aria-pressed="true"],
+  .row-current {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }

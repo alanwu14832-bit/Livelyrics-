@@ -34,7 +34,7 @@ export function StreamPanel({
     <section className={cx("flex min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-panel", className)}>
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-line px-4">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-fg">
-          {live && <span className="size-2 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
+          {live && <span className="size-2 rounded-full bg-accent" aria-hidden="true" />}
           {title}
         </h2>
         {badge}
@@ -53,7 +53,7 @@ export function StreamPanel({
         {text ? (
           <>
             <Markdown>{text}</Markdown>
-            {live && <span aria-hidden="true" className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-accent/70 align-middle" />}
+            {live && <span aria-hidden="true" className="ml-0.5 inline-block h-4 w-0.5 animate-caret bg-tint align-middle" />}
           </>
         ) : (
           <div className="py-6 text-sm text-muted">{placeholder}</div>

@@ -121,14 +121,17 @@ export function NewProjectCard({
         </Button>
       </header>
 
+      {/* noValidate: the card shows its own inline error instead of the browser bubble
+          (the title input keeps `required` for semantics and the e2e hook) */}
       <form
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
         <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-          <fieldset disabled={submitting} className="space-y-4">
+          <fieldset disabled={submitting} className="min-w-0 space-y-4">
             <legend className="mb-2 text-sm font-semibold text-fg">歌曲資訊</legend>
             <div className="space-y-1.5">
               <label htmlFor={ids.title} className="text-xs text-muted">
@@ -213,7 +216,7 @@ export function NewProjectCard({
                   <Waveform peaks={analysis.peaks} duration={analysis.duration} boundaries={bounds} className="h-16" label="音訊波形與偵測到的段落邊界" />
                   <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
                     {analysis.bpm > 0 && <Badge tone={analysis.bpmConfidence >= 0.3 ? "neutral" : "warn"}>節奏{bpmConfidence(analysis.bpmConfidence)}</Badge>}
-                    <span>橘線是偵測到的段落邊界，設計師會據此安排每段畫面。</span>
+                    <span>藍線是偵測到的段落邊界，設計師會據此安排每段畫面。</span>
                   </p>
                 </>
               ) : (

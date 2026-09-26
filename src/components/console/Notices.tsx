@@ -11,17 +11,17 @@ export function Notices({ controller, notices }: { controller: ConsoleController
         <div
           key={n.id}
           className={cx(
-            "pointer-events-auto flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-xl backdrop-blur",
-            n.tone === "error" && "border-danger/50 bg-[#2a1216]/95 text-fg",
-            n.tone === "warn" && "border-warn/40 bg-[#29230f]/95 text-fg",
-            n.tone === "ok" && "border-ok/40 bg-[#0f2519]/95 text-fg",
-            n.tone === "info" && "border-line bg-panel-2/95 text-fg",
+            "pointer-events-auto flex w-full items-start gap-2 rounded-lg border material-thick px-3 py-2 text-xs text-fg shadow-overlay",
+            n.tone === "error" && "border-danger/50",
+            n.tone === "warn" && "border-warn/40",
+            n.tone === "ok" && "border-ok/40",
+            n.tone === "info" && "border-line",
           )}
         >
           <span
             className={cx(
               "mt-1 size-1.5 shrink-0 rounded-full",
-              n.tone === "error" ? "bg-danger" : n.tone === "warn" ? "bg-warn" : n.tone === "ok" ? "bg-ok" : "bg-accent-2",
+              n.tone === "error" ? "bg-danger" : n.tone === "warn" ? "bg-warn" : n.tone === "ok" ? "bg-ok" : "bg-label-2",
             )}
             aria-hidden="true"
           />

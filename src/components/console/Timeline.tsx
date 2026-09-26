@@ -25,6 +25,7 @@ import {
 import type { PlaybackMode } from "@/lib/stage/protocol";
 import { formatTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, CueNote, LyricLine, Project, SectionDesign } from "@/lib/types";
+import { readTokens, subscribeAppearance, tokenAlpha } from "@/lib/ui/canvas-tokens";
 import { useRafLoop } from "./useRaf";
 
 const RULER_H = 16;
@@ -47,22 +48,26 @@ interface Palette {
   mono: string;
 }
 
+/** Design tokens read from the canvas itself (the console is a dark scope inside the page). */
 function readPalette(el: HTMLElement): Palette {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
-  const font = getComputedStyle(el).fontFamily || "sans-serif";
-  return {
-    bg: v("--color-bg", "#0b0c10"),
-    panel: v("--color-panel", "#12141a"),
-    panel2: v("--color-panel-2", "#191c24"),
-    line: v("--color-line", "#2a2f3c"),
-    fg: v("--color-fg", "#e9ebf1"),
-    muted: v("--color-muted", "#8d93a3"),
-    faint: v("--color-faint", "#5b6172"),
-    accent: v("--color-accent", "#ff5a36"),
-    font,
-    mono: v("--font-mono", "ui-monospace, monospace"),
-  };
+  const t = readTokens(el, {
+    bg: ["--surface", "#1c1c1e"],
+    panel: ["--surface", "#1c1c1e"],
+    panel2: ["--surface-2", "#2c2c2e"],
+    line: ["--separator", "rgba(84,84,88,0.65)"],
+    fg: ["--label", "#ffffff"],
+    muted: ["--label-2", "rgba(235,235,245,0.6)"],
+    faint: ["--label-2", "rgba(235,235,245,0.6)"],
+    accent: ["--tint", "#0a84ff"],
+    mono: ["--font-numeric", "ui-monospace, monospace"],
+  });
+  let font = "sans-serif";
+  try {
+    font = getComputedStyle(el).fontFamily || font;
+  } catch {
+    /* default */
+  }
+  return { ...t, font };
 }
 
 interface Hover {
@@ -124,6 +129,10 @@ function TimelineImpl({
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
     paletteRef.current = readPalette(canvas);
+    const unsubAppearance = subscribeAppearance(() => {
+      paletteRef.current = readPalette(canvas);
+      versionRef.current++;
+    });
     const resize = () => {
       const r = wrap.getBoundingClientRect();
       const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -140,7 +149,10 @@ function TimelineImpl({
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      unsubAppearance();
+    };
   }, []);
 
   const applyZoom = useCallback(
@@ -311,8 +323,8 @@ function TimelineImpl({
     <section className="flex min-h-0 flex-col rounded-lg border border-line bg-panel" style={{ gridArea: "timeline" }} aria-label="時間軸">
       <header className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-line px-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-xs font-semibold tracking-wide text-muted">時間軸</h2>
-          <span className="hidden items-center gap-2 text-[10px] text-faint min-[1400px]:flex">
+          <h2 className="text-xs font-semibold text-muted">時間軸</h2>
+          <span className="hidden items-center gap-2 text-[11px] text-faint min-[1400px]:flex">
             <span className="flex items-center gap-1">
               <span className="h-2 w-3 rounded-sm bg-accent" />
               歌詞
@@ -376,7 +388,7 @@ function TimelineImpl({
         />
         {hover && !dragging && (
           <div
-            className="pointer-events-none absolute top-0.5 z-10 rounded bg-bg/90 px-1.5 py-0.5 font-mono text-[10px] text-fg tabular ring-1 ring-line"
+            className="pointer-events-none absolute top-0.5 z-10 rounded bg-bg/90 px-1.5 py-0.5 font-mono text-[11px] text-fg tabular ring-1 ring-line"
             style={{ left: Math.min(Math.max(0, hover.x + 6), Math.max(0, wrapWidth - 64)) }}
           >
             {formatTime(hover.t)}
@@ -388,7 +400,7 @@ function TimelineImpl({
             className="pointer-events-none absolute z-20 w-64 rounded-md border border-line bg-panel-2/95 p-2.5 shadow-xl backdrop-blur"
             style={{ left: Math.min(Math.max(4, hover.x - 128), Math.max(4, wrapWidth - 260)), top: WAVE_TOP + 8 }}
           >
-            <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center justify-between gap-2 text-[11px]">
               <span className="font-semibold" style={{ color: CUE_KIND_COLORS[hoverCue.kind] }}>
                 {CUE_KIND_LABELS[hoverCue.kind] ?? hoverCue.kind}
               </span>
@@ -437,13 +449,13 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
 
   // ruler
   const step = tickStep(view, w);
-  ctx.font = `500 10px ${pal.mono}`;
+  ctx.font = `500 11px ${pal.mono}`;
   ctx.textBaseline = "middle";
   for (const tick of ticks(view, step)) {
     const x = Math.round(X(tick)) + 0.5;
     ctx.fillStyle = pal.line;
     ctx.fillRect(x - 0.5, RULER_H - 5, 1, 5);
-    ctx.fillStyle = withAlpha(pal.line, 0.35);
+    ctx.fillStyle = tokenAlpha(pal.line, 0.35);
     ctx.fillRect(x - 0.5, WAVE_TOP, 1, waveBottom - WAVE_TOP);
     ctx.fillStyle = pal.faint;
     ctx.fillText(tickLabel(tick, step), x + 3, RULER_H / 2);
@@ -464,7 +476,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     ctx.fillStyle = accent;
     ctx.fillRect(x0 + 1, SECTION_TOP, 2, SECTION_H);
     if (active) {
-      ctx.strokeStyle = withAlpha(pal.fg, 0.7);
+      ctx.strokeStyle = tokenAlpha(pal.fg, 0.7);
       ctx.lineWidth = 1;
       roundRect(ctx, x0 + 1.5, SECTION_TOP + 0.5, x1 - x0 - 3, SECTION_H - 1, 4);
       ctx.stroke();
@@ -474,7 +486,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     ctx.beginPath();
     ctx.rect(x0 + 6, SECTION_TOP, Math.max(0, x1 - x0 - 10), SECTION_H);
     ctx.clip();
-    ctx.fillStyle = active ? "#ffffff" : withAlpha(pal.fg, 0.85);
+    ctx.fillStyle = active ? pal.fg : tokenAlpha(pal.fg, 0.85);
     ctx.fillText(label, x0 + 8, SECTION_TOP + SECTION_H / 2 + 0.5);
     ctx.restore();
   });
@@ -486,7 +498,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
       for (let i = 0; i < beats.length; i++) {
         const b = beats[i];
         if (b < view.start || b > view.start + view.span) continue;
-        ctx.fillStyle = withAlpha(pal.fg, i % 4 === 0 ? 0.1 : 0.045);
+        ctx.fillStyle = tokenAlpha(pal.fg, i % 4 === 0 ? 0.1 : 0.045);
         ctx.fillRect(Math.round(X(b)), WAVE_TOP, 1, waveBottom - WAVE_TOP);
       }
     }
@@ -509,7 +521,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
       ctx.fillRect(c * colW, waveMid - amp, Math.max(1, colW - 0.6), amp * 2);
     }
   } else {
-    ctx.fillStyle = withAlpha(pal.fg, 0.12);
+    ctx.fillStyle = tokenAlpha(pal.fg, 0.12);
     ctx.fillRect(0, waveMid - 0.5, w, 1);
     ctx.font = `500 11px ${pal.font}`;
     ctx.fillStyle = pal.faint;
@@ -530,7 +542,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
       if (x === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = withAlpha(pal.fg, 0.35);
+    ctx.strokeStyle = tokenAlpha(pal.fg, 0.35);
     ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -543,7 +555,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     const x1 = X(span[1]);
     if (x1 < 0 || x0 > w) continue;
     const current = i === d.state.lineIndex;
-    ctx.fillStyle = current ? pal.accent : span[0] <= t ? withAlpha(pal.fg, 0.35) : withAlpha(pal.fg, 0.18);
+    ctx.fillStyle = current ? pal.accent : span[0] <= t ? tokenAlpha(pal.fg, 0.35) : tokenAlpha(pal.fg, 0.18);
     roundRect(ctx, x0, lyricY, Math.max(2, x1 - x0 - 1.5), LYRIC_H, 2);
     ctx.fill();
   }
@@ -573,7 +585,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
   // hover
   if (d.hover && !d.dragging) {
     const x = Math.round(d.hover.x) + 0.5;
-    ctx.fillStyle = withAlpha(pal.fg, 0.4);
+    ctx.fillStyle = tokenAlpha(pal.fg, 0.4);
     ctx.fillRect(x - 0.5, RULER_H, 1, h - RULER_H);
   }
 

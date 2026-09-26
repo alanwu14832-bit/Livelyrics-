@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cx } from "@/components/ui";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { useStageValue } from "@/lib/console/hooks";
@@ -47,8 +47,18 @@ export function SidePanel({
   // only rendered on the client once the project has loaded, so reading storage here is safe
   const [tab, setTab] = useState<TabId>(readTab);
   const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ design: null, research: null, control: null, sync: null });
+  // UI-16: only the active panel is mounted (the sync meters run rAF loops), but each tab keeps
+  // its own scroll position. 控制 always opens at the top so the safety controls are in view.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const scrollTops = useRef<Record<TabId, number>>({ design: 0, research: 0, control: 0, sync: 0 });
+
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (el) el.scrollTop = tab === "control" ? 0 : scrollTops.current[tab];
+  }, [tab]);
 
   const choose = (id: TabId) => {
+    if (panelRef.current) scrollTops.current[tab] = panelRef.current.scrollTop;
     setTab(id);
     try {
       window.localStorage.setItem(TAB_KEY, id);
@@ -86,7 +96,7 @@ export function SidePanel({
               tabIndex={active ? 0 : -1}
               onClick={() => choose(t.id)}
               className={cx(
-                "relative px-3 text-xs font-semibold tracking-wide transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+                "relative px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
                 active ? "text-fg" : "text-faint hover:text-muted",
               )}
             >
@@ -98,6 +108,8 @@ export function SidePanel({
         })}
       </div>
       <div
+        key={tab}
+        ref={panelRef}
         role="tabpanel"
         id={`console-tabpanel-${tab}`}
         aria-labelledby={`console-tab-${tab}`}

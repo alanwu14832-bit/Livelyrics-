@@ -1,5 +1,6 @@
 "use client";
 
+import { SpinnerIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui";
@@ -112,7 +113,12 @@ export function NotReadyState({ project, onOpenAnyway }: { project: Project; onO
         「<span className="text-fg">{project.meta?.title || "未命名歌曲"}</span>」
         {processing ? "的研究與設計正在進行，完成後這裡會自動進入控制台。" : "需要先抓歌詞、研究與設計，才能得到完整的舞台視覺。"}
       </p>
-      {processing && <p className="mt-3 animate-pulse text-xs text-accent">處理中…</p>}
+      {processing && (
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted">
+          <SpinnerIcon size={14} weight="bold" className="animate-spinner" aria-hidden="true" />
+          處理中…
+        </p>
+      )}
     </Centered>
   );
 }

@@ -27,8 +27,8 @@ show up in the product:
 ## Tech
 
 - Next.js 16 App Router (webpack: `npm run dev` / `npm run build` use `--webpack`), React 19, TypeScript
-  strict, Tailwind v4 (tokens in `src/app/globals.css`: `bg-bg bg-panel bg-panel-2 bg-panel-3 border-line
-  text-fg text-muted text-faint text-accent bg-accent text-accent-2 text-ok text-warn text-danger`).
+  strict, Tailwind v4 (design tokens in `src/app/globals.css`, see "Design system" below), `motion` v13
+  (springs, `src/lib/motion.ts`), `@phosphor-icons/react` (icons).
 - Read `node_modules/next/dist/docs/` before using Next APIs — this Next version differs from older
   ones (e.g. route `params` is a Promise; `PageProps<'/p/[id]'>` / `RouteContext` global helpers).
 - `@anthropic-ai/sdk` (server only), `zod` v4, `music-metadata` (browser tag reading), `react-markdown`
@@ -172,6 +172,61 @@ Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{proj
 - Lyrics editor: table of lines (time, text, translation), paste / import LRC / LRCLIB picker,
   tap-sync mode (play, Space marks the current line start and advances), ±0.1 s nudge, auto-distribute,
   export LRC, save → `api.updateProject`, offer to re-run design.
+
+## Design system
+
+Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The projection output and
+`src/components/stage/**` never use it. Spec and rationale: `docs/UI-AUDIT.md` §3 (Apple website + iOS HIG).
+
+- **Appearance.** `:root` is light (apple.com) and follows `prefers-color-scheme: dark` unless the root
+  has `data-theme="light"`. `data-theme="light" | "dark" | "console"` on any element scopes a theme to that
+  subtree. The console page wrapper (`src/app/p/[id]/page.tsx`) is `data-theme="console"` (always dark,
+  desktop density), `/stage-lab` is `data-theme="dark"`; `html` follows a page-level scope via `:has()`.
+  Every scope declares `color-scheme`.
+- **Colour tokens** (CSS custom properties, utilities via `@theme inline` so nested scopes work):
+  `--bg --surface --surface-2 --surface-3 --elevated`, labels `--label --label-2` (all readable secondary
+  text) `--label-3 --label-4` (non-text only), fills `--fill .. --fill-4`, `--separator`, tint (systemBlue,
+  the only accent) `--tint` (non-text) `--tint-fill` (button base) `--tint-text` `--tint-text-on-soft`
+  `--tint-soft` `--on-tint`, semantic `--red* --orange* --yellow --green --green-switch` (red = blackout,
+  on-air, recording, error, delete; orange = warning, waiting; green = connected, done, on),
+  `--segment-thumb`, `--scrim`, materials `--material-thin|regular|thick` + `--blur-*`, shadows
+  `--shadow-card|lift|overlay|sheet|thumb`, `--hairline` (1 px, 0.5 px on 2x), spacing `--space-*`,
+  `--page-gutter --group-gap --row-min-h --row-pad-x`. Utilities: `bg-surface`, `text-label-2`,
+  `bg-tint-soft`, `text-red-text` and so on. Code that needs a raw value writes `var(--token)`.
+- **Transitional aliases** (removed in stage 5): `bg-panel*`, `border-line`, `text-fg`, `text-muted`,
+  `text-faint` (now `--label-2`), `*-accent` / `*-accent-2` (now tint), `*-ok` (green), `*-warn` / `*-danger`
+  (orange / red; the bare `text-warn` / `text-danger` use `--orange-text` / `--red-text`) point at the new tokens. New code uses the new names.
+- **Canvas** code reads tokens from its own element, never from `document.documentElement`, and re-reads
+  on appearance changes: `readTokens`, `tokenAlpha`, `subscribeAppearance` in `src/lib/ui/canvas-tokens.ts`.
+- **Type.** `--font-ui` (SF / PingFang TC, then the bundled Noto Sans TC, `font-sans`), `--font-numeric`
+  (time codes, `font-numeric` adds tabular-nums), `--font-code` (`font-mono`: colour codes, LRC only). The
+  stage fonts (`FONTS`, `fontStack()`) are separate; the raw `--font-sans` / `--font-mono` variables keep the
+  stage's pre-redesign values outside the console, because the stage overlays read them directly. Scale: `text-hero text-large-title text-title-1..3
+  text-intro text-headline text-body text-callout text-subheadline text-footnote text-caption
+  text-caption-2`; console `text-c-caption text-c-footnote text-c-body text-c-headline text-c-title
+  text-c-clock text-c-now`. CJK text has 0 tracking (never positive, never uppercase); `t-latin` applies
+  the size-specific SF tracking to Latin / digits; `tabular` for any number that changes. Minimum 11 px.
+- **Radius:** `rounded-xs 6 / sm 8 / md 10 / lg 12 / xl 14 / 2xl 20 / 3xl 28 / pill 980` (px).
+- **Surfaces:** `material-thin|regular|thick` (solid under reduced transparency, increased contrast, or no
+  backdrop-filter support; never on the console top bar, panes or dialog scrims), `border-hairline`,
+  `border-t|b|l|r-hairline`, `divide-y-hairline`, `ring-hairline`, `scroll-edge`, `shadow-*`.
+- **States:** `press` (scale .97, 80 ms down / 160 ms up), `press-tile` (.98), `press-fade` (opacity .6),
+  `focus-inset`, `row-current` (the one current-row look: 3 px tint bar, tint-soft, 600), `row-standby`,
+  `row-selected`, `skeleton` (static, appears after 300 ms). Focus ring: global 2 px tint `:focus-visible`,
+  offset 2, never transitioned (outline colour is constant on every element); listbox rings the
+  `aria-selected` option.
+- **Motion:** `--ease-out --ease-in-out --ease-drawer --ease-spring` (critically damped `linear()`
+  spring, `--dur-spring` 500 ms) are Tailwind `ease-*` utilities; `--dur-press|release|fast|base|exit|toast`
+  via `duration-(--dur-fast)`. Always name the curve (`ease-[ease]` for hover and colour, 150 ms); Tailwind's
+  default timing is left as shipped because the projection window relies on it; never `transition-all`. Loops:
+  only `animate-spinner` (Phosphor Spinner, steps(8)); `animate-caret` (streaming text) and the one-shot
+  `animate-halo` stop under reduced motion. JS: `spring`, `springSnappy`, `springMomentum`, `fadeReduced`,
+  `motionFor()`, `scrollBehavior()`, `staggerDelay()` in `src/lib/motion.ts`. Keyboard-triggered changes
+  never animate; the console animates DOM with CSS only. Real-CSS primitives: `dialog.ui-sheet`,
+  `dialog.ui-alert`, `dialog.ui-instant`, `.ui-popover`, `input.ui-slider` (set `--p`).
+- **Preferences:** `prefers-reduced-motion` (no scroll smoothing, no decorative offsets, spring becomes a
+  150 ms fade), `prefers-reduced-transparency` (no backdrop-filter anywhere), `prefers-contrast: more`
+  (opaque separators, secondary text = label, 3 px focus ring), `forced-colors` (selection has an outline).
 
 ## Development notes
 

@@ -23,7 +23,8 @@ function ControlTabImpl({ controller, project }: { controller: ConsoleController
 
   return (
     <div className="flex flex-col gap-4 p-3">
-      <div>
+      {/* UI-16: the safety controls stay in view while the rest of the tab scrolls */}
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 material-thin px-3 pt-3 pb-3 scroll-edge">
         <SectionTitle
           actions={
             <Button size="sm" variant="ghost" onClick={() => controller.resetOverrides()} disabled={!anyOverride}>
@@ -45,7 +46,7 @@ function ControlTabImpl({ controller, project }: { controller: ConsoleController
         <SectionTitle
           actions={
             <Button size="sm" variant={ov.scene == null ? "secondary" : "ghost"} active={ov.scene == null} onClick={() => controller.setSceneOverride(null)} title="回到設計方案（0）">
-              <span className="font-mono text-[10px] text-faint">0</span> 跟隨設計
+              <span className="font-mono text-[11px] text-faint">0</span> 跟隨設計
             </Button>
           }
         >
@@ -68,8 +69,8 @@ function ControlTabImpl({ controller, project }: { controller: ConsoleController
                 )}
               >
                 <span className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] text-faint">{i + 1}</span>
-                  {inPlan && <span className="text-[9px] text-ok">目前段落</span>}
+                  <span className="font-mono text-[11px] text-faint">{i + 1}</span>
+                  {inPlan && <span className="text-[11px] text-ok">目前段落</span>}
                 </span>
                 <span className="truncate text-xs font-medium">{SCENE_LABELS[scene]}</span>
               </button>
@@ -131,7 +132,7 @@ function ControlTabImpl({ controller, project }: { controller: ConsoleController
             );
           })}
         </div>
-        <p className="mt-1 text-[10px] text-faint">綠框＝目前段落的設計。覆寫會套用到所有段落，直到按下「跟隨設計」。</p>
+        <p className="mt-1 text-[11px] text-faint">綠框＝目前段落的設計。覆寫會套用到所有段落，直到按下「跟隨設計」。</p>
       </div>
 
       <div className="flex flex-col gap-3">

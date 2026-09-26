@@ -227,13 +227,15 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
         href={statusHref}
         className="relative block h-20 overflow-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
         aria-label={`${p.title} 設計總覽`}
+        // the art tile is a dark media surface in both appearances (white text sits on it)
+        data-theme="dark"
         style={{
-          background: `radial-gradient(120% 140% at 0% 0%, ${accent}cc 0%, ${accent}55 38%, transparent 72%), linear-gradient(135deg, #191c24, #0b0c10)`,
+          background: `radial-gradient(120% 140% at 0% 0%, ${accent}cc 0%, ${accent}55 38%, transparent 72%), linear-gradient(135deg, var(--surface), var(--bg))`,
         }}
       >
         <span aria-hidden="true" className="absolute inset-0 bg-[repeating-linear-gradient(115deg,rgba(255,255,255,0.05)_0_1px,transparent_1px_14px)] opacity-60" />
         <span className="absolute right-3 top-3">
-          <Badge tone={status.tone} className={cx("backdrop-blur-sm", p.status === "processing" && "animate-pulse")}>
+          <Badge tone={status.tone} className="backdrop-blur-sm">
             {status.label}
           </Badge>
         </span>

@@ -655,7 +655,7 @@ export function LyricsEditorClient({ id }: { id: string }) {
           tapPointer={tapPointer}
           onDragMarker={tapActive ? undefined : onDragMarker}
           className="h-12"
-          label="全曲時間軸：點擊跳轉，拖曳紫色標記調整該行開始時間"
+          label="全曲時間軸：點擊跳轉，拖曳標記調整該行開始時間"
         />
         <Timeline
           playhead={playhead}

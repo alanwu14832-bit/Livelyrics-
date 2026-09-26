@@ -1,5 +1,6 @@
 "use client";
 
+import { HandPalmIcon, SpinnerIcon as PhSpinner } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRef } from "react";
 import { Badge, Button, cx } from "@/components/ui";
@@ -46,14 +47,15 @@ function OutputPill({ snap, onOpen }: { snap: ConsoleSnapshot; onOpen: () => voi
       )}
     >
       <span className="relative flex size-2.5 items-center justify-center" aria-hidden="true">
-        {o.connected && <span className="absolute inline-flex size-full animate-ping rounded-full bg-ok opacity-50" />}
-        <span className={cx("relative inline-flex size-2 rounded-full", o.connected ? "bg-ok" : "bg-faint")} />
+        <span className={cx("relative inline-flex size-1.5 rounded-full", o.connected ? "bg-ok" : "bg-label-3")} />
+        {/* mounts when the output connects, so the ring plays once per connection */}
+        {o.connected && <span className="absolute inset-0 m-auto size-1.5 animate-halo rounded-full" />}
       </span>
       <span className="flex flex-col leading-tight">
         <span className={cx("text-xs font-semibold", o.connected ? "text-ok" : "text-muted")}>
           {o.connected ? (o.count > 1 ? `投影已連線 ×${o.count}` : "投影已連線") : "投影未連線"}
         </span>
-        <span className="font-mono text-[10px] text-faint tabular">
+        <span className="font-mono text-[11px] text-faint tabular">
           {o.connected ? `${o.width}×${o.height}${o.fullscreen ? " · 全螢幕" : " · 視窗"}` : "按 O 開啟"}
         </span>
       </span>
@@ -114,6 +116,19 @@ export function TopBar({
           {lyrics && untimed > 0 && <Badge tone="warn">{untimed} 行未對時</Badge>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {live && (
+            <span
+              aria-hidden={!snap.liveHeld}
+              className={cx(
+                "inline-flex h-6 items-center gap-1 rounded-pill bg-orange-soft px-2.5 text-xs font-semibold text-orange-text",
+                // appears in 0 ms (keyboard-driven), fades out in 150 ms
+                snap.liveHeld ? "opacity-100 transition-none" : "invisible opacity-0 transition-[opacity,visibility] duration-(--dur-exit) ease-[ease]",
+              )}
+            >
+              <HandPalmIcon size={12} weight="bold" aria-hidden="true" />
+              等待下一句
+            </span>
+          )}
           {project?.status === "processing" && <Badge tone="accent">處理中…</Badge>}
           {project?.status === "error" && (
             <Badge tone="danger" title={project.error}>
@@ -122,7 +137,8 @@ export function TopBar({
           )}
           {snap.redesign.running && (
             <button type="button" onClick={onRedesign} className="focus-visible:outline-2 focus-visible:outline-accent">
-              <Badge tone="accent" className="animate-pulse">
+              <Badge tone="accent">
+                <PhSpinner size={12} weight="bold" className="animate-spinner" aria-hidden="true" />
                 重新設計中…
               </Badge>
             </button>
@@ -162,7 +178,7 @@ export function TopBar({
         <Button
           variant="primary"
           size="md"
-          className={cx("w-12 px-0", live && snap.liveHeld && "animate-pulse")}
+          className="w-12 px-0"
           onClick={() => controller.togglePlay()}
           aria-label={snap.playing ? "暫停" : "播放"}
           title={live ? (snap.playing ? "停止 LIVE 時脈" : "啟動 LIVE 時脈") : "播放／暫停（Space）"}
@@ -170,14 +186,21 @@ export function TopBar({
         >
           {snap.playing ? <IconPause size={18} /> : <IconPlay size={18} />}
         </Button>
-        <Button variant="ghost" size="md" className="w-9 px-0 text-fg/80" onClick={() => controller.next()} aria-label="下一句" title="下一句（→ / ↓）">
+        <Button
+          variant="ghost"
+          size="md"
+          className={cx("w-9 px-0 text-fg/80", live && snap.liveHeld && "bg-orange-soft text-orange-text! ring-2 ring-orange")}
+          onClick={() => controller.next()}
+          aria-label="下一句"
+          title="下一句（→ / ↓）"
+        >
           <IconNextLine size={18} />
         </Button>
       </div>
 
       <div className="flex w-[168px] shrink-0 flex-col items-start justify-center">
         <TimeReadout controller={controller} duration={snap.duration} />
-        <span className="text-[10px] leading-tight text-faint">
+        <span className="text-[11px] leading-tight text-faint">
           {live
             ? snap.liveHeld
               ? "LIVE · 等待下一句"

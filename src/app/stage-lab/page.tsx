@@ -1,9 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { StageLab, type StageLabInitial } from "./StageLab";
 
 export const metadata: Metadata = {
-  title: "舞台實驗室 — Livelyrics",
+  title: "舞台實驗室｜Livelyrics",
   description: "預覽每一種場景、歌詞樣式與位置的開發用頁面。",
+};
+
+// The lab frames stage visuals, so its chrome is always dark.
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#000000",
 };
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -42,5 +48,9 @@ export default async function StageLabPage({ searchParams }: { searchParams: Pro
     lyrics: one(sp, "lyrics"),
     slowmo: one(sp, "slowmo"),
   };
-  return <StageLab initial={initial} />;
+  return (
+    <div data-theme="dark" className="min-h-screen bg-bg text-label">
+      <StageLab initial={initial} />
+    </div>
+  );
 }

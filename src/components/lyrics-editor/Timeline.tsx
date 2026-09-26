@@ -5,25 +5,60 @@ import { cx } from "@/components/ui";
 import { formatTimeShort } from "@/lib/timeline";
 import type { DesignPlan } from "@/lib/types";
 import { drawWaveform, fitCanvas } from "@/components/upload/waveform";
+import { readTokens, subscribeAppearance, tokenAlpha } from "@/lib/ui/canvas-tokens";
 import { effectiveEnd, formatTimeInput, lineAt, type EditorLine } from "./editor-model";
 import type { Playhead } from "./playhead";
 
-const COLORS = {
-  bg: "#12141a",
-  wave: "#3a4050",
-  waveActive: "#5b6172",
-  span: "rgba(139,108,255,0.14)",
-  spanCurrent: "rgba(139,108,255,0.34)",
-  marker: "#8b6cff",
-  markerTap: "#ff5a36",
-  playhead: "#ffffff",
-  text: "#e9ebf1",
-  muted: "#8d93a3",
-  grid: "rgba(255,255,255,0.06)",
-  hover: "rgba(255,255,255,0.35)",
-};
+/** Canvas colours come from the design tokens of the canvas's own theme scope. */
+const TOKENS = {
+  bg: ["--surface", "#ffffff"],
+  wave: ["--label-3", "rgba(60,60,67,0.3)"],
+  tint: ["--tint", "#0071e3"],
+  tintSoft: ["--tint-soft", "rgba(0,113,227,0.12)"],
+  red: ["--red", "#ff3b30"],
+  label: ["--label", "#1d1d1f"],
+  label2: ["--label-2", "#6e6e73"],
+  label3: ["--label-3", "rgba(60,60,67,0.3)"],
+  separator: ["--separator", "rgba(60,60,67,0.29)"],
+  elevated: ["--elevated", "#ffffff"],
+  fontUi: ["--font-ui", "system-ui, sans-serif"],
+  fontNumeric: ["--font-numeric", "ui-monospace, monospace"],
+} as const;
+
+type Palette = ReturnType<typeof readPalette>;
+
+function readPalette(el: Element) {
+  const t = readTokens(el, TOKENS);
+  return {
+    bg: t.bg,
+    wave: t.wave,
+    span: t.tintSoft,
+    spanCurrent: tokenAlpha(t.tint, 0.3),
+    marker: t.tint,
+    markerTap: t.red,
+    playhead: t.label,
+    text: t.label,
+    muted: t.label2,
+    grid: tokenAlpha(t.separator, 0.45),
+    hover: t.label3,
+    readoutBg: tokenAlpha(t.elevated, 0.92),
+    fontUi: t.fontUi,
+    fontNumeric: t.fontNumeric,
+  };
+}
 
 const HIT_PX = 6;
+/** a press on a marker only becomes a drag after this much movement; less is a click (UI-20) */
+const DRAG_THRESHOLD_PX = 3;
+/** Alt / Option drags the marker at a quarter of the pointer speed */
+const FINE_FACTOR = 0.25;
+
+type Drag =
+  | { kind: "seek" }
+  /** pressed on a marker, not moved far enough yet */
+  | { kind: "pending"; index: number; startX: number; grabOffset: number }
+  /** dragging: start = timeAt(x) - grabOffset (1:1, respecting where the marker was grabbed) */
+  | { kind: "marker"; index: number; grabOffset: number; value: number; lastX: number; fine: boolean };
 
 export interface TimelineProps {
   playhead: Playhead;
@@ -48,7 +83,7 @@ export function Timeline(props: TimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const propsRef = useRef(props);
   const hover = useRef<{ x: number; marker: number | null } | null>(null);
-  const drag = useRef<{ kind: "seek" } | { kind: "marker"; index: number } | null>(null);
+  const drag = useRef<Drag | null>(null);
   const drawRef = useRef<() => void>(() => {});
   const rafRef = useRef(0);
 
@@ -60,12 +95,7 @@ export function Timeline(props: TimelineProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let font = "12px sans-serif";
-    try {
-      font = `12px ${getComputedStyle(document.body).fontFamily}`;
-    } catch {
-      /* default */
-    }
+    let pal: Palette = readPalette(canvas);
 
     const view = (): [number, number] => {
       const p = propsRef.current;
@@ -86,7 +116,7 @@ export function Timeline(props: TimelineProps) {
       const { width: W, height: H, dpr } = fitCanvas(canvas);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = COLORS.bg;
+      ctx.fillStyle = pal.bg;
       ctx.fillRect(0, 0, W, H);
       const dur = Math.max(0.001, p.duration || p.playhead.getDuration() || 1);
       const [a, b] = view();
@@ -99,7 +129,7 @@ export function Timeline(props: TimelineProps) {
           const x0 = x(s.start);
           const x1 = x(s.end);
           if (x1 < 0 || x0 > W) continue;
-          ctx.fillStyle = s.colorway[1] ?? COLORS.marker;
+          ctx.fillStyle = s.colorway[1] ?? pal.marker;
           ctx.globalAlpha = 0.85;
           ctx.fillRect(x0, 0, Math.max(1, x1 - x0 - 1), bandH);
           ctx.globalAlpha = 1;
@@ -108,17 +138,17 @@ export function Timeline(props: TimelineProps) {
 
       // seconds grid in window mode (labels are drawn after the waveform)
       if (p.window !== "full") {
-        ctx.fillStyle = COLORS.grid;
+        ctx.fillStyle = pal.grid;
         for (let s = Math.ceil(a); s <= b; s++) ctx.fillRect(Math.round(x(s)), bandH, 1, H - bandH);
       }
 
       // waveform
-      drawWaveform(ctx, p.peaks, { x: 0, y: bandH + 2, width: W, height: H - bandH - 4, color: COLORS.wave, from: a / dur, to: b / dur, bar: 2, gap: 1 });
+      drawWaveform(ctx, p.peaks, { x: 0, y: bandH + 2, width: W, height: H - bandH - 4, color: pal.wave, from: a / dur, to: b / dur, bar: 2, gap: 1 });
 
       if (p.window !== "full") {
-        ctx.font = "10px ui-monospace, monospace";
+        ctx.font = `500 11px ${pal.fontNumeric}`;
         ctx.textBaseline = "bottom";
-        ctx.fillStyle = COLORS.muted;
+        ctx.fillStyle = pal.muted;
         for (let s = Math.ceil(a); s <= b; s++) {
           if (s % 2 === 0) ctx.fillText(formatTimeShort(s), Math.round(x(s)) + 3, H - 3);
         }
@@ -127,7 +157,7 @@ export function Timeline(props: TimelineProps) {
       // line spans + markers
       const t = p.playhead.getTime();
       const current = lineAt(p.lines, t, dur);
-      ctx.font = font;
+      ctx.font = `12px ${pal.fontUi}`;
       ctx.textBaseline = "top";
       const timed = p.lines
         .map((l, i) => ({ l, i }))
@@ -140,16 +170,17 @@ export function Timeline(props: TimelineProps) {
         if (e < a || s > b) continue;
         const x0 = x(s);
         const x1 = x(e);
-        ctx.fillStyle = i === current ? COLORS.spanCurrent : COLORS.span;
+        ctx.fillStyle = i === current ? pal.spanCurrent : pal.span;
         ctx.fillRect(x0, bandH, Math.max(1, x1 - x0), H - bandH);
-        const isHover = hover.current?.marker === i || (drag.current?.kind === "marker" && drag.current.index === i);
-        ctx.fillStyle = p.tapPointer === i ? COLORS.markerTap : COLORS.marker;
-        ctx.fillRect(Math.round(x0) - (isHover ? 1 : 0), bandH, isHover ? 3 : 1.5, H - bandH);
+        const d = drag.current;
+        const isHover = hover.current?.marker === i || ((d?.kind === "marker" || d?.kind === "pending") && d.index === i);
+        ctx.fillStyle = p.tapPointer === i ? pal.markerTap : pal.marker;
+        ctx.fillRect(Math.round(x0) - (isHover ? 1 : 0), bandH, isHover ? 3 : 2, H - bandH);
         if (p.labels) {
           const next = timed[k + 1]?.l.start ?? e;
           const room = Math.min(x(next), W) - x0 - 8;
           if (room > 24) {
-            ctx.fillStyle = i === current ? COLORS.text : COLORS.muted;
+            ctx.fillStyle = i === current ? pal.text : pal.muted;
             let text = l.text || "（空白）";
             while (text.length > 1 && ctx.measureText(text).width > room) text = text.slice(0, -2) + "…";
             ctx.fillText(text, x0 + 5, bandH + 5);
@@ -160,14 +191,14 @@ export function Timeline(props: TimelineProps) {
       // hover line + time
       const hv = hover.current;
       if (hv && !drag.current) {
-        ctx.fillStyle = COLORS.hover;
+        ctx.fillStyle = pal.hover;
         ctx.fillRect(Math.round(hv.x), bandH, 1, H - bandH);
       }
 
       // playhead
       const px = x(t);
       if (px >= -2 && px <= W + 2) {
-        ctx.fillStyle = COLORS.playhead;
+        ctx.fillStyle = pal.playhead;
         ctx.fillRect(Math.round(px) - 1, 0, 2, H);
         ctx.beginPath();
         ctx.moveTo(px - 5, 0);
@@ -181,12 +212,12 @@ export function Timeline(props: TimelineProps) {
       if (hv) {
         const time = a + (hv.x / W) * (b - a);
         const label = hv.marker != null ? `${formatTimeInput(p.lines[hv.marker]?.start ?? time)}  ${p.lines[hv.marker]?.text ?? ""}` : formatTimeInput(time);
-        ctx.font = "11px ui-monospace, monospace";
+        ctx.font = `500 12px ${pal.fontUi}`;
         const w = Math.min(W - 8, ctx.measureText(label).width + 10);
         const lx = Math.min(W - w - 4, Math.max(4, hv.x + 6));
-        ctx.fillStyle = "rgba(11,12,16,0.9)";
+        ctx.fillStyle = pal.readoutBg;
         ctx.fillRect(lx, H - 20, w, 16);
-        ctx.fillStyle = COLORS.text;
+        ctx.fillStyle = pal.text;
         ctx.textBaseline = "middle";
         ctx.fillText(label, lx + 5, H - 12, w - 10);
       }
@@ -200,6 +231,10 @@ export function Timeline(props: TimelineProps) {
     const unsub = propsRef.current.playhead.subscribe(request);
     const ro = new ResizeObserver(request);
     ro.observe(canvas);
+    const unsubAppearance = subscribeAppearance(() => {
+      pal = readPalette(canvas);
+      request();
+    });
 
     const timeAt = (clientX: number) => {
       const rect = canvas.getBoundingClientRect();
@@ -225,14 +260,20 @@ export function Timeline(props: TimelineProps) {
       return bestD <= HIT_PX ? best : null;
     };
 
+    const secondsPerPx = () => {
+      const [a, b] = view();
+      return (b - a) / Math.max(1, canvas.getBoundingClientRect().width);
+    };
+
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       const p = propsRef.current;
       const m = markerAt(e.clientX);
       canvas.setPointerCapture(e.pointerId);
-      if (m != null) {
-        drag.current = { kind: "marker", index: m };
-        p.onDragMarker?.(m, timeAt(e.clientX), "start");
+      const start = m != null ? p.lines[m]?.start : null;
+      if (m != null && start != null) {
+        // nothing changes until the pointer has moved DRAG_THRESHOLD_PX: a click stays a click
+        drag.current = { kind: "pending", index: m, startX: e.clientX, grabOffset: timeAt(e.clientX) - start };
       } else {
         drag.current = { kind: "seek" };
         p.playhead.seek(timeAt(e.clientX));
@@ -242,10 +283,26 @@ export function Timeline(props: TimelineProps) {
     const onMove = (e: PointerEvent) => {
       const p = propsRef.current;
       const rect = canvas.getBoundingClientRect();
-      const d = drag.current;
-      if (d?.kind === "marker") p.onDragMarker?.(d.index, timeAt(e.clientX), "move");
-      else if (d?.kind === "seek") p.playhead.seek(timeAt(e.clientX));
-      const marker = d ? (d.kind === "marker" ? d.index : null) : markerAt(e.clientX);
+      let d = drag.current;
+      if (d?.kind === "pending" && Math.abs(e.clientX - d.startX) >= DRAG_THRESHOLD_PX) {
+        const start = p.lines[d.index]?.start ?? timeAt(d.startX) - d.grabOffset;
+        p.onDragMarker?.(d.index, start, "start");
+        d = drag.current = { kind: "marker", index: d.index, grabOffset: d.grabOffset, value: start, lastX: d.startX, fine: false };
+      }
+      if (d?.kind === "marker") {
+        if (e.altKey) {
+          d.value += (e.clientX - d.lastX) * secondsPerPx() * FINE_FACTOR;
+          d.fine = true;
+        } else {
+          // leaving fine mode: re-anchor so the marker does not jump back under the pointer
+          if (d.fine) d.grabOffset = timeAt(d.lastX) - d.value;
+          d.fine = false;
+          d.value = timeAt(e.clientX) - d.grabOffset;
+        }
+        d.lastX = e.clientX;
+        p.onDragMarker?.(d.index, d.value, "move");
+      } else if (d?.kind === "seek") p.playhead.seek(timeAt(e.clientX));
+      const marker = d ? (d.kind === "seek" ? null : d.index) : markerAt(e.clientX);
       hover.current = { x: e.clientX - rect.left, marker };
       canvas.style.cursor = marker != null ? "ew-resize" : "pointer";
       request();
@@ -253,7 +310,12 @@ export function Timeline(props: TimelineProps) {
     const onUp = (e: PointerEvent) => {
       const d = drag.current;
       drag.current = null;
-      if (d?.kind === "marker") propsRef.current.onDragMarker?.(d.index, timeAt(e.clientX), "end");
+      if (d?.kind === "marker") propsRef.current.onDragMarker?.(d.index, d.value, "end");
+      else if (d?.kind === "pending") {
+        // a click on a marker selects that line: jump to its start
+        const start = propsRef.current.lines[d.index]?.start;
+        if (start != null) propsRef.current.playhead.seek(start);
+      }
       try {
         canvas.releasePointerCapture(e.pointerId);
       } catch {
@@ -272,6 +334,7 @@ export function Timeline(props: TimelineProps) {
     canvas.addEventListener("pointerleave", onLeave);
     return () => {
       unsub();
+      unsubAppearance();
       ro.disconnect();
       cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;

@@ -1,5 +1,6 @@
 "use client";
 
+import { SpinnerIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Button, cx } from "@/components/ui";
 import { Markdown } from "@/components/ui/Markdown";
@@ -146,7 +147,12 @@ export function RedesignDialog({
             <div className="flex min-h-0 flex-col gap-2 rounded-lg border border-line bg-bg/60 p-3">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="font-semibold text-muted">進度</span>
-                {running && <span className="animate-pulse text-accent">設計中…</span>}
+                {running && (
+                  <span className="flex items-center gap-1 text-muted">
+                    <SpinnerIcon size={12} weight="bold" className="animate-spinner" aria-hidden="true" />
+                    設計中…
+                  </span>
+                )}
                 {finished && <span className="flex items-center gap-1 text-ok"><IconCheck size={12} />已套用到控制台與投影</span>}
               </div>
               <div ref={logRef} className="max-h-64 min-h-16 overflow-y-auto text-xs">

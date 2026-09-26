@@ -32,7 +32,7 @@ export function ServerStatusPill({ state, onRetry }: { state: ServerStatusState;
   if (state.kind === "loading") {
     return (
       <span className="inline-flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-muted" role="status">
-        <span className="size-2 animate-pulse rounded-full bg-faint" />
+        <span className="size-2 rounded-full bg-label-3" aria-hidden="true" />
         檢查伺服器…
       </span>
     );

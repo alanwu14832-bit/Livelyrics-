@@ -55,7 +55,7 @@ export function LyricsOptions({
   const summary = useMemo(() => summarizeLyricsText(pasteText), [pasteText]);
 
   return (
-    <fieldset disabled={disabled} className="space-y-3">
+    <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <legend className="mb-2 text-sm font-semibold text-fg">歌詞</legend>
       <div role="radiogroup" aria-label="歌詞來源" className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-panel-2 p-1">
         {MODES.map((m) => (

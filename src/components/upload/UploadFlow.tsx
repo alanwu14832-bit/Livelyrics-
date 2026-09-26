@@ -207,7 +207,7 @@ export function UploadFlow() {
         <div className="mx-auto flex max-w-2xl flex-col gap-5">
           <div className="flex items-center gap-4">
             <span className={failed ? "flex size-12 shrink-0 items-center justify-center rounded-xl bg-danger/15 text-danger" : "flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"}>
-              {failed ? <AlertIcon size={22} /> : <MusicIcon size={22} className="animate-pulse" />}
+              {failed ? <AlertIcon size={22} /> : <MusicIcon size={22} />}
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-semibold text-fg">

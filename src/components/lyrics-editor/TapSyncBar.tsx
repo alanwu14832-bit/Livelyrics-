@@ -69,10 +69,7 @@ export function TapSyncBar({
       className="relative flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-accent/40 bg-gradient-to-r from-accent/[0.14] via-panel to-panel px-5 py-3"
     >
       <span className="flex items-center gap-2 text-xs font-semibold text-accent">
-        <span className="relative flex size-2.5">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent opacity-60" />
-          <span className="relative inline-flex size-2.5 rounded-full bg-accent" />
-        </span>
+        <span className="relative inline-flex size-2.5 rounded-full bg-red" aria-hidden="true" />
         對拍中
       </span>
       <div className="min-w-0 flex-1" aria-live="polite">
