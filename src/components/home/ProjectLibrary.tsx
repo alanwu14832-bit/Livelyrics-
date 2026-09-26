@@ -48,12 +48,24 @@ function writeCount(n: number) {
 const consoleHref = (id: string) => `/p/${encodeURIComponent(id)}`;
 const lyricsHref = (id: string) => `/p/${encodeURIComponent(id)}/lyrics`;
 
+const sortProjects = (list: ProjectSummary[]) => [...list].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
 const GRID = "relative grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-6";
 
-export function ProjectLibrary({ className }: { className?: string }) {
+export function ProjectLibrary({
+  className,
+  initialProjects = null,
+  serverNow,
+}: {
+  className?: string;
+  /** read on the server for the first paint; the client refreshes it on mount */
+  initialProjects?: ProjectSummary[] | null;
+  /** the server's clock for that render, so the relative times hydrate identically */
+  serverNow?: number;
+}) {
   const router = useRouter();
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [now, setNow] = useState(() => Date.now());
+  const [state, setState] = useState<LoadState>(() => (initialProjects ? { kind: "ok", projects: sortProjects(initialProjects) } : { kind: "loading" }));
+  const [now, setNow] = useState(() => serverNow ?? Date.now());
   const [filter, setFilter] = useState("");
   const [pendingDelete, setPendingDelete] = useState<ProjectSummary | null>(null);
   const [pendingReprocess, setPendingReprocess] = useState<ProjectSummary | null>(null);
@@ -67,7 +79,7 @@ export function ProjectLibrary({ className }: { className?: string }) {
     api
       .listProjects()
       .then((projects) => {
-        setState({ kind: "ok", projects: [...projects].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)) });
+        setState({ kind: "ok", projects: sortProjects(projects) });
         setNow(Date.now());
         writeCount(projects.length);
       })
@@ -275,8 +287,8 @@ function CardMeta({ project: p, now }: { project: ProjectSummary; now: number })
   const when = formatRelativeTime(p.updatedAt, now);
   const lead = p.status === "new" ? "尚未處理" : p.duration > 0 ? formatTimeShort(p.duration) : null;
   return (
-    <p className={cls} title={formatAbsoluteTime(p.updatedAt)}>
-      <span className="truncate tabular">{[lead, when].filter(Boolean).join("・")}</span>
+    <p className={cls} title={formatAbsoluteTime(p.updatedAt)} suppressHydrationWarning>
+      <span className="truncate tabular" suppressHydrationWarning>{[lead, when].filter(Boolean).join("・")}</span>
     </p>
   );
 }
@@ -318,7 +330,7 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
         <Menu
           label={`「${name}」的更多動作`}
           placement="bottom-end"
-          trigger={(t) => <Button {...t} variant="quiet" size="icon-sm" icon={DotsThreeIcon} aria-label={`「${name}」的更多動作`} />}
+          trigger={(t) => <Button {...t} variant="quiet" size="icon-sm" icon={<DotsThreeIcon size={20} weight="bold" />} aria-label={`「${name}」的更多動作`} />}
         >
           {!ready && hasDesign && (
             <MenuItem icon={MonitorPlayIcon} href={consoleHref(p.id)}>

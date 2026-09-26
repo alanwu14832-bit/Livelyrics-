@@ -9,16 +9,17 @@ import { AppHeader, cx, pageContainerClass } from "@/components/ui";
 import { UploadFlow } from "@/components/upload/UploadFlow";
 import { Brand } from "./Brand";
 import { ProjectLibrary } from "./ProjectLibrary";
+import type { ProjectSummary } from "@/lib/types";
 import { ConnectClaudeSheet, ServerStatusButton, ServerStatusLine, useServerStatus } from "./ServerStatus";
 
 let introPlayed = false;
 
 /** One-shot fade-up (spring), 60 ms apart; opacity only with reduced motion (data-motion="move"). */
 function reveal(step: number) {
-  return cx("animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_both]", step === 1 && "[animation-delay:60ms]", step === 2 && "[animation-delay:120ms]", step === 3 && "[animation-delay:180ms]");
+  return cx("animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_backwards]", step === 1 && "[animation-delay:60ms]", step === 2 && "[animation-delay:120ms]", step === 3 && "[animation-delay:180ms]");
 }
 
-export function HomeClient() {
+export function HomeClient({ initialProjects = null, serverNow }: { initialProjects?: ProjectSummary[] | null; serverNow?: number }) {
   const { state, reload } = useServerStatus();
   const [connectOpen, setConnectOpen] = useState(false);
   const [intro] = useState(() => !introPlayed);
@@ -50,7 +51,7 @@ export function HomeClient() {
             <UploadFlow />
           </div>
         </section>
-        <ProjectLibrary className="mt-24" />
+        <ProjectLibrary className="mt-24" initialProjects={initialProjects} serverNow={serverNow} />
       </main>
       <ConnectClaudeSheet open={connectOpen} onClose={() => setConnectOpen(false)} state={state} onRecheck={reload} />
     </div>

@@ -232,7 +232,7 @@ export function LyricsSearchPicker({
                   </div>
                 )}
                 {selected && r.synced && (
-                  <div className="flex min-h-11 min-w-0 items-center gap-3 border-t-hairline py-1.5 pr-4 pl-4 ml-4">
+                  <div className="ml-4 flex min-h-11 min-w-0 items-center gap-3 border-t-hairline py-1.5 pr-4">
                     <label htmlFor={`${group}-timing`} className="min-w-0 flex-1 text-[15px] leading-5 text-label">
                       使用 LRCLIB 的時間碼
                       {far && value.useTiming && <span className="block text-[12px] leading-4 text-orange-text">長度不同時，時間碼可能對不上。</span>}

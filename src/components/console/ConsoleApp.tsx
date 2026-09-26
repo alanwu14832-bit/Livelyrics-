@@ -110,7 +110,7 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
           controller.openOutput();
           break;
         case "mode":
-          controller.toggleMode();
+          controller.toggleMode({ announce: false }); // the HUD says 「LIVE 模式」 / 「TRACK 模式」
           break;
         case "help":
           setHelpOpen((v) => !v);

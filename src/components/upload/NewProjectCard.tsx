@@ -179,9 +179,6 @@ export function NewProjectCard({
             {file.name}，{formatBytes(file.size)}
           </p>
         </div>
-        <Button variant="plain" onClick={onCancel} disabled={submitting}>
-          換一首
-        </Button>
       </header>
 
       {/* noValidate: the card shows its own inline error instead of the browser bubble
@@ -194,8 +191,7 @@ export function NewProjectCard({
         }}
       >
         <div className="grid min-w-0 gap-x-8 gap-y-7 px-6 pt-6 pb-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-          <fieldset disabled={submitting} className="min-w-0">
-            <legend className="sr-only">歌曲資訊</legend>
+          <fieldset disabled={submitting} aria-label="歌曲資訊" className="min-w-0">
             <InsetGroup
               header="歌曲資訊"
               bodyClassName="bg-fill-4!"
@@ -205,7 +201,8 @@ export function NewProjectCard({
                 ) : undefined
               }
             >
-              <FormRow label="歌名" htmlFor={ids.title} error={titleError}>
+              {/* the kit's focus ring would hide the red error ring while the field is focused */}
+              <FormRow label="歌名" htmlFor={ids.title} error={titleError} className={titleError ? "has-[:focus-visible]:outline-red!" : undefined}>
                 <input
                   ref={titleRef}
                   id={ids.title}

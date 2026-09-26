@@ -351,7 +351,7 @@ export function ProcessClient({
           <Button href={lyricsHref} transitionTypes={PUSH} variant="gray" icon={PencilSimpleIcon}>
             編輯歌詞
           </Button>
-          <Button href={consoleHref} transitionTypes={PUSH} variant={showDone ? "plain" : plan && !running ? "filled" : "gray"} icon={MonitorPlayIcon} disabled={!plan}>
+          <Button href={consoleHref} transitionTypes={PUSH} variant={showDone ? "plain" : plan && !running && !error ? "filled" : "gray"} icon={MonitorPlayIcon} disabled={!plan}>
             進入控制台
           </Button>
         </>,

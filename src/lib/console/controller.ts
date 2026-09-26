@@ -1089,7 +1089,11 @@ export class ConsoleController {
     if (section) this.seek(section.start + 0.001);
   }
 
-  setMode(mode: PlaybackMode): void {
+  /**
+   * Switch TRACK / LIVE. `announce: false` skips the explanatory notice (the M hotkey answers
+   * with the console HUD instead, so a toast would repeat it).
+   */
+  setMode(mode: PlaybackMode, { announce = true }: { announce?: boolean } = {}): void {
     if (mode === this.settings.mode) return;
     const project = this.snapshot.project;
     if (!project) {
@@ -1124,11 +1128,11 @@ export class ConsoleController {
     this.updateSettings({ mode });
     this.set({ mode, liveHeld: false });
     this.afterClockChange();
-    this.notify(mode === "live" ? "LIVE 模式：由你逐句送出歌詞（Space／→ 下一句）" : "TRACK 模式：跟著音檔時間自動播放歌詞", "info");
+    if (announce) this.notify(mode === "live" ? "LIVE 模式：由你逐句送出歌詞（Space／→ 下一句）" : "TRACK 模式：跟著音檔時間自動播放歌詞", "info");
   }
 
-  toggleMode(): void {
-    this.setMode(this.settings.mode === "live" ? "track" : "live");
+  toggleMode(opts?: { announce?: boolean }): void {
+    this.setMode(this.settings.mode === "live" ? "track" : "live", opts);
   }
 
   // -------------------------------------------------------------------------

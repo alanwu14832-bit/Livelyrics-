@@ -60,7 +60,7 @@ function revealAt(on: boolean, i: number): { className?: string; style?: CSSProp
   if (!on) return {};
   return {
     "data-motion": "move",
-    className: "animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_both]",
+    className: "animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_backwards]",
     style: { animationDelay: `${staggerDelay(Math.min(i, STAGGER_MAX - 1))}s` },
   };
 }
@@ -239,7 +239,7 @@ function Palette({ colors, reveal }: { colors: DesignPlan["keyVisual"]["palette"
         <li
           key={`${c.hex}-${i}`}
           data-motion={reveal ? "move" : undefined}
-          className={cx("w-20 min-w-0", reveal && "animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_both]")}
+          className={cx("w-20 min-w-0", reveal && "animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_backwards]")}
           style={reveal ? { animationDelay: `${0.12 + Math.abs(i - center) * 0.04}s` } : undefined}
         >
           <button
