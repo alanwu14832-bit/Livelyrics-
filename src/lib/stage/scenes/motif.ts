@@ -28,7 +28,7 @@ vec3 scene(vec2 fc) {
     float ang = fi / n * TAU + uTime * 0.12;
     vec2 c = vec2(cos(ang), sin(ang)) * vec2(0.4, 0.33);
     float s = 0.055 * (1.0 + 0.12 * k * step(0.5, hash11(fi + floor(uBeatN))));
-    vec2 muv = rot(-ang) * (p - c) / (2.0 * s) + 0.5;
+    vec2 muv = rot(sin(uTime * 0.4 + fi) * 0.15) * (p - c) / (2.0 * s) + 0.5;
     float m = motifMask(muv, 0.0);
     float g = motifMask(muv, 3.0);
     col = mix(col, mix(uPri, uAcc, 0.5 + 0.5 * sin(fi)), m * 0.75);

@@ -26,13 +26,13 @@ vec3 scene(vec2 fc) {
   float h2 = hash12(cell + 19.19);
 
   vec3 glass = mix(mix(uBg, uPri, 0.3), uPri, smoothstep(0.25, 0.85, h));
-  glass = mix(glass, uAcc, smoothstep(0.84, 0.97, h));
-  glass *= 0.55 + 0.5 * fbm3(q * 1.7 + h * 10.0);
+  glass = mix(glass, uAcc, smoothstep(0.88, 0.98, h));
+  glass *= (0.5 + 0.5 * fbm3(q * 1.7 + h * 10.0)) * (0.5 + 0.5 * h2);
 
   // light sweeping across the window
   float sweepPos = fract(uTime * 0.035 + h2 * 0.08);
   float sweep = exp(-pow((dot(p, normalize(vec2(1.0, 0.45))) * 0.6 + 0.5 - sweepPos) * 5.0, 2.0));
-  glass *= 0.26 + 1.0 * sweep + 0.22 * uEnergy + 0.25 * exp(-dot(p, p) * 3.0);
+  glass *= 0.26 + 0.8 * sweep + 0.22 * uEnergy + 0.25 * exp(-dot(p, p) * 3.0);
 
   // per-beat flares on random cells
   float flare = step(0.86, hash12(cell + floor(uBeatN) * 3.17)) * kick() * 1.4;

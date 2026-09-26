@@ -71,7 +71,19 @@ export function contrastRatio(a: RGB | string, b: RGB | string): number {
  * Return `fg` nudged toward white (or black, for light backgrounds) until it reaches
  * `minRatio` contrast against `bg`. Keeps the hue as long as possible.
  */
+const contrastMemo = new Map<string, string>();
+
 export function ensureContrast(fg: string, bg: string, minRatio = 4.5): string {
+  const key = `${fg}|${bg}|${minRatio}`;
+  const hit = contrastMemo.get(key);
+  if (hit) return hit;
+  const out = computeContrast(fg, bg, minRatio);
+  if (contrastMemo.size > 256) contrastMemo.clear();
+  contrastMemo.set(key, out);
+  return out;
+}
+
+function computeContrast(fg: string, bg: string, minRatio: number): string {
   const f = parseHex(fg, [1, 1, 1]);
   const b = parseHex(bg);
   if (contrastRatio(f, b) >= minRatio) return toHex(f);

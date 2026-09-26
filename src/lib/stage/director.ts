@@ -40,6 +40,8 @@ export interface DirectorInput {
   frozen: boolean;
   /** 0..1 current musical energy (motion speeds up a little when loud) */
   energy: number;
+  /** multiplies transition durations (stage-lab slow motion); default 1 */
+  durationScale?: number;
 }
 
 export const TRANSITION_SECONDS: Record<TransitionKind, number> = {
@@ -84,6 +86,7 @@ export class SceneDirector {
 
   update(input: DirectorInput): DirectorFrame {
     const { target, now } = input;
+    const scale = input.durationScale && input.durationScale > 0 ? input.durationScale : 1;
     if (!this.current) {
       this.current = { target, clock: this.initialClock };
       this.sectionKey = input.sectionKey;
@@ -100,11 +103,11 @@ export class SceneDirector {
         } else if (!lookChanged && kind !== "flash") {
           this.current.target = target;
         } else {
-          this.begin(kind, TRANSITION_SECONDS[kind], target, now);
+          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now);
         }
       } else if (lookChanged) {
         if (sameLookIgnoringParams(target, this.current.target)) this.current.target = target;
-        else this.begin("fade", OVERRIDE_FADE_SECONDS, target, now);
+        else this.begin("fade", OVERRIDE_FADE_SECONDS * scale, target, now);
       }
     }
 

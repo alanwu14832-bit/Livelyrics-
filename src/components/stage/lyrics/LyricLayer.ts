@@ -198,15 +198,19 @@ function textAlignFor(box: PlacementBox, mode: WritingMode): string {
   return a === "start" ? "start" : a === "end" ? "end" : "center";
 }
 
-/** Largest --ly-fit (≤ 1) that makes `block` fit inside `w`×`h`. */
-function fitBlock(block: HTMLElement, w: number, h: number) {
-  if (w <= 0 || h <= 0) return;
+/**
+ * Largest --ly-fit (≤ 1) that makes `block` fit inside `w`×`h`.
+ * Returns false when nothing could be measured yet (not laid out).
+ */
+function fitBlock(block: HTMLElement, w: number, h: number): boolean {
+  if (w <= 0 || h <= 0) return false;
   css(block, "--ly-fit", "1");
   const bw = block.offsetWidth;
   const bh = block.offsetHeight;
-  if (!bw || !bh) return;
+  if (!bw || !bh) return false;
   const k = Math.min(1, w / bw, h / bh);
   css(block, "--ly-fit", k < 1 ? f3(k * 0.98) : "1");
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,8 +353,7 @@ class LineView extends LyricView {
     const { block, units, fills } = this.built;
     if (this.fitDirty) {
       const [w, h] = this.boxSize();
-      fitBlock(block, w, h);
-      this.fitDirty = false;
+      this.fitDirty = !fitBlock(block, w, h);
     }
     const e = this.enter(f.now);
     const x = this.exit(f.now);
@@ -492,9 +495,10 @@ class ImpactView extends LyricView {
     if (this.fitDirty) {
       const [w, h] = this.boxSize();
       const trH = this.tr ? this.tr.offsetHeight : 0;
-      for (const b of this.blocks) fitBlock(b, w, Math.max(10, h - trH));
+      let ok = true;
+      for (const b of this.blocks) ok = fitBlock(b, w, Math.max(10, h - trH)) && ok;
       if (this.tr) fitBlock(this.tr, w, h);
-      this.fitDirty = false;
+      this.fitDirty = !ok;
     }
     const elapsed = lineElapsed(this.line, f.t, this.startedAt, f.nowEpoch);
     const idx = this.chunks.length ? chunkIndexAt(this.chunks, elapsed) : -1;
@@ -563,7 +567,8 @@ class StackView extends LyricView {
 
   private anchor(h: number): number {
     const a = this.spec.box.alignY;
-    return h * (a === "start" ? 0.3 : a === "end" ? 0.72 : 0.5);
+    // leave room for the faint next line inside the box
+    return h * (a === "start" ? 0.34 : a === "end" ? 0.6 : 0.5);
   }
 
   private makeItem(index: number): StackItem | null {
@@ -620,13 +625,14 @@ class StackView extends LyricView {
     this.lastNow = f.now;
     if (this.fitDirty) {
       const [w, h] = this.boxSize();
-      for (const it of this.items.values()) fitBlock(it.el, w, h);
+      let ok = w > 0 && h > 0;
+      for (const it of this.items.values()) ok = fitBlock(it.el, w, h) && ok;
       const cur = this.items.get(this.current);
       if (cur) {
         this.targetY = this.anchor(h) - (cur.el.offsetTop + cur.el.offsetHeight / 2);
         this.y = this.targetY;
       }
-      this.fitDirty = false;
+      this.fitDirty = !ok;
     }
     const k = 1 - Math.exp(-dt / 0.2);
     this.y += (this.targetY - this.y) * (dt > 0 ? k : 0);

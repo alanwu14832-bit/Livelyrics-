@@ -29,11 +29,14 @@ vec3 scene(vec2 fc) {
   float flare = step(0.88, hash12(cell + floor(uBeatN) * 1.37)) * k;
   float tex = vnoise(vec2(u, v) * 2.0) * (1.0 - smoothstep(0.3, 1.0, fv));
 
-  float fog = smoothstep(0.0, 0.45, r);
+  float fog = smoothstep(0.0, 0.45, r) * (1.0 - 0.55 * smoothstep(0.5, 1.1, r));
+  // LED-panel falloff: bright centre, soft edges
+  vec2 pc = abs(f - 0.5);
+  float panelGlow = smoothstep(0.5, 0.05, max(pc.x, pc.y));
   vec3 ringCol = mix(uPri, uAcc, step(0.72, hash11(cell.y * 1.7)));
   vec3 col = uBg * (0.35 + 0.65 * fog);
   col += mix(uBg, uPri, 0.5) * (0.1 + 0.16 * tex) * fog;
-  col += mix(uPri, uAcc, h) * (lit * 0.35 + flare * 0.9) * fog * (1.0 - edges);
+  col += mix(uPri, uAcc, h) * (lit * 0.3 + flare * 0.9) * panelGlow * fog * (1.0 - edges);
   col += ringCol * edges * fog * (0.55 + 0.9 * k);
 
   vec3 lightCol = mix(uAcc, vec3(1.0), 0.4);

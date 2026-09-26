@@ -20,8 +20,8 @@ vec3 scene(vec2 fc) {
   // paper / water ground with faint fibres
   float fibre = fbm3(p * vec2(9.0, 2.0) + 3.0);
   vec3 ground = uBg * (0.85 + 0.25 * fibre) + uPri * 0.06 * smoothstep(0.3, 0.55, f);
-  vec3 inkCol = mix(uPri * 0.45, uPri * (0.95 + 0.25 * w2.x), smoothstep(th, th + 0.22, f));
-  vec3 deep = mix(uPri, uAcc, 0.35) * 1.05;
+  vec3 inkCol = mix(uPri * 0.38, uPri * (0.78 + 0.2 * w2.x), smoothstep(th, th + 0.22, f));
+  vec3 deep = mix(uPri, uAcc, 0.35) * 0.9;
 
   vec3 col = mix(ground, inkCol, inkA);
   col = mix(col, deep, inkB * 0.85);

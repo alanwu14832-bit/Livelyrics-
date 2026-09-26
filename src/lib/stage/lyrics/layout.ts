@@ -84,7 +84,7 @@ export const STYLE_METRICS: Record<LyricStyleId, StyleMetrics> = {
   "line-fade": { size: 9, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: false, scrim: 0.5, weightDelta: 0, trackingDelta: 0.02, leading: 1.24 },
   "word-pop": { size: 9.6, maxChars: 14, maxLines: 2, translationScale: 0.48, showNext: false, scrim: 0.45, weightDelta: 100, trackingDelta: 0, leading: 1.2 },
   typewriter: { size: 8.2, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: false, scrim: 0.5, weightDelta: 0, trackingDelta: 0.04, leading: 1.26 },
-  stack: { size: 7, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: true, scrim: 0.5, weightDelta: 0, trackingDelta: 0.02, leading: 1.25 },
+  stack: { size: 7.8, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: true, scrim: 0.5, weightDelta: 0, trackingDelta: 0.02, leading: 1.25 },
   vertical: { size: 8.2, maxChars: 9, maxLines: 2, translationScale: 0.46, showNext: false, scrim: 0.45, weightDelta: 0, trackingDelta: 0.1, leading: 1.3 },
   impact: { size: 25, maxChars: 6, maxLines: 1, translationScale: 0.2, showNext: false, scrim: 0.35, weightDelta: 200, trackingDelta: -0.02, leading: 1.02 },
   subtitle: { size: 4.6, maxChars: 22, maxLines: 2, translationScale: 0.72, showNext: false, scrim: 0.7, weightDelta: -100, trackingDelta: 0.02, leading: 1.35 },

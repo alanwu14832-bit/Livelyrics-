@@ -23,6 +23,8 @@ export interface StageViewProps {
   adaptiveQuality?: boolean;
   /** force the WebGL1 code path (diagnostics) */
   forceWebGL1?: boolean;
+  /** multiplies section-transition durations (slow motion for inspection); default 1 */
+  transitionScale?: number;
   /** called about once per second with renderer statistics */
   onStats?: (stats: StageStats) => void;
   style?: CSSProperties;
@@ -37,6 +39,7 @@ export function StageView({
   renderScale = 1,
   adaptiveQuality = true,
   forceWebGL1 = false,
+  transitionScale = 1,
   onStats,
   style,
 }: StageViewProps) {
@@ -84,6 +87,10 @@ export function StageView({
   useEffect(() => {
     engineRef.current?.setAdaptive(adaptiveQuality);
   }, [adaptiveQuality, forceWebGL1]);
+
+  useEffect(() => {
+    engineRef.current?.setTransitionScale(transitionScale);
+  }, [transitionScale, forceWebGL1]);
 
   useEffect(() => {
     engineRef.current?.setOnStats(onStats ?? null);

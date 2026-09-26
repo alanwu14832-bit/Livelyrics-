@@ -19,6 +19,7 @@ function one(sp: SearchParams, key: string): string | undefined {
  *   ?scene=<SceneId|plan>&style=<LyricStyleId|plan>&placement=<LyricPlacement|plan>
  *   &t=<seconds>&play=0|1&cw=<colorway id>&chrome=0|1&guides=0|1&tp=0|1
  *   &gl=1 (force WebGL1) &aq=0 (no adaptive resolution) &intensity=&scale=&blackout=1&freeze=1&lyrics=0
+ *   &slowmo=<1..20> (slow-motion section transitions for inspection)
  */
 export default async function StageLabPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
@@ -39,6 +40,7 @@ export default async function StageLabPage({ searchParams }: { searchParams: Pro
     blackout: one(sp, "blackout"),
     freeze: one(sp, "freeze"),
     lyrics: one(sp, "lyrics"),
+    slowmo: one(sp, "slowmo"),
   };
   return <StageLab initial={initial} />;
 }

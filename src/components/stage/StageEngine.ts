@@ -57,6 +57,7 @@ export class StageEngine {
   private showGuides = false;
   private renderScale = 1;
   private adaptive = true;
+  private transitionScale = 1;
   private quality = 1;
   private onStats: ((s: StageStats) => void) | null = null;
 
@@ -85,6 +86,7 @@ export class StageEngine {
   private statsAt = 0;
   private frames = 0;
   private dprRaw = 0;
+  private audio: StageAudioFrame | null = null;
   private beatN = 0;
   private lastBeat = 0;
 
@@ -176,6 +178,11 @@ export class StageEngine {
       this.quality = 1;
       this.sizeDirty = true;
     }
+  }
+
+  /** slow down section transitions (stage lab inspection); 1 = normal */
+  setTransitionScale(scale: number) {
+    this.transitionScale = clamp(scale, 0.1, 50, 1);
   }
 
   setOnStats(cb: ((s: StageStats) => void) | null) {
@@ -332,7 +339,9 @@ export class StageEngine {
     const frozen = !!ov?.freeze;
     if (!frozen) this.clock = (this.clock + dt) % 3600;
 
-    const audio = this.mixer.update(project.analysis, state, t, dt);
+    // a freeze is a true still frame: audio-reactive uniforms hold as well
+    if (!frozen || !this.audio) this.audio = { ...this.mixer.update(project.analysis, state, t, dt) };
+    const audio = this.audio;
     if (audio.beat < this.lastBeat - 0.5) this.beatN++;
     this.lastBeat = audio.beat;
     const targetIntensity = clamp(ov?.intensity ?? 1, 0, 1.5, 1);
@@ -347,6 +356,7 @@ export class StageEngine {
       dt,
       frozen,
       energy: audio.energy,
+      durationScale: this.transitionScale,
     });
 
     // blackout ramp (smooth ~0.4 s, eased)

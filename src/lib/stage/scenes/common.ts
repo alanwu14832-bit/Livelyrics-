@@ -121,10 +121,11 @@ vec3 ramp(float t) {
 
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
-// sample the motif mask at uv (0..1), zero outside
+// sample the motif mask at uv (0..1); fades out softly at the borders so blurred
+// mip levels never show a hard tile edge
 float motifMask(vec2 uv, float bias) {
-  vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
-  return TEX(uMotif, clamp(uv, 0.0, 1.0), bias).a * inside.x * inside.y;
+  vec2 e = smoothstep(vec2(0.0), vec2(0.06), uv) * smoothstep(vec2(1.0), vec2(0.94), uv);
+  return TEX(uMotif, clamp(uv, 0.0, 1.0), bias).a * e.x * e.y;
 }
 `;
 
@@ -140,7 +141,7 @@ vec3 post(vec3 col, vec2 fc) {
   vec2 q = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
   float vig = smoothstep(1.15, 0.25, length(q * vec2(0.78, 1.0)));
   col *= mix(0.42, 1.0, vig);
-  col *= 1.22 * pow(max(uIntensity, 0.0), 0.72);
+  col *= 1.15 * pow(max(uIntensity, 0.0), 0.7);
   col = softKnee(max(col, 0.0));
   float l = luma(col);
   float g = hash12(fc * 0.9173 + vec2(fract(uClock * 7.13) * 517.0, fract(uClock * 3.71) * 389.0)) - 0.5;

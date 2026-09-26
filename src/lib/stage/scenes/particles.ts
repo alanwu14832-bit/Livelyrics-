@@ -36,8 +36,8 @@ vec3 scene(vec2 fc) {
     col += particleLayer(pr + vec2(fi * 0.37, fi * 0.21), z, fi * 17.13 + uSeed, k) * fade * (0.55 + 0.45 * depth);
   }
   // beat shockwave ring
-  float ring = exp(-abs(r - (0.15 + (1.0 - uBeat) * 0.05) - uBeat * 0.7) * 30.0) * pow(1.0 - uBeat, 2.0);
-  col += uAcc * ring * 0.18 * uReact * (0.3 + uEnergy);
+  float ring = exp(-abs(r - 0.08 - uBeat * 0.75) * 30.0) * pow(1.0 - uBeat, 2.0);
+  col += uAcc * ring * 0.2 * sat(uPulse * 1.5) * uReact * (0.3 + uEnergy);
   return col;
 }
 `;

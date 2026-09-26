@@ -50,7 +50,7 @@ export function drawFallbackEmblem(ctx: CanvasRenderingContext2D, size: number, 
   const inner = 0.38 + ((h >> 3) % 20) / 100;
   const cx = size / 2;
   const cy = size / 2;
-  const R = size * 0.4;
+  const R = size * 0.36;
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = "#ffffff";
@@ -123,7 +123,8 @@ export async function rasterizeMotif(svg: string | null | undefined, seed: strin
     const canvas = makeCanvas(size);
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
-    const pad = size * 0.06;
+    // generous padding so blurred mip levels stay inside the texture
+    const pad = size * 0.1;
     ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2);
     // an SVG that renders nothing visible would leave the scene empty
     const data = ctx.getImageData(0, 0, size, size).data;

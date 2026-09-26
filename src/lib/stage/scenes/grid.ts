@@ -55,7 +55,7 @@ vec3 scene(vec2 fc) {
     float gz = 0.5 - abs(fract(zz) - 0.5);
     float lx = smoothstep(0.02 + fx, 0.0, gx) * (1.0 - smoothstep(0.18, 0.55, fx));
     float lz = smoothstep(0.025 + fz, 0.0, gz) * (1.0 - smoothstep(0.12, 0.45, fz));
-    float lines = max(lx, lz);
+    float lines = max(lx, lz) * smoothstep(0.012, 0.11, depth);
     float fog = exp(-z * 0.2);
     vec3 floorCol = mix(uBg * 0.5, uBg, fog);
     vec3 lineCol = mix(uPri, uAcc, sat(fog * 1.3));

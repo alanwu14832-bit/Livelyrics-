@@ -21,9 +21,9 @@ vec3 scene(vec2 fc) {
   col = mix(col, mix(uBg, uPri, 0.55), smoothstep(0.35, 0.95, far) * 0.7);
 
   float body = smoothstep(0.28, 0.9, f);
-  col = mix(col, uPri * (0.75 + 0.35 * w1.x), body * (0.62 + 0.25 * uEnergy));
+  col = mix(col, uPri * (0.7 + 0.3 * w1.x), body * (0.5 + 0.22 * uEnergy));
   float hot = smoothstep(0.55, 1.05, f * f * 1.25 + length(w2) * 0.22);
-  col = mix(col, uAcc, hot * (0.35 + 0.35 * uEnergy + 0.25 * k));
+  col = mix(col, uAcc, hot * (0.3 + 0.28 * uEnergy + 0.22 * k));
 
   // bright filaments along the warp ridges
   float fil = pow(sat(1.0 - abs(f - 0.6) * 7.0), 3.0) * smoothstep(0.2, 0.7, w2.y);

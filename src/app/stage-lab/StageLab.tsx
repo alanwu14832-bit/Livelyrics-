@@ -29,6 +29,7 @@ export interface StageLabInitial {
   blackout?: string;
   freeze?: string;
   lyrics?: string;
+  slowmo?: string;
 }
 
 const STYLE_LABELS: Record<LyricStyleId, string> = {
@@ -95,6 +96,7 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
   const chrome = flag(initial.chrome, true);
   const forceWebGL1 = flag(initial.gl, false);
   const adaptive = flag(initial.aq, true);
+  const slowmo = num(initial.slowmo, 1, 1, 20);
 
   const colorway = useMemo(() => {
     const preset = DEMO_COLORWAYS.find((c) => c.id === cw);
@@ -249,6 +251,7 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
       showGuides={guides}
       forceWebGL1={forceWebGL1}
       adaptiveQuality={adaptive}
+      transitionScale={slowmo}
       onStats={setStats}
       className={chrome ? "w-full" : "absolute inset-0"}
       style={chrome ? undefined : { aspectRatio: "auto" }}
