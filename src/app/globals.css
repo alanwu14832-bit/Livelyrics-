@@ -49,6 +49,9 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* drawers, iOS sheet feel */
   /* critically damped spring (damping 1.0, response 0.35 s): x(t) = 1 - (1 + wt)e^(-wt), sampled over 500 ms */
   --ease-spring: linear(0, 0.075, 0.227, 0.39, 0.536, 0.656, 0.75, 0.821, 0.873, 0.911, 0.938, 0.957, 0.971, 0.98, 0.986, 0.991, 0.994, 0.996, 0.997, 0.998, 1);
+  /* snappy spring (damping 1.0, response 0.25 s) sampled over 350 ms: 72 % at 100 ms, 96 % at 200 ms;
+     the CSS twin of springSnappy (press release, small controls) */
+  --ease-spring-snappy: linear(0, 0.073, 0.22, 0.38, 0.525, 0.645, 0.74, 0.812, 0.866, 0.905, 0.934, 0.954, 0.968, 0.978, 0.985, 0.99, 0.993, 0.995, 0.997, 0.998, 1);
 
   /* Tailwind's default transition timing stays as shipped: the projection window's waiting hint
      relies on it. UI code names the curve: ease-[ease] (hover, colour), ease-out, ease-spring. */
@@ -59,6 +62,8 @@
   --animate-caret: ui-caret 1s step-end infinite;
   /* one-shot ring when the projection connects; never loops */
   --animate-halo: ui-halo 600ms cubic-bezier(0.23, 1, 0.32, 1) 1;
+  /* scroll-driven reveal (apple.com product grids); see the reveal-on-scroll utility */
+  --animate-reveal: ui-reveal linear both;
 
   @keyframes ui-spinner {
     to {
@@ -68,6 +73,12 @@
   @keyframes ui-caret {
     50% {
       opacity: 0;
+    }
+  }
+  @keyframes ui-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
     }
   }
   @keyframes ui-halo {
@@ -244,6 +255,8 @@
 
   /* motion */
   --dur-spring: 500ms; /* visually 87 % at 200 ms, 97 % at 300 ms */
+  --dur-spring-snappy: 350ms; /* with --ease-spring-snappy */
+  --dur-page: 500ms; /* spatial page transitions (spring, visually ~350 ms) */
   --dur-press: 80ms;
   --dur-release: 160ms;
   --dur-fast: 150ms; /* hover, colour */
@@ -762,24 +775,34 @@
 
 /* ------------------------------------------------------------------ states */
 
-/* press feedback: 80 ms down, 160 ms release (asymmetric), strong ease-out */
+/* press feedback: scale down in 80 ms (ease-out) on pointer-down, spring back on release
+   (snappy spring, interruptible: a new press retargets from the current scale) */
 @utility press {
-  transition-property: color, background-color, box-shadow, transform, opacity, filter;
-  transition-duration: var(--dur-release);
-  transition-timing-function: var(--ease-out);
+  transition:
+    transform var(--dur-spring-snappy) var(--ease-spring-snappy),
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    opacity var(--dur-fast) ease,
+    filter var(--dur-fast) ease;
   &:active:not(:disabled) {
     transform: scale(0.97);
     transition-duration: var(--dur-press);
+    transition-timing-function: var(--ease-out);
   }
 }
-/* large tiles (console lock tiles, scene grid) */
+/* large tiles and cards (console lock tiles, scene grid, project cards) */
 @utility press-tile {
-  transition-property: color, background-color, box-shadow, transform, opacity;
-  transition-duration: var(--dur-release);
-  transition-timing-function: var(--ease-out);
+  transition:
+    transform var(--dur-spring-snappy) var(--ease-spring-snappy),
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
   &:active:not(:disabled) {
     transform: scale(0.98);
     transition-duration: var(--dur-press);
+    transition-timing-function: var(--ease-out);
   }
 }
 /* icon-only and plain buttons dim instead of shrinking */
@@ -821,6 +844,15 @@
   }
 }
 
+/* scroll-driven reveal for grids (home library); off with reduced motion, no-op without support */
+@utility reveal-on-scroll {
+  @supports (animation-timeline: view()) {
+    animation: var(--animate-reveal);
+    animation-timeline: view();
+    animation-range: entry 0% entry 60%;
+  }
+}
+
 /* ------------------------------------------------------------------ primitives that need real CSS */
 
 @property --p {
@@ -843,11 +875,14 @@
     opacity: 1;
     transform: none;
   }
+  /* materialize (UI-AUDIT 3.4.1): opacity, scale and a small blur move together */
   dialog.ui-sheet {
     max-height: 85vh;
     border-radius: var(--radius-2xl);
+    filter: none;
     transition:
       opacity var(--dur-base) var(--ease-out),
+      filter var(--dur-base) var(--ease-out),
       transform var(--dur-spring) var(--ease-spring),
       overlay var(--dur-spring) allow-discrete,
       display var(--dur-spring) allow-discrete;
@@ -855,8 +890,10 @@
   dialog.ui-alert {
     width: 340px;
     border-radius: var(--radius-xl);
+    filter: none;
     transition:
       opacity var(--dur-base) var(--ease-out),
+      filter var(--dur-base) var(--ease-out),
       transform var(--dur-base) var(--ease-out),
       overlay var(--dur-base) allow-discrete,
       display var(--dur-base) allow-discrete;
@@ -864,21 +901,25 @@
   @starting-style {
     dialog.ui-sheet[open] {
       opacity: 0;
+      filter: blur(6px);
       transform: translateY(8px) scale(0.98);
     }
     dialog.ui-alert[open] {
       opacity: 0;
+      filter: blur(6px);
       transform: scale(0.96);
     }
   }
   dialog.ui-sheet:not([open]) {
     opacity: 0;
+    filter: blur(4px);
     transform: scale(0.98);
     transition-duration: var(--dur-exit);
     transition-timing-function: var(--ease-out);
   }
   dialog.ui-alert:not([open]) {
     opacity: 0;
+    filter: blur(4px);
     transform: scale(0.96);
     transition-duration: var(--dur-exit);
   }
@@ -921,9 +962,11 @@
     box-shadow: var(--shadow-overlay);
     transform-origin: var(--popover-origin, top left);
     opacity: 1;
+    filter: none;
     transform: none;
     transition:
       opacity var(--dur-fast) var(--ease-out),
+      filter var(--dur-fast) var(--ease-out),
       transform var(--dur-fast) var(--ease-out),
       overlay var(--dur-fast) allow-discrete,
       display var(--dur-fast) allow-discrete;
@@ -931,6 +974,7 @@
   @starting-style {
     .ui-popover:popover-open {
       opacity: 0;
+      filter: blur(6px);
       transform: scale(0.97);
     }
   }
@@ -996,6 +1040,121 @@
   }
 }
 
+/* ------------------------------------------------------------------ view transitions (React <ViewTransition>) */
+/* Page wrappers use enter/exit {push: "push", pop: "pop", default: "none"}; links pass
+   transitionTypes={["push"]} going deeper and ["pop"] for "‹ 作品庫". Shared elements use
+   share="morph" default="none" with names like project-art-<id>. AppHeader carries
+   view-transition-name: app-header so it stays put while content slides. */
+
+::view-transition {
+  pointer-events: none; /* clicks during a transition reach the live page */
+}
+
+/* iOS navigation push: new page from the right, old page drifts left and dims */
+::view-transition-old(.push) {
+  animation:
+    var(--dur-exit) var(--ease-out) both ui-vt-fade-out,
+    var(--dur-page) var(--ease-spring) both ui-vt-push-old;
+}
+::view-transition-new(.push) {
+  animation:
+    var(--dur-base) var(--ease-out) both ui-vt-fade-in,
+    var(--dur-page) var(--ease-spring) both ui-vt-push-new;
+}
+/* pop: the exact reverse path */
+::view-transition-old(.pop) {
+  animation:
+    var(--dur-exit) var(--ease-out) both ui-vt-fade-out,
+    var(--dur-page) var(--ease-spring) both ui-vt-pop-old;
+}
+::view-transition-new(.pop) {
+  animation:
+    var(--dur-base) var(--ease-out) both ui-vt-fade-in,
+    var(--dur-page) var(--ease-spring) both ui-vt-pop-new;
+}
+/* same place, different content: cross-fade with a 12 px directional drift */
+::view-transition-old(.xfade-forward),
+::view-transition-old(.xfade-back) {
+  animation: var(--dur-exit) var(--ease-out) both ui-vt-fade-out;
+}
+::view-transition-new(.xfade-forward) {
+  animation:
+    var(--dur-base) var(--ease-out) both ui-vt-fade-in,
+    var(--dur-spring) var(--ease-spring) both ui-vt-from-right;
+}
+::view-transition-new(.xfade-back) {
+  animation:
+    var(--dur-base) var(--ease-out) both ui-vt-fade-in,
+    var(--dur-spring) var(--ease-spring) both ui-vt-from-left;
+}
+/* shared element morph (card art -> header art): spring, blur hides interpolation */
+::view-transition-group(.morph) {
+  animation-duration: var(--dur-page);
+  animation-timing-function: var(--ease-spring);
+}
+::view-transition-image-pair(.morph) {
+  animation-name: ui-vt-via-blur;
+}
+/* the sticky header is the spatial anchor: it does not slide */
+::view-transition-group(app-header) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(app-header) {
+  display: none;
+}
+::view-transition-new(app-header) {
+  animation: none;
+}
+
+@keyframes ui-vt-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ui-vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ui-vt-push-old {
+  to {
+    transform: translateX(-12px);
+    filter: brightness(0.92);
+  }
+}
+@keyframes ui-vt-push-new {
+  from {
+    transform: translateX(24px);
+  }
+}
+@keyframes ui-vt-pop-old {
+  to {
+    transform: translateX(24px);
+  }
+}
+@keyframes ui-vt-pop-new {
+  from {
+    transform: translateX(-12px);
+    filter: brightness(0.92);
+  }
+}
+@keyframes ui-vt-from-right {
+  from {
+    transform: translateX(12px);
+  }
+}
+@keyframes ui-vt-from-left {
+  from {
+    transform: translateX(-12px);
+  }
+}
+@keyframes ui-vt-via-blur {
+  30% {
+    filter: blur(3px);
+  }
+}
+
 /* ------------------------------------------------------------------ user preferences */
 
 @media (prefers-reduced-motion: reduce) {
@@ -1017,18 +1176,38 @@
     translate: none !important;
     scale: none !important;
   }
+  /* materialize becomes a plain fade */
+  dialog.ui-sheet,
+  dialog.ui-alert,
+  .ui-popover {
+    filter: none !important;
+  }
   /* stages 3-4 remove these loops; this is the safety net (the spinner keeps turning, as on iOS) */
   .animate-pulse,
   .animate-ping,
   .animate-bounce,
   .animate-caret,
-  .animate-halo {
+  .animate-halo,
+  .reveal-on-scroll {
     animation: none !important;
   }
   /* slides become short fades or instant */
   :root {
     --dur-spring: 150ms;
     --ease-spring: ease;
+    --dur-spring-snappy: 150ms;
+    --ease-spring-snappy: ease;
+    --dur-page: 150ms;
+  }
+  /* page and content transitions: a 150 ms cross-fade, no movement, no morph travel */
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+  }
+  ::view-transition-old(*) {
+    animation: var(--dur-fast) ease both ui-vt-fade-out !important;
+  }
+  ::view-transition-new(*) {
+    animation: var(--dur-fast) ease both ui-vt-fade-in !important;
   }
 }
 

@@ -67,3 +67,72 @@ export function prefersReducedMotion(): boolean {
     return false;
   }
 }
+
+// ---------------------------------------------------------------- gesture physics (UI-AUDIT 3.4.1)
+// Shared by drag-to-dismiss sheets, timeline pan inertia and slider over-drag. Everything here is
+// pure math; drive the element with motion's animate() (full transform strings on the console).
+
+/**
+ * Distance a flick keeps travelling, Apple's projection from "Designing Fluid Interfaces":
+ * `(v / 1000) * d / (1 - d)` with v in px/s. d ≈ 0.998 feels like scrolling, 0.99 is snappier.
+ */
+export function projectMomentum(velocityPxPerSecond: number, decelerationRate = 0.998): number {
+  if (!Number.isFinite(velocityPxPerSecond) || decelerationRate <= 0 || decelerationRate >= 1) return 0;
+  return ((velocityPxPerSecond / 1000) * decelerationRate) / (1 - decelerationRate);
+}
+
+/**
+ * Rubber-band resistance: how far an element follows when dragged `overshoot` px past a
+ * boundary of a `dimension` px track (the further past, the less it follows). Keeps the sign.
+ */
+export function rubberband(overshoot: number, dimension: number, constant = 0.55): number {
+  if (!Number.isFinite(overshoot) || !(dimension > 0)) return 0;
+  const o = Math.abs(overshoot);
+  return Math.sign(overshoot) * ((o * dimension * constant) / (dimension + constant * o));
+}
+
+/** `value` inside [min, max] unchanged; outside it, rubber-banded towards the nearest bound. */
+export function rubberbandClamp(value: number, min: number, max: number, dimension: number, constant = 0.55): number {
+  if (value < min) return min + rubberband(value - min, dimension, constant);
+  if (value > max) return max + rubberband(value - max, dimension, constant);
+  return value;
+}
+
+/**
+ * Pointer velocity from the recent position history (the last `windowMs`), in px/s. Feed it
+ * every pointermove with `event.timeStamp`; read it on pointerup.
+ */
+export function createVelocityTracker(windowMs = 100) {
+  let samples: Array<{ t: number; x: number }> = [];
+  return {
+    add(t: number, x: number) {
+      samples.push({ t, x });
+      const cutoff = t - windowMs;
+      while (samples.length > 2 && samples[0].t < cutoff) samples.shift();
+    },
+    /** px per second; 0 without enough history or after the pointer rested for `windowMs` */
+    velocity(now?: number): number {
+      if (samples.length < 2) return 0;
+      const last = samples[samples.length - 1];
+      if (now != null && now - last.t > windowMs) return 0;
+      const first = samples[0];
+      const dt = last.t - first.t;
+      return dt > 0 ? ((last.x - first.x) / dt) * 1000 : 0;
+    },
+    reset() {
+      samples = [];
+    },
+  };
+}
+
+/**
+ * Drag-to-dismiss decision for a sheet dragged `offset` px towards dismissal (positive = down)
+ * with release `velocity` (px/s): a quick flick dismisses even before halfway, a slow drag
+ * needs its projected resting point past `threshold` of `extent`.
+ */
+export function shouldDismiss(offset: number, velocity: number, extent: number, { threshold = 0.5, flickVelocity = 500 } = {}): boolean {
+  if (offset <= 0 && velocity <= 0) return false;
+  if (velocity >= flickVelocity) return true;
+  if (velocity <= -flickVelocity) return false;
+  return offset + projectMomentum(velocity, 0.99) > extent * threshold;
+}
