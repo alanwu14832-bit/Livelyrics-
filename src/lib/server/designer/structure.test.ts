@@ -53,7 +53,11 @@ describe("analyzeStructure", () => {
     // AUDIO reports 8.001 / 24.003 / 40.008 / 48.002 / 63.999 for the demo song while the LRC says 8.00, 24.00, 48.00
     const analysis = demoAnalysis();
     const snapped = [0, 8.001, 24.003, 40.008, 48.002, 63.999, 73];
-    analysis.sections = analysis.sections.map((s, i) => ({ ...s, start: snapped[i], end: snapped[i + 1] }));
+    // and the energies it measures (the breakdown is only a moderate dip below the song mean)
+    const energies = [0.2664, 0.5653, 0.768, 0.3919, 0.768, 0.2146];
+    analysis.sections = analysis.sections.map((s, i) => ({ ...s, start: snapped[i], end: snapped[i + 1], energy: energies[i] }));
+    const rate = analysis.envelopeRate;
+    analysis.energy = analysis.energy.map((_, f) => energies[Math.max(0, snapped.findIndex((b, i) => f / rate >= b && f / rate < snapped[i + 1]))]);
     const st = analyzeStructure({ ...demoInput(), analysis });
     expect(st.sections.map((s) => s.kind)).toEqual(["intro", "verse", "chorus", "breakdown", "chorus", "outro"]);
     expect(st.sections[0].lineIds).toEqual([]);

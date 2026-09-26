@@ -170,7 +170,9 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
           setProject(p);
           setLoad({ kind: "ok" });
           // a refresh after completion must not start the pipeline again
-          if (run) window.history.replaceState(window.history.state, "", processHref(id));
+          // null state (not history.state): Next only syncs its router URL for non-internal
+          // calls, otherwise its next commit would put `?run=1` back and a refresh would re-run
+          if (run) window.history.replaceState(null, "", processHref(id));
           if (run || p.status === "new") {
             const handoff = readLyricsHandoff(id);
             execute({ steps, lyricsText: handoff ?? undefined, instruction });

@@ -551,7 +551,15 @@ function assignKinds(sections: StructSection[], source: SongStructure["source"],
     const prev = sections[i - 1];
     const dur = s.end - s.start;
     const quiet = isFiniteNumber(s.energy) && s.energy <= meanEnergy - 0.12;
-    if (i > 0 && i < n - 1 && quiet && s.lineIds.length <= 2 && chorusesSeen >= 1) s.kind = "breakdown";
+    // a short sung dip between two choruses is a breakdown even when the song's mean is low
+    const dip =
+      prev?.kind === "chorus" &&
+      next?.kind === "chorus" &&
+      isFiniteNumber(s.energy) &&
+      isFiniteNumber(prev.energy) &&
+      isFiniteNumber(next.energy) &&
+      s.energy <= Math.min(prev.energy, next.energy) - 0.25;
+    if (i > 0 && i < n - 1 && (quiet || dip) && s.lineIds.length <= 2 && chorusesSeen >= 1) s.kind = "breakdown";
     else if (next?.kind === "chorus" && prev?.kind === "verse" && dur <= 16) s.kind = "pre-chorus";
     else if (chorusesSeen >= 1 && s.repeatedRatio === 0 && s.start >= sections[n - 1].end * 0.55 && sections.slice(i + 1).some((x) => x.kind === "chorus"))
       s.kind = "bridge";

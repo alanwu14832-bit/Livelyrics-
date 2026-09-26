@@ -113,7 +113,7 @@ export const SECTION_KIND_LABELS: Record<SectionKind, string> = {
   chorus: "副歌",
   bridge: "橋段",
   solo: "獨奏",
-  breakdown: "Breakdown",
+  breakdown: "抽離段",
   outro: "尾奏",
   interlude: "間奏",
 };
