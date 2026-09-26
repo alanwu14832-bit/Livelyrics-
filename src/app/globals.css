@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+  Operator UI design tokens (dark, low-glare — consoles live in dark venues).
+  Use the Tailwind utilities generated from @theme: bg-bg, bg-panel, bg-panel-2,
+  border-line, text-fg, text-muted, text-accent, bg-accent, text-ok, text-warn, text-danger ...
+  The projection output does NOT use these; it is styled by the design plan.
+*/
+@theme {
+  --color-bg: #0b0c10;
+  --color-panel: #12141a;
+  --color-panel-2: #191c24;
+  --color-panel-3: #222633;
+  --color-line: #2a2f3c;
+  --color-fg: #e9ebf1;
+  --color-muted: #8d93a3;
+  --color-faint: #5b6172;
+  --color-accent: #ff5a36;
+  --color-accent-2: #8b6cff;
+  --color-ok: #34d17c;
+  --color-warn: #f5c542;
+  --color-danger: #ff4d5e;
+
+  --font-sans: var(--font-noto-sans-tc), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+
+/* thin dark scrollbars for dense operator panels */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
