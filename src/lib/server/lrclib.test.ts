@@ -112,6 +112,17 @@ describe("searchLyrics", () => {
     await expect(searchLyrics({ title: "x" })).rejects.toThrow(/無法連線到 LRCLIB/);
   });
 
+  it("retries a transient failure once, but not a client error", async () => {
+    let n = 0;
+    let calls = mockFetch(() => (++n === 1 ? { status: 503 } : { status: 200, body: [rec({ id: 11 })] }));
+    expect((await searchLyrics({ title: "x", artist: "y" })).map((r) => r.id)).toEqual([11]);
+    expect(calls).toHaveLength(2);
+
+    calls = mockFetch(() => ({ status: 400 }));
+    await expect(searchLyrics({ title: "x" })).rejects.toThrow(/400/);
+    expect(calls).toHaveLength(1);
+  });
+
   it("empty title returns nothing without a request", async () => {
     const calls = mockFetch(() => ({ status: 200, body: [] }));
     expect(await searchLyrics({ title: "  " })).toEqual([]);

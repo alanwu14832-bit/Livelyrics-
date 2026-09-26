@@ -30,7 +30,7 @@ export function TopBar({
   return (
     <header className={cx("sticky top-0 z-20 border-b border-line/70 bg-bg/90 backdrop-blur", className)}>
       <div className="flex min-h-14 items-center gap-4 px-5 py-2">
-        <Brand compact />
+        <Brand compact onClick={onNavigate ? (e) => onNavigate(e, "/") : undefined} />
         <span aria-hidden="true" className="h-6 w-px bg-line" />
         <div className="min-w-0 flex-1">
           <nav aria-label="路徑" className="flex items-center gap-1 text-[11px] text-faint">

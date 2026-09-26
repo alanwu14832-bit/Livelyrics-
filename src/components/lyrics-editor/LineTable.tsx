@@ -86,7 +86,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
     >
       {(current || tapTarget) && <span aria-hidden="true" className={cx("absolute inset-y-0 left-0 w-0.5", tapTarget ? "bg-accent" : "bg-accent-2")} />}
       <div role="cell" className="flex items-center gap-1 font-mono text-[11px] text-faint tabular">
-        {tapTarget ? <span className="text-accent">下一句</span> : index + 1}
+        {tapTarget ? <span className="text-accent">待標記</span> : index + 1}
       </div>
       <div role="cell" className="flex items-center gap-0.5">
         <IconButton label="提早 0.1 秒" onClick={() => h.nudge(index, -0.1)} disabled={line.start == null}>

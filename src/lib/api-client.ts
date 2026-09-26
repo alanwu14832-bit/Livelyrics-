@@ -127,4 +127,10 @@ export interface ProcessRequest {
   lyricsText?: string;
   /** free-form art-direction instruction for a re-design, e.g. "副歌更熱血一點" */
   instruction?: string;
+  /**
+   * Only watch the run in progress (or one that finished in the last minute); never start
+   * a new one. With nothing to attach to, the stream ends right away with `done` (project
+   * ready) or `error` (never processed / last run failed). Other fields are ignored.
+   */
+  attachOnly?: boolean;
 }

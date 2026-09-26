@@ -73,11 +73,11 @@ describe("live navigation", () => {
 
 describe("sections and cues", () => {
   const plan = testPlan();
-  it("maps a line to its section by start time", () => {
-    expect(sectionOfLine(plan, lines[0])).toBe(1);
-    expect(sectionOfLine(plan, lines[4])).toBe(2);
-    expect(sectionOfLine(plan, lines[2])).toBeNull();
-    expect(sectionOfLine(null, lines[0])).toBeNull();
+  it("maps a line to the section it is sung in", () => {
+    expect(sectionOfLine(plan, lines, 0, 73)).toBe(1);
+    expect(sectionOfLine(plan, lines, 4, 73)).toBe(2);
+    expect(sectionOfLine(plan, lines, 2, 73)).toBeNull();
+    expect(sectionOfLine(null, lines, 0, 73)).toBeNull();
   });
 
   it("sorts cues and finds the upcoming one", () => {

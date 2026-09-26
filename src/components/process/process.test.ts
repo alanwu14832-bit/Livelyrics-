@@ -73,8 +73,13 @@ describe("pipeline reducer", () => {
     let s = startRun(["design"], 0);
     expect(s.steps.lyrics.status).toBe("kept");
     expect(s.steps.design.status).toBe("pending");
-    s = applyEvent(s, { type: "log", step: "research", message: "已接上進行中的處理。" }, 1);
+    s = applyEvent(s, { type: "attached", steps: ["research", "design"], sameRequest: false }, 1);
     expect(s.attached).toBe(true);
+    expect(s.requested).toEqual(["research", "design"]);
+    expect(s.steps.research.status).toBe("pending");
+    expect(s.steps.lyrics.status).toBe("kept");
+    // a log line mentioning attaching is just a log line
+    s = applyEvent(s, { type: "log", step: "research", message: "已接上進行中的處理。" }, 1);
     s = applyEvent(s, { type: "step", step: "research", status: "start" }, 2);
     expect(s.requested).toEqual(["research", "design"]);
     expect(s.steps.research.status).toBe("running");

@@ -155,6 +155,10 @@ export interface ProjectSummary {
   updatedAt: string;
   /** first palette color, for the library card */
   accent?: string;
+  /** a few plan palette colors (background first), for the library card */
+  palette?: string[];
+  /** last error message when status === "error" */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,12 @@ export interface ProjectSummary {
 // ---------------------------------------------------------------------------
 
 export type PipelineEvent =
+  /**
+   * First event when this request joined a run that was already in progress (or had just
+   * finished) instead of starting one. `steps` are the steps that run covers;
+   * `sameRequest` is false when this request's own steps/instruction/lyrics were NOT applied.
+   */
+  | { type: "attached"; steps: Array<"lyrics" | "research" | "design">; sameRequest: boolean }
   | { type: "step"; step: PipelineStepId; status: "start" | "done" | "skipped" | "error"; message?: string }
   | { type: "log"; step: PipelineStepId; message: string }
   /** incremental research text / designer thoughts to show live */

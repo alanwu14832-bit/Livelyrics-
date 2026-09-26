@@ -1,6 +1,6 @@
 // Pure lyric / section / cue navigation used by the console controller and UI.
 
-import { lineIndexAt } from "@/lib/timeline";
+import { lineIndexAt, sectionIndexForLine } from "@/lib/timeline";
 import type { CueNote, DesignPlan, LyricLine, Lyrics } from "@/lib/types";
 
 /** Tolerance so a jump that lands exactly on a line start does not re-target that same line. */
@@ -79,12 +79,13 @@ export function livePrevLine(lines: readonly LyricLine[], current: number | null
   return ref > 0 ? ref - 1 : 0;
 }
 
-/** Section index a lyric line belongs to (by its start time), or null for untimed lines / no plan. */
-export function sectionOfLine(plan: DesignPlan | null, line: LyricLine | undefined): number | null {
-  if (!plan || plan.sections.length === 0 || !isTimed(line)) return null;
-  const secs = plan.sections;
-  for (let i = secs.length - 1; i >= 0; i--) if (line.start >= secs[i].start - 1e-6) return i;
-  return 0;
+/**
+ * Section index a lyric line belongs to — the same rule the stage uses for its lyric style
+ * (a line sung into a section a beat early belongs to it) — or null for untimed lines / no plan.
+ */
+export function sectionOfLine(plan: DesignPlan | null, lines: LyricLine[], index: number, songDuration: number): number | null {
+  if (!plan || plan.sections.length === 0 || !isTimed(lines[index])) return null;
+  return sectionIndexForLine(plan, lines, index, songDuration);
 }
 
 export interface UpcomingCue {

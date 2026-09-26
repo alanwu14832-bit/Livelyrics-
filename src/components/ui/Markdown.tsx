@@ -23,7 +23,13 @@ export function Markdown({ children, className }: { children: string; className?
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" /> }}
+        components={{
+          a: ({ href, title, children }) => (
+            <a href={href} title={title} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
       >
         {children}
       </ReactMarkdown>

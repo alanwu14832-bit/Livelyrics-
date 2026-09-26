@@ -332,6 +332,12 @@ function summarize(project: Project): ProjectSummary {
     updatedAt: project.updatedAt,
   };
   if (accent) summary.accent = accent;
+  const colors = (palette ?? [])
+    .map((c) => c?.hex)
+    .filter((c): c is string => typeof c === "string" && HEX_COLOR_RE.test(c))
+    .slice(0, 4);
+  if (colors.length) summary.palette = colors;
+  if (project.status === "error" && project.error) summary.error = project.error;
   return summary;
 }
 
@@ -370,6 +376,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
             artist: err instanceof Error ? err.message : "",
             duration: 0,
             status: "error",
+            error: "project.json 無法讀取或已損毀，可以刪除這個專案。",
             updatedAt: (stat?.mtime ?? new Date(0)).toISOString(),
           };
         }

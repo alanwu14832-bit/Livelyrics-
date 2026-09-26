@@ -114,6 +114,8 @@ function describeEvent(e) {
       return `✓ 完成：狀態 ${e.project.status}${e.project.plan ? `，主視覺「${e.project.plan.keyVisual.title}」` : ""}`;
     case "error":
       return `✗ 錯誤：${e.message}`;
+    case "attached":
+      return `  已接上進行中的處理（${e.steps.join(" → ")}）${e.sameRequest ? "" : "，這次的設定不會套用"}`;
     default:
       return JSON.stringify(e);
   }

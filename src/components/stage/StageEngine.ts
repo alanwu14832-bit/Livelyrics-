@@ -14,6 +14,7 @@ import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { stageTime, type StageState, type StageStore } from "@/lib/stage/protocol";
 import { clamp, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
+import { sectionIndexForLine } from "@/lib/timeline";
 import type { Project, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
 import { buildGuides, buildTestPattern, type GuidesHandle, type TestPatternHandle } from "./overlays";
@@ -236,6 +237,17 @@ export class StageEngine {
     this.lyrics.invalidateFit();
   }
 
+  /** The look for the lyric layer: the current line's own section when it differs from the playhead's. */
+  private lyricLookFor(project: Project, state: StageState, t: number, look: StageLook): StageLook {
+    const lines = project.lyrics?.lines;
+    const idx = state.lineIndex;
+    if (!project.plan || !Array.isArray(lines) || typeof idx !== "number" || !lines[idx]) return look;
+    const duration = project.meta?.duration || project.analysis?.duration || 0;
+    const own = sectionIndexForLine(project.plan, lines, idx, duration);
+    if (own == null || own === look.sectionIndex) return look;
+    return resolveLook(project, { ...state, sectionIndex: own }, t);
+  }
+
   private prewarm(project: Project | null) {
     if (!this.renderer) return;
     const planScenes = (project?.plan?.sections ?? []).map((s) => s.scene);
@@ -320,7 +332,9 @@ export class StageEngine {
     const store = this.store;
     const project = this.project;
     if (!store || !project) return;
-    const dt = this.last ? Math.min(0.1, Math.max(0, (now - this.last) / 1000)) : 0;
+    // animation steps are capped so a stall does not jump the scene; the blackout uses real time
+    const elapsed = this.last ? Math.max(0, (now - this.last) / 1000) : 0;
+    const dt = Math.min(0.1, elapsed);
     this.last = now;
     this.adapt(now, dt);
     if ((window.devicePixelRatio || 1) !== this.dprRaw) {
@@ -359,11 +373,12 @@ export class StageEngine {
       durationScale: this.transitionScale,
     });
 
-    // blackout ramp (smooth ~0.4 s, eased)
+    // blackout ramp (smooth ~0.4 s, eased), timed by the wall clock: even a struggling GPU
+    // at a few fps reaches full black 0.4 s after B is pressed
     const bTarget = ov?.blackout ? 1 : 0;
-    const bStep = dt / BLACKOUT_SECONDS;
+    const bStep = elapsed / BLACKOUT_SECONDS;
     this.blackAmt = bTarget > this.blackAmt ? Math.min(1, this.blackAmt + bStep) : Math.max(0, this.blackAmt - bStep);
-    if (dt === 0) this.blackAmt = bTarget;
+    if (elapsed === 0) this.blackAmt = bTarget;
     const b = this.blackAmt;
     this.overlay.style.opacity = String(Math.round(b * b * (3 - 2 * b) * 1000) / 1000);
 
@@ -386,14 +401,15 @@ export class StageEngine {
     this.updateFallback(look, backend === "fallback" || backend === "lost");
     this.canvas.style.visibility = backend === "fallback" || backend === "lost" ? "hidden" : "visible";
 
-    // lyrics
+    // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
+    const lyricLook = this.lyricLookFor(project, state, t, look);
     this.lyrics.update({
       project,
       state,
       t,
       nowEpoch,
       now,
-      look,
+      look: lyricLook,
       typography: this.typography,
       pulse: audio.pulse * look.params.reactivity,
       visible: ov?.lyricsVisible !== false,
@@ -408,8 +424,8 @@ export class StageEngine {
       const lines = project.lyrics?.lines ?? [];
       const idx = state.lineIndex;
       const line = typeof idx === "number" ? lines[idx] : undefined;
-      const style = line ? resolveLineDesign(project.plan, line.id, look.lyricStyle, ov?.lyricStyle).style : look.lyricStyle;
-      this.guides.setPlacement(style === "hidden" ? null : placementBox(look.placement, writingModeFor(style, look.placement)));
+      const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, ov?.lyricStyle).style : lyricLook.lyricStyle;
+      this.guides.setPlacement(style === "hidden" ? null : placementBox(lyricLook.placement, writingModeFor(style, lyricLook.placement)));
     }
 
     // stats

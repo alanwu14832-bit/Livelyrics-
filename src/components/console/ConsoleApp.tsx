@@ -12,6 +12,7 @@ import { HelpOverlay } from "./HelpOverlay";
 import { IconWarning } from "./icons";
 import { LyricsList } from "./LyricsList";
 import { Notices } from "./Notices";
+import { PanelBoundary } from "./PanelBoundary";
 import { PreviewPanel, StageReadout } from "./Preview";
 import { RedesignDialog } from "./RedesignDialog";
 import { SidePanel } from "./SidePanel";
@@ -117,6 +118,23 @@ export function ConsoleApp({ id }: { id: string }) {
     };
   }, [active, controller, helpOpen, redesignOpen]);
 
+  // A mouse click must not leave focus on a control: Enter (cue) or arrows (next line) would
+  // otherwise re-trigger that button / move that slider. Keyboard (Tab) focus is kept.
+  useEffect(() => {
+    if (!active) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.detail === 0) return; // keyboard activation
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement) || el === document.body || el.closest('[role="dialog"]')) return;
+      const tag = el.tagName;
+      if (tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable) return;
+      if (tag === "INPUT" && !["range", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type)) return;
+      el.blur();
+    };
+    window.addEventListener("click", onClick);
+    return () => window.removeEventListener("click", onClick);
+  }, [active]);
+
   if (snap.load.status === "not-found") return <NotFoundState id={id} />;
   if (snap.load.status === "error" && !project) return <LoadErrorState message={snap.load.message} onRetry={() => void controller.reload()} />;
   if (!project) return <ConsoleSkeleton />;
@@ -135,31 +153,39 @@ export function ConsoleApp({ id }: { id: string }) {
           gridTemplateRows: "minmax(0, 1fr) clamp(150px, 21vh, 210px)",
         }}
       >
-        <LyricsList controller={controller} project={project} mode={snap.mode} selectedIndex={snap.selectedIndex} duration={snap.duration} />
-        <section className="flex min-h-0 min-w-0 flex-col gap-2" style={{ gridArea: "center" }} aria-label="投影預覽">
-          {snap.mode === "track" && snap.audio.status === "error" && (
-            <div className="flex shrink-0 items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-fg" role="alert">
-              <IconWarning className="shrink-0 text-danger" />
-              <span className="flex-1">
-                {snap.audio.error ?? "音檔無法載入。"} 仍可切到 LIVE 模式手動送出歌詞。
-              </span>
-              <Button size="sm" variant="secondary" onClick={() => controller.retryAudio()}>
-                重新載入音檔
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => controller.setMode("live")}>
-                切到 LIVE
-              </Button>
-            </div>
-          )}
-          <PreviewPanel controller={controller} project={project} output={snap.output} />
-          <StageReadout controller={controller} project={project} mode={snap.mode} />
-        </section>
-        <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} />
-        <Timeline controller={controller} project={project} duration={snap.duration} fallbackPeaks={snap.fallbackPeaks} mode={snap.mode} />
-        <CuePanel controller={controller} project={project} />
+        <PanelBoundary area="lyrics" label="歌詞">
+          <LyricsList controller={controller} project={project} mode={snap.mode} selectedIndex={snap.selectedIndex} duration={snap.duration} />
+        </PanelBoundary>
+        <PanelBoundary area="center" label="預覽">
+          <section className="flex min-h-0 min-w-0 flex-col gap-2" style={{ gridArea: "center" }} aria-label="投影預覽">
+            {snap.mode === "track" && snap.audio.status === "error" && (
+              <div className="flex shrink-0 items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-fg" role="alert">
+                <IconWarning className="shrink-0 text-danger" />
+                <span className="flex-1">{snap.audio.error ?? "音檔無法載入。"} 仍可切到 LIVE 模式手動送出歌詞。</span>
+                <Button size="sm" variant="secondary" onClick={() => controller.retryAudio()}>
+                  重新載入音檔
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => controller.setMode("live")}>
+                  切到 LIVE
+                </Button>
+              </div>
+            )}
+            <PreviewPanel controller={controller} project={project} output={snap.output} />
+            <StageReadout controller={controller} project={project} mode={snap.mode} />
+          </section>
+        </PanelBoundary>
+        <PanelBoundary area="panel" label="設計與控制">
+          <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} />
+        </PanelBoundary>
+        <PanelBoundary area="timeline" label="時間軸">
+          <Timeline controller={controller} project={project} duration={snap.duration} fallbackPeaks={snap.fallbackPeaks} mode={snap.mode} />
+        </PanelBoundary>
+        <PanelBoundary area="cues" label="現場提示">
+          <CuePanel controller={controller} project={project} />
+        </PanelBoundary>
       </main>
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
-      {redesignOpen && <RedesignDialog controller={controller} redesign={snap.redesign} hasPlan={!!project.plan} onClose={() => setRedesignOpen(false)} />}
+      {redesignOpen && <RedesignDialog controller={controller} redesign={snap.redesign} hasPlan={!!project.plan} hasResearch={!!project.research} onClose={() => setRedesignOpen(false)} />}
       <Notices controller={controller} notices={snap.notices} />
     </div>
   );

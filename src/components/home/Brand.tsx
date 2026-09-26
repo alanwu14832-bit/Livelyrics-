@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { MouseEvent } from "react";
 import { cx } from "@/components/ui";
 
 /** Livelyrics wordmark: a spotlight over two lyric lines, plus the name. */
@@ -24,10 +25,19 @@ export function BrandMark({ size = 28, className }: { size?: number; className?:
   );
 }
 
-export function Brand({ compact = false, className }: { compact?: boolean; className?: string }) {
+export function Brand({
+  compact = false,
+  className,
+  onClick,
+}: {
+  compact?: boolean;
+  className?: string;
+  onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
+}) {
   return (
     <Link
       href="/"
+      onClick={onClick}
       className={cx("group inline-flex items-center gap-2.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", className)}
       aria-label="Livelyrics 作品庫"
     >

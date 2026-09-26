@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
 import { ProcessClient } from "@/components/process/ProcessClient";
 import { firstParam, parseRunParam, parseStepsParam } from "@/components/process/steps";
+import { getProject, isValidProjectId } from "@/lib/server/storage";
 
-export const metadata: Metadata = {
-  title: "設計總覽 — Livelyrics",
-};
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  let song = "";
+  try {
+    if (isValidProjectId(id)) song = (await getProject(id))?.meta.title ?? "";
+  } catch {
+    /* the page itself reports load errors */
+  }
+  return { title: song ? `${song} · 設計總覽 — Livelyrics` : "設計總覽 — Livelyrics" };
+}
 
 /**
  * Runs / observes the processing pipeline and shows the resulting key visual.

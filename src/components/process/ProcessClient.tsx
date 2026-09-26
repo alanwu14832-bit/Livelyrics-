@@ -45,6 +45,7 @@ function formatElapsed(ms: number): string {
 
 /** Drop `steps` when it is the full pipeline (the server default). */
 function cleanRequest(req: ProcessRequest): ProcessRequest {
+  if (req.attachOnly) return { attachOnly: true };
   const out: ProcessRequest = {};
   const steps = req.steps ? PROCESS_STEPS.filter((s) => req.steps!.includes(s)) : [];
   if (steps.length && steps.length < PROCESS_STEPS.length) out.steps = steps;
@@ -100,12 +101,23 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
         if (events.length && !controller.signal.aborted) setRunState((s) => applyEvents(s, events, Date.now()));
       };
 
+      let sawAttached = false;
       api
         .process(
           id,
           request,
           (event) => {
             if (controller.signal.aborted) return;
+            if (event.type === "attached") {
+              sawAttached = true;
+              // retry / re-run should repeat what the attached run does, not what this page asked for
+              setLastRequest((r) => ({ steps: event.steps, lyricsText: r?.attachOnly ? undefined : r?.lyricsText, instruction: r?.instruction }));
+            }
+            if (event.type === "step" && event.step === "lyrics" && (event.status === "done" || event.status === "skipped")) {
+              // the lyrics now live on the project: never re-send the pasted text (it could overwrite later edits)
+              clearLyricsHandoff(id);
+              setLastRequest((r) => (r?.lyricsText ? { ...r, lyricsText: undefined } : r));
+            }
             queue.current.push(event);
             if (event.type === "delta" || event.type === "log" || event.type === "search") {
               flushTimer.current ??= setTimeout(flush, 120);
@@ -119,14 +131,25 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
           if (controller.signal.aborted) return;
           flush();
           setProject(final);
-          setJustFinished(true);
           clearLyricsHandoff(id);
+          if (request.attachOnly && !sawAttached) {
+            // the run had already finished: show the stored result, not an empty "run"
+            setRunState(initialRunState());
+            return;
+          }
+          setJustFinished(true);
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           flush();
-          const message = err instanceof Error ? err.message || "處理失敗" : String(err);
-          setRunState((s) => failRun(s, message === "Failed to fetch" ? "連不上本機伺服器（處理可能仍在背景進行，重新整理頁面即可接上）" : message, Date.now()));
+          // fetch() network failures are TypeErrors ("Failed to fetch", "Load failed", "NetworkError…")
+          const message =
+            err instanceof TypeError
+              ? "與本機伺服器的連線中斷（處理可能仍在背景進行，重新整理頁面即可接上）"
+              : err instanceof Error
+                ? err.message || "處理失敗"
+                : String(err);
+          setRunState((s) => failRun(s, message, Date.now()));
           refreshProject();
         });
     },
@@ -148,9 +171,12 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
           setLoad({ kind: "ok" });
           // a refresh after completion must not start the pipeline again
           if (run) window.history.replaceState(window.history.state, "", processHref(id));
-          if (run || p.status === "new" || p.status === "processing") {
+          if (run || p.status === "new") {
             const handoff = readLyricsHandoff(id);
             execute({ steps, lyricsText: handoff ?? undefined, instruction });
+          } else if (p.status === "processing") {
+            // another tab (or an earlier visit) started it: only watch, never start a second run
+            execute({ attachOnly: true });
           }
         })
         .catch((err: unknown) => {
@@ -179,7 +205,7 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
   }, [running]);
 
   const retry = () => {
-    if (runState.phase === "error" && lastRequest) {
+    if (runState.phase === "error" && lastRequest && !lastRequest.attachOnly) {
       const requested = lastRequest.steps ?? [...PROCESS_STEPS];
       const from = failedStep(runState) ?? runningStep(runState) ?? requested[0] ?? "lyrics";
       execute({ steps: stepsFrom(requested, from), lyricsText: lastRequest.lyricsText, instruction: lastRequest.instruction });
@@ -300,6 +326,7 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
                 <span>
                   <span className="font-medium text-danger">處理失敗</span>
                   <span className="mt-0.5 block text-muted">{error}</span>
+                  {plan && <span className="mt-1 block text-xs text-faint">目前的設計方案沒有變更，仍可進入控制台使用。</span>}
                 </span>
               </p>
               <div className="flex flex-wrap gap-2">
@@ -314,21 +341,20 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
             </section>
           )}
 
-          {!running && (plan || project.research) && (
-            <RedesignBox hasResearch={project.research != null} offline={offline} onRedesign={redesign} />
-          )}
+          {(plan || project.research) && <RedesignBox disabled={running} hasResearch={project.research != null} offline={offline} onRedesign={redesign} />}
 
           {runState.logs.length > 0 && <LogPanel logs={runState.logs} startedAt={runState.startedAt ?? 0} />}
         </aside>
 
         <main className="min-w-0 space-y-6">
           {justFinished && plan && phase === "done" && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-ok/30 bg-ok/[0.07] px-4 py-3">
+            <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-ok/30 bg-ok/[0.07] px-4 py-3">
               <span className="flex size-8 items-center justify-center rounded-full bg-ok/20 text-ok">
                 <CheckIcon size={16} />
               </span>
               <p className="flex-1 text-sm text-fg">
-                設計完成{elapsed > 0 && <span className="text-muted">（用時 {formatElapsed(elapsed)}）</span>}。檢查主視覺與段落安排，沒問題就進入控制台準備上台。
+                {lastRequest?.instruction ? `已依指示「${lastRequest.instruction}」重新設計` : "設計完成"}
+                {elapsed >= 1000 && <span className="text-muted">（用時 {formatElapsed(elapsed)}）</span>}。檢查主視覺與段落安排，沒問題就進入控制台準備上台。
               </p>
               <Link href={consoleHref} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-sm font-semibold text-white hover:brightness-110">
                 進入控制台
@@ -355,7 +381,7 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
             />
           )}
 
-          {(running || phase === "error") && runState.requested.includes("design") && (
+          {runState.requested.includes("design") && (running || (phase === "error" && (design.text || design.status === "error"))) && (
             <StreamPanel
               title="設計進度"
               text={design.text}
@@ -363,6 +389,21 @@ export function ProcessClient({ id, run, steps, instruction }: { id: string; run
               maxHeight="20rem"
               placeholder={design.status === "running" ? "設計師正在構思世界觀、色票與每一段的畫面…" : "研究完成後開始設計主視覺與段落。"}
             />
+          )}
+
+          {showSummary && (project.lyrics.lines.length === 0 || /粗略/.test(runState.steps.lyrics.message ?? "")) && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-accent-2/30 bg-accent-2/[0.07] px-4 py-3 text-sm">
+              <PenIcon size={16} className="shrink-0 text-accent-2" />
+              <p className="min-w-0 flex-1 text-fg">
+                {project.lyrics.lines.length === 0
+                  ? "這首歌還沒有歌詞，畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
+                  : "歌詞的時間是依音訊能量粗略分配的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"}
+              </p>
+              <Link href={lyricsHref} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-panel-3 px-3 text-xs font-medium text-fg hover:bg-line">
+                前往歌詞編輯器
+                <ArrowRightIcon size={13} />
+              </Link>
+            </div>
           )}
 
           {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} />}

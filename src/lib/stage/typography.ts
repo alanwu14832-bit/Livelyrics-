@@ -1,7 +1,7 @@
 // Plan typography -> CSS values for the lyric layer. Kept apart from resolve.ts
 // because fonts.ts imports next/font (not loadable in plain unit tests).
 
-import { fontStack } from "../fonts";
+import { fontStack } from "../font-meta";
 import type { DesignPlan } from "../types";
 import { clampWeight } from "./lyrics/layout";
 import { clamp } from "./resolve";

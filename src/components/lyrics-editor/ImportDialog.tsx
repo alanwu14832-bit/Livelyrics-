@@ -136,7 +136,7 @@ export function ImportDialog({
 
       {tab === "lrclib" && (
         <div role="tabpanel">
-          <LyricsSearchPicker title={title} artist={artist} duration={duration} value={pick} onChange={setPick} editableQuery allowNone={false} debounceMs={0} />
+          <LyricsSearchPicker title={title} artist={artist} duration={duration} value={pick} onChange={setPick} editableQuery allowNone={false} />
         </div>
       )}
     </Dialog>

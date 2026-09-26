@@ -128,7 +128,7 @@ function StageReadoutImpl({ controller, project, mode }: { controller: ConsoleCo
   const line = lineIndex != null ? lines[lineIndex] : undefined;
   const next = upcoming != null ? lines[upcoming] : undefined;
   const section = sectionIndex != null ? plan?.sections[sectionIndex] : undefined;
-  const lineDesign = line ? plan?.lines.find((l) => l.lineId === line.id) : undefined;
+  const lineDesign = line ? plan?.lines?.find((l) => l.lineId === line.id) : undefined;
   const style: LyricStyleId | undefined = ov.lyricStyle ?? lineDesign?.styleOverride ?? section?.lyricStyle;
   const scene = ov.scene ?? section?.scene;
   const lyricHidden = !ov.lyricsVisible || style === "hidden" || ov.blackout;

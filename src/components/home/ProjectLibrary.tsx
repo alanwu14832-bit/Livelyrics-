@@ -216,6 +216,7 @@ export function ProjectLibrary() {
 
 function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: ProjectSummary; now: number; onDelete: () => void; onReprocess: () => void }) {
   const accent = accentFor(p);
+  const palette = (p.palette ?? []).filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 4);
   const status = STATUS[p.status] ?? STATUS.new;
   const statusHref = p.status === "new" ? processHref(p.id, { run: true }) : processHref(p.id);
   const iconBtn =
@@ -237,6 +238,13 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
           </Badge>
         </span>
         <span className="absolute bottom-2.5 left-3 font-mono text-xs text-white/80 tabular drop-shadow">{p.duration > 0 ? formatTimeShort(p.duration) : "—:—"}</span>
+        {palette.length > 0 && (
+          <span className="absolute bottom-2.5 right-3 flex overflow-hidden rounded-full ring-1 ring-white/15" aria-label="主視覺色票" role="img">
+            {palette.map((c, i) => (
+              <span key={`${c}-${i}`} className="h-2.5 w-4" style={{ background: c }} />
+            ))}
+          </span>
+        )}
       </Link>
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="min-w-0">
@@ -247,6 +255,11 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
           <p className="mt-1 text-xs text-faint" title={formatAbsoluteTime(p.updatedAt)}>
             更新於 {formatRelativeTime(p.updatedAt, now)}
           </p>
+          {p.status === "error" && p.error && (
+            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-danger/90" title={p.error}>
+              {p.error}
+            </p>
+          )}
         </div>
         {p.status !== "ready" && (
           <Link href={statusHref} className="inline-flex w-fit items-center gap-1 text-xs text-accent hover:underline">

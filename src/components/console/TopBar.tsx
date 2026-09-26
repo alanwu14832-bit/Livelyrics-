@@ -6,7 +6,6 @@ import { Badge, Button, cx } from "@/components/ui";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { formatOffset } from "@/lib/console/format";
 import { untimedCount } from "@/lib/console/navigation";
-import { stageTime } from "@/lib/stage/protocol";
 import { formatTime } from "@/lib/timeline";
 import { IconBack, IconHelp, IconMonitor, IconNextLine, IconPause, IconPlay, IconPrevLine, IconSparkles, IconWarning } from "./icons";
 import { Segmented } from "./controls";
@@ -18,8 +17,7 @@ function TimeReadout({ controller, duration }: { controller: ConsoleController; 
   useRafLoop(() => {
     const el = ref.current;
     if (!el) return;
-    const s = controller.store.get();
-    const text = formatTime(stageTime(s));
+    const text = formatTime(controller.songTime());
     if (text !== last.current) {
       last.current = text;
       el.textContent = text;
@@ -85,6 +83,9 @@ export function TopBar({
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel px-3">
       <Link
         href="/"
+        onClick={(e) => {
+          if (!controller.confirmLeave()) e.preventDefault();
+        }}
         className="flex h-9 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-panel-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
       >
         <IconBack />

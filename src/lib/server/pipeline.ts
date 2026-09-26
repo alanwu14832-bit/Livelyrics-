@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { ProcessRequest } from "@/lib/api-client";
 import { distributeLines, emptyLyrics, parseLyricsText } from "@/lib/lyrics/lrc";
+import { remapPlanLines } from "@/lib/lyrics/remap";
 import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
 import type { DesignerCallbacks } from "@/lib/server/designer";
@@ -113,6 +114,15 @@ export function getRun(projectId: string): PipelineRun | undefined {
 
 export function isRunActive(projectId: string): boolean {
   return registry.runs.get(projectId)?.status === "running";
+}
+
+/**
+ * Observe the project's run without ever starting one: the active run, or the last one
+ * while it is still retained (about a minute after it finished). Null when there is none.
+ */
+export function attachToRun(projectId: string): RunHandle | null {
+  const existing = registry.runs.get(projectId);
+  return existing ? makeHandle(existing, true) : null;
 }
 
 /**
@@ -450,6 +460,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
 
   const finalLyrics = lyrics;
   const saved = await updateProject(project.id, (p) => {
+    if (p.plan) p.plan = remapPlanLines(p.plan, p.lyrics, finalLyrics);
     p.lyrics = finalLyrics;
   });
   return { project: saved, message };

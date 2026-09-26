@@ -3,9 +3,10 @@
 // normalizePlan. Records are keyed by the schema enums so a new id cannot be added
 // without describing it here.
 //
-// Font metadata mirrors src/lib/fonts.ts (which imports next/font and therefore cannot
-// be loaded outside the Next compiler); catalog.test.ts checks the two stay in sync.
+// Font label / script / generic family come from the shared registry in
+// src/lib/font-meta.ts; only the designer-facing descriptions live here.
 
+import { FONTS } from "@/lib/font-meta";
 import type { FontId, LyricPlacement, LyricStyleId, SceneId, SectionKind } from "@/lib/types";
 
 export interface SceneInfo {
@@ -72,19 +73,26 @@ export interface FontCatalogEntry {
   description: string;
 }
 
-export const FONT_CATALOG: Record<FontId, FontCatalogEntry> = {
-  "noto-sans-tc": { label: "思源黑體", cjk: true, generic: "sans-serif", description: "中性、最易讀的黑體，LED 上最穩定的安全選擇。" },
-  "noto-serif-tc": { label: "思源宋體", cjk: true, generic: "serif", description: "文學、優雅的明朝體，適合抒情與敘事歌（粗細要 600 以上）。" },
-  "lxgw-wenkai-tc": { label: "霞鶩文楷", cjk: true, generic: "serif", description: "溫暖的手寫楷書，適合民謠、溫柔、懷舊。" },
-  huninn: { label: "粉圓", cjk: true, generic: "sans-serif", description: "圓體，友善、可愛、青春；適合輕快流行。" },
-  "chiron-hei-hk": { label: "昭源黑體", cjk: true, generic: "sans-serif", description: "現代感粗黑體，有力量；適合搖滾、電子、熱血。" },
-  iansui: { label: "芫荽", cjk: true, generic: "cursive", description: "手寫感、俏皮；適合輕鬆、童趣、獨立樂團。" },
-  "cactus-classical-serif": { label: "仙人掌明體", cjk: true, generic: "serif", description: "古典舊式明體，復古、詩意、東方。" },
-  "bebas-neue": { label: "Bebas Neue", cjk: false, generic: "sans-serif", description: "拉丁窄體大寫展示字，口號與英文 hook 很有力。" },
-  anton: { label: "Anton", cjk: false, generic: "sans-serif", description: "拉丁超粗窄體，衝擊感最強。" },
-  "space-grotesk": { label: "Space Grotesk", cjk: false, generic: "sans-serif", description: "幾何怪誕體，現代、乾淨，配黑體最自然。" },
-  "playfair-display": { label: "Playfair Display", cjk: false, generic: "serif", description: "高對比襯線，優雅；配宋體、楷書。" },
+const FONT_DESCRIPTIONS: Record<FontId, string> = {
+  "noto-sans-tc": "中性、最易讀的黑體，LED 上最穩定的安全選擇。",
+  "noto-serif-tc": "文學、優雅的明朝體，適合抒情與敘事歌（粗細要 600 以上）。",
+  "lxgw-wenkai-tc": "溫暖的手寫楷書，適合民謠、溫柔、懷舊。",
+  huninn: "圓體，友善、可愛、青春；適合輕快流行。",
+  "chiron-hei-hk": "現代感粗黑體，有力量；適合搖滾、電子、熱血。",
+  iansui: "手寫感、俏皮；適合輕鬆、童趣、獨立樂團。",
+  "cactus-classical-serif": "古典舊式明體，復古、詩意、東方。",
+  "bebas-neue": "拉丁窄體大寫展示字，口號與英文 hook 很有力。",
+  anton: "拉丁超粗窄體，衝擊感最強。",
+  "space-grotesk": "幾何怪誕體，現代、乾淨，配黑體最自然。",
+  "playfair-display": "高對比襯線，優雅；配宋體、楷書。",
 };
+
+export const FONT_CATALOG: Record<FontId, FontCatalogEntry> = Object.fromEntries(
+  (Object.keys(FONT_DESCRIPTIONS) as FontId[]).map((id) => {
+    const { label, cjk, generic } = FONTS[id];
+    return [id, { label, cjk, generic, description: FONT_DESCRIPTIONS[id] }];
+  }),
+) as Record<FontId, FontCatalogEntry>;
 
 export function isCjkFont(id: FontId): boolean {
   return FONT_CATALOG[id].cjk;

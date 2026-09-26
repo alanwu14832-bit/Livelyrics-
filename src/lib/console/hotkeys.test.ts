@@ -53,11 +53,17 @@ describe("hotkeyAction", () => {
 });
 
 describe("targetOwnsKey", () => {
-  it("text fields and selects keep every key", () => {
+  it("text fields and editors keep every key", () => {
     expect(targetOwnsKey({ tagName: "INPUT", type: "text" }, "KeyB")).toBe(true);
     expect(targetOwnsKey({ tagName: "TEXTAREA" }, "Space")).toBe(true);
-    expect(targetOwnsKey({ tagName: "SELECT" }, "ArrowDown")).toBe(true);
     expect(targetOwnsKey({ tagName: "DIV", isContentEditable: true }, "KeyB")).toBe(true);
+  });
+
+  it("selects keep navigation keys but not letters or Space", () => {
+    expect(targetOwnsKey({ tagName: "SELECT" }, "ArrowDown")).toBe(true);
+    expect(targetOwnsKey({ tagName: "SELECT" }, "Enter")).toBe(true);
+    expect(targetOwnsKey({ tagName: "SELECT" }, "KeyB")).toBe(false);
+    expect(targetOwnsKey({ tagName: "SELECT" }, "Space")).toBe(false);
   });
 
   it("sliders keep only their navigation keys", () => {

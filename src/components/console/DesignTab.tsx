@@ -45,7 +45,13 @@ function KeyVisualCard({ controller, plan, sampleText }: { controller: ConsoleCo
   const lyricColor = plan.sections[0]?.lyricColor ?? palette.find((p) => /歌詞|lyric/i.test(p.role))?.hex ?? "#ffffff";
   const motifColor = palette[1]?.hex ?? palette[palette.length - 1]?.hex ?? "#ffffff";
   const motifSrc = useMemo(() => motifDataUrl(kv.motifSvg, motifColor), [kv.motifSvg, motifColor]);
-  const typo = kv.typography;
+  const typo: DesignPlan["keyVisual"]["typography"] = kv.typography ?? {
+    cjkFont: "noto-sans-tc",
+    latinFont: "space-grotesk",
+    weight: 700,
+    letterSpacing: 0,
+    rationale: "",
+  };
   const cjk = FONTS[typo.cjkFont];
   const latin = FONTS[typo.latinFont];
   const [notesOpen, setNotesOpen] = useState(false);

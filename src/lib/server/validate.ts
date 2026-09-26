@@ -248,6 +248,7 @@ const ProcessRequestSchema = z.object({
   steps: z.array(z.enum(["lyrics", "research", "design"])).max(10).optional(),
   lyricsText: z.string().max(500_000).optional(),
   instruction: z.string().max(4000).optional(),
+  attachOnly: z.boolean().optional(),
 });
 
 export function parseProcessRequest(raw: unknown): ProcessRequest {
@@ -255,6 +256,7 @@ export function parseProcessRequest(raw: unknown): ProcessRequest {
   if (!parsed.success) throw new HttpError(400, `處理參數錯誤：${issuesText(parsed.error)}`);
   const r = parsed.data;
   const out: ProcessRequest = {};
+  if (r.attachOnly) return { attachOnly: true };
   if (r.steps && r.steps.length) out.steps = [...new Set(r.steps)];
   if (r.lyricsText && r.lyricsText.trim()) out.lyricsText = r.lyricsText;
   if (r.instruction && r.instruction.trim()) out.instruction = r.instruction.trim();

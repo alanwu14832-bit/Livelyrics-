@@ -3,7 +3,7 @@
 // (percent of the StageView's height), so the console preview and the
 // projector scale identically.
 
-import type { LyricPlacement, LyricStyleId } from "../../types";
+import type { LyricPlacement, LyricStyleId, SceneId } from "../../types";
 
 /** Fraction of the stage used by the title-safe area (lyrics never leave it). */
 export const TITLE_SAFE = 0.9;
@@ -90,6 +90,25 @@ export const STYLE_METRICS: Record<LyricStyleId, StyleMetrics> = {
   subtitle: { size: 4.6, maxChars: 22, maxLines: 2, translationScale: 0.72, showNext: false, scrim: 0.7, weightDelta: -100, trackingDelta: 0.02, leading: 1.35 },
   hidden: { size: 0, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: false, scrim: 0, weightDelta: 0, trackingDelta: 0, leading: 1.2 },
 };
+
+/**
+ * Scenes with a bright feature where lyrics usually sit (the synthwave sun on the horizon,
+ * the key-visual emblem, the tunnel's glowing vanishing point) need a stronger backdrop
+ * behind the text to keep it readable on a big screen.
+ */
+const SCENE_SCRIM_BOOST: Partial<Record<SceneId, number>> = {
+  grid: 1.75,
+  motif: 1.5,
+  tunnel: 1.4,
+  shards: 1.25,
+  bokeh: 1.2,
+};
+
+/** Backdrop alpha (0..0.85) for a lyric style over a scene. */
+export function scrimAlpha(style: LyricStyleId, scene: SceneId): number {
+  const base = (STYLE_METRICS[style] ?? STYLE_METRICS["line-fade"]).scrim * 0.62;
+  return Math.min(0.85, base * (SCENE_SCRIM_BOOST[scene] ?? 1));
+}
 
 export function clampWeight(w: number): number {
   if (!Number.isFinite(w)) return 700;

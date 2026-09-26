@@ -40,11 +40,12 @@ show up in the product:
 
 | File | What |
 |---|---|
-| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` |
+| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error) |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `StageStore`, `createStageStore()`, `stageTime()` |
-| `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` |
-| `src/lib/fonts.ts` | next/font loading, `FONTS` registry, `fontStack(cjkFont, latinFont)` |
+| `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
+| `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
+| `src/lib/font-meta.ts` | `FONTS` registry + `fontStack(cjkFont, latinFont)` without next/font, so server code and tests can import it |
 | `src/lib/api-client.ts` | typed browser fetchers for every API route (routes must match exactly) |
 | `src/components/ui/*` | `Button`, `Panel`, `Badge`, `Kbd`, `cx`, `Markdown` |
 
@@ -83,8 +84,18 @@ Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{proj
   attaches to it (replays past events, then streams live) — survives page refresh / React StrictMode.
   A run keeps going if the client disconnects. Steps: lyrics uses `lyricsText` if given, else keeps
   existing synced lyrics, else LRCLIB, else plain → `distributeLines`; research/design call DESIGNER.
+  An attaching request first receives `{ type: "attached", steps, sameRequest }` (its own settings are
+  not applied when `sameRequest` is false). `ProcessRequest.attachOnly` only watches: it attaches to the
+  active (or just-finished) run and otherwise ends at once with `done` (ready) or `error` — it never
+  starts a run. A failed step ends with `{ type: "error" }` only; earlier steps stay saved, so clients
+  re-fetch the project after a rejection.
+- Lyrics saves (PATCH `lyrics`, pipeline lyrics step) re-number ids `l0..`; `plan.lines[]` is re-pointed
+  to the line with the same text (`src/lib/lyrics/remap.ts`) and dropped when that text is gone.
+  PATCH `plan` is validated (`DesignPlanSchema`, ≥ 1 section), not normalized, so operator edits stay
+  exactly as made; the renderer repairs anything out of range.
 - All route handlers: `export const runtime = "nodejs"`, `dynamic = "force-dynamic"`; JSON errors
   `{ error: string }` with proper status codes; validate ids (no path traversal); size limit ~200 MB.
+  Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`
 - `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-opus-5`), server tool `web_search_20260209`,
@@ -161,3 +172,11 @@ Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{proj
 - Lyrics editor: table of lines (time, text, translation), paste / import LRC / LRCLIB picker,
   tap-sync mode (play, Space marks the current line start and advances), ±0.1 s nudge, auto-distribute,
   export LRC, save → `api.updateProject`, offer to re-run design.
+
+## Development notes
+
+- `npm run typecheck` runs `next typegen` first, so the global `PageProps` / `LayoutProps` /
+  `RouteContext` helpers exist on a fresh clone.
+- Isolated dev servers (`NEXT_DIST_DIR=.next-<name> npx next dev --webpack -p <port>`) are ignored by
+  ESLint and git, but `next dev` appends `.next-<name>/types/**` entries to `tsconfig.json` (it checks
+  for exact strings, so a glob does not stop it). Restore `tsconfig.json` from git after stopping one.

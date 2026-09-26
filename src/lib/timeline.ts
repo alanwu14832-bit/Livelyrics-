@@ -63,6 +63,34 @@ export function sectionIndexAt(plan: DesignPlan | null, t: number): number | nul
   return 0;
 }
 
+/**
+ * A line starting at most this long before a section boundary is sung into that section.
+ * Section boundaries sit on downbeats (audio analysis snaps them to beats) while singers
+ * often come in a beat early, and LRC times can be a few ms before the snapped boundary.
+ */
+export const LINE_PICKUP_SECONDS = 1.5;
+
+/** The time that decides which section a line belongs to: start + half its span, at most +1.5 s. */
+export function lineAnchorTime(start: number, end: number): number {
+  return start + Math.min(LINE_PICKUP_SECONDS, Math.max(0, end - start) / 2);
+}
+
+/** Anchor time of line `index` (see lineAnchorTime), or null when untimed. */
+export function lineAnchor(lines: LyricLine[], index: number, songDuration: number): number | null {
+  const span = lineSpan(lines, index, songDuration);
+  return span ? lineAnchorTime(span[0], span[1]) : null;
+}
+
+/**
+ * The plan section a lyric line belongs to (its lyric style, placement and colors come
+ * from here, so a pickup line does not switch style half-way when the boundary passes).
+ * Null for untimed lines or without a plan.
+ */
+export function sectionIndexForLine(plan: DesignPlan | null, lines: LyricLine[], index: number, songDuration: number): number | null {
+  const anchor = lineAnchor(lines, index, songDuration);
+  return anchor == null ? null : sectionIndexAt(plan, anchor);
+}
+
 export function sectionAt(plan: DesignPlan | null, t: number): SectionDesign | null {
   const i = sectionIndexAt(plan, t);
   return i == null || !plan ? null : plan.sections[i];
@@ -106,17 +134,23 @@ export function beatPhaseAt(analysis: AudioAnalysis | null, t: number): number {
   return 0;
 }
 
+/** m:ss.cc — rounded to the nearest hundredth (0.29 → "0:00.29", not "0:00.28"). */
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  const cs = Math.floor((seconds * 100) % 100);
+  // work in integer hundredths so binary floating point cannot shave off a digit
+  const total = Math.round(seconds * 100);
+  const m = Math.floor(total / 6000);
+  const s = Math.floor(total / 100) % 60;
+  const cs = total % 100;
   return `${m}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
 
+/** m:ss — truncated to whole seconds (a clock never shows a second before it has passed). */
 export function formatTimeShort(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  // tolerate float noise just below a whole second (e.g. 2.9999999 from 0.1 steps)
+  const whole = Math.floor(seconds + 1e-6);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }

@@ -6,7 +6,7 @@ import { IconClose } from "./icons";
 
 export function Notices({ controller, notices }: { controller: ConsoleController; notices: Notice[] }) {
   return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 flex w-[min(560px,90vw)] -translate-x-1/2 flex-col items-center gap-2" aria-live="polite" role="status">
+    <div className="pointer-events-none fixed top-16 left-1/2 z-40 flex w-[min(560px,90vw)] -translate-x-1/2 flex-col items-center gap-2" aria-live="polite" role="status">
       {notices.map((n) => (
         <div
           key={n.id}

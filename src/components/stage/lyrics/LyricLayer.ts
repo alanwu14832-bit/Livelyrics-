@@ -8,7 +8,7 @@
 // song time (deterministic under seeking), or on the time since the console cued
 // the line for untimed lyrics.
 
-import type { LyricPlacement, LyricStyleId, Project } from "@/lib/types";
+import type { LyricPlacement, LyricStyleId, Project, SceneId } from "@/lib/types";
 import { lightness, rgba, shade } from "@/lib/stage/color";
 import { chunkIndexAt, impactChunks, type Chunk } from "@/lib/stage/lyrics/chunks";
 import {
@@ -16,6 +16,7 @@ import {
   clampWeight,
   flexAlign,
   placementBox,
+  scrimAlpha,
   writingModeFor,
   type PlacementBox,
   type StyleMetrics,
@@ -26,6 +27,7 @@ import { unitProgress } from "@/lib/stage/lyrics/timing";
 import type { StageState } from "@/lib/stage/protocol";
 import { resolveLineDesign, type StageLook } from "@/lib/stage/resolve";
 import type { StageTypography } from "@/lib/stage/typography";
+import { sectionIndexForLine } from "@/lib/timeline";
 import styles from "./lyrics.module.css";
 
 export interface LyricFrame {
@@ -311,8 +313,8 @@ abstract class LyricView {
     return [this.group.clientWidth, this.group.clientHeight];
   }
 
-  setScrim(bg: string) {
-    this.group.style.setProperty("--ly-scrim", rgba(shade(bg, 0.55), this.spec.metrics.scrim * 0.62));
+  setScrim(bg: string, scene: SceneId) {
+    this.group.style.setProperty("--ly-scrim", rgba(shade(bg, 0.55), scrimAlpha(this.spec.style, scene)));
   }
 
   abstract render(f: ViewFrame): void;
@@ -732,7 +734,7 @@ export class LyricLayer {
 
   private applyRootStyles(f: LyricFrame) {
     const { look, typography } = f;
-    const ck = `${look.lyricColor}|${look.accentColor}|${look.colorway[0]}`;
+    const ck = `${look.lyricColor}|${look.accentColor}|${look.colorway[0]}|${look.scene}`;
     if (ck !== this.colorKey) {
       this.colorKey = ck;
       const r = this.root.style;
@@ -746,8 +748,8 @@ export class LyricLayer {
       r.setProperty("--ly-glow", rgba(look.accentColor, 0.55));
       r.setProperty("--ly-shadow", rgba(shadowBase, darkText ? 0.5 : 0.62));
       r.setProperty("--ly-shadow-soft", rgba(shadowBase, darkText ? 0.3 : 0.38));
-      this.current?.setScrim(look.colorway[0]);
-      for (const v of this.leaving) v.setScrim(look.colorway[0]);
+      this.current?.setScrim(look.colorway[0], look.scene);
+      for (const v of this.leaving) v.setScrim(look.colorway[0], look.scene);
     }
     const sk = f3(look.lyricScale);
     if (sk !== this.scaleKey) {
@@ -775,7 +777,7 @@ export class LyricLayer {
 
   private frame(f: LyricFrame) {
     const { project, state, look, now } = f;
-    const dt = Math.min(0.1, Math.max(0, (now - (this.lastNow || now)) / 1000));
+    const elapsed = Math.max(0, (now - (this.lastNow || now)) / 1000);
     this.lastNow = now;
 
     if (project !== this.projectRef) {
@@ -788,9 +790,9 @@ export class LyricLayer {
     }
     this.applyRootStyles(f);
 
-    // lyricsVisible: smooth 0.3 s ramp
+    // lyricsVisible: smooth 0.3 s ramp in real time (L must work on time even at a low frame rate)
     const target = f.visible ? 1 : 0;
-    const step = dt / 0.3;
+    const step = elapsed / 0.3;
     this.visibleAmt = target > this.visibleAmt ? Math.min(target, this.visibleAmt + step) : Math.max(target, this.visibleAmt - step);
     css(this.root, "opacity", f3(easeInOut(this.visibleAmt)));
 
@@ -854,14 +856,14 @@ export class LyricLayer {
     const lines = project.lyrics?.lines ?? [];
     let view: LyricView | null = null;
     if (style === "stack") {
-      const section = look.section;
+      const duration = project.meta?.duration || project.analysis?.duration || 0;
       const sameSection = (i: number) => {
         const l = lines[i];
         if (!l) return false;
         const d = resolveLineDesign(project.plan, l.id, look.lyricStyle, state.overrides?.lyricStyle);
         if (d.style !== "stack") return false;
-        if (!section || l.start == null) return true;
-        return l.start >= section.start - 0.05 && l.start < section.end;
+        if (look.sectionIndex == null || l.start == null) return true;
+        return sectionIndexForLine(project.plan, lines, i, duration) === look.sectionIndex;
       };
       const prepare = (i: number) => {
         const l = lines[i];
@@ -884,7 +886,7 @@ export class LyricLayer {
         view = new LineView(key, spec, this.root, f.now, line, startedAt, next);
       }
     }
-    view.setScrim(look.colorway[0]);
+    view.setScrim(look.colorway[0], look.scene);
     return view;
   }
 

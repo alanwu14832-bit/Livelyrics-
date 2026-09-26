@@ -16,8 +16,8 @@ vi.mock("@/lib/server/designer", () => ({
 }));
 vi.mock("./lrclib", () => ({ findBestLyrics: lrclibMock.findBestLyrics }));
 
-import { cancelRun, isRunActive, runPipeline, withLiveStatus, type RunHandle } from "./pipeline";
-import { pipelineEventStream } from "./sse";
+import { attachToRun, cancelRun, isRunActive, runPipeline, withLiveStatus, type RunHandle } from "./pipeline";
+import { eventListStream, pipelineEventStream } from "./sse";
 import { createProject, createUploadTempPath, getProject, updateProject } from "./storage";
 
 let root: string;
@@ -393,5 +393,41 @@ describe("pipelineEventStream", () => {
     expect(second.attached).toBe(true);
     const text = await readAll(pipelineEventStream(second));
     expect(text).toContain('"type":"done"');
+  });
+});
+
+describe("attachToRun (attach-only watchers)", () => {
+  it("never starts a run, and follows one that is in progress or just finished", async () => {
+    const p = await newProject();
+    expect(attachToRun(p.id)).toBeNull();
+    expect(isRunActive(p.id)).toBe(false);
+
+    let release!: () => void;
+    designerMock.researchSong.mockImplementation(() => new Promise<Research>((resolve) => (release = () => resolve(research))));
+    designerMock.designSong.mockResolvedValue(plan());
+    const run = runPipeline(p.id, { steps: ["research", "design"] });
+
+    const watcher = attachToRun(p.id);
+    expect(watcher).not.toBeNull();
+    expect(watcher!.attached).toBe(true);
+    expect(watcher!.run.runId).toBe(run.run.runId);
+    const watched = collect(watcher!);
+    await vi.waitFor(() => expect(designerMock.researchSong).toHaveBeenCalled());
+    release();
+    const events = await watched;
+    expect(events.at(-1)?.type).toBe("done");
+
+    // a finished run stays attachable (replayed) for a while
+    const late = attachToRun(p.id);
+    expect(late).not.toBeNull();
+    const replay = await collect(late!);
+    expect(replay.map((e) => e.type)).toEqual(events.map((e) => e.type));
+  });
+});
+
+describe("eventListStream", () => {
+  it("sends the given events and closes", async () => {
+    const text = await new Response(eventListStream([{ type: "error", message: "目前沒有進行中的處理。" }])).text();
+    expect(text).toContain('data: {"type":"error","message":"目前沒有進行中的處理。"}\n\n');
   });
 });

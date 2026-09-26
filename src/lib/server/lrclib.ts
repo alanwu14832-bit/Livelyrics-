@@ -10,8 +10,15 @@ const TIMEOUT_MS = 8000;
 /** synced timings are only trusted when the recording length matches within this many seconds */
 const DURATION_TOLERANCE = 3;
 
+/** pause before the single retry of a transient failure */
+const RETRY_DELAY_MS = 600;
+
 export class LrclibError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** a transient failure (connection reset, 429, 5xx) worth one more try */
+    readonly retryable = false,
+  ) {
     super(message);
     this.name = "LrclibError";
   }
@@ -67,7 +74,33 @@ function toRecord(raw: unknown): LrclibRecord | null {
   };
 }
 
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** One request, retried once after a short pause when LRCLIB fails transiently. */
 async function request(pathAndQuery: string, opts: RequestOptions = {}): Promise<unknown | null> {
+  try {
+    return await requestOnce(pathAndQuery, opts);
+  } catch (err) {
+    if (!(err instanceof LrclibError) || !err.retryable || opts.signal?.aborted) throw err;
+    await delay(RETRY_DELAY_MS, opts.signal);
+    return requestOnce(pathAndQuery, opts);
+  }
+}
+
+async function requestOnce(pathAndQuery: string, opts: RequestOptions = {}): Promise<unknown | null> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
   let res: Response;
@@ -81,7 +114,7 @@ async function request(pathAndQuery: string, opts: RequestOptions = {}): Promise
     if (opts.signal?.aborted) throw err;
     if (timeout.aborted) throw new LrclibError(`LRCLIB 沒有回應（逾時 ${TIMEOUT_MS / 1000} 秒）`);
     const cause = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err);
-    throw new LrclibError(`無法連線到 LRCLIB（${cause}）`);
+    throw new LrclibError(`無法連線到 LRCLIB（${cause}）`, true);
   }
   if (res.status === 404) {
     await res.body?.cancel().catch(() => {});
@@ -89,7 +122,7 @@ async function request(pathAndQuery: string, opts: RequestOptions = {}): Promise
   }
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
-    throw new LrclibError(`LRCLIB 回傳錯誤 ${res.status}`);
+    throw new LrclibError(`LRCLIB 回傳錯誤 ${res.status}`, res.status === 429 || res.status >= 500);
   }
   try {
     return await res.json();

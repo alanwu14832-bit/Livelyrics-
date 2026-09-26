@@ -72,6 +72,8 @@ function CuePanelImpl({ controller, project }: { controller: ConsoleController; 
               </li>
             );
           })}
+          {/* lets the last cues scroll up to the top of the list */}
+          <li aria-hidden="true" style={{ height: "60%" }} />
         </ol>
       )}
     </section>

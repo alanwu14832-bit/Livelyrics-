@@ -103,7 +103,11 @@ export type StageMessage =
   | { type: "state"; state: StageState }
   /** console -> output heartbeat, every 1 s */
   | { type: "ping"; at: number }
-  /** output -> console heartbeat reply; lets the console show "output connected" */
+  /**
+   * output -> console heartbeat reply; lets the console show "output connected".
+   * width/height are the output viewport in physical pixels (CSS px × devicePixelRatio,
+   * rounded), e.g. 1920×1080 on a projector — use them for the preview's aspect ratio.
+   */
   | { type: "pong"; outputId: string; at: number; width: number; height: number; fullscreen: boolean }
   /** console -> output: ask the output window to toggle fullscreen (needs a user gesture there; best effort) */
   | { type: "fullscreen" }

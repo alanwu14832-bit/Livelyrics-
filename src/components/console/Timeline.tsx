@@ -6,7 +6,7 @@ import type { ConsoleController } from "@/lib/console/controller";
 import { formatCountdown, withAlpha } from "@/lib/console/format";
 import { selectTimeDecis, useStageValue } from "@/lib/console/hooks";
 import { CUE_KIND_COLORS, CUE_KIND_LABELS, SCENE_LABELS } from "@/lib/console/labels";
-import { sortedCues } from "@/lib/console/navigation";
+import { CUE_ACTIVE_WINDOW, sortedCues } from "@/lib/console/navigation";
 import {
   clampView,
   followPlayhead,
@@ -22,7 +22,7 @@ import {
   ZOOM_LEVELS,
   type TimeView,
 } from "@/lib/console/timeline-geom";
-import { stageTime, type PlaybackMode } from "@/lib/stage/protocol";
+import type { PlaybackMode } from "@/lib/stage/protocol";
 import { formatTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, CueNote, LyricLine, Project, SectionDesign } from "@/lib/types";
 import { useRafLoop } from "./useRaf";
@@ -146,7 +146,7 @@ function TimelineImpl({
   const applyZoom = useCallback(
     (next: number) => {
       const z = Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], Math.max(1, next));
-      viewRef.current = z === 1 ? fullView(duration) : viewForZoom(z, stageTime(controller.store.get()), duration);
+      viewRef.current = z === 1 ? fullView(duration) : viewForZoom(z, controller.songTime(), duration);
       setZoom(z);
       versionRef.current++;
     },
@@ -250,7 +250,7 @@ function TimelineImpl({
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-    const t = stageTime(controller.store.get());
+    const t = controller.songTime();
     let target: number | null = null;
     if (e.key === "PageUp") target = t - 5;
     else if (e.key === "PageDown") target = t + 5;
@@ -271,7 +271,7 @@ function TimelineImpl({
       pendingSeek.current = null;
     }
     const state = controller.store.get();
-    const t = stageTime(state);
+    const t = controller.songTime();
     if (state.playing && !dragRef.current) {
       const followed = followPlayhead(viewRef.current, t, duration);
       if (followed !== viewRef.current) viewRef.current = followed;
@@ -393,7 +393,7 @@ function TimelineImpl({
                 {CUE_KIND_LABELS[hoverCue.kind] ?? hoverCue.kind}
               </span>
               <span className="font-mono text-faint tabular">
-                {formatTime(hoverCue.time)} · {formatCountdown(hoverCue.time - t)}
+                {formatTime(hoverCue.time)} · {hoverCue.time < t - CUE_ACTIVE_WINDOW ? "已經過" : formatCountdown(hoverCue.time - t)}
               </span>
             </div>
             <p className="mt-1 text-xs font-semibold text-fg">{hoverCue.title}</p>
@@ -514,7 +514,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     ctx.font = `500 11px ${pal.font}`;
     ctx.fillStyle = pal.faint;
     ctx.textAlign = "center";
-    ctx.fillText("讀取波形中…", w / 2, waveMid - 10);
+    ctx.fillText(peaks ? "沒有波形資料" : "讀取波形中…", w / 2, waveMid - 10);
     ctx.textAlign = "left";
   }
 

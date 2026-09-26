@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StageView } from "@/components/stage/StageView";
 import { createStageStore, initialStageState } from "@/lib/stage/protocol";
 import { lineIndexAt } from "@/lib/timeline";
@@ -12,6 +12,20 @@ import type { Project } from "@/lib/types";
  */
 export function SectionPreview({ project, sectionIndex, className }: { project: Project; sectionIndex: number; className?: string }) {
   const [store] = useState(() => createStageStore(initialStageState(project.id)));
+  const holder = useRef<HTMLDivElement>(null);
+  // the WebGL renderer only runs while the preview is on screen
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = holder.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      const t = setTimeout(() => setVisible(true), 0);
+      return () => clearTimeout(t);
+    }
+    const io = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting ?? false), { rootMargin: "120px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const section = project.plan?.sections[sectionIndex];
@@ -37,5 +51,9 @@ export function SectionPreview({ project, sectionIndex, className }: { project: 
     return () => clearInterval(id);
   }, [project, sectionIndex, store]);
 
-  return <StageView project={project} store={store} renderScale={0.6} className={className} />;
+  return (
+    <div ref={holder} className={className} style={{ aspectRatio: "16 / 9", background: "#000" }}>
+      {visible && <StageView project={project} store={store} renderScale={0.6} className="h-full w-full" />}
+    </div>
+  );
 }

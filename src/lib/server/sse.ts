@@ -89,3 +89,15 @@ export function pipelineEventStream(handle: RunHandle, opts: SseOptions = {}): R
     },
   });
 }
+
+/** A stream that sends a fixed list of events and closes (e.g. nothing to attach to). */
+export function eventListStream(events: readonly PipelineEvent[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(": livelyrics\n\n"));
+      for (const event of events) controller.enqueue(encoder.encode(formatSseEvent(event)));
+      controller.close();
+    },
+  });
+}

@@ -101,16 +101,20 @@ export interface TargetLike {
   role?: string | null;
 }
 
+/** Keys a focused <select> handles itself (letters stay hotkeys: B must always work). */
+const SELECT_KEYS = new Set([...SLIDER_KEYS, "Enter", "NumpadEnter"]);
+
 /**
  * Whether a key press on `target` belongs to that element instead of the console:
- * text fields / selects / editors swallow everything; sliders keep their arrow keys;
- * buttons, links and checkboxes keep Enter (Space always stays the transport).
+ * text fields / editors swallow everything; sliders and selects keep their navigation
+ * keys; buttons, links and checkboxes keep Enter (Space always stays the transport).
  */
 export function targetOwnsKey(target: TargetLike | null | undefined, code: string): boolean {
   if (!target) return false;
   if (target.isContentEditable) return true;
   const tag = (target.tagName ?? "").toUpperCase();
-  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "SELECT") return SELECT_KEYS.has(code);
   if (tag === "INPUT") {
     const type = (target.type ?? "text").toLowerCase();
     if (type === "range") return SLIDER_KEYS.has(code);

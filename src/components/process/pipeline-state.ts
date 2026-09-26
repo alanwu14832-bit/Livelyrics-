@@ -109,11 +109,19 @@ export function applyEvent(state: RunState, event: PipelineEvent, now: number): 
       if (event.message) return { ...next, logs: pushLog(next, { at: now, step, message: event.message, tone: "success" }) };
       return next;
     }
-    case "log": {
-      const next = { ...state, logs: pushLog(state, { at: now, step: event.step ?? null, message: event.message, tone: "info" as const }) };
-      if (/已接上/.test(event.message)) next.attached = true;
-      return next;
+    case "attached": {
+      // the server joined a run already in progress: show the steps that run covers
+      const requested = PROCESS_STEPS.filter((s) => event.steps.includes(s));
+      if (requested.length === 0) return { ...state, attached: true };
+      const steps = { ...state.steps };
+      for (const s of PROCESS_STEPS) {
+        const st = steps[s];
+        if (st.status === "pending" || st.status === "kept") steps[s] = emptyStep(requested.includes(s) ? "pending" : "kept");
+      }
+      return { ...state, attached: true, requested, steps };
     }
+    case "log":
+      return { ...state, logs: pushLog(state, { at: now, step: event.step ?? null, message: event.message, tone: "info" as const }) };
     case "delta": {
       if (!isProcessStep(event.step) || !event.text) return state;
       return withStep(state, event.step, { text: state.steps[event.step].text + event.text });

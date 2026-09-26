@@ -2,7 +2,7 @@
 
 // Small form controls shared by the console panels (dark tokens from globals.css).
 
-import { useId, type ReactNode, type Ref } from "react";
+import { useId, useRef, type ReactNode, type Ref } from "react";
 import { cx } from "@/components/ui";
 
 export function SectionTitle({ children, actions, className }: { children: ReactNode; actions?: ReactNode; className?: string }) {
@@ -146,6 +146,8 @@ export function SelectField<T extends string>({
   title?: string;
 }) {
   const id = useId();
+  // picked with the mouse → give the keyboard back to the show hotkeys; keyboard users keep focus
+  const byPointer = useRef(false);
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <label htmlFor={id} className="text-[10px] font-medium tracking-wide text-faint">
@@ -157,7 +159,16 @@ export function SelectField<T extends string>({
           value={value}
           disabled={disabled}
           title={title}
-          onChange={(e) => onChange(e.target.value as T)}
+          onPointerDown={() => {
+            byPointer.current = true;
+          }}
+          onKeyDown={() => {
+            byPointer.current = false;
+          }}
+          onChange={(e) => {
+            onChange(e.target.value as T);
+            if (byPointer.current) e.currentTarget.blur();
+          }}
           className="h-7 w-full cursor-pointer appearance-none truncate rounded-md border border-line bg-panel-2 pr-6 pl-2 text-xs text-fg hover:border-faint focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {options.map((o) => (

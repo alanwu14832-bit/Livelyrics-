@@ -14,6 +14,7 @@ import {
   channelName,
   createStageStore,
   initialStageState,
+  stageTime,
   type LiveAudioFeatures,
   type PlaybackMode,
   type StageMessage,
@@ -37,6 +38,7 @@ import {
 } from "./navigation";
 import { computeWaveformPeaks } from "./peaks";
 import { patchSection, sceneBank, type SectionPatch } from "./plan-edit";
+import { loadSession, saveSession } from "./session";
 import { clampOffset, defaultSettings, hasStoredSettings, loadSettings, PLAYBACK_RATES, saveSettings, type ConsoleSettings } from "./settings";
 import { TapClock } from "./tap";
 
@@ -130,7 +132,7 @@ export interface ConsoleSnapshot {
   save: SaveStatus;
   redesign: RedesignState;
   notices: Notice[];
-  /** waveform computed in the browser when the project has no stored analysis peaks */
+  /** waveform computed in the browser when the project has no stored analysis peaks (null = loading, [] = unavailable) */
   fallbackPeaks: number[] | null;
 }
 
@@ -194,9 +196,11 @@ export class ConsoleController {
   private settingsFromStorage = false;
 
   private attached = false;
+  private sessionRestored = false;
   private channel: BroadcastChannel | null = null;
   private audio: HTMLAudioElement | null = null;
   private audioCleanup: (() => void) | null = null;
+  private resumeAt = 0;
   private elementAnalyser: LiveAnalyser | null = null;
   private micAnalyser: LiveAnalyser | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -304,6 +308,7 @@ export class ConsoleController {
       muted: this.settings.muted,
       mic: { ...this.snapshot.mic, deviceId: this.settings.micDeviceId },
     });
+    this.restoreSession();
     this.openChannel();
     this.heartbeatTimer = setInterval(() => this.heartbeat(), HEARTBEAT_MS);
     this.listenWindow();
@@ -315,6 +320,8 @@ export class ConsoleController {
     if (!this.attached) return;
     this.attached = false;
     this.flushSaveOnExit();
+    if (this.snapshot.project) this.persistSession();
+    this.holdOutput();
     this.loadAbort?.abort();
     this.loadAbort = null;
     this.peaksAbort?.abort();
@@ -343,6 +350,32 @@ export class ConsoleController {
     this.outputs.clear();
   }
 
+  /** After a reload of this tab: keep the operator's overrides (a blackout stays black) and position. */
+  private restoreSession(): void {
+    if (this.sessionRestored) return;
+    this.sessionRestored = true;
+    const session = loadSession(this.id);
+    if (!session) return;
+    this.overrides = session.overrides;
+    if (session.audioTime > 0 && this.resumeAt === 0) this.resumeAt = session.audioTime;
+    if (session.overrides.blackout) this.notify("已還原重新整理前的黑場狀態（按 B 解除）", "warn");
+  }
+
+  /** The console is going away: let the projection hold its last frame instead of running on. */
+  private holdOutput(): void {
+    const last = this.store.get();
+    if (!this.snapshot.project || !last.playing) return;
+    const held: StageState = { ...last, t: stageTime(last), sentAt: Date.now(), playing: false };
+    this.store.set(held);
+    this.post({ type: "state", state: held });
+  }
+
+  private persistSession(): void {
+    const el = this.audio;
+    const audioTime = el && el.readyState > 0 && Number.isFinite(el.currentTime) ? el.currentTime : this.resumeAt;
+    saveSession(this.id, { overrides: this.overrides, audioTime });
+  }
+
   /** Re-fetch the project from the server (e.g. after the lyrics editor saved). */
   async reload(): Promise<void> {
     await this.load(true);
@@ -361,8 +394,9 @@ export class ConsoleController {
     } catch (err) {
       if (abort.signal.aborted || !this.attached) return;
       const message = errorMessage(err, "無法載入專案");
-      if (/^404\b|找不到/.test(message)) this.set({ load: { status: "not-found" } });
-      else if (this.snapshot.project) this.notify(`重新載入失敗：${message}`, "error");
+      // never tear down a running console: once loaded, failures are only reported
+      if (this.snapshot.project) this.notify(`重新載入專案失敗：${message}`, "error");
+      else if (/^404\b|找不到/.test(message)) this.set({ load: { status: "not-found" } });
       else this.set({ load: { status: "error", message } });
     } finally {
       if (this.loadAbort === abort) this.loadAbort = null;
@@ -421,13 +455,18 @@ export class ConsoleController {
     const abort = new AbortController();
     this.peaksAbort = abort;
     void computeWaveformPeaks(api.audioUrl(this.id), abort.signal).then((peaks) => {
-      if (abort.signal.aborted || !this.attached || !peaks) return;
-      this.set({ fallbackPeaks: peaks });
+      if (abort.signal.aborted || !this.attached) return;
+      // [] = decoding failed: the timeline shows "no waveform" instead of a loading hint
+      this.set({ fallbackPeaks: peaks ?? [] });
     });
   }
 
   private listenWindow(): void {
-    const onPageHide = () => this.flushSaveOnExit();
+    const onPageHide = () => {
+      this.flushSaveOnExit();
+      this.persistSession();
+      this.holdOutput();
+    };
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       const s = this.snapshot.save.status;
       if (s === "pending" || s === "saving" || s === "error" || this.snapshot.redesign.running) {
@@ -479,6 +518,14 @@ export class ConsoleController {
       [
         "loadedmetadata",
         () => {
+          if (this.resumeAt > 0) {
+            try {
+              el.currentTime = Math.min(this.resumeAt, Number.isFinite(el.duration) ? el.duration : this.resumeAt);
+            } catch {
+              /* not seekable */
+            }
+            this.resumeAt = 0;
+          }
           this.set({ audio: { ...this.snapshot.audio, status: "ready", error: null } });
           sync();
         },
@@ -529,6 +576,8 @@ export class ConsoleController {
     if (!el) return;
     this.audioCleanup?.();
     this.audioCleanup = null;
+    // a re-attach (dev Fast Refresh, retry) continues from the same place
+    if (Number.isFinite(el.currentTime) && el.currentTime > 0) this.resumeAt = el.currentTime;
     try {
       el.pause();
       el.removeAttribute("src");
@@ -546,6 +595,11 @@ export class ConsoleController {
   retryAudio(): void {
     this.releaseAudio();
     this.setupAudio();
+    const project = this.snapshot.project;
+    if (project && this.snapshot.fallbackPeaks?.length === 0) {
+      this.set({ fallbackPeaks: null });
+      this.loadFallbackPeaks(project);
+    }
   }
 
   private ensureElementAnalyser(): void {
@@ -579,8 +633,8 @@ export class ConsoleController {
   songTime(now = Date.now()): number {
     if (this.settings.mode === "live") return this.clock.time(now);
     const el = this.audio;
-    const t = (el && Number.isFinite(el.currentTime) ? el.currentTime : 0) + this.settings.offset;
-    return Math.max(0, t);
+    const audioT = el && el.readyState > 0 && Number.isFinite(el.currentTime) ? el.currentTime : this.resumeAt;
+    return Math.max(0, audioT + this.settings.offset);
   }
 
   private computeIndices(t: number, now: number): void {
@@ -749,6 +803,7 @@ export class ConsoleController {
 
   private heartbeat(): void {
     this.post({ type: "ping", at: Date.now() });
+    if (this.snapshot.project) this.persistSession();
     // idle consoles resend the state once a second so a missed message heals itself
     if (!this.tickTimer) this.publish();
     this.updateOutputStatus();
@@ -771,6 +826,19 @@ export class ConsoleController {
     if (this.projectBroadcastTimer) return;
     const wait = Math.max(0, PROJECT_BROADCAST_MS - (Date.now() - this.lastProjectBroadcast));
     this.projectBroadcastTimer = setTimeout(send, wait);
+  }
+
+  /**
+   * Leaving the console stops its clock (the projection holds its last frame). While the
+   * show is live — playing or a projection window connected — ask first. True = go ahead.
+   */
+  confirmLeave(): boolean {
+    if (!this.isPlaying() && !this.snapshot.output.connected) return true;
+    try {
+      return window.confirm("演出進行中：離開控制台會停止播放，投影畫面會停在最後一格。確定要離開嗎？");
+    } catch {
+      return true;
+    }
   }
 
   /** Open (or focus) the projection window. Must run inside a user gesture. */
@@ -1206,6 +1274,7 @@ export class ConsoleController {
     next.intensity = Math.min(1.5, Math.max(0, Number.isFinite(next.intensity) ? next.intensity : 1));
     next.lyricScale = Math.min(2, Math.max(0.5, Number.isFinite(next.lyricScale) ? next.lyricScale : 1));
     this.overrides = next;
+    this.persistSession();
     this.publish();
   }
 
@@ -1241,6 +1310,7 @@ export class ConsoleController {
 
   resetOverrides(): void {
     this.overrides = { ...DEFAULT_OVERRIDES };
+    this.persistSession();
     this.publish();
   }
 
@@ -1321,7 +1391,9 @@ export class ConsoleController {
     const abort = new AbortController();
     this.redesignAbort = abort;
     try {
-      const project = await api.process(this.id, { steps: ["design"], ...(text ? { instruction: text } : {}) }, (e) => this.onPipelineEvent(e), abort.signal);
+      // a re-design keeps the research; a project that never had one researches first
+      const steps: Array<"research" | "design"> = this.snapshot.project?.research ? ["design"] : ["research", "design"];
+      const project = await api.process(this.id, { steps, ...(text ? { instruction: text } : {}) }, (e) => this.onPipelineEvent(e), abort.signal);
       if (!this.attached) return false;
       this.flushDelta();
       this.pendingPlan = null;
@@ -1386,6 +1458,10 @@ export class ConsoleController {
         break;
       case "done":
         this.pushLog({ kind: "done", message: "設計完成" });
+        break;
+      case "attached":
+        // the server joined a run that was already going; the log line that follows explains it
+        if (!e.sameRequest) this.notify("已有處理正在進行，這次的重新設計指示不會套用；完成後請再執行一次。", "warn");
         break;
       default:
         break;

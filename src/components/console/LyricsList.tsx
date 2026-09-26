@@ -8,7 +8,7 @@ import { withAlpha } from "@/lib/console/format";
 import { selectLineIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_LABELS, SCENE_LABELS, SECTION_KIND_LABELS } from "@/lib/console/labels";
 import { sectionOfLine, untimedCount } from "@/lib/console/navigation";
-import { stageTime, type PlaybackMode } from "@/lib/stage/protocol";
+import type { PlaybackMode } from "@/lib/stage/protocol";
 import { lineProgress } from "@/lib/timeline";
 import type { LineDesign, Project, SectionDesign } from "@/lib/types";
 import { IconEdit, IconTarget } from "./icons";
@@ -31,9 +31,10 @@ function buildRows(project: Project): Row[] {
   const lines = project.lyrics?.lines ?? [];
   const plan = project.plan;
   const rows: Row[] = [];
+  const duration = project.meta.duration || project.analysis?.duration || 0;
   let current: number | null = null;
   lines.forEach((line, index) => {
-    const sec = sectionOfLine(plan, line) ?? current;
+    const sec = sectionOfLine(plan, lines, index, duration) ?? current;
     if (sec != null && sec !== current && plan) {
       // headers for every section up to this one, so instrumental sections show too
       const from = current == null ? 0 : current + 1;
@@ -55,7 +56,7 @@ function CurrentProgress({ controller, project, index, duration }: { controller:
   useRafLoop(() => {
     const el = ref.current;
     if (!el) return;
-    const p = lineProgress(lines, index, stageTime(controller.store.get()), duration);
+    const p = lineProgress(lines, index, controller.songTime(), duration);
     el.style.transform = `scaleX(${p.toFixed(4)})`;
   });
   if (lines[index]?.start == null) return null;
@@ -96,7 +97,11 @@ function LyricsListImpl({
   const [followPausedAt, setFollowPausedAt] = useState(0);
   const following = followPausedAt === 0;
 
-  const pauseFollow = useCallback(() => setFollowPausedAt(Date.now()), []);
+  // (re)start the pause at most every half second while the operator scrolls
+  const pauseFollow = useCallback(() => {
+    const now = Date.now();
+    setFollowPausedAt((prev) => (now - prev < 500 ? prev : now));
+  }, []);
 
   // resume auto-follow a few seconds after the operator stopped scrolling
   useEffect(() => {
@@ -182,6 +187,9 @@ function LyricsListImpl({
           )}
           <Link
             href={`/p/${encodeURIComponent(project.id)}/lyrics`}
+            onClick={(e) => {
+              if (!controller.confirmLeave()) e.preventDefault();
+            }}
             className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted hover:bg-panel-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
           >
             <IconEdit size={12} />
@@ -215,12 +223,13 @@ function LyricsListImpl({
               const s = row.section;
               const [bg, primary, accent] = s.colorway;
               return (
-                <button
+                // a header inside the listbox is not an option: mouse shortcut only (sections are
+                // also reachable from the timeline and the 設計 tab)
+                <div
                   key={row.key}
-                  type="button"
-                  tabIndex={-1}
+                  role="presentation"
                   onClick={() => controller.jumpToSection(row.sectionIndex)}
-                  className="sticky top-0 z-10 flex w-full items-center gap-2 border-y border-line/60 bg-panel/95 px-3 py-1.5 text-left backdrop-blur hover:bg-panel-2"
+                  className="sticky top-0 z-10 flex w-full cursor-pointer items-center gap-2 border-y border-line/60 bg-panel/95 px-3 py-1.5 text-left backdrop-blur hover:bg-panel-2"
                   title={`跳到「${s.label}」`}
                 >
                   <span
@@ -235,7 +244,7 @@ function LyricsListImpl({
                     <span className={cx(s.lyricStyle === "hidden" && "text-warn")}>{LYRIC_STYLE_LABELS[s.lyricStyle] ?? s.lyricStyle}</span>
                     <span className="font-mono tabular">{formatLineTime(s.start)}</span>
                   </span>
-                </button>
+                </div>
               );
             }
             const i = row.index;

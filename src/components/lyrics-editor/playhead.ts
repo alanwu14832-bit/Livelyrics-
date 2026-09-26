@@ -147,11 +147,11 @@ export class Playhead {
     if (this.el) this.el.playbackRate = rate;
   }
 
+  /** Detach from the element (subscribers unsubscribe themselves). */
   destroy(): void {
     this.detach?.();
     this.detach = null;
     this.el = null;
-    this.listeners.clear();
   }
 }
 

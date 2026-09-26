@@ -248,12 +248,12 @@ export function LyricsSearchPicker({
             );
           })}
           {allowNone && (
-          <li className={cx("rounded-lg border transition-colors", value === null ? "border-accent/60 bg-accent/[0.06]" : "border-line bg-panel-2/50 hover:border-faint")}>
-            <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm text-muted">
-              <input type="radio" name={group} checked={value === null} onChange={() => choose(null)} className="accent-[var(--color-accent)]" />
-              {noneLabel}
-            </label>
-          </li>
+            <li className={cx("rounded-lg border transition-colors", value === null ? "border-accent/60 bg-accent/[0.06]" : "border-line bg-panel-2/50 hover:border-faint")}>
+              <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm text-muted">
+                <input type="radio" name={group} checked={value === null} onChange={() => choose(null)} className="accent-[var(--color-accent)]" />
+                {noneLabel}
+              </label>
+            </li>
           )}
         </ul>
       )}

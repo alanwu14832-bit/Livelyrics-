@@ -3,7 +3,7 @@
 // section boundaries (audio novelty sections, refined by lyric structure; lyric gaps
 // or an even split without analysis) and a section-kind guess per section.
 
-import { lineSpan } from "@/lib/timeline";
+import { lineAnchorTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, Lyrics, SectionKind, SongMeta } from "@/lib/types";
 
 export interface StructureInput {
@@ -284,11 +284,22 @@ function isChorusLine(l: LineInfo): boolean {
   return l.repeats >= 2;
 }
 
+/**
+ * Whether a line is sung in this span. Uses the shared anchor (start + half the line,
+ * at most 1.5 s): boundaries are snapped to beats and singers come in early, so a line
+ * at 8.000 belongs to a section starting at 8.001, and a pickup to the section it leads into.
+ */
+function inSpan(l: LineInfo, s: { start: number; end: number }): boolean {
+  if (l.start == null) return false;
+  const a = lineAnchorTime(l.start, l.end ?? l.start);
+  return a >= s.start && a < s.end;
+}
+
 /** Split spans where lyrics switch between unique and repeated lines (a missed verse/chorus boundary). */
 function splitByRepetition(spans: Span[], lines: LineInfo[], depth = 0): Span[] {
   const out: Span[] = [];
   for (const span of spans) {
-    const inside = lines.filter((l) => l.start != null && l.start >= span.start && l.start < span.end);
+    const inside = lines.filter((l) => inSpan(l, span));
     let cut: number | null = null;
     let best = 0.75;
     for (let i = 1; i < inside.length; i++) {
@@ -418,7 +429,6 @@ export function analyzeStructure(input: StructureInput): SongStructure {
     if (env != null) s.energy = s.energy == null ? env : (s.energy + env) / 2;
   }
 
-  const inSpan = (l: LineInfo, s: Span) => l.start != null && l.start >= s.start && l.start < s.end;
   const spanLines = spans.map((s) => lines.filter((l) => inSpan(l, s)));
   const clusterSpans = new Map<number, Set<number>>();
   spanLines.forEach((ls, si) =>

@@ -39,3 +39,29 @@ export function withoutTimings(lyrics: Lyrics): Lyrics {
     }),
   };
 }
+
+export interface LrcHeaderTags {
+  title?: string;
+  artist?: string;
+  album?: string;
+}
+
+const HEADER_KEYS: Record<string, keyof LrcHeaderTags> = { ti: "title", ar: "artist", al: "album" };
+
+/** Song info from LRC header tags ([ti:…] [ar:…] [al:…]) at the top of pasted lyrics. */
+export function lrcHeaderTags(text: string): LrcHeaderTags {
+  const out: LrcHeaderTags = {};
+  // headers live at the top; stop at the first timed line so lyric text is never read as a tag
+  for (const raw of text.split(/\r?\n/).slice(0, 40)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^\[(ti|ar|al)\s*:\s*(.*?)\s*\]$/i.exec(line);
+    if (m) {
+      const key = HEADER_KEYS[m[1].toLowerCase()];
+      if (m[2] && !out[key]) out[key] = m[2].slice(0, 200);
+      continue;
+    }
+    if (/^\[\d/.test(line) || !line.startsWith("[")) break;
+  }
+  return out;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AUDIO_ACCEPT, checkAudioFile, fileExtension, formatBytes, MAX_UPLOAD_BYTES, pickAudioFile } from "./accept";
 import { clearLyricsHandoff, lyricsHandoffKey, readLyricsHandoff, storeLyricsHandoff } from "./handoff";
+import { lrcHeaderTags } from "./lyrics-choice";
 import { resamplePeaks } from "./waveform";
 
 function memoryStorage() {
@@ -102,5 +103,21 @@ describe("resamplePeaks", () => {
     expect(resamplePeaks([], 3)).toEqual([0, 0, 0]);
     expect(resamplePeaks([NaN, 2], 1)).toEqual([1]);
     expect(resamplePeaks([0.5], 0)).toEqual([]);
+  });
+});
+
+describe("lrcHeaderTags", () => {
+  it("reads title, artist and album from the LRC header", () => {
+    expect(lrcHeaderTags("[ti:示範之歌]\n[ar:Livelyrics Band]\n[al: 夜色 ]\n[00:08.00]夜色慢慢落在城市的邊緣")).toEqual({
+      title: "示範之歌",
+      artist: "Livelyrics Band",
+      album: "夜色",
+    });
+  });
+
+  it("ignores empty tags, other tags, plain text and anything after the first timed line", () => {
+    expect(lrcHeaderTags("[ti:]\n[by:someone]\n[offset:+100]\n[ar:A]")).toEqual({ artist: "A" });
+    expect(lrcHeaderTags("第一行歌詞\n[ti:不是標籤]")).toEqual({});
+    expect(lrcHeaderTags("[00:01.00]一\n[ti:太晚了]")).toEqual({});
   });
 });

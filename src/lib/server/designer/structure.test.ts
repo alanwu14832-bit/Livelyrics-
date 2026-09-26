@@ -49,6 +49,18 @@ describe("analyzeStructure", () => {
     expect(st.sections[2].lineIds).toEqual(["l4", "l5", "l6", "l7"]);
   });
 
+  it("keeps the labels when boundaries are snapped a hair after the lyric times (real browser analysis)", () => {
+    // AUDIO reports 8.001 / 24.003 / 40.008 / 48.002 / 63.999 for the demo song while the LRC says 8.00, 24.00, 48.00
+    const analysis = demoAnalysis();
+    const snapped = [0, 8.001, 24.003, 40.008, 48.002, 63.999, 73];
+    analysis.sections = analysis.sections.map((s, i) => ({ ...s, start: snapped[i], end: snapped[i + 1] }));
+    const st = analyzeStructure({ ...demoInput(), analysis });
+    expect(st.sections.map((s) => s.kind)).toEqual(["intro", "verse", "chorus", "breakdown", "chorus", "outro"]);
+    expect(st.sections[0].lineIds).toEqual([]);
+    expect(st.sections[1].lineIds[0]).toBe("l0");
+    expect(st.sections[4].lineIds[0]).toBe("l9");
+  });
+
   it("falls back to lyric blocks without analysis", () => {
     const st = analyzeStructure({ meta: demoMeta(), lyrics: demoLyrics(), analysis: null });
     expect(st.source).toBe("lyrics");

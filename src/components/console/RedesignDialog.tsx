@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, cx } from "@/components/ui";
+import { Markdown } from "@/components/ui/Markdown";
 import type { ConsoleController, RedesignState } from "@/lib/console/controller";
 import { IconCheck, IconClose, IconSearch, IconSparkles, IconWarning } from "./icons";
 
@@ -20,11 +21,13 @@ export function RedesignDialog({
   controller,
   redesign,
   hasPlan,
+  hasResearch,
   onClose,
 }: {
   controller: ConsoleController;
   redesign: RedesignState;
   hasPlan: boolean;
+  hasResearch: boolean;
   onClose: () => void;
 }) {
   const [instruction, setInstruction] = useState(redesign.running ? redesign.instruction : "");
@@ -66,9 +69,15 @@ export function RedesignDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
       onKeyDown={(e) => {
-        // the dialog is modal: keep console hotkeys out while it is open
+        // the dialog is modal: keep console hotkeys out while it is open…
         e.stopPropagation();
         if (e.key === "Escape") onClose();
+        // …except the blackout key, which must work from anywhere outside the text field
+        const tag = (e.target as HTMLElement).tagName;
+        if (e.code === "KeyB" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && tag !== "TEXTAREA" && tag !== "INPUT") {
+          e.preventDefault();
+          controller.toggleBlackout();
+        }
       }}
       onClick={onClose}
     >
@@ -86,7 +95,9 @@ export function RedesignDialog({
               {hasPlan ? "重新設計" : "產生設計"}
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-faint">
-              用一句話告訴舞台視覺設計師想怎麼改，會保留研究結果、只重做設計方案（主視覺、逐段場景與歌詞呈現、現場提示）。
+              {hasResearch
+                ? "用一句話告訴舞台視覺設計師想怎麼改，會保留研究結果、只重做設計方案（主視覺、逐段場景與歌詞呈現、現場提示）。"
+                : "這首歌還沒有研究資料：會先研究樂團與歌曲，再產生設計方案（主視覺、逐段場景與歌詞呈現、現場提示）。"}
             </p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-1.5 text-muted hover:bg-panel-3 hover:text-fg" aria-label="關閉">
@@ -158,7 +169,9 @@ export function RedesignDialog({
                   ))}
                 </ul>
                 {redesign.text && (
-                  <p className="mt-2 border-t border-line pt-2 text-[11px] leading-relaxed whitespace-pre-wrap text-faint">{redesign.text.slice(-1200)}</p>
+                  <div className="mt-2 border-t border-line pt-1">
+                    <Markdown className="text-[11px] leading-relaxed text-muted [&_h2]:text-xs [&_h3]:text-xs">{redesign.text.slice(-2400)}</Markdown>
+                  </div>
                 )}
               </div>
               {redesign.error && <p className="rounded-md bg-danger/10 px-2 py-1.5 text-[11px] text-danger">{redesign.error}</p>}

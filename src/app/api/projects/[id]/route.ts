@@ -1,4 +1,5 @@
 import { handle, HttpError, json, readJson, requireProjectId } from "@/lib/server/http";
+import { remapPlanLines } from "@/lib/lyrics/remap";
 import { cancelRun, withLiveStatus } from "@/lib/server/pipeline";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
 import { applyMetaPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
@@ -41,7 +42,11 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
-    if (lyrics) p.lyrics = lyrics;
+    if (lyrics) {
+      // ids are re-numbered on every lyrics save: keep per-line designs on the same text
+      if (!plan && p.plan) p.plan = remapPlanLines(p.plan, p.lyrics, lyrics);
+      p.lyrics = lyrics;
+    }
     if (plan) p.plan = plan;
   });
   return json(withLiveStatus(saved));

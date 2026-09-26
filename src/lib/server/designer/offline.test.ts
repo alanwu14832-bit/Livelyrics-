@@ -104,6 +104,16 @@ describe("offlineDesign edge cases", () => {
     }
   });
 
+  it("does not talk about lyric placement or sing-alongs for a song without lyrics", () => {
+    const p = offlineDesign({ ...demoInput(), lyrics: { source: "none", synced: false, lines: [] } as Lyrics });
+    for (const s of p.sections) {
+      expect(s.lyricStyle).toBe("hidden");
+      expect(s.rationale).not.toMatch(/合唱|放在|「不顯示」/);
+    }
+    expect(p.keyVisual.concept).not.toMatch(/合唱/);
+    expect(p.designerNotes).not.toMatch(/跟唱|主歌：歌詞/);
+  });
+
   it("handles a long through-composed song", () => {
     const analysis = demoAnalysis();
     const lines = Array.from({ length: 60 }, (_, i) => ({ id: `l${i}`, text: `第${i}句獨一無二的歌詞在這裡`, start: 4 + i * 1.1, end: null }));

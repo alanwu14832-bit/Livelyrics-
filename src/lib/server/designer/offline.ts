@@ -276,30 +276,36 @@ function transitionFor(s: StructSection, prev: StructSection | undefined): Secti
   return rise >= 0.15 ? "wipe" : "fade";
 }
 
-function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, placement: LyricPlacement, energy: number): string {
+function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, placement: LyricPlacement, energy: number, songHasLyrics: boolean): string {
   const sc = SCENES[scene].label;
   const ly = LYRIC_STYLES[style].label;
   const where = LYRIC_PLACEMENTS_INFO[placement].split("：")[0];
+  const hidden = style === "hidden";
+  // how this section treats lyrics, for sections whose sentence depends on it
+  const lyricClause = !songHasLyrics ? "這首歌沒有歌詞，畫面本身就是主角" : hidden ? "這段不放歌詞" : `歌詞以「${ly}」放在${where}`;
   switch (kind) {
     case "intro":
       return `以「${sc}」開場，先讓觀眾認得這首歌的世界；歌詞留白。`;
     case "chorus":
-      return `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；歌詞以「${ly}」放在${where}，邀請全場合唱。`;
+      return hidden
+        ? `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，讓光與節拍帶動全場。`
+        : `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，邀請全場合唱。`;
     case "verse":
+      if (hidden) return `主歌以「${sc}」維持中低亮度；${lyricClause}，把焦點留給主唱。`;
       return style === "subtitle"
         ? `主歌字很密，畫面「${sc}」為主、歌詞退到小字幕，不和主唱搶戲。`
-        : `主歌以「${sc}」維持中低亮度，歌詞「${ly}」放在${where}，避開主唱 IMAG。`;
+        : `主歌以「${sc}」維持中低亮度，${lyricClause}，避開主唱 IMAG。`;
     case "pre-chorus":
-      return `導歌用「${sc}」慢慢堆疊張力，歌詞「${ly}」為副歌蓄勢。`;
+      return hidden ? `導歌用「${sc}」慢慢堆疊張力；${lyricClause}，為副歌蓄勢。` : `導歌用「${sc}」慢慢堆疊張力，歌詞「${ly}」為副歌蓄勢。`;
     case "bridge":
-      return `橋段換一個畫面語彙：「${sc}」配「${ly}」，製造文學感的轉折。`;
+      return hidden ? `橋段換一個畫面語彙：「${sc}」；${lyricClause}，製造轉折。` : `橋段換一個畫面語彙：「${sc}」配「${ly}」，製造文學感的轉折。`;
     case "breakdown":
-      return `能量收掉，「${sc}」留白；${style === "hidden" ? "不放歌詞" : `歌詞「${ly}」`}，讓舞台燈光說話。`;
+      return `能量收掉，「${sc}」留白；${hidden ? "不放歌詞" : `歌詞「${ly}」`}，讓舞台燈光說話。`;
     case "solo":
     case "interlude":
       return `器樂段落交給「${sc}」與燈光，歌詞隱藏，畫面隨節拍反應。`;
     case "outro":
-      return `回到「${sc}」收尾，與開場呼應；${style === "hidden" ? "歌詞留白" : "最後一句放大淡出"}。`;
+      return `回到「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
   }
 }
 
@@ -349,7 +355,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricScale: scale,
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
       transitionIn: transitionFor(s, st.sections[i - 1]),
-      rationale: rationaleFor(s.kind, scene, style, placement, e),
+      rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0),
     };
   });
 }
@@ -420,13 +426,20 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
     `以主視覺「${title}」開場建立世界觀，${arcDescription(ctx.st)}。畫面隨能量起伏，副歌一次比一次更亮、更快，最後回到主視覺收尾。`,
     "",
     "## 歌詞與動畫",
-    verse
-      ? `- 主歌：歌詞「${LYRIC_STYLES[verse.lyricStyle].label}」、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
-      : "- 敘事段落：歌詞穩定淡入，畫面保持低調。",
-    choruses.length
-      ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
-      : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
-    hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
+    ...(ctx.st.lines.length === 0
+      ? [
+          "- 這首歌目前沒有歌詞：全程由畫面與燈光敘事，安靜段落退後、能量高的段落跟著節拍爆開。",
+          "- 之後在歌詞編輯器加入歌詞，再重新設計，就會得到每一段的歌詞呈現方式。",
+        ]
+      : [
+          verse && verse.lyricStyle !== "hidden"
+            ? `- 主歌：歌詞「${LYRIC_STYLES[verse.lyricStyle].label}」、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
+            : "- 敘事段落：畫面保持低調，把焦點留給主唱。",
+          choruses.length
+            ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
+            : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
+          hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
+        ]),
     "",
     "## 現場注意",
     "- 任何狀況先按 **B** 全黑；樂團即興延長或跳段時，切到現場模式手動 cue。",
@@ -489,7 +502,9 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const concept = [
     `這首${tempoText}的歌，在舞台上是一個「${title}」的世界。`,
     `畫面從${imageryText}長出來，以${palette.entries[1].name}與${palette.entries[2].name}為主色，在${palette.entries[0].name}的深色背景上發光。`,
-    "主歌讓畫面退後、把空間留給主唱；副歌讓光與節拍一起爆開，邀請全場合唱。",
+    st.lines.length > 0
+      ? "主歌讓畫面退後、把空間留給主唱；副歌讓光與節拍一起爆開，邀請全場合唱。"
+      : "這首歌不放歌詞：安靜的段落讓畫面退後，能量高的段落讓光與節拍一起爆開。",
     "視覺始終是配角：它是樂團背後的一道牆，托起表演而不搶戲。",
   ].join("");
 

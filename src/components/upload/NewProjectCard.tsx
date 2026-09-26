@@ -1,12 +1,13 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { Badge, Button, cx } from "@/components/ui";
-import type { AudioFileMetadata } from "@/lib/audio/metadata";
+import { parseFileName, type AudioFileMetadata } from "@/lib/audio/metadata";
 import { formatTimeShort } from "@/lib/timeline";
 import type { AudioAnalysis } from "@/lib/types";
 import { AlertIcon, ArrowRightIcon, MusicIcon, SpinnerIcon, XIcon } from "@/components/home/icons";
 import { formatBytes } from "./accept";
+import { lrcHeaderTags } from "./lyrics-choice";
 import { LyricsOptions, summarizeLyricsText, type LyricsMode } from "./LyricsOptions";
 import type { LyricsPick } from "./LyricsSearchPicker";
 import { Waveform } from "./Waveform";
@@ -54,7 +55,33 @@ export function NewProjectCard({
   const [pick, setPick] = useState<LyricsPick | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [validation, setValidation] = useState<string | null>(null);
+  const [filledFromLrc, setFilledFromLrc] = useState<string[]>([]);
   const ids = { title: useId(), artist: useId(), album: useId() };
+
+  // pasted LRC headers ([ti:] [ar:] [al:]) fill song info the user has not typed themselves,
+  // when the field is empty or still just the file name (research and LRCLIB need real names)
+  const fromFileName = useMemo(() => parseFileName(file.name), [file.name]);
+  const edited = useRef({ title: false, artist: false, album: false });
+  const changePasteText = (text: string) => {
+    setPasteText(text);
+    const tags = lrcHeaderTags(text);
+    const filled: string[] = [];
+    const replaceable = (field: "title" | "artist" | "album", value: string, fileValue: string | undefined) =>
+      !edited.current[field] && (!value.trim() || value === (fileValue ?? ""));
+    if (tags.title && tags.title !== title && replaceable("title", title, fromFileName.title)) {
+      setTitle(tags.title);
+      filled.push("歌名");
+    }
+    if (tags.artist && tags.artist !== artist && replaceable("artist", artist, fromFileName.artist)) {
+      setArtist(tags.artist);
+      filled.push("樂團");
+    }
+    if (tags.album && tags.album !== album && replaceable("album", album, fromFileName.album)) {
+      setAlbum(tags.album);
+      filled.push("專輯");
+    }
+    if (filled.length) setFilledFromLrc(filled);
+  };
 
   const submit = () => {
     if (!title.trim()) {
@@ -107,22 +134,55 @@ export function NewProjectCard({
               <label htmlFor={ids.title} className="text-xs text-muted">
                 歌名 <span className="text-accent">*</span>
               </label>
-              <input id={ids.title} value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="歌曲名稱" required />
+              <input
+                id={ids.title}
+                value={title}
+                onChange={(e) => {
+                  edited.current.title = true;
+                  setTitle(e.target.value);
+                }}
+                className={inputCls}
+                placeholder="歌曲名稱"
+                required
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label htmlFor={ids.artist} className="text-xs text-muted">
                   樂團／演出者
                 </label>
-                <input id={ids.artist} value={artist} onChange={(e) => setArtist(e.target.value)} className={inputCls} placeholder="例如：落日飛車" />
+                <input
+                  id={ids.artist}
+                  value={artist}
+                  onChange={(e) => {
+                    edited.current.artist = true;
+                    setArtist(e.target.value);
+                  }}
+                  className={inputCls}
+                  placeholder="例如：落日飛車"
+                />
               </div>
               <div className="space-y-1.5">
                 <label htmlFor={ids.album} className="text-xs text-muted">
                   專輯
                 </label>
-                <input id={ids.album} value={album} onChange={(e) => setAlbum(e.target.value)} className={inputCls} placeholder="選填" />
+                <input
+                  id={ids.album}
+                  value={album}
+                  onChange={(e) => {
+                    edited.current.album = true;
+                    setAlbum(e.target.value);
+                  }}
+                  className={inputCls}
+                  placeholder="選填"
+                />
               </div>
             </div>
+            {filledFromLrc.length > 0 && (
+              <p role="status" className="-mt-1 text-xs text-faint">
+                已從歌詞的 LRC 標籤帶入{filledFromLrc.join("、")}，可以再修改。
+              </p>
+            )}
 
             <div className="rounded-xl border border-line bg-bg/40 p-3">
               <dl className="mb-3 grid grid-cols-3 gap-2 text-center">
@@ -174,7 +234,7 @@ export function NewProjectCard({
             pick={pick}
             onPickChange={setPick}
             pasteText={pasteText}
-            onPasteTextChange={setPasteText}
+            onPasteTextChange={changePasteText}
             disabled={submitting}
           />
         </div>

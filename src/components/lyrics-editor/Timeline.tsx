@@ -106,25 +106,23 @@ export function Timeline(props: TimelineProps) {
         }
       }
 
-      // seconds grid in window mode
+      // seconds grid in window mode (labels are drawn after the waveform)
       if (p.window !== "full") {
         ctx.fillStyle = COLORS.grid;
-        ctx.font = "10px ui-monospace, monospace";
-        for (let s = Math.ceil(a); s <= b; s++) {
-          const gx = Math.round(x(s)) + 0.5;
-          ctx.fillRect(gx, bandH, 1, H - bandH);
-          if (s % 2 === 0) {
-            ctx.fillStyle = COLORS.muted;
-            ctx.globalAlpha = 0.6;
-            ctx.fillText(formatTimeShort(s), gx + 3, H - 4);
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = COLORS.grid;
-          }
-        }
+        for (let s = Math.ceil(a); s <= b; s++) ctx.fillRect(Math.round(x(s)), bandH, 1, H - bandH);
       }
 
       // waveform
       drawWaveform(ctx, p.peaks, { x: 0, y: bandH + 2, width: W, height: H - bandH - 4, color: COLORS.wave, from: a / dur, to: b / dur, bar: 2, gap: 1 });
+
+      if (p.window !== "full") {
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = COLORS.muted;
+        for (let s = Math.ceil(a); s <= b; s++) {
+          if (s % 2 === 0) ctx.fillText(formatTimeShort(s), Math.round(x(s)) + 3, H - 3);
+        }
+      }
 
       // line spans + markers
       const t = p.playhead.getTime();
