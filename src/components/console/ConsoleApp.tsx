@@ -192,7 +192,7 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
     [dispatch],
   );
 
-  if (snap.load.status === "not-found") return <NotFoundState id={id} />;
+  if (snap.load.status === "not-found") return <NotFoundState />;
   if (snap.load.status === "error" && !project) return <LoadErrorState message={snap.load.message} onRetry={() => void controller.reload()} />;
   if (!project) return <ConsoleSkeleton id={id} intro={intro ?? null} />;
   if (notReady) return <NotReadyState project={project} onOpenAnyway={() => setOpenAnyway(true)} />;
@@ -257,7 +257,12 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
         onBlackout={blackoutFromSheet}
         onClose={() => setRedesignOpen(false)}
       />
-      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      {/* over the preview's top-right corner (solid in the console), never over the side-panel tabs */}
+      <ToastStack
+        toasts={toasts}
+        onDismiss={dismissToast}
+        className="top-[70px]! right-[calc(clamp(340px,24vw,400px)+24px)]! w-[340px]!"
+      />
     </div>
   );
 }

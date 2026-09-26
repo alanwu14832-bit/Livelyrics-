@@ -38,8 +38,8 @@ import { renderIcon } from "./render-icon";
 const ITEM_SELECTOR = '[role="menuitem"]:not([aria-disabled="true"])';
 
 const SURFACE = cx(
-  // --focus-ring is re-resolved here: portalled surfaces carry their own data-theme scope
-  "ui-popover fixed [inset:auto] outline-none [--focus-ring:var(--tint)]",
+  // portalled surfaces carry their own data-theme scope, which re-resolves --focus-ring
+  "ui-popover fixed [inset:auto] outline-none",
   // over the console (and its WebGL preview) floating layers are solid: no backdrop-filter
   "data-[theme=console]:bg-elevated data-[theme=console]:[backdrop-filter:none] data-[theme=console]:[-webkit-backdrop-filter:none]",
   "in-data-[theme=console]:bg-elevated in-data-[theme=console]:[backdrop-filter:none] in-data-[theme=console]:[-webkit-backdrop-filter:none]",
@@ -144,6 +144,7 @@ export function MenuItem({
   children,
   onSelect,
   href,
+  transitionTypes,
   icon,
   shortcut,
   destructive = false,
@@ -156,6 +157,8 @@ export function MenuItem({
   onSelect?: () => void;
   /** navigation item (next/link) */
   href?: string;
+  /** view-transition types for href items (["push"] going deeper) */
+  transitionTypes?: string[];
   icon?: UiIcon | ReactNode;
   /** key combo shown as a Kbd (e.g. "Meta+S") */
   shortcut?: string;
@@ -206,7 +209,7 @@ export function MenuItem({
   } as const;
   if (href && !disabled) {
     return (
-      <Link href={href} {...common} role="menuitem" onClick={select}>
+      <Link href={href} transitionTypes={transitionTypes} {...common} role="menuitem" onClick={select}>
         {inner}
       </Link>
     );

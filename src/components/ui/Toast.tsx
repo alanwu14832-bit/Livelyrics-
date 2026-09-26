@@ -60,7 +60,7 @@ function ToastBody({ toast, onClose }: { toast: ToastItem; onClose?: () => void 
       </span>
       <div className="min-w-0 flex-1 py-[5px]">
         {toast.title && <p className="font-semibold">{toast.title}</p>}
-        <div className="break-words">{toast.message}</div>
+        <div className="break-words [text-wrap:pretty]">{toast.message}</div>
       </div>
       {toast.action && (
         <Button variant="plain" size="sm" className="shrink-0" onClick={toast.action.onClick}>

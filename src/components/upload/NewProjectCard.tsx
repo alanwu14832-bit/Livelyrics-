@@ -202,7 +202,7 @@ export function NewProjectCard({
               }
             >
               {/* the kit's focus ring would hide the red error ring while the field is focused */}
-              <FormRow label="歌名" htmlFor={ids.title} error={titleError} className={titleError ? "has-[:focus-visible]:outline-red!" : undefined}>
+              <FormRow label="歌名" htmlFor={ids.title} error={titleError}>
                 <input
                   ref={titleRef}
                   id={ids.title}

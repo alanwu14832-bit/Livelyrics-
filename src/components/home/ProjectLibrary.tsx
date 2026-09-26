@@ -333,14 +333,14 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
           trigger={(t) => <Button {...t} variant="quiet" size="icon-sm" icon={<DotsThreeIcon size={20} weight="bold" />} aria-label={`「${name}」的更多動作`} />}
         >
           {!ready && hasDesign && (
-            <MenuItem icon={MonitorPlayIcon} href={consoleHref(p.id)}>
+            <MenuItem icon={MonitorPlayIcon} href={consoleHref(p.id)} transitionTypes={PUSH}>
               開啟控制台
             </MenuItem>
           )}
-          <MenuItem icon={PencilSimpleIcon} href={lyricsHref(p.id)}>
+          <MenuItem icon={PencilSimpleIcon} href={lyricsHref(p.id)} transitionTypes={PUSH}>
             編輯歌詞
           </MenuItem>
-          <MenuItem icon={SparkleIcon} href={processHref(p.id)}>
+          <MenuItem icon={SparkleIcon} href={processHref(p.id)} transitionTypes={PUSH}>
             設計總覽
           </MenuItem>
           <MenuItem icon={ArrowClockwiseIcon} onSelect={onReprocess} disabled={p.status === "processing"}>

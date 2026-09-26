@@ -6,7 +6,9 @@
 // Page variant (home, process, lyrics editor): sticky; transparent over --bg while the page is at
 // the top, then --material-regular with a hairline scroll edge once content scrolls beneath it
 // (an IntersectionObserver on a sentinel sets data-scrolled; background 200 ms ease). Content is
-// aligned to the page container (`pageContainerClass`, max 1200) or full width (editor).
+// aligned to the page container (`pageContainerClass`, max 1200: home) or full width with the
+// 16 px --header-gutter (project pages), the same inset as the console top bar, so 「‹ 作品庫」 and the
+// title sit at the same x on the design overview, the lyrics editor and the console.
 //   <AppHeader back title="示範之歌" subtitle="示範樂團" actions={<Button href=…>進入控制台</Button>} />
 //   <AppHeader leading={<Brand />} />                                     home
 //   <AppHeader back={{ onNavigate: guardUnsaved }} width="full" … />      editor
@@ -55,6 +57,7 @@ export function AppHeader({
   title,
   subtitle,
   titleAccessory,
+  heading,
   center,
   actions,
   width = "page",
@@ -71,6 +74,8 @@ export function AppHeader({
   subtitle?: ReactNode;
   /** next to the title, e.g. 「尚未儲存」 */
   titleAccessory?: ReactNode;
+  /** replaces title / subtitle with a ready-made block (project pages: thumbnail + title) */
+  heading?: ReactNode;
   /** console: mode switch, transport, clock, status capsules */
   center?: ReactNode;
   actions?: ReactNode;
@@ -94,7 +99,7 @@ export function AppHeader({
 
   const backNode = back ? <BackLink {...(typeof back === "object" ? back : {})} /> : null;
   const isConsole = variant === "console";
-  const titleBlock = (title != null || subtitle != null || titleAccessory != null) && (
+  const titleBlock = heading ?? ((title != null || subtitle != null || titleAccessory != null) && (
     <div className="flex min-w-0 flex-col justify-center">
       <div className="flex min-w-0 items-center gap-2">
         {title != null && <h1 className="min-w-0 truncate text-[15px] leading-5 font-semibold text-label">{title}</h1>}
@@ -102,13 +107,13 @@ export function AppHeader({
       </div>
       {subtitle != null && <div className={cx("min-w-0 truncate", isConsole ? "text-[12px] leading-4 text-label-2" : "text-[13px] leading-4 text-label-2-on-material")}>{subtitle}</div>}
     </div>
-  );
+  ));
   const style = anchor ? { viewTransitionName: "app-header" } : undefined;
 
   if (isConsole) {
     return (
       <header
-        className={cx("relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 bg-surface px-3 border-b-hairline", className)}
+        className={cx("relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 bg-surface px-(--header-gutter) border-b-hairline", className)}
         style={style}
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -133,9 +138,12 @@ export function AppHeader({
         )}
         style={style}
       >
-        <div className={cx("flex h-full min-w-0 items-center gap-4", width === "page" ? pageContainerClass : "px-(--page-gutter)")}>
-          {(leading ?? backNode) && <div className="flex shrink-0 items-center">{leading ?? backNode}</div>}
-          <div className="min-w-0 flex-1">{titleBlock}</div>
+        <div className={cx("flex h-full min-w-0 items-center gap-4", width === "page" ? pageContainerClass : "px-(--header-gutter)")}>
+          {/* back and title keep one geometry on every full-width page (and in the console) */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {(leading ?? backNode) && <div className="flex shrink-0 items-center">{leading ?? backNode}</div>}
+            <div className="min-w-0 flex-1">{titleBlock}</div>
+          </div>
           {center}
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </div>

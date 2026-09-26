@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { IconProvider } from "@/components/ui/IconProvider";
+import { APPEARANCE_SCRIPT } from "@/components/lyrics-editor/appearance-script";
 import { fontVariables } from "@/lib/fonts";
 import "./globals.css";
 
@@ -19,8 +21,15 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="zh-Hant" className={`${fontVariables} h-full antialiased`}>
-      <body className="min-h-full bg-bg text-label">{children}</body>
+    // suppressHydrationWarning: the editor's pre-paint script may set data-theme on <html>
+    <html lang="zh-Hant" className={`${fontVariables} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        {/* inline and parser-blocking on purpose: it must run before the first paint */}
+        <script id="editor-appearance" dangerouslySetInnerHTML={{ __html: APPEARANCE_SCRIPT }} />
+      </head>
+      <body className="min-h-full bg-bg text-label">
+        <IconProvider>{children}</IconProvider>
+      </body>
     </html>
   );
 }

@@ -5,14 +5,16 @@
 // in the header once there is a plan, moving into the 「設計完成」 banner right after a run (the
 // header copy turns plain). Kept for the e2e: role="status" containing 「設計完成」, ?run=1 stripped.
 
-import { ViewTransition, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AppHeader, BackLink, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
 import { MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import type { PipelineEvent, Project } from "@/lib/types";
-import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
+import { validPalette } from "@/components/home/ProjectArt";
+import { ProjectHeading } from "@/components/home/ProjectHeading";
+import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
 import { useServerStatus } from "@/components/home/ServerStatus";
-import { PUSH, artTransitionName, titleTransitionName } from "@/components/home/transitions";
+import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
 import { KeyVisualSummary } from "./KeyVisualSummary";
 import {
@@ -247,26 +249,14 @@ export function ProcessClient({
 
   const header = (actions?: ReactNode, titleOverride?: string) => (
     <AppHeader
-      leading={
-        <span className="flex items-center gap-3">
-          <BackLink />
-          {(project || initial) && (
-            <ViewTransition name={artTransitionName(id)} share="morph" default="none">
-              <span className="block">
-                <ProjectArt id={id} palette={headerPalette} placeholderIconSize={16} className="size-8 rounded-[7px]" />
-              </span>
-            </ViewTransition>
-          )}
-        </span>
+      back
+      width="full"
+      title={titleOverride}
+      heading={
+        titleOverride == null && (project || initial) ? (
+          <ProjectHeading id={id} title={headerTitle || "載入中…"} subtitle={headerArtist || undefined} palette={headerPalette} />
+        ) : undefined
       }
-      title={
-        titleOverride ?? (
-          <ViewTransition name={titleTransitionName(id)} share="morph" default="none">
-            <span className="inline-block max-w-full truncate align-top">{headerTitle || "載入中…"}</span>
-          </ViewTransition>
-        )
-      }
-      subtitle={titleOverride ? undefined : headerArtist || undefined}
       actions={actions}
     />
   );
@@ -300,25 +290,24 @@ export function ProcessClient({
   if (load.kind === "error" || !project) {
     const notFound = load.kind === "error" && load.notFound;
     return (
-      <div className="min-h-dvh">
-        {header(undefined, notFound ? "找不到作品" : "無法載入")}
-        <EmptyState
-          icon={WarningCircleIcon}
-          title={notFound ? "找不到這個作品" : "無法載入這個作品"}
-          description={notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}
-          action={
-            notFound ? (
-              <Button href="/" transitionTypes={["pop"]} variant="tinted">
-                回到作品庫
-              </Button>
-            ) : (
-              <Button variant="tinted" onClick={() => window.location.reload()}>
-                重新載入
-              </Button>
-            )
-          }
-          className="mt-16"
-        />
+      <div className="flex min-h-dvh flex-col">
+        {header(undefined, notFound ? NOT_FOUND_HEADER_TITLE : "無法載入")}
+        {notFound ? (
+          <ProjectNotFound />
+        ) : (
+          <div className="flex min-h-0 flex-1 items-center justify-center pb-[52px]">
+            <EmptyState
+              icon={WarningCircleIcon}
+              title="無法載入這個作品"
+              description={load.kind === "error" ? load.message : ""}
+              action={
+                <Button variant="tinted" onClick={() => window.location.reload()}>
+                  重新載入
+                </Button>
+              }
+            />
+          </div>
+        )}
       </div>
     );
   }

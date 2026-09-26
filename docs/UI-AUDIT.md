@@ -1,5 +1,12 @@
 # Livelyrics UI 稽核與 Apple 風格重設計規格
 
+> **UI 改版（2026-09 完成）**：本規格已照第 4 節的五個階段實作完畢。已解決 UI-01 到 UI-36 全部 36 項：
+> UI-01、UI-02、UI-03、UI-05、UI-06、UI-07、UI-08、UI-09、UI-10、UI-11、UI-12、UI-13、UI-14、UI-15、UI-16、UI-17、UI-18、UI-19、
+> UI-20、UI-21、UI-22、UI-23、UI-24、UI-25、UI-26、UI-27、UI-28、UI-29、UI-30、UI-31、UI-32、UI-33、UI-34、UI-36 已在執行中驗證；
+> UI-04（SF／PingFang 字體堆疊）與 UI-35（時間軸慣性與邊界回彈）已實作，但 Mac 上的字體顯示與實機手感無法在 Linux headless 驗證。
+> 驗收：typecheck、lint、test、build 全部通過；`scripts/e2e.cjs` 34 項（原 29 項加 5 項水平溢出檢查）全部通過；兩種外觀的文字對比掃描 0 項低於 AA。
+> 已知例外：設計師（`src/lib/server/designer/normalize.ts`）離線筆記的段落理由仍以 em-dash 連接，設計師模組不在這次 UI 改版範圍內。
+
 > 範圍：`/`（上傳與作品庫）、`/p/[id]/process`、`/p/[id]`（控制台）、`/p/[id]/lyrics`、`/stage-lab` 的外框。
 > **不在範圍內**：`/p/[id]/output` 投影視窗、`src/components/stage/**`、`src/lib/stage/**`（舞台渲染與投影的樣子一律不動）。
 >

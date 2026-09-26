@@ -150,7 +150,7 @@ export function UiLab({ theme, section }: { theme?: string; section?: string }) 
             </h2>
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${themes.length}, minmax(0, 1fr))` }}>
               {themes.map((t) => (
-                <div key={t.id} data-theme={t.id} data-lab-cell={`${s.id}-${t.id}`} className="relative min-w-0 overflow-hidden rounded-2xl bg-bg p-4 text-label ring-hairline [--focus-ring:var(--tint)]">
+                <div key={t.id} data-theme={t.id} data-lab-cell={`${s.id}-${t.id}`} className="relative min-w-0 overflow-hidden rounded-2xl bg-bg p-4 text-label ring-hairline">
                   {t.id === "console" ? <div className="rounded-lg bg-surface p-3">{s.render(t.id)}</div> : s.render(t.id)}
                 </div>
               ))}

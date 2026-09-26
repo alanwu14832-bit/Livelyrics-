@@ -113,7 +113,10 @@ function Row({
   children?: ReactNode;
 }) {
   const quiet = status === "pending" || status === "kept";
-  const right = statusText ?? (status === "warn" ? "注意" : status === "done" && meta ? meta : STATUS_TEXT[status as StepStatus]);
+  // the leading accessory already says running / done / waiting; words only where they add something
+  const right =
+    statusText ??
+    (status === "warn" ? "注意" : status === "done" || status === "running" || status === "pending" ? (meta ?? null) : STATUS_TEXT[status as StepStatus]);
   return (
     <li
       className={cx(
@@ -127,7 +130,11 @@ function Row({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline justify-between gap-3">
           <p className={cx("min-w-0 text-[15px] leading-5 font-medium", quiet ? "text-label-2" : "text-label")}>{title}</p>
-          <span className={cx("shrink-0 text-[13px] leading-5 tabular", status === "error" ? "text-red-text" : "text-label-2")}>{right}</span>
+          {right ? (
+            <span className={cx("shrink-0 text-[13px] leading-5 tabular", status === "error" ? "text-red-text" : "text-label-2")}>{right}</span>
+          ) : (
+            <span className="sr-only">{STATUS_TEXT[status as StepStatus]}</span>
+          )}
         </div>
         {detail && <div className="mt-0.5 text-[13px] leading-[18px] break-words text-label-2">{detail}</div>}
         {children}
@@ -173,7 +180,6 @@ export function StepTimeline({
           status={analysis ? "done" : "warn"}
           draw={false}
           title={STEP_TITLE.analyze}
-          meta="完成"
           detail={
             analysis
               ? `${formatTimeShort(analysis.duration)}${analysis.bpm > 0 ? `，${Math.round(analysis.bpm)} BPM` : ""}，${analysis.sections.length} 個段落邊界。上傳時已在瀏覽器完成。`

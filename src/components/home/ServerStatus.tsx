@@ -139,7 +139,7 @@ function CodeLine({ text }: { text: string }) {
   return (
     <div className="mt-2 flex min-w-0 items-center gap-2 rounded-sm bg-fill-3 py-1 pr-1 pl-3">
       <code className="min-w-0 flex-1 truncate font-mono text-[13px] leading-5 text-label select-all">{text}</code>
-      <Button size="sm" variant="plain" icon={copied ? CheckCircleIcon : CopyIcon} onClick={copy} aria-live="polite">
+      <Button size="sm" variant="gray" icon={copied ? CheckCircleIcon : CopyIcon} onClick={copy} aria-live="polite">
         {copied ? "已複製" : "複製"}
       </Button>
     </div>

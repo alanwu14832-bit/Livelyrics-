@@ -198,7 +198,7 @@ export function TapSyncCard({ session: live, lines, onMark, onUndo, onSkip, onEx
             className="press inline-flex h-14 min-w-44 items-center justify-center gap-2.5 rounded-xl bg-tint-fill px-6 text-[17px] leading-6 font-semibold text-on-tint hover:bg-tint-fill-hover"
           >
             標記
-            <Kbd className="bg-white/20 text-white shadow-none">Space</Kbd>
+            <Kbd className="bg-black/20! text-white! shadow-none!">Space</Kbd>
           </button>
         )}
         <div className="flex items-center">

@@ -22,7 +22,7 @@ export { Banner, type BannerTone } from "./Banner";
 export { EmptyState } from "./EmptyState";
 export { Skeleton, SkeletonText, SkeletonGroup } from "./Skeleton";
 export { Disclosure } from "./Disclosure";
-export { Z } from "./z";
+export { Z } from "@/lib/ui/z";
 
 // client
 export { SegmentedControl, type SegmentOption } from "./SegmentedControl";

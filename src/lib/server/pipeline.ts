@@ -426,15 +426,15 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
     if (!title.trim()) {
       log("沒有歌名，略過 LRCLIB 歌詞搜尋。");
     } else {
-      log(`在 LRCLIB 搜尋歌詞：「${title}」${artist ? ` — ${artist}` : ""}`);
+      log(`在 LRCLIB 搜尋歌詞：「${title}」${artist ? `，${artist}` : ""}`);
       try {
         const best = await raceAbort(findBestLyrics({ title, artist, album, duration }, { signal, onLog: log }), signal);
         if (best?.kind === "synced") {
           lyrics = best.lyrics;
-          message = `LRCLIB 同步歌詞：${best.result.trackName} — ${best.result.artistName}（${best.lyrics.lines.length} 行）`;
+          message = `LRCLIB 同步歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行）`;
         } else if (best?.kind === "plain") {
           lyrics = roughTiming(best.lyrics);
-          message = `LRCLIB 歌詞：${best.result.trackName} — ${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已粗略分配，建議到歌詞編輯器校正）`;
+          message = `LRCLIB 歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已粗略分配，建議到歌詞編輯器校正）`;
         } else if (best?.kind === "instrumental") {
           lyrics = emptyLyrics("none");
           message = `LRCLIB 標示「${best.trackName}」為純音樂，這首歌以純視覺設計`;

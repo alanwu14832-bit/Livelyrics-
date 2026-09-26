@@ -33,6 +33,17 @@ function watch(page, label) {
     if (r.status() >= 400) problems.push(`[${label}] HTTP ${r.status()} ${r.url()}`);
   });
 }
+// UI-AUDIT §4: no page, in any state, scrolls sideways (the new-project card neither).
+const noOverflow = (page, selector) =>
+  page.evaluate((sel) => {
+    const d = document.documentElement;
+    const el = sel ? document.querySelector(sel) : null;
+    return { ok: d.scrollWidth <= d.clientWidth && (!el || el.scrollWidth <= el.clientWidth), page: `${d.scrollWidth}/${d.clientWidth}`, el: el ? `${el.scrollWidth}/${el.clientWidth}` : "-" };
+  }, selector ?? null);
+async function checkOverflow(page, name, selector) {
+  const r = await noOverflow(page, selector);
+  check(`no horizontal overflow: ${name}`, r.ok, `page ${r.page} card ${r.el}`);
+}
 const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.png`), caret: "initial" });
 
 (async () => {
@@ -40,6 +51,8 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required"],
   });
   const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+  // a cold dev compile of a route can take longer than Playwright's 30 s default
+  context.setDefaultNavigationTimeout(90000);
   const page = await context.newPage();
   watch(page, "home");
   try {
@@ -59,9 +72,10 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     const titleValue = await page.locator('section[aria-label="新作品"] input[required]').inputValue();
     check("LRC [ti:]/[ar:] tags fill the song info", titleValue === "示範之歌", `title=${titleValue}`);
     await shot(page, "02-home-new-project");
+    await checkOverflow(page, "new project card", 'section[aria-label="新作品"]');
 
     await page.getByRole("button", { name: /開始製作/ }).click();
-    await page.waitForURL(/\/p\/[^/]+\/process/, { timeout: 30000 });
+    await page.waitForURL(/\/p\/[^/]+\/process/, { timeout: 90000 });
     const id = page.url().match(/\/p\/([^/?]+)\/process/)[1];
     console.log("project id", id);
 
@@ -69,6 +83,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     await page.getByRole("status").filter({ hasText: "設計完成" }).first().waitFor({ timeout: 90000 });
     await page.waitForTimeout(2500);
     await shot(page, "03-process-done");
+    await checkOverflow(page, "design overview");
     check("process url stripped of run=1", !/run=1/.test(page.url()), page.url());
     const project = await (await fetch(`${BASE}/api/projects/${id}`)).json();
     check("project ready with plan", project.status === "ready" && !!project.plan, `status=${project.status} sections=${project.plan?.sections?.length}`);
@@ -80,6 +95,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     await page.waitForSelector('[role="option"][data-line-index="0"]', { timeout: 30000 });
     await page.waitForTimeout(2500);
     await shot(page, "04-console");
+    await checkOverflow(page, "console");
     const consoleText = await page.locator("body").innerText();
     check("console shows design panel", /主視覺|設計/.test(consoleText));
     check("console shows sections", /主歌|副歌/.test(consoleText));
@@ -113,14 +129,21 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     // play
     await page.keyboard.press("Space");
     await page.waitForTimeout(10000);
+    // read the output clock on both sides of the console read: playback keeps running meanwhile
     const t = await popup.evaluate(() => window.__last?.t ?? -1);
     const cur = await page.locator('[role="option"][aria-current="true"]').first().innerText().catch(() => "");
+    const tAfter = await popup.evaluate(() => window.__last?.t ?? -1);
     const outText = await popup.locator("body").innerText();
     console.log("t after 10 s:", t, "console current:", cur.replace(/\s+/g, " "), "| output:", outText.replace(/\s+/g, " ").slice(0, 80));
     const lines = project.lyrics.lines;
     const expected = lines.filter((l) => l.start != null && l.start <= t).at(-1);
+    const expectedAfter = lines.filter((l) => l.start != null && l.start <= tAfter).at(-1);
     check("playing advances clock", t > 7, `t=${t.toFixed?.(2)}`);
-    check("console highlights line for current time", !!expected && cur.includes(expected.text), `expected「${expected?.text}」`);
+    check(
+      "console highlights line for current time",
+      (!!expected && cur.includes(expected.text)) || (!!expectedAfter && cur.includes(expectedAfter.text)),
+      `expected「${expected?.text}」`,
+    );
     check("output shows the lyric line", !!expected && outText.replace(/\s+/g, "").includes(expected.text.replace(/\s+/g, "").slice(0, 4)), outText.slice(0, 60));
     await shot(popup, "06-output-playing");
     await shot(page, "07-console-playing");
@@ -194,10 +217,12 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     const editor = await context.newPage();
     watch(editor, "lyrics");
     await editor.goto(`${BASE}/p/${id}/lyrics`, { waitUntil: "networkidle" });
-    await editor.waitForTimeout(2000);
+    await editor.locator('input[value="夜色慢慢落在城市的邊緣"]').first().waitFor({ timeout: 30000 }).catch(() => {});
+    await editor.waitForTimeout(500);
     await shot(editor, "12-lyrics-editor");
     const edText = await editor.locator("body").innerText();
     check("lyrics editor lists lines", edText.includes("夜色慢慢落在城市的邊緣") || (await editor.locator('input[value="夜色慢慢落在城市的邊緣"]').count()) > 0);
+    await checkOverflow(editor, "lyrics editor");
     await editor.close();
 
     // ------------------------------------------------------------- stage lab
@@ -210,8 +235,10 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
 
     // home library after the flow
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
-    await page.waitForTimeout(800);
+    await page.getByText("示範之歌").first().waitFor({ timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);
     await shot(page, "14-home-library");
+    await checkOverflow(page, "home library");
     check("library lists the project", (await page.locator("body").innerText()).includes("示範之歌"));
     await popup.close().catch(() => {});
   } catch (err) {

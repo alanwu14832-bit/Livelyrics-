@@ -43,8 +43,10 @@ import type { Lyrics, Project } from "@/lib/types";
 import { formatRelativeTime } from "@/components/home/relative-time";
 import { LYRICS_SOURCE_LABEL } from "@/components/process/labels";
 import { processHref } from "@/components/process/steps";
-import { useAppearance, type Appearance } from "./appearance";
+import { readAppearance, useAppearance, type Appearance } from "./appearance";
 import { MagicWandIcon, SortByTimeIcon } from "./icons";
+import { ProjectHeading } from "@/components/home/ProjectHeading";
+import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
 import { clearDraft, draftToLines, loadDraft, saveDraft, type LyricsDraft } from "./draft";
 import {
   clearAllTimes,
@@ -129,7 +131,14 @@ function lrcHeaderValue(s: string): string {
   return s.replace(/[\r\n\]]+/g, " ").trim();
 }
 
-export function LyricsEditorClient({ id }: { id: string }) {
+/** Server-read header info, so the thumbnail and title are in the first paint (shared elements). */
+export interface EditorHeaderInfo {
+  title: string;
+  artist: string;
+  palette: string[];
+}
+
+export function LyricsEditorClient({ id, initial = null }: { id: string; initial?: EditorHeaderInfo | null }) {
   const [project, setProject] = useState<Project | null>(null);
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [state, dispatch] = useReducer(editorReducer, undefined, initialEditorState);
@@ -586,7 +595,12 @@ export function LyricsEditorClient({ id }: { id: string }) {
   if (load.kind === "loading") {
     return (
       <EditorRoot theme={themeAttr}>
-        <AppHeader back width="full" title={<span className="text-label-2">載入中…</span>} />
+        <AppHeader
+          back
+          width="full"
+          heading={initial ? <ProjectHeading id={id} title={initial.title} subtitle={initial.artist || undefined} palette={initial.palette} /> : undefined}
+          title={initial ? undefined : <span className="text-label-2">載入中…</span>}
+        />
         <SkeletonGroup label="載入歌詞" className="flex min-h-0 flex-1 flex-col gap-4 px-(--page-gutter) pt-2">
           <Skeleton className="h-[188px] rounded-lg" />
           <Skeleton className="h-4 w-40" />
@@ -599,18 +613,23 @@ export function LyricsEditorClient({ id }: { id: string }) {
     const notFound = load.kind === "error" && load.notFound;
     return (
       <EditorRoot theme={themeAttr}>
-        <AppHeader back width="full" title={notFound ? "找不到作品" : "無法載入"} />
-        <EmptyState
-          className="mt-16"
-          icon={<WarningCircleIcon size={44} />}
-          title={notFound ? "找不到這個作品" : "無法載入歌詞"}
-          description={notFound ? "它可能已經被刪除了。" : load.kind === "error" ? load.message : ""}
-          action={
-            <Button variant="tinted" href="/" transitionTypes={["pop"]}>
-              回到作品庫
-            </Button>
-          }
-        />
+        <AppHeader back width="full" title={notFound ? NOT_FOUND_HEADER_TITLE : "無法載入"} />
+        {notFound ? (
+          <ProjectNotFound />
+        ) : (
+          <div className="flex min-h-0 flex-1 items-center justify-center pb-[52px]">
+            <EmptyState
+              icon={<WarningCircleIcon size={44} />}
+              title="無法載入歌詞"
+              description={load.kind === "error" ? load.message : ""}
+              action={
+                <Button variant="tinted" href="/" transitionTypes={["pop"]}>
+                  回到作品庫
+                </Button>
+              }
+            />
+          </div>
+        )}
       </EditorRoot>
     );
   }
@@ -732,9 +751,15 @@ export function LyricsEditorClient({ id }: { id: string }) {
       <AppHeader
         back={{ onNavigate: guardLeave }}
         width="full"
-        title={project.meta.title}
-        subtitle={project.meta.artist || undefined}
-        titleAccessory={dirty ? <span className="shrink-0 text-[12px] leading-4 text-label-2">尚未儲存</span> : undefined}
+        heading={
+          <ProjectHeading
+            id={project.id}
+            title={project.meta.title}
+            subtitle={project.meta.artist || undefined}
+            palette={project.plan?.keyVisual.palette.map((c) => c.hex)}
+            accessory={dirty ? <span className="shrink-0 text-[12px] leading-4 text-label-2">尚未儲存</span> : undefined}
+          />
+        }
         actions={
           <>
             <UndoRedo
@@ -915,11 +940,20 @@ export function LyricsEditorClient({ id }: { id: string }) {
 
 /** The editor's theme scope: follows the system unless the 外觀 menu picked light or dark. */
 function EditorRoot({ theme, children }: { theme?: "light" | "dark"; children: ReactNode }) {
+  // mirror the choice on <html> (the pre-paint script set it for the first paint), so the page
+  // background and overscroll match too. During hydration `theme` is still the server "system"
+  // snapshot, so fall back to the stored value instead of clearing what the script set.
+  useEffect(() => {
+    const html = document.documentElement;
+    const next = theme ?? (readAppearance() === "system" ? undefined : readAppearance());
+    if (next) html.setAttribute("data-theme", next);
+    else html.removeAttribute("data-theme");
+  }, [theme]);
+  useEffect(() => () => document.documentElement.removeAttribute("data-theme"), []);
   return (
     <div
       data-theme={theme}
-      // a nested theme scope has to re-resolve the focus ring (it is declared on :root only)
-      className="flex h-screen flex-col overflow-hidden bg-bg text-label transition-[background-color] duration-200 ease-[ease] [--focus-ring:var(--tint)]"
+      className="flex h-screen flex-col overflow-hidden bg-bg text-label transition-[background-color] duration-200 ease-[ease]"
     >
       {children}
     </div>

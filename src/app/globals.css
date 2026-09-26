@@ -130,21 +130,6 @@
   --color-segment-thumb: var(--segment-thumb);
   --color-scrim: var(--scrim);
 
-  /* Transitional aliases (stage 1): the old utility names point at the new tokens so every
-     page changes colour at once. Removed in stage 5 (see docs/UI-AUDIT.md §4). */
-  --color-panel: var(--surface);
-  --color-panel-2: var(--surface-2);
-  --color-panel-3: var(--surface-3);
-  --color-line: var(--separator);
-  --color-fg: var(--label);
-  --color-muted: var(--label-2);
-  --color-faint: var(--label-2); /* faint was used as text: promoted to label-2 */
-  --color-accent: var(--tint);
-  --color-accent-2: var(--tint);
-  --color-ok: var(--green);
-  --color-warn: var(--orange);
-  --color-danger: var(--red);
-
   --font-sans: var(--font-ui);
   --font-mono: var(--font-code);
 }
@@ -182,7 +167,7 @@
   /* tint (systemBlue): the only accent */
   --tint: #0071e3; /* non-text: focus ring, selection bar, progress, slider fill; 4.31:1 on --bg */
   --tint-fill: #0071e3; /* filled button base, white text 4.70:1 */
-  --tint-fill-hover: #0077ed;
+  --tint-fill-hover: #006edb; /* white 4.94:1 (#0077ed was 4.32) */
   --tint-text: #0066cc; /* links, plain and tinted button text; 5.57:1 on #fff */
   --tint-text-on-soft: #0066cc;
   --tint-soft: rgba(0, 113, 227, 0.12); /* tinted buttons, selected row base */
@@ -232,6 +217,7 @@
   --space-16: 64px;
   --space-20: 80px;
   --page-gutter: 24px; /* home, process, editor sides */
+  --header-gutter: 16px; /* full-width top bars: project pages and the console */
   --group-gap: 24px; /* between groups */
   --row-min-h: 44px; /* inset grouped row */
   --row-pad-x: 16px;
@@ -300,7 +286,7 @@
 
     --tint: #0a84ff;
     --tint-fill: #0071e3;
-    --tint-fill-hover: #0077ed;
+    --tint-fill-hover: #006edb;
     --tint-text: #409cff;
     --tint-text-on-soft: #64b5ff;
     --tint-soft: rgba(10, 132, 255, 0.18);
@@ -359,7 +345,7 @@
 
   --tint: #0a84ff; /* non-text; focus ring 5.76:1 on #000, 3.82:1 on #2c2c2e */
   --tint-fill: #0071e3; /* white text 4.70:1 (#0a84ff with white is only 3.65:1) */
-  --tint-fill-hover: #0077ed;
+  --tint-fill-hover: #006edb; /* white 4.94:1 */
   --tint-text: #409cff; /* 7.42 on #000, 6.01 on #1c1c1e, 4.92 on #2c2c2e; not on #3a3a3c */
   --tint-text-on-soft: #64b5ff; /* tinted button on #2c2c2e 5.17:1 */
   --tint-soft: rgba(10, 132, 255, 0.18);
@@ -403,9 +389,11 @@
 }
 
 /* The --color-* names are also real variables, re-declared in every theme scope, so code that
-   writes var(--color-accent) directly resolves inside the nearest scope, not at :root. */
+   writes var(--color-tint) directly resolves inside the nearest scope, not at :root. */
 :root,
 [data-theme] {
+  /* re-resolved per scope, so a nested dark scope gets the dark tint ring */
+  --focus-ring: var(--tint);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -422,30 +410,6 @@
   --color-red: var(--red);
   --color-orange: var(--orange);
   --color-green: var(--green);
-  --color-panel: var(--surface);
-  --color-panel-2: var(--surface-2);
-  --color-panel-3: var(--surface-3);
-  --color-line: var(--separator);
-  --color-fg: var(--label);
-  --color-muted: var(--label-2);
-  --color-faint: var(--label-2);
-  --color-accent: var(--tint);
-  --color-accent-2: var(--tint);
-  --color-ok: var(--green);
-  --color-warn: var(--orange);
-  --color-danger: var(--red);
-}
-
-/* Transitional, removed with the aliases: the bare text-warn / text-danger classes are text, so
-   they take the legible text variants (#ff9500 / #ff3b30 text on white is only 2.2 / 3.6:1);
-   bg-, border- and variant forms keep the true orange / red. */
-@layer utilities {
-  .text-warn {
-    color: var(--orange-text);
-  }
-  .text-danger {
-    color: var(--red-text);
-  }
 }
 
 /* ------------------------------------------------------------------ base */
@@ -492,7 +456,12 @@
     outline: none;
   }
   [role="listbox"]:focus-visible [role="option"][aria-selected="true"] {
-    outline: 2px solid var(--tint);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  /* nothing selected yet (before the first line): ring the list itself */
+  [role="listbox"]:focus-visible:not(:has([role="option"][aria-selected="true"])) {
+    outline: 2px solid var(--focus-ring);
     outline-offset: -2px;
   }
 

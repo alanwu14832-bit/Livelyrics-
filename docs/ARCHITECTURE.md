@@ -47,7 +47,7 @@ show up in the product:
 | `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
 | `src/lib/font-meta.ts` | `FONTS` registry + `fontStack(cjkFont, latinFont)` without next/font, so server code and tests can import it |
 | `src/lib/api-client.ts` | typed browser fetchers for every API route (routes must match exactly) |
-| `src/components/ui/*` | `Button`, `Panel`, `Badge`, `Kbd`, `cx`, `Markdown` |
+| `src/components/ui/*` | the component kit (see "Component kit" below); `Button`, `Panel`, `Badge`, `Kbd`, `cx`, `Markdown` keep their old signatures |
 
 Cross-module stubs (owner replaces the implementation, **keeps the exported signatures**):
 `src/lib/audio/{analyze,metadata,live}.ts` (AUDIO), `src/components/stage/StageView.tsx` (STAGE),
@@ -193,10 +193,10 @@ Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The 
   `--shadow-card|lift|overlay|sheet|thumb`, `--hairline` (1 px, 0.5 px on 2x), spacing `--space-*`,
   `--page-gutter --group-gap --row-min-h --row-pad-x`. Utilities: `bg-surface`, `text-label-2`,
   `bg-tint-soft`, `text-red-text` and so on. Code that needs a raw value writes `var(--token)`.
-- **Transitional aliases** (removed in stage 5): `bg-panel*`, `border-line`, `text-fg`, `text-muted`,
-  `text-faint` (now `--label-2`), `*-accent` / `*-accent-2` (now tint), `*-ok` (green), `*-warn` /
-  `*-danger` (orange / red; the bare `text-warn` / `text-danger` use `--orange-text` / `--red-text`) point
-  at the new tokens. New code uses the new names.
+- **No aliases.** The stage-1 transitional names (`bg-panel*`, `border-line`, `text-fg`, `text-muted`,
+  `text-faint`, `*-accent*`, `*-ok`, `*-warn`, `*-danger`) were removed in stage 5; use the token names.
+  `--focus-ring` is re-resolved in every `[data-theme]` scope, so a nested dark scope gets the dark ring.
+  `--header-gutter` (16 px) is the inset of every full-width top bar.
 - **Canvas** code reads tokens from its own element, never from `document.documentElement`, and re-reads on
   appearance changes: `readTokens`, `tokenAlpha`, `subscribeAppearance` in `src/lib/ui/canvas-tokens.ts`.
 - **Type.** `--font-ui` (SF / PingFang TC, then the bundled Noto Sans TC, `font-sans`), `--font-numeric`
@@ -232,6 +232,21 @@ Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The 
   `transitionTypes={["push"]}` / `["pop"]`), `xfade-forward` / `xfade-back` (same-route content), `morph`
   (shared elements, e.g. `project-art-<id>`), `view-transition-name: app-header` anchors the header; all
   become a 150 ms cross-fade under reduced motion.
+- **Component kit** (`src/components/ui/`, demo of every state in the dev-only `/ui-lab`, `?theme=` and
+  `?section=` narrow it). `index.tsx` is a barrel without `"use client"`: server components can import the
+  hook-free parts. Button (filled, tinted, gray, plain, quiet, destructive, destructive-filled; `href` renders
+  next/link; `type` defaults to `"button"`, so submit buttons pass `type="submit"`), InsetGroup / ListRow /
+  FormRow, SegmentedControl, Switch, Slider, Stepper, Alert and Sheet (native `<dialog>`), Menu and Popover
+  (Popover API; `MenuItem` takes `href` + `transitionTypes`), Tooltip, Toast stack (`useToasts`), Banner,
+  Tag, StatusCapsule(s), Kbd, Spinner, ProgressBar, EmptyState, Skeleton, Disclosure, TextField / TextArea /
+  Select, AppHeader (page and console variants; `heading` replaces title / subtitle), HUD, IconProvider
+  (wrapped once in `src/app/layout.tsx`). Icons: `@/components/ui/Icon` (Phosphor, sizes and weights built
+  in); the kit itself only imports `kit-icons.tsx`. The z-index scale is `src/lib/ui/z.ts`.
+- **Project page chrome.** `src/components/home/ProjectHeading.tsx` is the one thumbnail + title block after
+  「‹ 作品庫」 on the design overview, the lyrics editor and the console (same x on all three, shared-element
+  names `project-art-<id>` / `project-title-<id>`); `ProjectNotFound.tsx` is the one not-found body under
+  each page's header. The lyrics editor's 外觀 choice is applied to `<html>` before first paint by the inline
+  script in `src/app/layout.tsx` (`src/components/lyrics-editor/appearance-script.ts`).
 - **Preferences:** `prefers-reduced-motion` (no scroll smoothing, no decorative offsets, spring becomes a
   150 ms fade), `prefers-reduced-transparency` (no backdrop-filter anywhere), `prefers-contrast: more`
   (opaque separators, secondary text = label, 3 px focus ring), `forced-colors` (selection has an outline).

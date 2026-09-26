@@ -7,14 +7,14 @@
 // projection split control, 重新設計, help. The centre stays centred: the left column shrinks (the
 // title truncates) instead of pushing the transport around when a capsule appears.
 
-import { useEffect, useRef, useState, ViewTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
 import { PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
 import { formatTime } from "@/lib/timeline";
-import { artBackground, projectArtName, projectTitleName } from "./art";
+import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { capsuleItems } from "./feedback";
 import { Dot } from "./ui";
 import { useRafLoop } from "./useRaf";
@@ -42,21 +42,10 @@ function TimeReadout({ controller, duration }: { controller: ConsoleController; 
   );
 }
 
-/** The thumbnail + title pair, also rendered by the loading skeleton (same view-transition names). */
+/** The thumbnail + title pair, also rendered by the loading skeleton (same view-transition names
+ *  and the same geometry as the design overview and the lyrics editor headers). */
 export function TitleBlock({ id, title, subtitle, palette }: { id: string; title: string; subtitle?: ReactNode; palette: readonly string[] }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      <ViewTransition name={projectArtName(id)} share="morph" default="none">
-        <span aria-hidden="true" className="size-7 shrink-0 rounded-[7px] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.12)]" style={{ background: artBackground(palette) }} />
-      </ViewTransition>
-      <div className="flex min-w-0 flex-col justify-center">
-        <ViewTransition name={projectTitleName(id)} share="morph" default="none">
-          <h1 className="min-w-0 truncate text-c-headline text-label">{title}</h1>
-        </ViewTransition>
-        {subtitle != null && <div className="flex min-w-0 items-center text-c-footnote text-label-2">{subtitle}</div>}
-      </div>
-    </div>
-  );
+  return <ProjectHeading dense id={id} title={title} subtitle={subtitle} palette={palette} />;
 }
 
 /** A red text button in the subtitle slot (the only alerts: another console, save failed). */
@@ -208,7 +197,7 @@ export function TopBar({
 
   return (
     <header
-      className="relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] items-center gap-4 bg-surface px-3 border-b-hairline"
+      className="relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] items-center gap-4 bg-surface px-(--header-gutter) border-b-hairline"
       style={{ viewTransitionName: "app-header" }}
     >
       {/* left: back, title, capsules (pushed right, next to the transport) */}

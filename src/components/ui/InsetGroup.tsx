@@ -221,8 +221,11 @@ export function FormRow({
         "relative flex min-h-(--row-min-h) min-w-0 flex-col justify-center px-(--row-pad-x)",
         "after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:left-(--row-pad-x) after:h-(--hairline) after:bg-separator last:after:hidden",
         CONSOLE.rowRadius,
-        "has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 has-[:focus-visible]:outline-tint has-[:focus-visible]:outline-solid",
-        error != null && error !== false && "outline-2 -outline-offset-2 outline-red outline-solid",
+        "has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 has-[:focus-visible]:outline-solid",
+        // an invalid row keeps its red ring while focused (the tint variant would win otherwise)
+        error != null && error !== false
+          ? "outline-2 -outline-offset-2 outline-red outline-solid has-[:focus-visible]:outline-red"
+          : "has-[:focus-visible]:outline-tint",
         className,
       )}
     >

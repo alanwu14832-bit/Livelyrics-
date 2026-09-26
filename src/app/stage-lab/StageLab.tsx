@@ -273,13 +273,13 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
   })();
 
   return (
-    <main className="flex min-h-screen flex-col gap-3 bg-bg p-3 text-fg lg:flex-row lg:p-4">
+    <main className="flex min-h-screen flex-col gap-3 bg-bg p-3 text-label lg:flex-row lg:p-4">
       <section className="flex min-w-0 flex-1 flex-col gap-3">
         <header className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-baseline gap-3">
             <h1 className="text-base font-semibold">舞台實驗室</h1>
-            <span className="text-xs text-muted">
-              {project.meta.title} · {project.meta.artist} · 示範專案
+            <span className="text-xs text-label-2">
+              {project.meta.title}・{project.meta.artist}・示範專案
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs">
@@ -292,22 +292,22 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
                 <Badge>
                   <span className="tabular">
                     {stats.width}×{stats.height}
-                    {stats.quality < 1 ? ` · ${Math.round(stats.quality * 100)}%` : ""}
+                    {stats.quality < 1 ? `・${Math.round(stats.quality * 100)}%` : ""}
                   </span>
                 </Badge>
               </>
             ) : (
               <Badge>初始化中…</Badge>
             )}
-            <Link href={fullHref} className="ml-1 rounded-md px-2 py-1 text-muted hover:bg-panel-3 hover:text-fg" target="_blank">
+            <Link href={fullHref} className="ml-1 rounded-md px-2 py-1 text-label-2 hover:bg-surface-3 hover:text-label" target="_blank">
               全螢幕預覽 ↗
             </Link>
           </div>
         </header>
 
-        <div className="overflow-hidden rounded-lg border border-line bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.4)]">{stage}</div>
+        <div className="overflow-hidden rounded-lg border border-separator bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.4)]">{stage}</div>
 
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-separator bg-surface px-3 py-2">
           <Button variant="primary" size="sm" onClick={togglePlay} aria-label={playing ? "暫停" : "播放"} className="w-16">
             {playing ? "暫停" : "播放"}
           </Button>
@@ -325,9 +325,9 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
             value={displayT}
             onChange={(e) => seek(Number(e.target.value))}
             aria-label="時間軸"
-            className="min-w-40 flex-1 accent-[var(--color-accent)]"
+            className="min-w-40 flex-1 accent-[var(--color-tint)]"
           />
-          <span className="tabular w-32 text-right font-mono text-xs text-muted">
+          <span className="tabular w-32 text-right font-mono text-xs text-label-2">
             {formatTime(displayT)} / {formatTime(duration)}
           </span>
         </div>
@@ -339,23 +339,23 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
               type="button"
               onClick={() => seek(s.start + 0.01)}
               className={cx(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
-                i === sectionIdx ? "border-accent bg-accent/15 text-fg" : "border-line bg-panel text-muted hover:text-fg",
+                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-[background-color,border-color,color] duration-(--dur-fast) ease-out",
+                i === sectionIdx ? "border-tint bg-tint/15 text-label" : "border-separator bg-surface text-label-2 hover:text-label",
               )}
             >
               <span className="size-2.5 rounded-full" style={{ background: s.colorway[1] }} />
               {s.label}
-              <span className="text-faint">{SCENE_LABELS[s.scene]}</span>
+              <span className="text-label-2">{SCENE_LABELS[s.scene]}</span>
             </button>
           ))}
         </div>
 
-        <div className="rounded-lg border border-line bg-panel px-3 py-2 text-sm">
-          <div className="text-xs text-muted">
-            {section ? `${section.label} · ${STYLE_LABELS[style ?? section.lyricStyle]} · ${PLACEMENT_LABELS[placement ?? section.lyricPlacement]}` : "—"}
+        <div className="rounded-lg border border-separator bg-surface px-3 py-2 text-sm">
+          <div className="text-xs text-label-2">
+            {section ? `${section.label}・${STYLE_LABELS[style ?? section.lyricStyle]}・${PLACEMENT_LABELS[placement ?? section.lyricPlacement]}` : "無"}
           </div>
-          <div className="mt-1 min-h-6 text-base">{lineIdx != null ? lines[lineIdx].text : <span className="text-faint">（間奏）</span>}</div>
-          {section && <p className="mt-1 text-xs text-muted">{section.rationale}</p>}
+          <div className="mt-1 min-h-6 text-base">{lineIdx != null ? lines[lineIdx].text : <span className="text-label-2">（間奏）</span>}</div>
+          {section && <p className="mt-1 text-xs text-label-2">{section.rationale}</p>}
         </div>
       </section>
 
@@ -409,8 +409,8 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
                 onClick={() => setCw(c.id)}
                 aria-pressed={cw === c.id}
                 className={cx(
-                  "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
-                  cw === c.id ? "border-accent bg-accent/10 text-fg" : "border-line bg-panel-2 text-muted hover:text-fg",
+                  "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-[background-color,border-color,color] duration-(--dur-fast) ease-out",
+                  cw === c.id ? "border-tint bg-tint/10 text-label" : "border-separator bg-surface-2 text-label-2 hover:text-label",
                 )}
               >
                 <span className="flex overflow-hidden rounded">
@@ -445,9 +445,9 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
                 測試畫面
               </Toggle>
             </div>
-            <p className="leading-relaxed text-faint">
+            <p className="leading-relaxed text-label-2">
               <Kbd>Space</Kbd> 播放／暫停　<Kbd>←</Kbd>
-              <Kbd>→</Kbd> 上／下一句　<Kbd>1</Kbd>–<Kbd>9</Kbd> 場景
+              <Kbd>→</Kbd> 上／下一句　<Kbd>1</Kbd> 到 <Kbd>9</Kbd> 場景
             </p>
           </div>
         </Panel>
@@ -468,9 +468,9 @@ function Chip({ active, onClick, children, title }: { active: boolean; onClick: 
       title={title}
       aria-pressed={active}
       className={cx(
-        "inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
-        active ? "border-accent bg-accent/15 text-fg" : "border-line bg-panel-2 text-muted hover:text-fg",
+        "inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs transition-[background-color,border-color,color] duration-(--dur-fast) ease-out",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-tint",
+        active ? "border-tint bg-tint/15 text-label" : "border-separator bg-surface-2 text-label-2 hover:text-label",
       )}
     >
       {children}
@@ -504,7 +504,7 @@ function Slider({
 }) {
   return (
     <label className="flex items-center gap-3">
-      <span className="w-14 shrink-0 text-muted">{label}</span>
+      <span className="w-14 shrink-0 text-label-2">{label}</span>
       <input
         type="range"
         min={min}
@@ -513,9 +513,9 @@ function Slider({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onDoubleClick={() => onChange(1)}
-        className="flex-1 accent-[var(--color-accent)]"
+        className="flex-1 accent-[var(--color-tint)]"
       />
-      <span className="tabular w-10 text-right font-mono text-muted">{value.toFixed(2)}</span>
+      <span className="tabular w-10 text-right font-mono text-label-2">{value.toFixed(2)}</span>
     </label>
   );
 }

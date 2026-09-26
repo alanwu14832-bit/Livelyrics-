@@ -7,8 +7,9 @@
 // library card, so the card morphs into the top bar across the navigation.
 
 import type { ReactNode } from "react";
-import { BackLink, Button, EmptyState, Skeleton, SkeletonGroup, Spinner, cx } from "@/components/ui";
-import { CaretLeftIcon, MagnifyingGlassIcon, MusicNotesIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { AppHeader, BackLink, Button, EmptyState, Skeleton, SkeletonGroup, Spinner, cx } from "@/components/ui";
+import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
+import { MusicNotesIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import type { Project } from "@/lib/types";
 import type { ConsoleIntro } from "./ConsoleApp";
 import { TitleBlock } from "./TopBar";
@@ -28,7 +29,7 @@ function PaneSkeleton({ area, className, lines = 0, children }: { area: string; 
 export function ConsoleSkeleton({ id, intro }: { id: string; intro: ConsoleIntro | null }) {
   return (
     <SkeletonGroup label="載入控制台中" className="flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg">
-      <header className="relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 bg-surface px-3 border-b-hairline" style={{ viewTransitionName: "app-header" }}>
+      <header className="relative z-20 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 bg-surface px-(--header-gutter) border-b-hairline" style={{ viewTransitionName: "app-header" }}>
         <div className="flex min-w-0 items-center gap-3">
           <BackLink />
           {intro ? <TitleBlock id={id} title={intro.title} palette={intro.palette} subtitle={intro.artist || undefined} /> : <Skeleton className="h-7 w-44 rounded-sm" />}
@@ -76,38 +77,29 @@ export function ConsoleSkeleton({ id, intro }: { id: string; intro: ConsoleIntro
   );
 }
 
-function Centered({ children }: { children: ReactNode }) {
+/** Non-console states keep the console's 52 px header (「‹ 作品庫」 at the same x) above a centred
+ *  empty state, the same composition as the design overview and the lyrics editor. */
+function StateFrame({ heading, title, children }: { heading?: ReactNode; title?: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg p-6">
-      <div className="w-full max-w-[420px] rounded-xl bg-surface shadow-sheet">{children}</div>
+    <div className="flex h-screen min-w-0 flex-col bg-bg text-label">
+      <AppHeader variant="console" back heading={heading} title={title} />
+      <div className="flex min-h-0 flex-1 items-center justify-center pb-[52px]">{children}</div>
     </div>
   );
 }
 
-export function NotFoundState({ id }: { id: string }) {
+export function NotFoundState() {
   return (
-    <Centered>
-      <EmptyState
-        icon={MagnifyingGlassIcon}
-        title="找不到這個作品"
-        description={
-          <>
-            作品「<span className="font-mono text-label">{id}</span>」不存在，可能已被刪除。
-          </>
-        }
-        action={
-          <Button variant="filled" href="/" transitionTypes={["pop"]} icon={CaretLeftIcon}>
-            回到作品庫
-          </Button>
-        }
-      />
-    </Centered>
+    <div className="flex h-screen min-w-0 flex-col bg-bg text-label">
+      <AppHeader variant="console" back title={NOT_FOUND_HEADER_TITLE} />
+      <ProjectNotFound />
+    </div>
   );
 }
 
 export function LoadErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <Centered>
+    <StateFrame title="無法載入">
       <EmptyState
         icon={<WarningCircleIcon size={44} className="text-red" />}
         title="無法載入作品"
@@ -128,14 +120,15 @@ export function LoadErrorState({ message, onRetry }: { message: string; onRetry:
           </span>
         }
       />
-    </Centered>
+    </StateFrame>
   );
 }
 
 export function NotReadyState({ project, onOpenAnyway }: { project: Project; onOpenAnyway: () => void }) {
   const processing = project.status === "processing";
+  const palette = (project.plan?.keyVisual.palette ?? []).map((p) => p.hex);
   return (
-    <Centered>
+    <StateFrame heading={<TitleBlock id={project.id} title={project.meta?.title || "未命名歌曲"} palette={palette} subtitle={project.meta?.artist || undefined} />}>
       <EmptyState
         icon={processing ? <Spinner size={20} /> : MusicNotesIcon}
         title={processing ? "這首歌還在處理中" : "這首歌還沒處理"}
@@ -156,6 +149,6 @@ export function NotReadyState({ project, onOpenAnyway }: { project: Project; onO
           </span>
         }
       />
-    </Centered>
+    </StateFrame>
   );
 }

@@ -1128,7 +1128,7 @@ export class ConsoleController {
     this.updateSettings({ mode });
     this.set({ mode, liveHeld: false });
     this.afterClockChange();
-    if (announce) this.notify(mode === "live" ? "LIVE 模式：由你逐句送出歌詞（Space／→ 下一句）" : "TRACK 模式：跟著音檔時間自動播放歌詞", "info");
+    if (announce) this.notify(mode === "live" ? "LIVE 模式：按 Space 或 → 送出下一句" : "TRACK 模式：歌詞跟著音檔自動播放", "info");
   }
 
   toggleMode(opts?: { announce?: boolean }): void {
