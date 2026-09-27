@@ -471,6 +471,16 @@ export function ProcessClient({
             />
           )}
 
+          {!running && project.bandId && (
+            <p className="-mt-3 flex flex-wrap items-center gap-x-1 px-4 text-[12px] leading-4 text-label-2">
+              這首歌屬於樂團：設計會遵守樂團的視覺聖經
+              {(project.bandAssets?.length ?? 0) > 0 ? `，也能使用樂團素材庫的 ${project.bandAssets!.length} 個素材` : ""}。
+              <Button href={`/b/${encodeURIComponent(project.bandId)}`} transitionTypes={PUSH} variant="plain" size="sm" className="-ml-1.5">
+                前往樂團
+              </Button>
+            </p>
+          )}
+
           {!running && !plan && !error && (
             <EmptyState
               icon={SparkleIcon}

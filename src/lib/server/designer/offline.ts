@@ -524,7 +524,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     bible,
     loudestLyricIndex,
   };
-  const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible);
+  const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible, input.assets);
   const title = makeTitle(mood, imagery, seed);
   const ownMotifs = [...imagery.slice(0, 3).map((h) => h.imagery.motif), MOOD_MOTIF[mood.mood]];
   const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...ownMotifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);

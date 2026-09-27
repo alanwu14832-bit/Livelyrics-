@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { Button, InsetGroup, ListRow, Sheet, Spinner } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import type { BandSummary } from "@/lib/types";
-import { BandArt } from "./BandShelf";
+import { BANDS_CHANGED, BandArt } from "./BandShelf";
 
 export function AssignBandSheet({
   open,
@@ -58,6 +58,8 @@ export function AssignBandSheet({
     try {
       await api.updateProject(projectId, { bandId: choice });
       onAssigned(choice);
+      // the band shelf above the library shows song counts
+      window.dispatchEvent(new Event(BANDS_CHANGED));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

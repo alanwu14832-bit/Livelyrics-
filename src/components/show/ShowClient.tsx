@@ -16,7 +16,7 @@ import { ChartLineUpIcon, CheckCircleIcon, MusicNotesPlusIcon, PlusIcon, Sparkle
 import { api } from "@/lib/api-client";
 import { spring } from "@/lib/motion";
 import { OUTPUT_PRESETS, aspectLabel } from "@/lib/output";
-import { LOOK_KINDS, LOOK_KIND_INFO, SONG_STATUS_INFO, arcDirectiveFor, defaultLook, formatRunningTime, moveItem, newSetItemId, setlistTotals, songItems, songStatus } from "@/lib/show";
+import { ARC_ROLE_INFO, LOOK_KINDS, LOOK_KIND_INFO, SONG_STATUS_INFO, arcDirectiveFor, defaultLook, formatRunningTime, moveItem, newSetItemId, setlistTotals, songItems, songStatus } from "@/lib/show";
 import { formatTimeShort } from "@/lib/timeline";
 import type { Band, LookItemKind, ProjectSummary, SetItem, Show } from "@/lib/types";
 import { LookSheet } from "./LookSheet";
@@ -260,8 +260,8 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
               <header className="flex min-w-0 items-center gap-5">
                 <BandArt id={band.id} palette={band.bible.palette.map((c) => c.hex)} className="size-16 shrink-0 rounded-full" iconSize={28} />
                 <div className="min-w-0">
-                  <p className="truncate text-[15px] leading-5 font-semibold text-label-2">{band.name}</p>
                   <h1 className="truncate text-large-title text-label">{show.name}</h1>
+                  <p className="truncate text-[17px] leading-6 text-label-2">{[band.name, show.date, show.venue].filter(Boolean).join("，")}</p>
                 </div>
               </header>
 
@@ -513,16 +513,18 @@ function CanvasGroup({ show, songCount, busy, note, onPreset, onApply }: { show:
           <Select id={selectId} value={known ? o.preset : "custom"} onChange={(e) => onPreset(e.target.value)} className="w-40">
             {OUTPUT_PRESETS.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.label}（{p.width} × {p.height}）
+                {p.label}
               </option>
             ))}
-            {!known && <option value="custom">自訂（{o.width} × {o.height}）</option>}
+            {!known && <option value="custom">自訂</option>}
           </Select>
         }
       />
       <div className="flex items-center justify-between gap-3 px-(--row-pad-x) py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <span aria-hidden="true" className="block h-7 rounded-[4px] bg-fill-3 shadow-[inset_0_0_0_1px_var(--separator)]" style={{ aspectRatio: `${o.width} / ${o.height}`, maxWidth: 72 }} />
+          <span aria-hidden="true" className="flex h-8 w-16 shrink-0 items-center justify-center">
+            <span className="block max-h-full max-w-full rounded-[3px] border-[1.5px] border-label-2 bg-tint-soft" style={{ aspectRatio: `${o.width} / ${o.height}`, width: o.width >= o.height * 2 ? "100%" : undefined, height: o.width >= o.height * 2 ? undefined : "100%" }} />
+          </span>
           <span className="truncate text-[13px] leading-5 text-label-2 tabular">
             {o.width} × {o.height}，{aspectLabel(o.width, o.height)}
           </span>
@@ -557,7 +559,7 @@ function ArcPanel({ show, busy, error, running, onPlan, onApplyAll }: { show: Sh
         ) : (
           <>
             <ArcChart show={show} />
-            <div className="px-4 pb-4">
+            <div className="px-4 pt-3 pb-4">
               <Markdown className="text-[13px]! leading-5! [&_h2]:mt-3! [&_h2]:text-[13px]! [&>*:first-child]:mt-0">{arc.overview}</Markdown>
               <p className="mt-2 text-[12px] leading-4 text-label-2">
                 {arc.engine === "claude" ? `Claude${arc.model ? `（${arc.model}）` : ""}規劃` : "離線設計師規劃"}，已依弧線設計 {applied}／{arc.songs.length} 首
@@ -578,22 +580,45 @@ function ArcPanel({ show, busy, error, running, onPlan, onApplyAll }: { show: Sh
 
 /** The arc as a small energy line across the set (one dot per song), in the tint colour. */
 function ArcChart({ show }: { show: Show }) {
+  const gid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const notes = show.arc?.songs ?? [];
   if (notes.length < 2) return null;
   const W = 320;
-  const H = 84;
-  const pad = 14;
-  const x = (i: number) => pad + (i / (notes.length - 1)) * (W - pad * 2);
-  const y = (e: number) => H - pad - e * (H - pad * 2);
+  const H = 104;
+  const padX = 24;
+  const top = 14;
+  const bottom = 30;
+  const x = (i: number) => padX + (i / (notes.length - 1)) * (W - padX * 2);
+  const y = (e: number) => top + (1 - e) * (H - top - bottom);
   const d = notes.map((n, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(n.energy).toFixed(1)}`).join(" ");
+  const area = `${d} L${x(notes.length - 1).toFixed(1)} ${H - bottom} L${x(0).toFixed(1)} ${H - bottom} Z`;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label={`能量：${notes.map((n) => `${Math.round(n.energy * 100)}%`).join("、")}`}>
-      <line x1={pad} x2={W - pad} y1={y(0.5)} y2={y(0.5)} stroke="var(--separator)" strokeWidth="1" strokeDasharray="2 4" />
-      <path d={d} fill="none" stroke="var(--tint)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      {notes.map((n, i) => (
-        <circle key={n.itemId} cx={x(i)} cy={y(n.energy)} r={n.role === "finale" || n.role === "peak" ? 4.5 : 3} fill={n.role === "breather" ? "var(--surface)" : "var(--tint)"} stroke="var(--tint)" strokeWidth="1.5" />
-      ))}
-    </svg>
+    <figure className="px-2 pt-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label={`整場能量：${notes.map((n, i) => `第 ${i + 1} 首 ${ARC_ROLE_INFO[n.role].label} ${Math.round(n.energy * 100)}%`).join("、")}`}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="var(--tint)" stopOpacity="0.22" />
+            <stop offset="1" stopColor="var(--tint)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line x1={padX} x2={W - padX} y1={H - bottom} y2={H - bottom} stroke="var(--separator)" strokeWidth="1" />
+        <path d={area} fill={`url(#${gid})`} />
+        <path d={d} fill="none" stroke="var(--tint)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {notes.map((n, i) => (
+          <g key={n.itemId}>
+            <circle cx={x(i)} cy={y(n.energy)} r={n.role === "finale" || n.role === "peak" ? 4.5 : 3.2} fill={n.role === "breather" ? "var(--surface)" : "var(--tint)"} stroke="var(--tint)" strokeWidth="1.5" />
+            <text x={x(i)} y={H - bottom + 14} textAnchor="middle" fontSize="11" fill="var(--label-2)" className="tabular">
+              {i + 1}
+            </text>
+            {(n.role === "finale" || n.role === "peak" || n.role === "breather" || notes.length <= 6) && (
+              <text x={x(i)} y={H - 4} textAnchor="middle" fontSize="11" fill="var(--label-2)">
+                {ARC_ROLE_INFO[n.role].label}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+    </figure>
   );
 }
 

@@ -98,7 +98,6 @@ export function offlineArc(input: ArcInput, now = new Date()): ShowArc {
   const avoid = input.bible?.sceneAvoid.length ? `整場都不用${input.bible.sceneAvoid.map((x) => SCENES[x].label).join("、")}。` : "";
   const overview = n
     ? [
-        "## 整場弧線",
         `「${input.showName}」共 ${n} 首歌${minutes ? `、約 ${minutes} 分鐘` : ""}。開場先亮出${input.bandName || "樂團"}的世界，${breather >= 0 ? `第 ${breather + 1} 首讓全場喘一口氣，` : ""}${peak >= 0 ? `第 ${peak + 1} 首是後段的高峰，` : ""}最大的畫面留給最後一首。`,
         "",
         "## 配色的走向",

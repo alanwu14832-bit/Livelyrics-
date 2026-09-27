@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { BandArt, bandHref } from "@/components/home/BandShelf";
 import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
@@ -14,7 +14,7 @@ import { PUSH } from "@/components/home/transitions";
 import { processHref } from "@/components/process/steps";
 import { Alert, AppHeader, Banner, Button, EmptyState, InsetGroup, ListRow, Menu, MenuItem, MenuSeparator, Sheet, Skeleton, SkeletonGroup, Spinner, Tag, TextField, cx, pageContainerClass } from "@/components/ui";
 import { Markdown } from "@/components/ui/Markdown";
-import { BookOpenIcon, DotsThreeIcon, MusicNotesPlusIcon, PencilSimpleIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon, UsersThreeIcon } from "@/components/ui/Icon";
+import { BookOpenIcon, DotsThreeIcon, MusicNotesPlusIcon, PencilSimpleIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon, UploadSimpleIcon, UsersThreeIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
 import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
 import { SONG_STATUS_INFO, songStatus } from "@/lib/show";
@@ -60,6 +60,7 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const pickerRef = useRef<(() => void) | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -167,7 +168,6 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
             <header className="flex min-w-0 flex-wrap items-center gap-x-7 gap-y-4 pt-10">
               <BandArt id={band.id} palette={band.bible.palette.map((c) => c.hex)} className="size-28 shrink-0 rounded-full shadow-lift" iconSize={48} />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] leading-5 font-semibold text-label-2">樂團</p>
                 <h1 className="truncate text-large-title text-label">{band.name}</h1>
                 <p className="mt-1 text-[15px] leading-[22px] text-label-2 tabular">
                   {[`${state.songs.length} 首歌`, `${state.shows.length} 場演出`, `${band.assets.length} 個樂團素材`].join("・")}
@@ -261,13 +261,27 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
               </ul>
             </section>
 
-            <div className="mt-16">
+            <section className="mt-16" aria-labelledby="band-assets-title">
+              <SectionHeader
+                id="band-assets-title"
+                title="樂團素材"
+                count={band.assets.length}
+                description="logo、專輯封面、照片與 MV 片段。樂團的每首歌與演出畫面都能使用。"
+                actions={
+                  <Button variant="plain" icon={UploadSimpleIcon} onClick={() => pickerRef.current?.()}>
+                    加入素材
+                  </Button>
+                }
+              />
               <AssetLibrary
                 owner={{ kind: "band", id: band.id }}
                 assets={band.assets}
+                heading="none"
+                headingId="band-assets-title"
+                pickerRef={pickerRef}
                 onChange={(assets) => setState((s) => (s.kind === "ok" ? { ...s, band: { ...s.band, assets } } : s))}
               />
-            </div>
+            </section>
           </>
         )}
       </main>

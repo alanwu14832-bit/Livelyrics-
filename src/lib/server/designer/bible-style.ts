@@ -5,7 +5,7 @@
 // Pure; every function returns new objects.
 
 import { paletteRoles } from "@/lib/show";
-import type { BandBible, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionDesign } from "@/lib/types";
+import type { Asset, BandBible, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionDesign } from "@/lib/types";
 import { colorName } from "./color";
 import type { PaletteEntry } from "./palette";
 
@@ -90,13 +90,17 @@ export function applyLyricPolicy(
 
 const BEAT_OK = 0.55;
 
-/** Swap media treatments for the bible's preferred ones where they fit (beat-cut only when loud). */
-export function applyTreatments(sections: readonly SectionDesign[], bible: BandBible | null | undefined): SectionDesign[] {
+/**
+ * Swap media treatments for the bible's preferred ones where they fit (beat-cut only when loud).
+ * The logo keeps being shown whole.
+ */
+export function applyTreatments(sections: readonly SectionDesign[], bible: BandBible | null | undefined, assets: readonly Asset[] = []): SectionDesign[] {
   const pref = bible?.treatments ?? [];
   if (!pref.length) return sections.map((s) => ({ ...s }));
+  const logos = new Set(assets.filter((a) => a.kind === "logo").map((a) => a.id));
   let turn = 0;
   return sections.map((s) => {
-    if (!s.media || pref.includes(s.media.treatment)) return { ...s };
+    if (!s.media || pref.includes(s.media.treatment) || logos.has(s.media.assetId)) return { ...s };
     const fits = (t: MediaTreatment) => (t === "beat-cut" ? s.energy >= BEAT_OK : true) && !(t === "mask-lyrics" && s.lyricStyle === "hidden");
     const options = pref.filter(fits);
     if (!options.length) return { ...s };

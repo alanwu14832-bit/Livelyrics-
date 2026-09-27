@@ -58,7 +58,10 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 
 | Route | Owner | Purpose |
 |---|---|---|
-| `/` | HOME | project library + upload dropzone + server status |
+| `/` | HOME | upload dropzone + server status, 樂團 (band shelf), 作品庫 (project library); `?band=<id>` preselects the band of a new song |
+| `/b/[id]` | HOME | 樂團: visual bible summary + 「從作品產生視覺聖經」, shows, the band's songs, the shared 樂團素材 library |
+| `/b/[id]/bible` | HOME | 視覺聖經 editor (every field, live stage preview) |
+| `/s/[id]` | HOME | 演出: setlist editor (songs + walk-in / interlude / standby / walk-out looks, reorder, running time, readiness, show canvas, 整場弧線) |
 | `/p/[id]/process` | HOME | runs/observes the pipeline with live progress, then hands off to the console |
 | `/p/[id]/lyrics` | HOME | lyrics editor: import/paste/LRCLIB pick, tap-sync, nudge, auto-distribute |
 | `/p/[id]` | CONSOLE | operator console |
@@ -73,8 +76,48 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
 | `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
+| `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
+| `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
+| `/api/bands/[id]/assets` GET/POST, `/api/bands/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | the band library, same contract as the project library (shared handlers in `src/lib/server/asset-routes.ts`); delete also clears every band song section and show look that used it |
+| `/api/bands/[id]/bible` POST | SERVER | 從作品產生視覺聖經 (Claude or offline) and save → `{ band, engine, logs }` |
+| `/api/shows` GET (`?bandId=`) / POST | SERVER | `ShowSummary[]` / create `{ bandId, name, date?, venue? }` → `Show` |
+| `/api/shows/[id]` GET/PATCH/DELETE | SERVER | show / patch `{ name?, date?, venue?, notes?, items?, output?, arc? }` (items only the band's songs, looks only the band's library) / delete |
+| `/api/shows/[id]/arc` POST | SERVER | 整場弧線 (Claude or offline) saved on the show → `{ show, engine, logs }` |
+| `/api/shows/[id]/apply-output` POST | SERVER | copy the show's canvas onto every song of its setlist → `{ updated, show }` |
 
-Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`.
+Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/`: `projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`,
+`bands/<id>/{band.json,assets/<assetId>.<ext>}`, `shows/<id>/show.json` (all atomic writes, tolerant readers, per-key locks).
+
+### Bands, the visual bible and shows (phase 2a)
+
+A band plays a 40-minute set, and every song should live in the same band world. Types in `src/lib/types.ts`
+(`Band`, `BandBible`, `BandSummary`, `Show`, `SetItem`, `SetLook`, `ShowArc`, `SongArcNote`, `SongArcDirective`);
+pure helpers in `src/lib/band.ts` (vocabularies, `defaultBible`, `coerceBible` / `coerceBand`, `applyBiblePatch`) and
+`src/lib/show.ts` (`coerceShow`, `applyShowPatch`, `paletteRoles`, `colorwayFor`, `defaultLook`, **`lookToPlan(look, bible)`**,
+`lookToProject(item, { band, output })`, `songStatus`, `setlistTotals`, `moveItem`, `arcDirectiveFor`); storage in
+`src/lib/server/band-storage.ts`.
+
+- `Project.bandId?` (old files load without it) and `Project.bandAssets?` (the band library with `scope: "band"`,
+  attached on read by `withBandAssets`, never stored). `Asset.scope?: "project" | "band"`; ids are unique across both
+  scopes (new ids avoid the other scope's). `src/lib/asset-scope.ts`: `stageAssets(project)` (own first, then band),
+  `resolveAsset`, `assetFileUrl(project, asset)` (band assets are served from `/api/bands/<bandId>/assets/<id>`). The
+  stage (`StageEngine` / `MediaSources`), the export (`OfflineStage` / `ExactMedia`), the console media picker and the
+  designer input all use the merged list.
+- Visual bible: summary (繁中 Markdown), palette (4 to 8, `[]` = undecided), fonts, motifs, preferred treatments,
+  scene affinity / avoid, lyric policy (`chorus-only` / `full` / `minimal` + note), dos / donts, source. When a project has
+  a band, research and design prompts include it as a hard constraint (`bibleBlock` in `prompts.ts`, "stay in this world;
+  deviate only with a reason in rationale"); the offline designer uses its palette (roles by lightness / contrast), fonts,
+  scene affinity / avoid, lyric policy and treatments (`designer/bible-style.ts`); `normalizePlan` still validates.
+  「從作品產生視覺聖經」: `designer/bible.ts` (Claude structured output `BibleDraftSchema`; offline `offlineBible` reads the
+  recurring palette families, fonts, scene stage time, treatments and lyric share of the band's plans).
+- Show: `items` are songs (`projectId`) and looks (`walk-in | walk-out | interlude | standby` with `{ scene, colorway, media,
+  text?, durationHint? }`). A look renders through the existing StageView as a synthetic single-section plan
+  (`lookToPlan` / `lookToProject`: the bible's palette and fonts, the look's text as the only lyric line, the band library as
+  `bandAssets`, the show's canvas). The live console does not run shows yet; it can use these helpers as they are.
+- 整場弧線: `designer/arc.ts`. `planShowArc` (Claude structured output or `offlineArc`: confident opener, build, a breather
+  past the middle, the peak, the biggest looks held for the finale) gives each song a role, target energy, palette emphasis
+  and note. `ProcessRequest.arc` (`SongArcDirective`) re-designs one song to follow it: Claude reads it in the design prompt,
+  the offline path applies `applyArc` (intensity by energy, tunnel only for the finale, colorway emphasis from the palette).
 
 ### Band media and the output canvas (phase 1a)
 

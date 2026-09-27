@@ -62,6 +62,18 @@ describe("offline design with a band bible", () => {
     expect(biasScenes(["particles", "ink", "tunnel"], bible)).toEqual(["ink", "particles"]);
   });
 
+  it("preferred treatments replace the defaults, but the logo stays whole", () => {
+    const logo = { id: "aaaaaaaaaaaa", kind: "logo" as const, name: "logo", mimeType: "image/png", file: "aaaaaaaaaaaa.png", width: 1, height: 1, bytes: 1, createdAt: "" };
+    const photo = { ...logo, id: "bbbbbbbbbbbb", kind: "image" as const, name: "live photo", file: "bbbbbbbbbbbb.png" };
+    const plan = offlineDesign(demoInput({ bible, assets: [logo, photo] }));
+    const media = plan.sections.map((s) => s.media).filter((m) => m != null);
+    expect(media.length).toBeGreaterThan(0);
+    for (const m of media) {
+      if (m!.assetId === logo.id) expect(m!.treatment).toBe("full");
+      else expect(m!.treatment).toBe("grain-film");
+    }
+  });
+
   it("puts the bible into both prompts as a hard constraint, and the arc into the design prompt", () => {
     const input = demoInput({ bible, bandName: "港口" });
     const st = analyzeStructure(input);
@@ -155,7 +167,7 @@ describe("show arc", () => {
     for (const s of arc.songs.slice(0, 7)) expect(s.energy).toBeLessThan(1);
     expect(arc.songs[4].emphasis).toBe("shadow");
     expect(arc.songs[4].energy).toBeLessThanOrEqual(0.45);
-    expect(arc.overview).toContain("整場弧線");
+    expect(arc.overview).toContain("配色的走向");
     expect(arcCurve(1)).toBeGreaterThan(arcCurve(0.6));
     expect(offlineArc({ showName: "單曲", bandName: "", bible: null, songs: [song(0, 0.5)] }).songs[0].role).toBe("finale");
   });

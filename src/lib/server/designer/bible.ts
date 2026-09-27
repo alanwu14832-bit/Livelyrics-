@@ -61,10 +61,18 @@ export function derivePalette(plans: readonly DesignPlan[]): BandBible["palette"
   const family = (hex: string) => Math.floor(((hexToHsl(hex).h % 360) + 360) % 360 / 30);
   const families = tally(mids.map((c) => family(c.hex)));
   const picks: Array<{ hex: string; role: string; name: string }> = [];
-  for (const f of top(families, 5)) {
+  // two neighbouring families can land on nearly the same colour: keep only distinct ones
+  const tooClose = (a: string, b: string) => {
+    const x = hexToHsl(a);
+    const y = hexToHsl(b);
+    const dh = Math.abs(((x.h - y.h + 540) % 360) - 180);
+    return dh < 24 && Math.abs(x.l - y.l) < 0.14;
+  };
+  for (const f of top(families, 6)) {
     const inFam = mids.filter((c) => family(c.hex) === f).sort((a, b) => hexToHsl(b.hex).s - hexToHsl(a.hex).s);
     const rep = inFam[Math.floor(inFam.length / 2)] ?? inFam[0];
-    if (rep && !picks.some((p) => p.hex === rep.hex)) picks.push(rep);
+    if (rep && !picks.some((p) => p.hex === rep.hex || tooClose(p.hex, rep.hex))) picks.push(rep);
+    if (picks.length >= 5) break;
   }
   const roles = ["主色", "點綴", "高光", "輔色", "輔色"];
   const out = [

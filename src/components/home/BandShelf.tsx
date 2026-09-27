@@ -18,6 +18,9 @@ type LoadState = { kind: "loading" } | { kind: "ok"; bands: BandSummary[] } | { 
 
 export const bandHref = (id: string) => `/b/${encodeURIComponent(id)}`;
 
+/** window event: a song joined or left a band (the shelf reloads its counts) */
+export const BANDS_CHANGED = "livelyrics:bands-changed";
+
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-x-5 gap-y-7";
 
 function bandMeta(b: BandSummary): string {
@@ -118,7 +121,11 @@ export function BandShelf({ className }: { className?: string }) {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", onFocus);
-    return () => document.removeEventListener("visibilitychange", onFocus);
+    window.addEventListener(BANDS_CHANGED, load);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener(BANDS_CHANGED, load);
+    };
   }, [load]);
 
   const bands = state.kind === "ok" ? state.bands : [];

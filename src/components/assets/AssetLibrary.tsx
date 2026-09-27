@@ -40,6 +40,12 @@ export interface AssetLibraryProps {
   alwaysOfferRedesign?: boolean;
   className?: string;
   headingId?: string;
+  /**
+   * "none": the page renders its own section heading (pass its id as `headingId`) and opens the
+   * file picker through `pickerRef`.
+   */
+  heading?: "small" | "none";
+  pickerRef?: { current: (() => void) | null };
 }
 
 let uploadSeq = 0;
@@ -253,6 +259,8 @@ export function AssetLibrary({
   alwaysOfferRedesign = false,
   className,
   headingId,
+  heading = "small",
+  pickerRef,
 }: AssetLibraryProps) {
   const compact = density === "console";
   const owner: AssetOwner = ownerProp ?? { kind: "project", id: projectId ?? "" };
@@ -333,13 +341,21 @@ export function AssetLibrary({
     }
   };
 
+  useEffect(() => {
+    if (!pickerRef) return;
+    pickerRef.current = () => inputRef.current?.click();
+    return () => {
+      pickerRef.current = null;
+    };
+  }, [pickerRef]);
+
   const offerRedesign = onRedesign && assets.length > 0 && (added > 0 || alwaysOfferRedesign);
   const hasDrag = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
   return (
     <section aria-labelledby={titleId} className={cx("min-w-0", className)} data-testid="asset-library">
-      <div className={cx("flex min-h-7 items-center justify-between gap-2", compact ? "" : "mb-1.5 px-4")}>
-        <h2 id={titleId} className={cx("min-w-0 truncate", compact ? "text-c-footnote font-semibold text-label-2" : "text-[13px] leading-5 text-label-2")}>
+      <div className={cx("flex min-h-7 items-center justify-between gap-2", compact ? "" : "mb-1.5 px-4", heading === "none" && "hidden")}>
+        <h2 id={heading === "none" ? undefined : titleId} className={cx("min-w-0 truncate", compact ? "text-c-footnote font-semibold text-label-2" : "text-[13px] leading-5 text-label-2")}>
           {band ? "樂團素材" : "素材"}
           {assets.length > 0 ? `（${assets.length}）` : ""}
         </h2>

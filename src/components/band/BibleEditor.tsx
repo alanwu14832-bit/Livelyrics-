@@ -46,7 +46,6 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [genNote, setGenNote] = useState<string | null>(null);
@@ -89,7 +88,6 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
       const saved = await api.updateBand(id, { bible: editable(draft) });
       setBand(saved);
       setDraft(saved.bible);
-      setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -140,7 +138,7 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
                 </Button>
               ) : (
                 <Button variant="plain" disabled>
-                  {savedAt ? "已儲存" : "沒有變更"}
+                  已儲存
                 </Button>
               )}
             </>
