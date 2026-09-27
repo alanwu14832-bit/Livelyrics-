@@ -74,14 +74,19 @@ export function assetsDir(id: string): string {
   return path.join(projectDir(id), "assets");
 }
 
-export function assetPath(projectId: string, asset: Pick<Asset, "id" | "file">): string {
+/** The stored file of an asset inside an assets/ folder (project or band); validates the name. */
+export function assetFileIn(dir: string, asset: Pick<Asset, "id" | "file">): string {
   if (!isAssetId(asset.id) || !ASSET_FILE_RE.test(asset.file) || !asset.file.startsWith(`${asset.id}.`)) {
     throw new StorageError("corrupt", "素材的檔名無效");
   }
-  return path.join(assetsDir(projectId), asset.file);
+  return path.join(dir, asset.file);
 }
 
-function isNodeError(err: unknown, code: string): boolean {
+export function assetPath(projectId: string, asset: Pick<Asset, "id" | "file">): string {
+  return assetFileIn(assetsDir(projectId), asset);
+}
+
+export function isNodeError(err: unknown, code: string): boolean {
   return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === code;
 }
 
@@ -97,7 +102,8 @@ const g = globalThis as typeof globalThis & {
 const locks = (g.__livelyricsLocks ??= new Map());
 const summaryCache = (g.__livelyricsSummaryCache ??= new Map());
 
-async function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+/** Serialize read-modify-write cycles on one key (a project id, "band:<id>", "show:<id>"). */
+export async function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
   const key = `${dataDir()}::${id}`;
   const previous = locks.get(key) ?? Promise.resolve();
   let release!: () => void;
@@ -117,7 +123,7 @@ async function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 // JSON files
 // ---------------------------------------------------------------------------
 
-async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
+export async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const json = JSON.stringify(data);
   const handle = await fs.open(tmp, "w");
@@ -163,7 +169,7 @@ function coercePlan(raw: Record<string, unknown>): DesignPlan {
 }
 
 /** Fill in defaults for anything missing so older / hand-edited files still load. */
-function coerceProject(raw: unknown, id: string, fallbackTime: string): Project {
+export function coerceProject(raw: unknown, id: string, fallbackTime: string): Project {
   if (!isRecord(raw)) throw new StorageError("corrupt", "project.json 不是有效的專案資料");
   const metaRaw = isRecord(raw.meta) ? raw.meta : {};
   const meta: SongMeta = {
@@ -198,6 +204,8 @@ function coerceProject(raw: unknown, id: string, fallbackTime: string): Project 
     output: normalizeOutput(raw.output),
   };
   if (typeof raw.error === "string" && raw.error) project.error = raw.error;
+  // projects created before bands existed have no bandId; bandAssets is never stored
+  if (typeof raw.bandId === "string" && PROJECT_ID_RE.test(raw.bandId)) project.bandId = raw.bandId;
   return project;
 }
 
@@ -250,7 +258,7 @@ async function sweepStaleTemp(dir: string): Promise<void> {
   }
 }
 
-async function moveFile(from: string, to: string): Promise<void> {
+export async function moveFile(from: string, to: string): Promise<void> {
   try {
     await fs.rename(from, to);
   } catch (err) {
@@ -262,6 +270,8 @@ async function moveFile(from: string, to: string): Promise<void> {
 
 export interface CreateProjectInput {
   meta: SongMeta;
+  /** the band the song belongs to (validated by the caller) */
+  bandId?: string;
   analysis: AudioAnalysis | null;
   /** an uploaded file on disk; it is moved into the project folder */
   audio: { tempPath: string; ext: string };
@@ -299,6 +309,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     plan: null,
     assets: [],
     output: normalizeOutput(null),
+    ...(input.bandId ? { bandId: input.bandId } : {}),
   };
   const dir = projectDir(id);
   try {
@@ -321,6 +332,9 @@ async function writeProject(project: Project): Promise<Project> {
   const dir = projectDir(project.id);
   const saved: Project = { ...project, updatedAt: new Date().toISOString() };
   if (saved.status !== "error") delete saved.error;
+  // the band library is attached on read, never stored with the project
+  delete saved.bandAssets;
+  if (!saved.bandId) delete saved.bandId;
   try {
     // never recreate a deleted project folder
     await writeJsonAtomic(path.join(dir, PROJECT_FILE), saved);
@@ -364,6 +378,10 @@ function summarize(project: Project): ProjectSummary {
     updatedAt: project.updatedAt,
   };
   if (accent) summary.accent = accent;
+  if (project.bandId) summary.bandId = project.bandId;
+  summary.lyricLines = project.lyrics.lines.length;
+  summary.lyricsSynced = project.lyrics.synced;
+  summary.hasPlan = !!project.plan;
   const colors = (palette ?? [])
     .map((c) => c?.hex)
     .filter((c): c is string => typeof c === "string" && HEX_COLOR_RE.test(c))
