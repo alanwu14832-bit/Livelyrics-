@@ -8,10 +8,13 @@ import {
   EyeSlashIcon,
   FilmSlateIcon,
   HandPalmIcon,
+  ListNumbersIcon,
   MetronomeIcon,
   MoonIcon,
   ProjectorScreenIcon,
+  PushPinSimpleIcon,
   RecordIcon,
+  RepeatIcon,
   SnowflakeIcon,
   SpeakerSlashIcon,
   SubtitlesIcon,
@@ -22,9 +25,16 @@ import {
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { formatBpm, formatOffsetSeconds } from "@/lib/console/format";
 import type { HotkeyAction } from "@/lib/console/hotkeys";
-import { LYRIC_STYLE_LABELS, SCENE_LABELS } from "@/lib/console/labels";
+import { LYRIC_STYLE_LABELS, SCENE_LABELS, SECTION_KIND_LABELS } from "@/lib/console/labels";
 import { sceneBank } from "@/lib/console/plan-edit";
 import type { StageOverrides } from "@/lib/stage/protocol";
+import type { Project, SectionDesign } from "@/lib/types";
+
+/** A section's name for the HUD and capsules (「副歌 2」, or its kind when it has no label). */
+export function sectionTitle(section: Pick<SectionDesign, "label" | "kind"> | null | undefined): string {
+  if (!section) return "";
+  return section.label || SECTION_KIND_LABELS[section.kind] || section.kind;
+}
 
 /**
  * HUD content for a hotkey that was just handled (read the new state from the controller), or
@@ -56,10 +66,30 @@ export function hudForAction(action: HotkeyAction, controller: ConsoleController
       return snap.mode === "live" ? { icon: RecordIcon, label: "LIVE 模式", tone: "red" } : { icon: WaveformIcon, label: "TRACK 模式" };
     case "openOutput":
       return { icon: ProjectorScreenIcon, label: snap.output.connected ? "已聚焦投影視窗" : "已開啟投影視窗" };
+    case "hold": {
+      const section = snap.sectionHold != null ? snap.project?.plan?.sections[snap.sectionHold] : null;
+      return { icon: PushPinSimpleIcon, label: "保持段落", value: section ? sectionTitle(section) : "關" };
+    }
+    case "loop": {
+      const section = snap.sectionLoop != null ? snap.project?.plan?.sections[snap.sectionLoop] : null;
+      return { icon: RepeatIcon, label: "循環段落", value: section ? sectionTitle(section) : "關" };
+    }
+    case "section": {
+      const index = controller.store.get().sectionIndex;
+      const section = index != null ? snap.project?.plan?.sections[index] : null;
+      return section ? { icon: ListNumbersIcon, label: `段落 ${index! + 1}`, value: sectionTitle(section) } : null;
+    }
     default:
       return null;
   }
 }
+
+/** What the capsules need to know besides the overrides (a look on air has no transport). */
+export type CapsuleSource = Pick<ConsoleSnapshot, "mode" | "liveHeld" | "muted" | "offset"> & {
+  sectionHold?: number | null;
+  sectionLoop?: number | null;
+  project?: Project | null;
+};
 
 const near = (a: number, b: number) => Math.abs(a - b) <= 0.01;
 
@@ -68,11 +98,17 @@ const near = (a: number, b: number) => Math.abs(a - b) <= 0.01;
  * is the only solid one; waiting, lyrics hidden and freeze are orange; overrides of the plan are
  * tint; the rest are neutral reminders of settings that change what the room sees or hears.
  */
-export function capsuleItems(ov: StageOverrides, snap: ConsoleSnapshot): CapsuleItem[] {
+export function capsuleItems(ov: StageOverrides, snap: CapsuleSource): CapsuleItem[] {
   const live = snap.mode === "live";
+  const sections = snap.project?.plan?.sections ?? [];
+  const hold = snap.sectionHold != null ? sections[snap.sectionHold] : undefined;
+  const loop = snap.sectionLoop != null ? sections[snap.sectionLoop] : undefined;
   const items: Array<CapsuleItem | false> = [
     ov.blackout && { id: "blackout", tone: "blackout", icon: MoonIcon, label: "黑場" },
     live && snap.liveHeld && { id: "held", tone: "orange", icon: HandPalmIcon, label: "等待下一句" },
+    // console chrome only: the projection never shows that a section is held or looping
+    !!hold && { id: "hold", tone: "tint", icon: PushPinSimpleIcon, label: `保持中：${sectionTitle(hold)}` },
+    !!loop && { id: "loop", tone: "tint", icon: RepeatIcon, label: `循環：${sectionTitle(loop)}` },
     !ov.lyricsVisible && { id: "lyrics", tone: "orange", icon: EyeSlashIcon, label: "歌詞隱藏" },
     ov.freeze && { id: "freeze", tone: "orange", icon: SnowflakeIcon, label: "凍結" },
     ov.scene != null && { id: "scene", tone: "tint", label: `場景：${SCENE_LABELS[ov.scene] ?? ov.scene}` },
