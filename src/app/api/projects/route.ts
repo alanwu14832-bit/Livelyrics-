@@ -3,6 +3,8 @@ import { MAX_AUDIO_BYTES, resolveAudioType, sanitizeFileName } from "@/lib/serve
 import { handle, HttpError, json } from "@/lib/server/http";
 import { parseMultipart } from "@/lib/server/multipart";
 import { withLiveStatus } from "@/lib/server/pipeline";
+import { isValidBandId } from "@/lib/band";
+import { getBand, withBandAssets } from "@/lib/server/band-storage";
 import { createProject, createUploadTempPath, listProjects } from "@/lib/server/storage";
 import { parseAnalysis, parseCreateMeta } from "@/lib/server/validate";
 
@@ -38,8 +40,14 @@ export const POST = handle(async (req: Request) => {
 
     const analysis = parseAnalysis(fields.analysis);
     const meta = parseCreateMeta(fields.meta, { fileName, mimeType: type.mimeType }, analysis);
-    const project = await createProject({ meta, analysis, audio: { tempPath: file.path, ext: type.ext } });
-    return json(project, { status: 201 });
+    let bandId: string | undefined;
+    const requestedBand = fields.bandId?.trim();
+    if (requestedBand) {
+      if (!isValidBandId(requestedBand) || !(await getBand(requestedBand))) throw new HttpError(400, "找不到指定的樂團");
+      bandId = requestedBand;
+    }
+    const project = await createProject({ meta, analysis, bandId, audio: { tempPath: file.path, ext: type.ext } });
+    return json(await withBandAssets(project), { status: 201 });
   } finally {
     // moved into the project on success; otherwise drop the upload
     await fs.rm(file.path, { force: true }).catch(() => {});

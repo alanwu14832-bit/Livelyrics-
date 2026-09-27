@@ -171,7 +171,7 @@ function offlinePlan(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolea
 
 /** Produce a validated, normalized DesignPlan. Never throws for Claude failures: falls back to offline. */
 export async function designSong(
-  input: DesignerInput & { research: Research | null; instruction?: string; previous?: DesignPlan | null },
+  input: DesignRequest,
   cb: DesignerCallbacks = {},
   deps: DesignerDeps = {},
 ): Promise<DesignPlan> {

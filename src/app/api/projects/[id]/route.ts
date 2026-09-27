@@ -1,6 +1,8 @@
 import { handle, HttpError, json, readJson, requireProjectId } from "@/lib/server/http";
 import { remapPlanLines } from "@/lib/lyrics/remap";
 import { cancelRun, withLiveStatus } from "@/lib/server/pipeline";
+import { isValidBandId } from "@/lib/band";
+import { getBand, withBandAssets } from "@/lib/server/band-storage";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
 import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
 import type { DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
@@ -16,7 +18,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const project = await getProject(id);
   if (!project) throw new HttpError(404, "找不到專案");
-  return json(withLiveStatus(project));
+  return json(withLiveStatus(await withBandAssets(project)));
 });
 
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
@@ -36,6 +38,12 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.output !== undefined && (typeof patch.output !== "object" || patch.output === null || Array.isArray(patch.output))) {
     throw new HttpError(400, "output 必須是物件");
   }
+  let bandId: string | null | undefined;
+  if (patch.bandId !== undefined) {
+    if (patch.bandId === null || patch.bandId === "") bandId = null;
+    else if (typeof patch.bandId === "string" && isValidBandId(patch.bandId) && (await getBand(patch.bandId))) bandId = patch.bandId;
+    else throw new HttpError(400, "找不到指定的樂團");
+  }
 
   const existing = await getProject(id);
   if (!existing) throw new HttpError(404, "找不到專案");
@@ -43,7 +51,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.meta !== undefined) meta = applyMetaPatch(existing.meta, patch.meta);
   let output: ProjectOutput | undefined;
   if (patch.output !== undefined) output = applyOutputPatch(existing.output, patch.output);
-  if (!meta && !lyrics && !plan && !output) return json(withLiveStatus(existing));
+  if (!meta && !lyrics && !plan && !output && bandId === undefined) return json(withLiveStatus(await withBandAssets(existing)));
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
@@ -54,8 +62,15 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     }
     if (plan) p.plan = plan;
     if (output) p.output = applyOutputPatch(p.output, patch.output);
+    if (bandId !== undefined && bandId !== (p.bandId ?? null)) {
+      // leaving a band: sections that showed the old band's material fall back to the scene
+      const own = new Set(p.assets.map((a) => a.id));
+      if (p.plan) p.plan = { ...p.plan, sections: p.plan.sections.map((s) => (s.media && !own.has(s.media.assetId) ? { ...s, media: null } : s)) };
+      if (bandId) p.bandId = bandId;
+      else delete p.bandId;
+    }
   });
-  return json(withLiveStatus(saved));
+  return json(withLiveStatus(await withBandAssets(saved)));
 });
 
 export const DELETE = handle(async (_req: Request, ctx: Ctx) => {
