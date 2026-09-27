@@ -11,7 +11,12 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { formatTimeShort } from "@/lib/timeline";
-import type { DesignPlan, Research } from "@/lib/types";
+import { coerceBible, sanitizeFonts } from "@/lib/band";
+import type { BandBible, DesignPlan, Research, ShowArc } from "@/lib/types";
+import { applyArc, ARC_SYSTEM, ArcDraftSchema, buildArcPrompt, normalizeArc, offlineArc, type ArcInput } from "./arc";
+import { BIBLE_SYSTEM, BibleDraftSchema, buildBiblePrompt, offlineBible, type BibleInput } from "./bible";
+import { bibleBlock } from "./prompts";
+import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
@@ -24,6 +29,8 @@ export type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
 export { normalizePlan } from "./normalize";
 export { offlineDesign, offlineResearch } from "./offline";
 export { sanitizeSvg, generateMotifSvg } from "./svg";
+export { offlineBible, type BibleInput, type BibleSong } from "./bible";
+export { offlineArc, applyArc, type ArcInput, type ArcSong } from "./arc";
 
 /** true when an Anthropic credential is configured (otherwise the offline designer is used) */
 export function isClaudeConfigured(): boolean {
@@ -119,10 +126,18 @@ function planSummary(plan: DesignPlan): string {
  * plan after a Claude failure, the previous plan is kept.
  */
 function offlinePath(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolean): DesignPlan {
+  const plan = offlinePlan(req, cb, claudeFailed);
+  if (!req.arc) return plan;
+  const shifted = applyArc(plan, req.arc, req);
+  cb.onLog(`依整場弧線調整：第 ${req.arc.position + 1} 首，目標能量 ${req.arc.energy.toFixed(2)}`);
+  return shifted;
+}
+
+function offlinePlan(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolean): DesignPlan {
   const instruction = req.instruction?.trim();
   const previous = req.previous ? normalizePlan(req.previous, req) : null;
 
-  if (previous && (instruction || claudeFailed)) {
+  if (previous && (instruction || (claudeFailed && !req.arc))) {
     if (instruction) {
       const { plan, changes } = applyInstruction(previous, instruction, req);
       if (changes.length) {
@@ -180,5 +195,72 @@ export async function designSong(
     const why = describeError(err);
     cbs.onLog(`Claude 設計失敗：${why}。改用離線設計師。`);
     return offlinePath(req, cbs, true);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// band-level jobs: the visual bible and the show arc
+// ---------------------------------------------------------------------------
+
+/** 從作品產生視覺聖經. Claude when configured, the offline heuristic otherwise (or on failure). */
+export async function generateBible(input: BibleInput, cb: DesignerCallbacks = {}, deps: DesignerDeps = {}): Promise<BandBible> {
+  const cbs = safeCallbacks(cb);
+  throwIfAborted(cb.signal);
+  const d = resolveDeps(deps);
+  const now = d.now?.() ?? new Date();
+  const fallback = () => offlineBible(input, now);
+  if (!d.configured) {
+    cbs.onLog("未設定 Claude，使用離線設計師整理作品的共同配色、字體與場景。");
+    return fallback();
+  }
+  try {
+    cbs.onLog(`Claude（${d.model}）開始整理「${input.bandName}」的視覺聖經…`);
+    const { raw, model } = await claudeStructured({ system: BIBLE_SYSTEM, prompt: buildBiblePrompt(input), schema: BibleDraftSchema, label: "視覺聖經" }, cbs, {
+      transport: d.transport(),
+      model: d.model,
+      now: d.now,
+    });
+    const draft = coerceBible(raw);
+    const base = fallback();
+    const bible: BandBible = {
+      ...draft,
+      // anything Claude left empty keeps the heuristic's reading of the songs
+      palette: draft.palette.length >= 3 ? draft.palette : base.palette,
+      fonts: sanitizeFonts((raw as { fonts?: unknown })?.fonts, base.fonts),
+      summary: draft.summary || base.summary,
+      source: { engine: "claude", model, updatedAt: now.toISOString() },
+    };
+    cbs.onLog("視覺聖經完成");
+    return bible;
+  } catch (err) {
+    if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
+    cbs.onLog(`Claude 無法產生視覺聖經：${describeError(err)}。改用離線設計師。`);
+    return fallback();
+  }
+}
+
+/** 整場弧線: per-song energy, palette emphasis and notes for the ordered setlist. */
+export async function planShowArc(input: ArcInput, cb: DesignerCallbacks = {}, deps: DesignerDeps = {}): Promise<ShowArc> {
+  const cbs = safeCallbacks(cb);
+  throwIfAborted(cb.signal);
+  const d = resolveDeps(deps);
+  const now = d.now?.() ?? new Date();
+  const fallback = offlineArc(input, now);
+  if (!d.configured || input.songs.length === 0) {
+    if (!d.configured) cbs.onLog("未設定 Claude，使用離線設計師依能量與順序排出整場弧線。");
+    return fallback;
+  }
+  try {
+    cbs.onLog(`Claude（${d.model}）開始規劃「${input.showName}」的整場弧線…`);
+    const { raw, model } = await claudeStructured(
+      { system: ARC_SYSTEM, prompt: buildArcPrompt(input, bibleBlock(input.bible, input.bandName)), schema: ArcDraftSchema, label: "整場弧線" },
+      cbs,
+      { transport: d.transport(), model: d.model, now: d.now },
+    );
+    return normalizeArc(raw, input, fallback, model, now);
+  } catch (err) {
+    if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
+    cbs.onLog(`Claude 無法規劃整場弧線：${describeError(err)}。改用離線設計師。`);
+    return fallback;
   }
 }
