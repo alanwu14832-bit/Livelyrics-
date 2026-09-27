@@ -10,13 +10,13 @@ import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
 import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
 import { placementBox, writingModeFor } from "@/lib/stage/lyrics/layout";
-import { BLEND_CODE, TREATMENT_CODE, beatAt, framing, hashId, resolveMediaFrame, videoTimeAt, type BeatInfo, type MediaLayerState } from "@/lib/stage/media/model";
+import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo, type MediaLayerState } from "@/lib/stage/media/model";
+import { isVideoAsset, mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media/draw";
 import { DEFAULT_OUTPUT, outputAspect, renderSize } from "@/lib/output";
 import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { stageTime, type StageState, type StageStore } from "@/lib/stage/protocol";
-import { clamp, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
+import { clamp, lyricLookAt, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
-import { sectionIndexForLine } from "@/lib/timeline";
 import type { Asset, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
 import { MediaSources } from "./MediaSources";
@@ -275,17 +275,6 @@ export class StageEngine {
     this.lyrics.invalidateFit();
   }
 
-  /** The look for the lyric layer: the current line's own section when it differs from the playhead's. */
-  private lyricLookFor(project: Project, state: StageState, t: number, look: StageLook): StageLook {
-    const lines = project.lyrics?.lines;
-    const idx = state.lineIndex;
-    if (!project.plan || !Array.isArray(lines) || typeof idx !== "number" || !lines[idx]) return look;
-    const duration = project.meta?.duration || project.analysis?.duration || 0;
-    const own = sectionIndexForLine(project.plan, lines, idx, duration);
-    if (own == null || own === look.sectionIndex) return look;
-    return resolveLook(project, { ...state, sectionIndex: own }, t);
-  }
-
   private prewarm(project: Project | null) {
     if (!this.renderer) return;
     const planScenes = (project?.plan?.sections ?? []).map((s) => s.scene);
@@ -334,49 +323,10 @@ export class StageEngine {
   }
 
   private mediaLayer(layer: MediaLayerState, t: number, beat: BeatInfo, playing: boolean, now: number): MediaLayerDraw | null {
-    const { asset, media } = layer;
-    const seed = hashId(`${asset.id}|${layer.sectionIndex}`) % 100000;
-    const isVideo = asset.kind === "video" || asset.mimeType.startsWith("video/");
-    const wanted = isVideo
-      ? videoTimeAt({ treatment: media.treatment, t, sectionStart: layer.sectionStart, duration: asset.duration ?? 0, beat, seed })
-      : 0;
-    const src = this.media.frame(asset, now, isVideo ? { wanted, playing } : undefined);
-    if (!src.source) return null;
-    const span = Math.max(0.001, layer.sectionEnd - layer.sectionStart);
-    // beat index relative to the section start so every section opens on the same framing
-    const uv = framing({
-      treatment: media.treatment,
-      fit: media.fit,
-      canvasAspect: outputAspect(this.output),
-      texAspect: src.width / Math.max(1, src.height),
-      progress: (t - layer.sectionStart) / span,
-      beatIndex: beat.index,
-      seed,
-    });
-    if (asset.kind === "logo") {
-      // a logo sits in the middle at a readable size, never edge to edge
-      const k = 1 / 0.46;
-      uv.sx *= k;
-      uv.sy *= k;
-    }
-    const downbeat = ((beat.index % 4) + 4) % 4 === 0;
-    const punch = media.treatment === "beat-cut" ? Math.exp(-beat.phase * 6) * (downbeat ? 1 : 0.55) : 0;
-    return {
-      key: asset.id,
-      source: src.source,
-      version: src.version,
-      hold: src.hold,
-      width: src.width,
-      height: src.height,
-      weight: clamp(layer.weight * media.opacity, 0, 1, 0),
-      treatment: TREATMENT_CODE[media.treatment] ?? 0,
-      blend: BLEND_CODE[media.blend] ?? 0,
-      contain: media.fit === "contain",
-      uv,
-      colorway: [this.color(layer.colorway[0]), this.color(layer.colorway[1]), this.color(layer.colorway[2])],
-      punch,
-      seed: (seed % 997) / 7,
-    };
+    const isVideo = isVideoAsset(layer);
+    const wanted = mediaVideoTime(layer, t, beat);
+    const src = this.media.frame(layer.asset, now, isVideo ? { wanted, playing } : undefined);
+    return mediaLayerDraw(layer, t, beat, src, outputAspect(this.output), (hex) => this.color(hex));
   }
 
   private mediaDraw(project: Project, state: StageState, t: number, look: StageLook, lyricLook: StageLook, audio: StageAudioFrame, now: number, dt: number): MediaDraw | null {
@@ -425,15 +375,7 @@ export class StageEngine {
       const b = this.lyrics.textBounds();
       if (b) this.textBox = b;
     }
-    let lyricBox: [number, number, number, number];
-    if (this.textBox && showing) {
-      const [x0, y0, x1, y1] = this.textBox;
-      lyricBox = [x0, 1 - y1, x1, 1 - y0];
-    } else {
-      const mode = writingModeFor(style === "hidden" ? lyricLook.lyricStyle : style, lyricLook.placement);
-      const box = placementBox(lyricLook.placement, mode, this.output.lyricSafe, outputAspect(this.output));
-      lyricBox = [box.left / 100, 1 - (box.top + box.height) / 100, (box.left + box.width) / 100, 1 - box.top / 100];
-    }
+    const lyricBox = mediaLyricBox(this.textBox, showing, style, lyricLook, this.output.lyricSafe, outputAspect(this.output));
     return { layers, time: mt, lyricBox, lyricAmount: this.lyricAmt };
   }
 
@@ -532,7 +474,7 @@ export class StageEngine {
     this.overlay.style.opacity = String(Math.round(b * b * (3 - 2 * b) * 1000) / 1000);
 
     // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
-    const lyricLook = this.lyricLookFor(project, state, t, look);
+    const lyricLook = lyricLookAt(project, state, t, look);
 
     // scene + band media
     let backend: StageStats["backend"] = "fallback";

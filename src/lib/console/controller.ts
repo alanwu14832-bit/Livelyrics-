@@ -851,6 +851,23 @@ export class ConsoleController {
   }
 
   /** Open (or focus) the projection window. Must run inside a user gesture. */
+  /** The export page in its own tab, with the 單格預覽 at the playhead (the console keeps running). */
+  exportUrl(): string {
+    const t = Math.max(0, Math.round(this.songTime() * 100) / 100);
+    return `/p/${encodeURIComponent(this.id)}/export?t=${t}`;
+  }
+
+  openExport(): void {
+    if (typeof window === "undefined") return;
+    let win: Window | null = null;
+    try {
+      win = window.open(this.exportUrl(), `livelyrics-export-${this.id}`);
+    } catch {
+      win = null;
+    }
+    if (!win) this.notify("瀏覽器封鎖了新分頁。請允許此網站開啟彈出視窗後再試一次。", "error");
+  }
+
   openOutput(): void {
     if (typeof window === "undefined") return;
     const url = `/p/${encodeURIComponent(this.id)}/output`;

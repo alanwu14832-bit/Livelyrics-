@@ -4,12 +4,12 @@
 // bottom hairline, no material (nothing scrolls beneath it). Left: 「‹ 作品庫」, the key-visual
 // thumbnail and the title (shared elements with the library card), the status capsules. Centre:
 // TRACK / LIVE, the transport (prev 32, play 36 white circle, next 32) and the clock. Right: the
-// projection split control, 重新設計, help. The centre stays centred: the left column shrinks (the
+// projection split control, 重新設計, 匯出 (the export page in a new tab), help. The centre stays centred: the left column shrinks (the
 // title truncates) instead of pushing the transport around when a capsule appears.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
-import { PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
+import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
@@ -278,6 +278,11 @@ export function TopBar({
         <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
           <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
             重新設計
+          </Button>
+        </Tooltip>
+        <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
+          <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
+            匯出
           </Button>
         </Tooltip>
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">

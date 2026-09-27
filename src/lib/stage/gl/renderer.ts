@@ -124,6 +124,8 @@ export interface RendererOptions {
   forceWebGL1?: boolean;
   onError?: (message: string) => void;
   onContextChange?: (lost: boolean) => void;
+  /** keep the drawing buffer after compositing (offline export reads it back with drawImage) */
+  preserveDrawingBuffer?: boolean;
 }
 
 export class StageRenderer {
@@ -168,7 +170,7 @@ export class StageRenderer {
       depth: false,
       stencil: false,
       premultipliedAlpha: false,
-      preserveDrawingBuffer: false,
+      preserveDrawingBuffer: !!opts.preserveDrawingBuffer,
       powerPreference: "high-performance",
     };
     let gl: GL | null = null;
@@ -370,6 +372,27 @@ export class StageRenderer {
     } catch (e) {
       this.report("idle", `著色器預先編譯失敗：${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /**
+   * Compile the given scenes (plus the compositor, and the media pass when asked) now and wait
+   * until every program is linked. The offline export calls this before its first frame so no
+   * frame falls back to a plain background while a shader compiles. Resolves with the ids that
+   * failed (they render the gradient scene, as live).
+   */
+  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000): Promise<string[]> {
+    this.prewarm(ids);
+    if (media) this.prewarmMedia();
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (this.lost || this.disposed) return [...this.warm];
+      this.idle();
+      const pending = [...this.programs.values()].some((e) => e.state === "pending");
+      if (!this.queue.length && !pending) break;
+      if (Date.now() > deadline) break;
+      if (this.parallel && !this.queue.length) await new Promise((r) => setTimeout(r, 8));
+    }
+    return [...this.programs.entries()].filter(([, e]) => e.state !== "ready").map(([k]) => k);
   }
 
   // -------------------------------------------------------------------------

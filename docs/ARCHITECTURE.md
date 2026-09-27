@@ -34,6 +34,7 @@ show up in the product:
 - `@anthropic-ai/sdk` (server only), `zod` v4, `music-metadata` (browser tag reading), `react-markdown`
   + `remark-gfm` (via `src/components/ui/Markdown.tsx`), `vitest` for unit tests (`src/**/*.test.ts`).
 - **Do not add dependencies** (package.json is frozen during parallel work). WebGL is hand-written GLSL.
+  Exception agreed for phase 1b: `mediabunny` (MP4 / WebM muxing for the video export, browser only).
 - UI language: **Traditional Chinese (繁體中文)** for all user-facing text.
 
 ## Shared contracts (already written — do not change without coordination)
@@ -62,6 +63,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/lyrics` | HOME | lyrics editor: import/paste/LRCLIB pick, tap-sync, nudge, auto-distribute |
 | `/p/[id]` | CONSOLE | operator console |
 | `/p/[id]/output` | STAGE | projection window — animation + lyrics only |
+| `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
 | `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan |
 | `/api/status` | SERVER | `{ claude, model, dataDir }` |
 | `/api/projects` GET/POST | SERVER | list summaries / create (multipart `audio`, `meta` JSON, `analysis` JSON) |
@@ -94,6 +96,31 @@ Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{proj
   preview uses the same aspect. Lyric boxes are mapped into `lyricSafe`, and `adaptMetrics` re-fits the
   style metrics outside 1.5 to 2.05:1 (strips: longer rows, size capped by the box height; portrait:
   shorter rows, up to 4).
+
+### Pre-rendered video export (phase 1b)
+
+- Offline, deterministic rendering: `src/components/stage/export/OfflineStage.ts` renders song time t into
+  `output.width × output.height` canvases without rAF or the wall clock. Scene: the live `StageRenderer`
+  (`preserveDrawingBuffer`, `ensureReady()` compiles the plan's shaders first) fed by
+  `src/lib/stage/offline.ts` (`trackStateAt`, `buildSceneClock`: the director's speed × smoothed-energy
+  integral precomputed on a 20 Hz grid so frame t is the same from any range start; `offlineSceneFrame`:
+  section transitions by song time; beat index from the analysis grid). Audio uniforms: the live
+  `AudioFeatureMixer` over the analysis envelopes, stepped at the export frame rate. Media: the shared
+  `src/lib/stage/media/draw.ts` (also used by StageEngine) with `ExactMedia` (images decoded up front, videos
+  seeked to the exact frame and used after `seeked`). Lyrics: the live `LyricLayer` in a hidden host at the
+  export size, stepped with now = song time, painted into a canvas by `LyricPainter` (layout boxes, computed
+  transforms, opacity, blur, colours, text shadows, karaoke insets, caret; vertical-rl placement as Blink;
+  `matte` = white text at its alpha, no scrim or shadows). Pure helpers: `src/lib/stage/lyrics/paint-math.ts`.
+  A jump (first frame, preview, going back) replays the preceding 3 s at the frame rate first.
+- Encoding: `src/lib/export/encode.ts` (WebCodecs checks, H.264 level from frame size and macroblock rate, then
+  higher levels, Main, VP9 fallback; AAC else Opus; one mediabunny `Output` per clip, `StreamTarget` into a
+  folder from `showDirectoryPicker`, else `BufferTarget` downloads). `src/lib/export/{frames,settings,cuesheet}.ts`
+  are pure: exact rational frame rates (29.97 = 30000/1001, drop-frame timecode), bitrate presets, ranges,
+  file names, the cue sheet CSV and the README. `src/components/export/ExportClient.tsx` + `runExport.ts` run it:
+  every frame is rendered once and composed into each variant (完整, 背景, 歌詞層 as luma matte or VP9 alpha).
+- Entry points: console top bar 「匯出」 and 控制 › 輸出畫面 open the page in a new tab at the playhead; the
+  design overview header has 「匯出影片」. Dev builds expose `window.__livelyricsExport` (`debugStage`,
+  `exportToOpfs`) for the render checks.
 
 ## Modules
 

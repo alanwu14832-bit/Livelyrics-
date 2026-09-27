@@ -2,7 +2,7 @@
 // project (plan + lyrics) and a StageState snapshot. No DOM, no GL.
 
 import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, SCENE_IDS } from "../schema";
-import { sectionIndexAt } from "../timeline";
+import { sectionIndexAt, sectionIndexForLine } from "../timeline";
 import type { DesignPlan, LyricPlacement, LyricStyleId, Project, SceneId, SectionDesign } from "../types";
 import { ensureContrast, isHex } from "./color";
 import type { StageOverrides, StageState } from "./protocol";
@@ -142,4 +142,18 @@ export function resolveLineDesign(
       : sectionStyle;
   const emphasis = Array.isArray(ld?.emphasis) ? ld.emphasis.filter((e): e is string => typeof e === "string" && e.trim().length > 0) : [];
   return { style, emphasis };
+}
+
+/**
+ * The look for the lyric layer: the current line's own section when it differs from the
+ * playhead's (a pickup line keeps its section's style across the boundary).
+ */
+export function lyricLookAt(project: Project, state: StageState, t: number, look: StageLook): StageLook {
+  const lines = project.lyrics?.lines;
+  const idx = state.lineIndex;
+  if (!project.plan || !Array.isArray(lines) || typeof idx !== "number" || !lines[idx]) return look;
+  const duration = project.meta?.duration || project.analysis?.duration || 0;
+  const own = sectionIndexForLine(project.plan, lines, idx, duration);
+  if (own == null || own === look.sectionIndex) return look;
+  return resolveLook(project, { ...state, sectionIndex: own }, t);
 }

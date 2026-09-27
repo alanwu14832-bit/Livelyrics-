@@ -6,7 +6,8 @@
 // Steppers. Changes go to the projection at once and are saved after a short pause.
 
 import { useId, useState } from "react";
-import { SegmentedControl, Stepper, TextField, cx } from "@/components/ui";
+import { Button, SegmentedControl, Stepper, TextField, cx } from "@/components/ui";
+import { ExportIcon } from "@/components/ui/Icon";
 import type { ConsoleController, OutputStatus } from "@/lib/console/controller";
 import { CUSTOM_PRESET, DEFAULT_OUTPUT, OUTPUT_MAX_PX, OUTPUT_MIN_PX, OUTPUT_PRESETS, SAFE_MAX, aspectLabel } from "@/lib/output";
 import type { LyricSafeArea, Project } from "@/lib/types";
@@ -142,6 +143,12 @@ export function OutputSettings({ controller, project, output }: { controller: Co
         )}
         開啟測試圖可以檢查安全區。
       </Footnote>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span className="text-c-footnote text-label-2">音樂祭要預先算好的影片時，照這個尺寸匯出。</span>
+        <Button variant="gray" size="sm" icon={ExportIcon} onClick={() => controller.openExport()}>
+          匯出影片
+        </Button>
+      </div>
     </section>
   );
 }

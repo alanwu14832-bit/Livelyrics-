@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
-import { MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { ExportIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import type { PipelineEvent, Project } from "@/lib/types";
 import { validPalette } from "@/components/home/ProjectArt";
@@ -244,6 +244,7 @@ export function ProcessClient({
 
   const consoleHref = `/p/${encodeURIComponent(id)}`;
   const lyricsHref = `/p/${encodeURIComponent(id)}/lyrics`;
+  const exportHref = `/p/${encodeURIComponent(id)}/export`;
   const headerTitle = project?.meta.title || initial?.title || "";
   const headerArtist = project?.meta.artist ?? initial?.artist ?? "";
   const headerPalette = project ? validPalette(project.plan?.keyVisual.palette.map((c) => c.hex)) : (initial?.palette ?? []);
@@ -341,6 +342,11 @@ export function ProcessClient({
           <Button href={lyricsHref} transitionTypes={PUSH} variant="gray" icon={PencilSimpleIcon}>
             編輯歌詞
           </Button>
+          {plan && !running && (
+            <Button href={exportHref} transitionTypes={PUSH} variant="gray" icon={ExportIcon}>
+              匯出影片
+            </Button>
+          )}
           <Button href={consoleHref} transitionTypes={PUSH} variant={showDone ? "plain" : plan && !running && !error ? "filled" : "gray"} icon={MonitorPlayIcon} disabled={!plan}>
             進入控制台
           </Button>
