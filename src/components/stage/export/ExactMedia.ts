@@ -3,9 +3,9 @@
 // seeked to the wanted time and the frame is only used after 'seeked' fired, so an export never
 // shows a stale or half-decoded clip frame, however slowly the machine seeks.
 
-import { api } from "@/lib/api-client";
+import { assetFileUrl } from "@/lib/asset-scope";
 import type { MediaPixels } from "@/lib/stage/media/draw";
-import type { Asset } from "@/lib/types";
+import type { Asset, Project } from "@/lib/types";
 
 interface ImageEntry {
   kind: "image";
@@ -55,13 +55,13 @@ export class ExactMedia {
   }
 
   /** Load every asset the plan uses. Resolves when all are decoded (failures simply have no source). */
-  async load(projectId: string, assets: readonly Asset[], used: ReadonlySet<string>): Promise<string[]> {
+  async load(owner: Pick<Project, "id" | "bandId">, assets: readonly Asset[], used: ReadonlySet<string>): Promise<string[]> {
     const failed: string[] = [];
     await Promise.all(
       assets
         .filter((a) => used.has(a.id))
         .map(async (a) => {
-          const url = api.assetUrl(projectId, a.id);
+          const url = assetFileUrl(owner, a);
           const ok = a.kind === "video" || a.mimeType.startsWith("video/") ? await this.loadVideo(a, url) : await this.loadImage(a, url);
           if (!ok) failed.push(a.name || a.id);
         }),

@@ -4,9 +4,9 @@
 // page, and seeked to the position the media model asks for whenever they drift by more than
 // ~80 ms. Nothing here throws: a missing or broken asset simply has no source (no layer).
 
-import { api } from "@/lib/api-client";
+import { assetFileUrl } from "@/lib/asset-scope";
 import { needsSeek } from "@/lib/stage/media/model";
-import type { Asset } from "@/lib/types";
+import type { Asset, Project } from "@/lib/types";
 
 const MAX_TEXTURE_EDGE = 2048;
 
@@ -65,18 +65,20 @@ function downscale(img: HTMLImageElement): { source: HTMLCanvasElement | HTMLIma
 export class MediaSources {
   private entries = new Map<string, Entry>();
   private projectId = "";
+  private bandId: string | undefined;
   private destroyed = false;
 
   /** Load what the project needs; drop entries for assets that are gone. */
-  setAssets(projectId: string, assets: readonly Asset[], used: ReadonlySet<string>) {
-    if (projectId !== this.projectId) {
+  setAssets(owner: Pick<Project, "id" | "bandId">, assets: readonly Asset[], used: ReadonlySet<string>) {
+    if (owner.id !== this.projectId || owner.bandId !== this.bandId) {
       this.clear();
-      this.projectId = projectId;
+      this.projectId = owner.id;
+      this.bandId = owner.bandId;
     }
     const keep = new Set(assets.map((a) => a.id));
     for (const [id, e] of this.entries) {
       const a = assets.find((x) => x.id === id);
-      if (!keep.has(id) || (a && a.file !== e.asset.file)) this.drop(id);
+      if (!keep.has(id) || (a && (a.file !== e.asset.file || a.scope !== e.asset.scope))) this.drop(id);
     }
     for (const a of assets) {
       if (!used.has(a.id) || this.entries.has(a.id)) continue;
@@ -86,7 +88,7 @@ export class MediaSources {
   }
 
   private url(asset: Asset): string {
-    return api.assetUrl(this.projectId, asset.id);
+    return assetFileUrl({ id: this.projectId, bandId: this.bandId }, asset);
   }
 
   private loadImage(asset: Asset) {

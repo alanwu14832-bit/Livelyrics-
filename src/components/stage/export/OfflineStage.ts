@@ -16,6 +16,7 @@
 // going backwards) re-runs the preceding PREROLL_SECONDS at the frame rate first, so a frame
 // looks the same however the export reached it.
 
+import { stageAssets } from "@/lib/asset-scope";
 import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, type RGB } from "@/lib/stage/color";
 import type { SceneSlot } from "@/lib/stage/director";
@@ -151,7 +152,7 @@ export class OfflineStage {
     this.cjkFamily = resolveCjkFamily(project, this.host);
     this.painter = new LyricPainter(this.lyrics.root, this.cjkFamily);
 
-    this.assetMap = new Map((project.assets ?? []).map((a) => [a.id, a]));
+    this.assetMap = new Map(stageAssets(project).map((a) => [a.id, a]));
     this.seed = (hashString(project.id || "stage") % 1000) / 37;
     this.clock = buildSceneClock(project);
     let maxTex = 4096;
@@ -209,7 +210,7 @@ export class OfflineStage {
     // media
     const used = new Set<string>();
     for (const s of project.plan?.sections ?? []) if (s?.media?.assetId && this.assetMap.has(s.media.assetId)) used.add(s.media.assetId);
-    const failed = await this.media.load(project.id, project.assets ?? [], used);
+    const failed = await this.media.load(project, [...this.assetMap.values()], used);
     if (failed.length) warnings.push(`素材無法解碼，將不會出現在影片中：${failed.join("、")}`);
 
     // shaders: compile everything the plan needs now (the live stage compiles lazily)

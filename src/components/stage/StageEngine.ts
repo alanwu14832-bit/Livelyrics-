@@ -4,6 +4,7 @@
 // It never throws to its caller: every frame is guarded, GL failures fall back to
 // a CSS gradient, and a broken lyric layer disables itself instead of the output.
 
+import { stageAssets } from "@/lib/asset-scope";
 import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
 import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
@@ -101,6 +102,8 @@ export class StageEngine {
   private media = new MediaSources();
   private assetMap = new Map<string, Asset>();
   private assetsRef: unknown = undefined;
+  private bandAssetsRef: unknown = undefined;
+  private assets: Asset[] = [];
   private mediaKey = "";
   private lyricAmt = 0;
   private frozenAt: number | null = null;
@@ -184,17 +187,20 @@ export class StageEngine {
 
   /** Load the band media the plan uses (and keep the asset lookup current). */
   private syncMedia(project: Project) {
-    const assets = Array.isArray(project.assets) ? project.assets : [];
+    const raw = Array.isArray(project.assets) ? project.assets : [];
     const used = new Set<string>();
     for (const s of project.plan?.sections ?? []) if (s?.media?.assetId) used.add(s.media.assetId);
-    const key = `${project.id}|${assets.map((a) => `${a.id}:${a.file}`).join(",")}|${[...used].sort().join(",")}`;
-    if (assets !== this.assetsRef) {
-      this.assetsRef = assets;
-      this.assetMap = new Map(assets.map((a) => [a.id, a]));
+    if (raw !== this.assetsRef || project.bandAssets !== this.bandAssetsRef) {
+      this.assetsRef = raw;
+      this.bandAssetsRef = project.bandAssets;
+      this.assets = stageAssets(project);
+      this.assetMap = new Map(this.assets.map((a) => [a.id, a]));
     }
+    const assets = this.assets;
+    const key = `${project.id}|${project.bandId ?? ""}|${assets.map((a) => `${a.id}:${a.file}:${a.scope ?? ""}`).join(",")}|${[...used].sort().join(",")}`;
     if (key === this.mediaKey) return;
     this.mediaKey = key;
-    this.media.setAssets(project.id, assets, used);
+    this.media.setAssets(project, assets, used);
     this.renderer?.pruneMedia(new Set(assets.map((a) => a.id)));
     if (used.size) this.renderer?.prewarmMedia();
   }
