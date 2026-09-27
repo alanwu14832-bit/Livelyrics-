@@ -144,7 +144,7 @@ export function NewProjectCard({
         // a preselected band that does not exist is dropped; its name fills an empty artist
         const chosen = list.find((b) => b.id === defaultBandId);
         if (!chosen) setBandId("");
-        else if (!edited.current.artist) setArtist((a) => a.trim() || chosen.name);
+        else setArtist((a) => a.trim() || chosen.name);
       })
       .catch(() => {});
     return () => {

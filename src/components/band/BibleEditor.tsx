@@ -26,9 +26,10 @@ const WEIGHTS = ["600", "700", "800", "900"] as const;
 
 type Stance = "avoid" | "neutral" | "prefer";
 
-function editable(b: BandBible) {
-  const { source: _source, ...rest } = b;
-  return rest;
+function editable(b: BandBible): Omit<BandBible, "source"> {
+  const rest: Partial<BandBible> = { ...b };
+  delete rest.source;
+  return rest as Omit<BandBible, "source">;
 }
 
 function Group({ title, footer, children, id }: { title: string; footer?: ReactNode; children: ReactNode; id?: string }) {
@@ -202,16 +203,18 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
 function BiblePreview({ band, bible }: { band: Band; bible: BandBible }) {
   const hexes = bible.palette.map((c) => c.hex);
   const scene: SceneId = bible.sceneAffinity[0] ?? "nebula";
-  const project = useMemo(
-    () =>
-      lookToProject(
-        { id: "bible", kind: "walk-in", title: "預覽", look: { scene, colorway: colorwayFor(hexes), media: null, text: band.name.slice(0, 24), durationHint: 60 } },
-        { band: { ...band, bible } },
-      ),
-    // the preview follows the palette, fonts and first scene only
+  // the preview follows the palette, fonts and first scene only (typing a summary does not re-render the stage)
+  const paletteKey = hexes.join(",");
+  const { cjkFont, latinFont, weight } = bible.fonts;
+  const project = useMemo(() => {
+    const colors = paletteKey ? paletteKey.split(",") : [];
+    const previewBible: BandBible = { ...bible, palette: bible.palette.filter((c) => colors.includes(c.hex)), fonts: { cjkFont, latinFont, weight } };
+    return lookToProject(
+      { id: "bible", kind: "walk-in", title: "預覽", look: { scene, colorway: colorwayFor(colors), media: null, text: band.name.slice(0, 24), durationHint: 60 } },
+      { band: { ...band, bible: previewBible } },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [band.id, band.name, scene, hexes.join(","), bible.fonts.cjkFont, bible.fonts.latinFont, bible.fonts.weight],
-  );
+  }, [band.id, band.name, scene, paletteKey, cjkFont, latinFont, weight]);
   const roles = hexes.length ? paletteRoles(hexes) : null;
   const ratio = roles ? contrastRatio(roles.lyric, roles.bg) : null;
   return (
