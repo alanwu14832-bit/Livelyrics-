@@ -95,6 +95,8 @@ export class MediaSources {
     const entry: ImageEntry = { kind: "image", asset, source: null, width: 0, height: 0, failed: false };
     this.entries.set(asset.id, entry);
     const img = new Image();
+    // CORS so the texture stays readable when cloud mode redirects the file to Vercel Blob
+    img.crossOrigin = "anonymous";
     img.decoding = "async";
     img.onload = () => {
       if (this.destroyed || this.entries.get(asset.id) !== entry) return;
@@ -115,6 +117,7 @@ export class MediaSources {
 
   private loadVideo(asset: Asset) {
     const el = document.createElement("video");
+    el.crossOrigin = "anonymous";
     el.muted = true;
     el.defaultMuted = true;
     el.playsInline = true;

@@ -50,6 +50,7 @@ export interface AssetLibraryProps {
 
 let uploadSeq = 0;
 
+/** Thumbnails load with CORS like the stage does (cloud mode redirects the file to Vercel Blob). */
 function Thumb({ owner, asset, className }: { owner: AssetOwner; asset: Asset; className?: string }) {
   const url = api.ownedAssetUrl(owner, asset.id);
   const [failed, setFailed] = useState(false);
@@ -64,6 +65,7 @@ function Thumb({ owner, asset, className }: { owner: AssetOwner; asset: Asset; c
   return video ? (
     <video
       src={`${url}#t=0.5`}
+      crossOrigin="anonymous"
       muted
       playsInline
       preload="metadata"
@@ -75,6 +77,7 @@ function Thumb({ owner, asset, className }: { owner: AssetOwner; asset: Asset; c
     // eslint-disable-next-line @next/next/no-img-element -- local API file, no optimizer
     <img
       src={url}
+      crossOrigin="anonymous"
       alt=""
       decoding="async"
       draggable={false}

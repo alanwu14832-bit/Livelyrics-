@@ -814,7 +814,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         }
       />
 
-      <audio ref={audioRef} src={api.audioUrl(id)} preload="auto" className="hidden" />
+      <audio ref={audioRef} src={api.audioUrl(id)} crossOrigin="anonymous" preload="auto" className="hidden" />
 
       <TapSyncBand
         session={session}

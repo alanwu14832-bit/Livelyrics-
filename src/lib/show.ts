@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { contrastRatio, ensureContrast, luminance } from "./server/designer/color";
 import { generateMotifSvg, hashString } from "./server/designer/svg";
-import { defaultBible, normalizeBibleHex } from "./band";
+import { coerceJob, defaultBible, normalizeBibleHex } from "./band";
 import { isAssetId } from "./assets";
 import { normalizeOutput, patchOutput } from "./output";
 import { MEDIA_BLENDS, MEDIA_FITS, MEDIA_TREATMENTS, SCENE_IDS, type SceneId } from "./schema";
@@ -461,6 +461,8 @@ export function coerceShow(raw: unknown, id: string, fallbackTime: string): Show
   if (typeof raw.date === "string" && DATE_RE.test(raw.date)) show.date = raw.date;
   const venue = oneLine(raw.venue, 80);
   if (venue) show.venue = venue;
+  const job = coerceJob(raw.arcJob);
+  if (job) show.arcJob = job;
   return show;
 }
 

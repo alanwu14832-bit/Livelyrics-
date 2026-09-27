@@ -1,13 +1,18 @@
+import { after } from "next/server";
 import { handle, HttpError, readJson, requireProjectId } from "@/lib/server/http";
-import { attachToRun, normalizeSteps, runPipeline, withLiveStatus } from "@/lib/server/pipeline";
+import { attachToRun, claimCloudRun, isStaleProcessing, normalizeSteps, runCloudSteps, runPipeline, withLiveStatus } from "@/lib/server/pipeline";
 import { eventListStream, pipelineEventStream, SSE_HEADERS } from "@/lib/server/sse";
 import { withBandAssets } from "@/lib/server/band-storage";
 import { getProject } from "@/lib/server/storage";
+import { isCloudStorage } from "@/lib/server/store";
 import type { PipelineEvent, Project } from "@/lib/types";
 import { parseProcessRequest } from "@/lib/server/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// One step of Claude research or design. 300 s is the Vercel Hobby ceiling (a larger value fails
+// the deploy); cloud mode runs one step per request and gives Claude a budget inside it.
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,6 +23,9 @@ function storedOutcome(project: Project): PipelineEvent {
   const p = withLiveStatus(project);
   if (p.status === "ready" && p.plan) return { type: "done", project: p };
   if (p.status === "error") return { type: "error", message: p.error || "上次的處理沒有完成，請重新處理。" };
+  if (p.status === "processing" && isCloudStorage() && !isStaleProcessing(p.updatedAt)) {
+    return { type: "error", message: "處理正在另一個連線進行中，重新整理頁面即可查看進度。" };
+  }
   return { type: "error", message: "目前沒有進行中的處理。" };
 }
 
@@ -28,6 +36,18 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
   const stored = await getProject(id);
   if (!stored) throw new HttpError(404, "找不到專案");
   const project = await withBandAssets(stored);
+
+  if (isCloudStorage()) {
+    // no shared memory between requests: the page watches a run in progress itself
+    // (src/lib/process-runner.ts), so an attach-only request just reports the stored state
+    if (request.attachOnly) return new Response(eventListStream([storedOutcome(project)]), { status: 200, headers: SSE_HEADERS });
+    // 409 while another fresh step or run is recorded; otherwise this request owns the step
+    const claim = await claimCloudRun(id, request);
+    const cloudRun = runCloudSteps(id, request, claim);
+    // a disconnect (page refresh) only ends the stream: the step still finishes and saves
+    after(cloudRun.run.finished);
+    return new Response(pipelineEventStream(cloudRun, { signal: req.signal }), { status: 200, headers: SSE_HEADERS });
+  }
 
   if (request.attachOnly) {
     const watched = attachToRun(id);

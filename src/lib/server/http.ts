@@ -2,7 +2,8 @@
 // and HTTP Range parsing.
 
 import { MultipartError } from "./multipart";
-import { isValidProjectId, StorageError } from "./storage";
+import { StorageError } from "./store/errors";
+import { isValidDocId as isValidProjectId } from "./store/ids";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -38,6 +39,9 @@ export function errorResponse(err: unknown): Response {
   if (err instanceof StorageError) {
     if (err.code === "invalid_id") return jsonError(400, err.message);
     if (err.code === "not_found") return jsonError(404, err.message);
+    if (err.code === "conflict") return jsonError(409, err.message);
+    // on Vercel without Blob / Postgres: say what to create instead of failing obscurely
+    if (err.code === "unconfigured") return jsonError(503, err.message);
     return jsonError(500, err.message);
   }
   if (isAbortError(err)) return jsonError(499, "請求已取消");
@@ -60,6 +64,11 @@ export function handle<C>(fn: (req: Request, ctx: C) => Promise<Response>): (req
 export function requireProjectId(id: string | undefined): string {
   if (!isValidProjectId(id)) throw new HttpError(400, "無效的專案 ID");
   return id;
+}
+
+/** A JSON request (cloud registrations, the login form's fetch) rather than multipart / a form post. */
+export function isJsonRequest(req: Request): boolean {
+  return /^application\/json\b/i.test(req.headers.get("content-type") ?? "");
 }
 
 /** Read and parse a JSON body with a size limit. Empty body -> `emptyValue` (or 400 when undefined). */

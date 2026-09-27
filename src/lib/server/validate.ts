@@ -318,6 +318,12 @@ const ProcessRequestSchema = z.object({
       note: z.string().max(1000),
     })
     .optional(),
+  run: z
+    .object({
+      id: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+      steps: z.array(z.enum(["lyrics", "research", "design"])).min(1).max(10),
+    })
+    .optional(),
 });
 
 export function parseProcessRequest(raw: unknown): ProcessRequest {
@@ -330,5 +336,6 @@ export function parseProcessRequest(raw: unknown): ProcessRequest {
   if (r.lyricsText && r.lyricsText.trim()) out.lyricsText = r.lyricsText;
   if (r.instruction && r.instruction.trim()) out.instruction = r.instruction.trim();
   if (r.arc) out.arc = { ...r.arc, showName: clean(r.arc.showName, 80), note: r.arc.note.trim().slice(0, 400) };
+  if (r.run) out.run = { id: r.run.id, steps: [...new Set(r.run.steps)] };
   return out;
 }

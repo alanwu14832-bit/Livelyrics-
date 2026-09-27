@@ -137,6 +137,17 @@ export interface Research {
 
 export type AssetKind = "image" | "video" | "logo";
 
+/**
+ * A file kept in Vercel Blob (cloud mode, see docs/ARCHITECTURE.md "Cloud mode"). Files on the
+ * local disk have none: their place follows from the project / band folder and the file name.
+ */
+export interface BlobRef {
+  /** public blob URL (the API routes redirect there) */
+  url: string;
+  /** pathname inside the blob store, e.g. "projects/<id>/asset-<random>.png" */
+  pathname: string;
+}
+
 export interface Asset {
   /** short id, e.g. "a1b2c3d4e5f6" (lowercase hex) */
   id: string;
@@ -163,6 +174,8 @@ export interface Asset {
    * merged view (`Project.bandAssets`, src/lib/asset-scope.ts); ids are unique across both.
    */
   scope?: "project" | "band";
+  /** cloud mode: where the file lives in Vercel Blob (`file` still names its type) */
+  blob?: BlobRef;
 }
 
 /** Fractions (0..0.3) of the canvas kept free of lyrics on each side. */
@@ -207,6 +220,42 @@ export interface Project {
    * read through the API; never stored in project.json. Plans may reference these ids too.
    */
   bandAssets?: Asset[];
+  /** cloud mode: the audio file in Vercel Blob (`audioFile` still names its type) */
+  audioBlob?: BlobRef;
+  /** cloud mode: the client-driven pipeline run, so a refreshed page can pick it up */
+  pipeline?: PipelineRecord;
+}
+
+export type ProcessStepId = "lyrics" | "research" | "design";
+
+/**
+ * A pipeline run as recorded on the project in cloud mode, where every step is its own request
+ * (bounded by the platform's time limit) and the page drives the steps one after another.
+ */
+export interface PipelineRecord {
+  runId: string;
+  /** every step of the run, in pipeline order */
+  steps: ProcessStepId[];
+  status: "running" | "done" | "error";
+  /** the step executing now; null between two steps */
+  current: ProcessStepId | null;
+  startedAt: string;
+  /** last change (a step started or ended) */
+  updatedAt: string;
+  /** finished steps of this run */
+  results: Partial<Record<ProcessStepId, { status: "done" | "skipped"; message?: string; at: string }>>;
+  failed?: ProcessStepId;
+  error?: string;
+  /** what the run was asked to do, so it can be continued or retried */
+  instruction?: string;
+  arc?: SongArcDirective;
+}
+
+/** A long server job (a Claude call) recorded on its document in cloud mode. */
+export interface JobState {
+  status: "running" | "error";
+  startedAt: string;
+  message?: string;
 }
 
 /** lightweight listing entry */
@@ -272,6 +321,8 @@ export interface Band {
   bible: BandBible;
   /** shared material reused across the band's songs (logo, album covers, photos, MV clips) */
   assets: Asset[];
+  /** cloud mode: 從作品產生視覺聖經 in progress (or its last failure) */
+  bibleJob?: JobState;
 }
 
 export interface BandSummary {
@@ -353,6 +404,8 @@ export interface Show {
   arc: ShowArc | null;
   createdAt: string;
   updatedAt: string;
+  /** cloud mode: 整場弧線 in progress (or its last failure) */
+  arcJob?: JobState;
 }
 
 export interface ShowSummary {

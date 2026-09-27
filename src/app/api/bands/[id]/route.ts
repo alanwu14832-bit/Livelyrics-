@@ -1,6 +1,7 @@
 import { applyBiblePatch, sanitizeBandName } from "@/lib/band";
 import { deleteBand, getBand, updateBand } from "@/lib/server/band-storage";
 import { handle, HttpError, json, readJson, requireBandId } from "@/lib/server/http";
+import { withLiveBandJob } from "@/lib/server/jobs";
 import type { BandBible } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,7 +13,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
   const id = requireBandId((await ctx.params).id);
   const band = await getBand(id);
   if (!band) throw new HttpError(404, "找不到樂團");
-  return json(band);
+  return json(withLiveBandJob(band));
 });
 
 /** { name?, bible? (partial) } -> Band */
@@ -39,7 +40,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
       if (r.ok) b.bible = r.bible as BandBible;
     }
   });
-  return json(saved);
+  return json(withLiveBandJob(saved));
 });
 
 /** Deletes the band, its library and its shows; its songs stay, unassigned. */

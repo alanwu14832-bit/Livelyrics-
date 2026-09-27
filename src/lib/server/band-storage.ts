@@ -1,35 +1,20 @@
-// Band and show storage on the local disk (same atomic / tolerant patterns as projects):
-//   <dataDir>/bands/<id>/band.json          (atomic writes: temp file + rename)
-//   <dataDir>/bands/<id>/assets/<assetId>.<ext>
-//   <dataDir>/shows/<id>/show.json
-// Writes are serialized per band ("band:<id>") and per show ("show:<id>") with the shared lock.
+// Band and show storage on top of the document and file stores (same patterns as projects):
+//   local  <dataDir>/bands/<id>/band.json, bands/<id>/assets/<assetId>.<ext>, shows/<id>/show.json
+//   cloud  a Postgres row per band / show; band assets in Vercel Blob (Asset.blob)
+// Writes are atomic per band and per show (local: the shared lock "band:<id>" / "show:<id>").
 
-import { promises as fs, type Dirent } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { asBandAssets } from "@/lib/asset-scope";
 import { bibleHasContent, coerceBand, defaultBible, isValidBandId, sanitizeBandName } from "@/lib/band";
 import { normalizeOutput } from "@/lib/output";
 import { coerceShow, isValidShowId } from "@/lib/show";
 import type { Asset, Band, BandSummary, Project, ProjectOutput, Show, ShowSummary } from "@/lib/types";
-import {
-  StorageError,
-  assetFileIn,
-  dataDir,
-  getProject,
-  isNodeError,
-  listProjects,
-  moveFile,
-  newProjectId,
-  updateProject,
-  withLock,
-  writeJsonAtomic,
-} from "./storage";
-
-const BAND_FILE = "band.json";
-const SHOW_FILE = "show.json";
+import { docs, files, type StoredDoc, type StoredFile } from "./store";
+import { StorageError, assetFileIn, dataDir, getProject, listProjects, updateProject } from "./storage";
 
 // ---------------------------------------------------------------------------
-// paths
+// paths (local mode)
 // ---------------------------------------------------------------------------
 
 export function bandsDir(): string {
@@ -61,125 +46,92 @@ export function bandAssetPath(bandId: string, asset: Pick<Asset, "id" | "file">)
   return assetFileIn(bandAssetsDir(bandId), asset);
 }
 
-function showDir(id: string): string {
-  assertShowId(id);
-  return path.join(showsDir(), id);
-}
-
-async function readJson(file: string, label: string): Promise<{ raw: unknown; mtime: string } | null> {
-  let text: string;
-  let mtime: Date;
-  try {
-    const [content, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
-    text = content;
-    mtime = stat.mtime;
-  } catch (err) {
-    if (isNodeError(err, "ENOENT") || isNodeError(err, "ENOTDIR")) return null;
-    throw err;
-  }
-  try {
-    return { raw: JSON.parse(text), mtime: mtime.toISOString() };
-  } catch {
-    throw new StorageError("corrupt", `${label} 已損毀，無法讀取`);
-  }
-}
-
-async function makeFolder(parent: string): Promise<string> {
-  await fs.mkdir(parent, { recursive: true });
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const candidate = newProjectId();
-    try {
-      await fs.mkdir(path.join(parent, candidate));
-      return candidate;
-    } catch (err) {
-      if (!isNodeError(err, "EEXIST")) throw err;
-    }
-  }
-  throw new Error("無法建立資料夾");
-}
-
-async function listFolderIds(dir: string, valid: (id: string) => boolean): Promise<string[]> {
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch (err) {
-    if (isNodeError(err, "ENOENT")) return [];
-    throw err;
-  }
-  return entries.filter((e) => e.isDirectory() && valid(e.name)).map((e) => e.name);
+/** Where a band library asset is (disk or Blob). */
+export function bandAssetFileOf(bandId: string, asset: Asset): StoredFile {
+  return asset.blob ? { kind: "blob", blob: asset.blob } : { kind: "disk", path: bandAssetPath(bandId, asset) };
 }
 
 // ---------------------------------------------------------------------------
 // bands
 // ---------------------------------------------------------------------------
 
-async function readBandFile(id: string): Promise<Band | null> {
-  const r = await readJson(path.join(bandDir(id), BAND_FILE), `樂團 ${id} 的 band.json`);
-  if (!r) return null;
+function bandFromDoc(doc: StoredDoc): Band {
   try {
-    return coerceBand(r.raw, id, r.mtime);
+    return coerceBand(doc.data, doc.id, doc.updatedAt);
   } catch (err) {
     throw new StorageError("corrupt", err instanceof Error ? err.message : "band.json 無法讀取");
   }
 }
 
-async function writeBand(band: Band): Promise<Band> {
-  const saved: Band = {
+async function readBand(id: string): Promise<Band | null> {
+  const doc = await docs().get("band", id);
+  return doc ? bandFromDoc(doc) : null;
+}
+
+/** The stored form: updatedAt bumped; `scope` is implied by where the asset lives (added again on read). */
+function bandForWrite(band: Band): Band {
+  return {
     ...band,
     updatedAt: new Date().toISOString(),
-    // scope is implied by where the file lives; it is added again on read
     assets: band.assets.map((a) => {
       const copy = { ...a };
       delete copy.scope;
       return copy;
     }),
   };
-  try {
-    await writeJsonAtomic(path.join(bandDir(band.id), BAND_FILE), saved);
-  } catch (err) {
-    if (isNodeError(err, "ENOENT")) throw new StorageError("not_found", "找不到樂團（可能已被刪除）");
-    throw err;
-  }
+}
+
+function withScope(saved: Band): Band {
   return { ...saved, assets: asBandAssets(saved.assets) };
 }
 
+/** Atomic read-modify-write of a band; `mutate` returns the next band or null (no change). */
+async function modifyBand(id: string, mutate: (current: Band) => Band | null | Promise<Band | null>): Promise<Band> {
+  let result: Band | null = null;
+  await docs().update("band", id, async (stored) => {
+    const current = bandFromDoc(stored);
+    const next = await mutate(current);
+    if (!next) {
+      result = current;
+      return null;
+    }
+    const saved = bandForWrite({ ...next, id });
+    result = withScope(saved);
+    return { data: saved };
+  });
+  return result!;
+}
+
 export async function createBand(name: string): Promise<Band> {
-  const id = await makeFolder(bandsDir());
-  const now = new Date().toISOString();
-  const band: Band = { id, name: sanitizeBandName(name), createdAt: now, updatedAt: now, bible: defaultBible(), assets: [] };
-  try {
-    return await writeBand(band);
-  } catch (err) {
-    await fs.rm(bandDir(id), { recursive: true, force: true });
-    throw err;
-  }
+  const doc = await docs().create("band", async (id) => {
+    const now = new Date().toISOString();
+    const band: Band = { id, name: sanitizeBandName(name), createdAt: now, updatedAt: now, bible: defaultBible(), assets: [] };
+    return { data: bandForWrite(band) };
+  });
+  return withScope(doc.data as Band);
 }
 
 /** null when the band does not exist. */
 export async function getBand(id: string): Promise<Band | null> {
   assertBandId(id);
-  return readBandFile(id);
+  return readBand(id);
 }
 
 export async function updateBand(id: string, mutate: (draft: Band) => Band | void): Promise<Band> {
   assertBandId(id);
-  return withLock(`band:${id}`, async () => {
-    const current = await readBandFile(id);
-    if (!current) throw new StorageError("not_found", "找不到樂團（可能已被刪除）");
+  return modifyBand(id, (current) => {
     const draft = structuredClone(current);
-    const next = mutate(draft) ?? draft;
-    return writeBand({ ...next, id });
+    return mutate(draft) ?? draft;
   });
 }
 
 /** Every band, newest first, with song / show / asset counts. Unreadable ones are skipped. */
 export async function listBands(): Promise<BandSummary[]> {
-  const ids = await listFolderIds(bandsDir(), isValidBandId);
-  const [projects, shows] = await Promise.all([listProjects(), listShows()]);
-  const bands = await Promise.all(ids.map((id) => readBandFile(id).catch(() => null)));
+  const [entries, projects, shows] = await Promise.all([docs().list("band", { map: bandFromDoc }), listProjects(), listShows()]);
   const out: BandSummary[] = [];
-  for (const b of bands) {
-    if (!b) continue;
+  for (const e of entries) {
+    if (!("value" in e)) continue;
+    const b = e.value;
     const palette = b.bible.palette.map((c) => c.hex).slice(0, 5);
     out.push({
       id: b.id,
@@ -213,24 +165,16 @@ function clearMediaRefs(project: Project, ids: ReadonlySet<string>): boolean {
 }
 
 /**
- * Delete a band folder and its shows. Its songs stay (they become unassigned) and lose the
- * sections that showed band material. False when the band did not exist.
+ * Delete a band (local: its folder with the library; cloud: its row and library blobs) and its
+ * shows. Its songs stay (they become unassigned) and lose the sections that showed band material.
+ * False when the band did not exist.
  */
 export async function deleteBand(id: string): Promise<boolean> {
   assertBandId(id);
-  const band = await readBandFile(id).catch(() => null);
-  const existed = await withLock(`band:${id}`, async () => {
-    const dir = bandDir(id);
-    try {
-      await fs.stat(dir);
-    } catch (err) {
-      if (isNodeError(err, "ENOENT")) return false;
-      throw err;
-    }
-    await fs.rm(dir, { recursive: true, force: true });
-    return true;
-  });
+  const band = await readBand(id).catch(() => null);
+  const existed = await docs().delete("band", id);
   if (!existed) return false;
+  if (band) await files().remove(band.assets.map((a) => bandAssetFileOf(id, a)));
   const bandAssetIds = new Set((band?.assets ?? []).map((a) => a.id));
   for (const s of (await listProjects()).filter((p) => p.bandId === id)) {
     await updateProject(s.id, (p) => {
@@ -242,23 +186,28 @@ export async function deleteBand(id: string): Promise<boolean> {
   return true;
 }
 
-/** Move an uploaded temp file into the band library (under the band lock). */
-export async function addBandAsset(id: string, asset: Asset, tempPath: string, maxAssets: number): Promise<Band> {
+/**
+ * Record a new band library asset: local mode moves the uploaded temp file into the band's assets
+ * folder (under the band lock); cloud mode records `asset.blob` (pass `tempPath: null`).
+ */
+export async function addBandAsset(id: string, asset: Asset, tempPath: string | null, maxAssets: number): Promise<Band> {
   assertBandId(id);
-  return withLock(`band:${id}`, async () => {
-    const current = await readBandFile(id);
-    if (!current) throw new StorageError("not_found", "找不到樂團（可能已被刪除）");
-    if (current.assets.length >= maxAssets) throw new Error(`樂團素材數量已達上限（${maxAssets} 個）`);
-    await fs.mkdir(bandAssetsDir(id), { recursive: true });
-    const file = bandAssetPath(id, asset);
-    await moveFile(tempPath, file);
-    try {
-      return await writeBand({ ...current, assets: [...current.assets, { ...asset, scope: "band" }] });
-    } catch (err) {
-      await fs.rm(file, { force: true }).catch(() => {});
-      throw err;
-    }
-  });
+  let placed: string | null = null;
+  try {
+    return await modifyBand(id, async (current) => {
+      if (current.assets.length >= maxAssets) throw new Error(`樂團素材數量已達上限（${maxAssets} 個）`);
+      if (asset.blob && current.assets.some((a) => a.blob?.url === asset.blob!.url)) throw new StorageError("conflict", "這個檔案已經加入過了");
+      if (tempPath) {
+        const file = bandAssetPath(id, asset);
+        await files().place(tempPath, file);
+        placed = file;
+      }
+      return { ...current, assets: [...current.assets, { ...asset, scope: "band" }] };
+    });
+  } catch (err) {
+    if (placed) await fs.rm(placed, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 /**
@@ -267,16 +216,16 @@ export async function addBandAsset(id: string, asset: Asset, tempPath: string, m
  */
 export async function removeBandAsset(id: string, assetId: string): Promise<Band | null> {
   assertBandId(id);
-  const saved = await withLock(`band:${id}`, async () => {
-    const current = await readBandFile(id);
-    if (!current) throw new StorageError("not_found", "找不到樂團（可能已被刪除）");
+  let removed: Asset | null = null;
+  const saved = await modifyBand(id, (current) => {
     const asset = current.assets.find((a) => a.id === assetId);
+    removed = asset ?? null;
     if (!asset) return null;
-    const next = await writeBand({ ...current, assets: current.assets.filter((a) => a.id !== assetId) });
-    await fs.rm(bandAssetPath(id, asset), { force: true }).catch(() => {});
-    return next;
+    return { ...current, assets: current.assets.filter((a) => a.id !== assetId) };
   });
-  if (!saved) return null;
+  const asset = removed as Asset | null;
+  if (!asset) return null;
+  await files().remove([bandAssetFileOf(id, asset)]).catch(() => {});
   const ids = new Set([assetId]);
   for (const s of (await listProjects()).filter((p) => p.bandId === id)) {
     await updateProject(s.id, (p) => {
@@ -295,7 +244,7 @@ export async function removeBandAsset(id: string, assetId: string): Promise<Band
 export async function takenAssetIds(bandId: string | undefined): Promise<Set<string>> {
   const out = new Set<string>();
   if (!bandId || !isValidBandId(bandId)) return out;
-  const band = await readBandFile(bandId).catch(() => null);
+  const band = await readBand(bandId).catch(() => null);
   for (const a of band?.assets ?? []) out.add(a.id);
   for (const p of await bandProjects(bandId).catch(() => [] as Project[])) for (const a of p.assets) out.add(a.id);
   return out;
@@ -309,7 +258,7 @@ export async function withBandAssets(project: Project): Promise<Project> {
   const rest: Project = { ...project };
   delete rest.bandAssets;
   if (!rest.bandId || !isValidBandId(rest.bandId)) return rest;
-  const band = await readBandFile(rest.bandId).catch(() => null);
+  const band = await readBand(rest.bandId).catch(() => null);
   if (!band) {
     delete rest.bandId;
     return rest;
@@ -321,57 +270,47 @@ export async function withBandAssets(project: Project): Promise<Project> {
 // shows
 // ---------------------------------------------------------------------------
 
-async function readShowFile(id: string): Promise<Show | null> {
-  const r = await readJson(path.join(showDir(id), SHOW_FILE), `演出 ${id} 的 show.json`);
-  if (!r) return null;
+function showFromDoc(doc: StoredDoc): Show {
   try {
-    return coerceShow(r.raw, id, r.mtime);
+    return coerceShow(doc.data, doc.id, doc.updatedAt);
   } catch (err) {
     throw new StorageError("corrupt", err instanceof Error ? err.message : "show.json 無法讀取");
   }
 }
 
-async function writeShow(show: Show): Promise<Show> {
-  const saved: Show = { ...show, updatedAt: new Date().toISOString() };
-  try {
-    await writeJsonAtomic(path.join(showDir(show.id), SHOW_FILE), saved);
-  } catch (err) {
-    if (isNodeError(err, "ENOENT")) throw new StorageError("not_found", "找不到演出（可能已被刪除）");
-    throw err;
-  }
-  return saved;
+function showForWrite(show: Show): Show {
+  return { ...show, updatedAt: new Date().toISOString() };
 }
 
 export async function createShow(input: { bandId: string; name: string; date?: string; venue?: string; output?: ProjectOutput }): Promise<Show> {
-  const id = await makeFolder(showsDir());
-  const now = new Date().toISOString();
-  const show = coerceShow(
-    { bandId: input.bandId, name: input.name, date: input.date, venue: input.venue, output: input.output ?? normalizeOutput(null), items: [], notes: "", arc: null, createdAt: now, updatedAt: now },
-    id,
-    now,
-  );
-  try {
-    return await writeShow(show);
-  } catch (err) {
-    await fs.rm(showDir(id), { recursive: true, force: true });
-    throw err;
-  }
+  const doc = await docs().create("show", async (id) => {
+    const now = new Date().toISOString();
+    const show = coerceShow(
+      { bandId: input.bandId, name: input.name, date: input.date, venue: input.venue, output: input.output ?? normalizeOutput(null), items: [], notes: "", arc: null, createdAt: now, updatedAt: now },
+      id,
+      now,
+    );
+    return { data: showForWrite(show) };
+  });
+  return doc.data as Show;
 }
 
 export async function getShow(id: string): Promise<Show | null> {
   assertShowId(id);
-  return readShowFile(id);
+  const doc = await docs().get("show", id);
+  return doc ? showFromDoc(doc) : null;
 }
 
 export async function updateShow(id: string, mutate: (draft: Show) => Show | void): Promise<Show> {
   assertShowId(id);
-  return withLock(`show:${id}`, async () => {
-    const current = await readShowFile(id);
-    if (!current) throw new StorageError("not_found", "找不到演出（可能已被刪除）");
-    const draft = structuredClone(current);
-    const next = mutate(draft) ?? draft;
-    return writeShow({ ...next, id });
+  let result: Show | null = null;
+  await docs().update("show", id, (stored) => {
+    const draft = structuredClone(showFromDoc(stored));
+    const saved = showForWrite({ ...(mutate(draft) ?? draft), id });
+    result = saved;
+    return { data: saved };
   });
+  return result!;
 }
 
 function summarizeShow(s: Show): ShowSummary {
@@ -389,25 +328,15 @@ function summarizeShow(s: Show): ShowSummary {
 
 /** Shows (optionally of one band): upcoming dates first, then newest. */
 export async function listShows(bandId?: string): Promise<ShowSummary[]> {
-  const ids = await listFolderIds(showsDir(), isValidShowId);
-  const shows = await Promise.all(ids.map((id) => readShowFile(id).catch(() => null)));
-  return shows
-    .filter((s): s is Show => !!s && (!bandId || s.bandId === bandId))
+  const entries = await docs().list("show", { map: showFromDoc });
+  return entries
+    .flatMap((e) => ("value" in e ? [e.value] : []))
+    .filter((s) => !bandId || s.bandId === bandId)
     .map(summarizeShow)
     .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "") || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
 export async function deleteShow(id: string): Promise<boolean> {
   assertShowId(id);
-  return withLock(`show:${id}`, async () => {
-    const dir = showDir(id);
-    try {
-      await fs.stat(dir);
-    } catch (err) {
-      if (isNodeError(err, "ENOENT")) return false;
-      throw err;
-    }
-    await fs.rm(dir, { recursive: true, force: true });
-    return true;
-  });
+  return docs().delete("show", id);
 }

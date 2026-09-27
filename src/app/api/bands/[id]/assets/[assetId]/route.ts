@@ -1,6 +1,6 @@
 import { isAssetId } from "@/lib/assets";
 import { patchAssetInList, readAssetPatch, serveAsset } from "@/lib/server/asset-routes";
-import { bandAssetPath, getBand, removeBandAsset, updateBand } from "@/lib/server/band-storage";
+import { bandAssetFileOf, getBand, removeBandAsset, updateBand } from "@/lib/server/band-storage";
 import { handle, HttpError, json, requireBandId } from "@/lib/server/http";
 import type { Asset } from "@/lib/types";
 
@@ -22,7 +22,7 @@ async function serve(req: Request, ctx: Ctx, withBody: boolean): Promise<Respons
   if (!band) throw new HttpError(404, "找不到樂團");
   const asset = band.assets.find((a) => a.id === assetId);
   if (!asset) throw new HttpError(404, "找不到素材");
-  return serveAsset(req, bandAssetPath(id, asset), asset, withBody);
+  return serveAsset(req, bandAssetFileOf(id, asset), asset, withBody);
 }
 
 export const GET = handle((req: Request, ctx: Ctx) => serve(req, ctx, true));

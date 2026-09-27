@@ -1,17 +1,19 @@
 // The media-library HTTP handlers shared by a project's assets (/api/projects/[id]/assets) and a
-// band's shared library (/api/bands/[id]/assets): multipart upload with magic-byte sniffing and
-// browser-measured dimensions, Range serving, and name / note / tags / kind edits. Each route
-// only says where the list lives and how to store a file.
+// band's shared library (/api/bands/[id]/assets): upload with magic-byte sniffing and
+// browser-measured dimensions (local: multipart to this server; cloud: the browser uploads to
+// Vercel Blob and registers the blob here), Range serving (cloud: a redirect to the blob), and
+// name / note / tags / kind edits. Each route only says where the list lives and how to store it.
 
 import { promises as fs } from "node:fs";
-import { MAX_ASSET_BYTES, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags, validateDimensions } from "@/lib/assets";
+import { MAX_ASSET_BYTES, coerceBlobRef, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags, validateDimensions } from "@/lib/assets";
 import type { Asset, AssetKind } from "@/lib/types";
 import { mimeForAssetFile, resolveAssetType } from "./asset-files";
 import { sanitizeFileName } from "./audio-files";
-import { serveFile } from "./file-response";
 import { HttpError, json, readJson } from "./http";
+export { isJsonRequest } from "./http";
 import { parseMultipart } from "./multipart";
 import { createUploadTempPath, newAssetId } from "./storage";
+import { files, StorageError, type StoredFile } from "./store";
 import { applyAssetPatch } from "./validate";
 
 const FORM_OVERHEAD_BYTES = 1024 * 1024;
@@ -26,6 +28,84 @@ export interface UploadTarget {
   store: (asset: Asset, tempPath: string) => Promise<Asset[]>;
   /** "素材" / "樂團素材" */
   label?: string;
+}
+
+function newUniqueAssetId(taken?: ReadonlySet<string>): string {
+  let assetId = newAssetId();
+  for (let i = 0; i < 8 && taken?.has(assetId); i++) assetId = newAssetId();
+  return assetId;
+}
+
+/** The asset record for a file of `type`, from the browser's meta (dimensions, name, kind, note, tags). */
+function buildAsset(meta: Record<string, unknown>, fileName: string, type: { ext: string; mimeType: string; video: boolean }, bytes: number, taken?: ReadonlySet<string>): Asset {
+  const dims = validateDimensions(meta, type.video);
+  if (!dims.ok) throw new HttpError(400, dims.error);
+  let kind: AssetKind = type.video ? "video" : "image";
+  if (!type.video && isAssetKind(meta.kind) && meta.kind === "logo") kind = "logo";
+  const assetId = newUniqueAssetId(taken);
+  const asset: Asset = {
+    id: assetId,
+    kind,
+    name: sanitizeAssetName(meta.name, sanitizeAssetName(fileName.replace(/\.[^.]+$/, ""))),
+    mimeType: type.mimeType,
+    file: `${assetId}.${type.ext}`,
+    width: dims.width,
+    height: dims.height,
+    bytes,
+    createdAt: new Date().toISOString(),
+  };
+  if (dims.duration) asset.duration = dims.duration;
+  const note = sanitizeNote(meta.note);
+  if (note) asset.note = note;
+  const tags = sanitizeTags(meta.tags);
+  if (tags) asset.tags = tags;
+  return asset;
+}
+
+export interface RegisterTarget {
+  /** blob pathname prefix the file must be under ("projects/<id>/", "bands/<id>/") */
+  prefix: string;
+  count: number;
+  max: number;
+  taken?: ReadonlySet<string>;
+  /** record the asset (with its blob); resolves with the new list */
+  store: (asset: Asset) => Promise<Asset[]>;
+  label?: string;
+}
+
+/**
+ * Cloud: JSON `{ blob: { url, pathname }, fileName, width, height, duration?, name?, kind?, note?, tags? }`
+ * after the browser uploaded the file to Vercel Blob -> 201 { asset, assets }. The blob must be in
+ * this store under the owner's prefix; its first bytes decide the type (a file that is not accepted
+ * media is deleted again).
+ */
+export async function receiveAssetRegistration(req: Request, target: RegisterTarget): Promise<Response> {
+  const label = target.label ?? "素材";
+  const body = await readJson(req, 64 * 1024);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { blob, fileName, width, height }");
+  const meta = body as Record<string, unknown>;
+  const blob = coerceBlobRef(meta.blob);
+  if (!blob) throw new HttpError(400, `缺少上傳的${label}（blob）`);
+  const store = files();
+  // not ours / not there: nothing to clean up
+  const info = await store.inspect(blob, { prefix: target.prefix });
+  const uploaded: StoredFile = { kind: "blob", blob: info.blob };
+  try {
+    if (target.count >= target.max) throw new HttpError(409, `${label}數量已達上限（${target.max} 個）`);
+    if (info.size === 0) throw new HttpError(400, `${label}檔案是空的`);
+    if (info.size > MAX_ASSET_BYTES) throw new HttpError(413, `${label}太大（上限 ${MAX_ASSET_BYTES / 1024 / 1024} MB）`);
+    const fileName = sanitizeFileName(typeof meta.fileName === "string" ? meta.fileName : "");
+    const type = resolveAssetType(fileName, info.head);
+    if (!type.ok) throw new HttpError(415, type.error);
+    const asset = buildAsset(meta, fileName, type, info.size, target.taken);
+    asset.blob = info.blob;
+    const assets = await target.store(asset);
+    return json({ asset: assets.find((a) => a.id === asset.id) ?? asset, assets }, { status: 201 });
+  } catch (err) {
+    // a repeated registration of a blob already in the library keeps it
+    if (!(err instanceof StorageError && err.code === "conflict")) await store.remove([uploaded]);
+    throw err;
+  }
 }
 
 /** multipart: `file` (image / video) + `meta` JSON { width, height, duration?, name?, kind?, note?, tags? } -> 201 { asset, assets } */
@@ -62,31 +142,7 @@ export async function receiveAssetUpload(req: Request, target: UploadTarget): Pr
         throw new HttpError(400, "meta 不是有效的 JSON 物件");
       }
     }
-    const dims = validateDimensions(meta, type.video);
-    if (!dims.ok) throw new HttpError(400, dims.error);
-
-    let kind: AssetKind = type.video ? "video" : "image";
-    if (!type.video && isAssetKind(meta.kind) && meta.kind === "logo") kind = "logo";
-
-    let assetId = newAssetId();
-    for (let i = 0; i < 8 && target.taken?.has(assetId); i++) assetId = newAssetId();
-    const asset: Asset = {
-      id: assetId,
-      kind,
-      name: sanitizeAssetName(meta.name, sanitizeAssetName(fileName.replace(/\.[^.]+$/, ""))),
-      mimeType: type.mimeType,
-      file: `${assetId}.${type.ext}`,
-      width: dims.width,
-      height: dims.height,
-      bytes: file.size,
-      createdAt: new Date().toISOString(),
-    };
-    if (dims.duration) asset.duration = dims.duration;
-    const note = sanitizeNote(meta.note);
-    if (note) asset.note = note;
-    const tags = sanitizeTags(meta.tags);
-    if (tags) asset.tags = tags;
-
+    const asset = buildAsset(meta, fileName, type, file.size, target.taken);
     const assets = await target.store(asset, file.path);
     return json({ asset: assets.find((a) => a.id === asset.id) ?? asset, assets }, { status: 201 });
   } finally {
@@ -95,10 +151,9 @@ export async function receiveAssetUpload(req: Request, target: UploadTarget): Pr
   }
 }
 
-/** GET / HEAD of a stored asset file with HTTP Range support. */
-export function serveAsset(req: Request, file: string, asset: Asset, withBody: boolean): Promise<Response> {
-  return serveFile(req, {
-    file,
+/** GET / HEAD of a stored asset file with HTTP Range support (cloud: a redirect to its blob). */
+export function serveAsset(req: Request, file: StoredFile, asset: Asset, withBody: boolean): Promise<Response> {
+  return files().serve(req, file, {
     contentType: asset.mimeType || mimeForAssetFile(asset.file),
     fileName: asset.name ? `${asset.name}.${asset.file.split(".").pop()}` : asset.file,
     withBody,

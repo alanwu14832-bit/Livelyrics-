@@ -99,6 +99,7 @@ export function NewProjectCard({
   duration,
   analysisWarning,
   submitting,
+  uploadProgress = null,
   submitError,
   defaultBandId,
   onCancel,
@@ -111,6 +112,8 @@ export function NewProjectCard({
   duration: number;
   analysisWarning?: string | null;
   submitting: boolean;
+  /** 0..1 while the audio uploads (cloud mode reports it; null = unknown) */
+  uploadProgress?: number | null;
   submitError?: string | null;
   onCancel: () => void;
   onSubmit: (input: NewProjectInput) => void;
@@ -367,7 +370,7 @@ export function NewProjectCard({
               取消
             </Button>
             <Button type="submit" variant="filled" size="lg" loading={submitting}>
-              {submitting ? "上傳中…" : "開始製作"}
+              {submitting ? (uploadProgress != null ? <span className="tabular">上傳中 {Math.round(uploadProgress * 100)}%</span> : "上傳中…") : "開始製作"}
             </Button>
           </div>
         </footer>

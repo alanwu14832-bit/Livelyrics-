@@ -1,8 +1,13 @@
 // Typed browser-side wrappers for the local API routes (src/app/api/**).
 // The route handlers must implement exactly these shapes.
+//
+// Cloud mode (a Vercel deployment, see /api/status `storage.mode`): uploads go from the browser
+// straight to Vercel Blob and are then registered with the same routes (JSON instead of
+// multipart), and `process` drives the pipeline one step per request (src/lib/process-runner.ts).
 
 import { bandAssetUrl, projectAssetUrl } from "./asset-scope";
 import type { BiblePatch } from "./band";
+import { abortableSleep, ProcessBusyError, runStepwise } from "./process-runner";
 import type {
   Asset,
   AssetKind,
@@ -37,11 +42,93 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type StorageModeName = "local" | "cloud" | "unconfigured";
+
 export interface ServerStatus {
   /** true when ANTHROPIC_API_KEY (or another Anthropic credential) is configured */
   claude: boolean;
   model: string;
+  /** local mode only ("" otherwise) */
   dataDir: string;
+  storage: {
+    /** local disk, cloud (Postgres + Vercel Blob), or on Vercel without them */
+    mode: StorageModeName;
+    /** both cloud credentials are present */
+    cloudConfigured: boolean;
+    /** unconfigured: the variables still missing */
+    missing: string[];
+    /** running on Vercel */
+    onVercel: boolean;
+  };
+  /** LIVELYRICS_PASSWORD is set: pages and APIs need a login */
+  auth: boolean;
+}
+
+let storageModePromise: Promise<StorageModeName> | null = null;
+
+/** The server's storage mode, asked once per page load (local when the status cannot be read). */
+export function storageMode(): Promise<StorageModeName> {
+  storageModePromise ??= fetch("/api/status")
+    .then((r) => (r.ok ? (r.json() as Promise<Partial<ServerStatus>>) : null))
+    .then((s) => s?.storage?.mode ?? "local")
+    .catch(() => {
+      storageModePromise = null;
+      return "local" as const;
+    });
+  return storageModePromise;
+}
+
+function newRunId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** One streamed POST /process: resolves with the `done` project (409 -> ProcessBusyError). */
+async function processStream(id: string, body: ProcessRequest, onEvent: (e: PipelineEvent) => void, signal?: AbortSignal): Promise<Project> {
+  const res = await fetch(`/api/projects/${id}/process`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (res.status === 409) {
+    let message = "這首歌已經有一個處理正在進行";
+    try {
+      const b = (await res.json()) as { error?: string };
+      if (b?.error) message = b.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ProcessBusyError(message);
+  }
+  if (!res.ok || !res.body) await json(res);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: Project | null = null;
+  let failure: string | null = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const data = chunk
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trimStart())
+        .join("\n");
+      if (!data) continue;
+      const event = JSON.parse(data) as PipelineEvent;
+      if (event.type === "done") final = event.project;
+      if (event.type === "error") failure = event.message;
+      onEvent(event);
+    }
+  }
+  if (failure && !final) throw new Error(failure);
+  if (!final) throw new Error("處理中斷：伺服器沒有回傳結果");
+  return final;
 }
 
 export const api = {
@@ -51,14 +138,32 @@ export const api = {
 
   getProject: (id: string) => fetch(`/api/projects/${id}`).then((r) => json<Project>(r)),
 
-  /** multipart upload: audio file + meta + analysis computed in the browser */
-  createProject(input: {
-    audio: File;
-    meta: Pick<SongMeta, "title" | "artist" | "album" | "year" | "duration">;
-    analysis: AudioAnalysis | null;
-    /** assign the new song to a band */
-    bandId?: string | null;
-  }) {
+  /**
+   * Local: multipart upload of the audio file + meta + analysis computed in the browser.
+   * Cloud: the audio goes straight to Vercel Blob (with progress), then the project is created from it.
+   */
+  async createProject(
+    input: {
+      audio: File;
+      meta: Pick<SongMeta, "title" | "artist" | "album" | "year" | "duration">;
+      analysis: AudioAnalysis | null;
+      /** assign the new song to a band */
+      bandId?: string | null;
+    },
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<Project> {
+    if ((await storageMode()) === "cloud") {
+      // the Blob SDK is only loaded in cloud mode
+      const { audioUploadType, uploadToBlob } = await import("./cloud-upload");
+      const type = await audioUploadType(input.audio);
+      const blob = await uploadToBlob(input.audio, { kind: "audio" }, type, opts);
+      return fetch("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ blob, fileName: input.audio.name, meta: input.meta, analysis: input.analysis, ...(input.bandId ? { bandId: input.bandId } : {}) }),
+        signal: opts.signal,
+      }).then((r) => json<Project>(r));
+    }
     const form = new FormData();
     form.set("audio", input.audio);
     form.set("meta", JSON.stringify(input.meta));
@@ -107,12 +212,32 @@ export const api = {
     return api.uploadOwnedAsset({ kind: "project", id }, input, opts);
   },
 
-  /** Upload into a project's library or a band's shared library (same contract). */
-  uploadOwnedAsset(
+  /**
+   * Upload into a project's library or a band's shared library (same contract). Cloud: the file
+   * goes straight to Vercel Blob (progress from the SDK), then it is registered with the library.
+   */
+  async uploadOwnedAsset(
     owner: AssetOwner,
     input: AssetUploadInput,
     opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
   ): Promise<{ asset: Asset; assets: Asset[] }> {
+    if ((await storageMode()) === "cloud") {
+      const { assetUploadType, uploadToBlob } = await import("./cloud-upload");
+      const { file, ...meta } = input;
+      const type = await assetUploadType(file);
+      const target = owner.kind === "band" ? ({ kind: "band-asset", bandId: owner.id } as const) : ({ kind: "project-asset", projectId: owner.id } as const);
+      // the last bit of the bar is the registration
+      const blob = await uploadToBlob(file, target, type, { signal: opts.signal, onProgress: (p) => opts.onProgress?.(p * 0.97) });
+      const res = await fetch(assetsBase(owner), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...meta, blob, fileName: file.name }),
+        signal: opts.signal,
+      });
+      const body = await json<{ asset: Asset; assets: Asset[] }>(res);
+      opts.onProgress?.(1);
+      return body;
+    }
     const form = new FormData();
     const { file, ...meta } = input;
     form.set("meta", JSON.stringify(meta));
@@ -220,49 +345,12 @@ export const api = {
 
   /**
    * Run (part of) the processing pipeline. Streams PipelineEvents (SSE) and
-   * resolves with the final project. Pass an AbortSignal to cancel.
+   * resolves with the final project. Pass an AbortSignal to cancel. Cloud mode: one request per
+   * step, and an attach-only call watches a run recorded on the project and continues it.
    */
-  async process(
-    id: string,
-    body: ProcessRequest,
-    onEvent: (e: PipelineEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<Project> {
-    const res = await fetch(`/api/projects/${id}/process`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!res.ok || !res.body) await json(res);
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let final: Project | null = null;
-    let failure: string | null = null;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let sep: number;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        const chunk = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        const data = chunk
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.slice(5).trimStart())
-          .join("\n");
-        if (!data) continue;
-        const event = JSON.parse(data) as PipelineEvent;
-        if (event.type === "done") final = event.project;
-        if (event.type === "error") failure = event.message;
-        onEvent(event);
-      }
-    }
-    if (failure && !final) throw new Error(failure);
-    if (!final) throw new Error("處理中斷：伺服器沒有回傳結果");
-    return final;
+  async process(id: string, body: ProcessRequest, onEvent: (e: PipelineEvent) => void, signal?: AbortSignal): Promise<Project> {
+    if ((await storageMode()) !== "cloud") return processStream(id, body, onEvent, signal);
+    return runStepwise(id, body, onEvent, signal, { stream: processStream, getProject: (pid) => api.getProject(pid), sleep: abortableSleep, newRunId });
   },
 };
 
@@ -313,4 +401,9 @@ export interface ProcessRequest {
   attachOnly?: boolean;
   /** the song's place in a show arc: the designer follows it (整場弧線) */
   arc?: SongArcDirective;
+  /**
+   * Cloud mode: this request is one step of a run the page drives (`steps` holds that step). The
+   * server records the run on the project so a refreshed page can continue it.
+   */
+  run?: { id: string; steps: Array<"lyrics" | "research" | "design"> };
 }

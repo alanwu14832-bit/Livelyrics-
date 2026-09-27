@@ -11,6 +11,7 @@ import { LookStage } from "@/components/show/LookStage";
 import { Alert, AppHeader, Banner, Button, EmptyState, InsetGroup, ListRow, SegmentedControl, Skeleton, SkeletonGroup, Spinner, Switch, TextArea, TextField, cx } from "@/components/ui";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, SparkleIcon, UsersThreeIcon, XIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
+import { useJobPolling } from "./use-job-polling";
 import { LYRIC_POLICY_INFO, LYRIC_POLICY_MODES, MAX_PALETTE, MIN_PALETTE, bibleHasContent, normalizeBibleHex } from "@/lib/band";
 import { MEDIA_TREATMENT_HINTS, MEDIA_TREATMENT_LABELS, SCENE_HINTS, SCENE_LABELS } from "@/lib/console/labels";
 import { FONTS, fontStack } from "@/lib/font-meta";
@@ -49,6 +50,7 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
   const [generating, setGenerating] = useState(false);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [genNote, setGenNote] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -70,6 +72,17 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+  // cloud mode: a generation recorded on the band keeps running on the server (refresh, other tab)
+  const jobRunning = band?.bibleJob?.status === "running";
+  useJobPolling(jobRunning && !generating, async () => {
+    const next = await api.getBand(id);
+    if (next.bibleJob?.status === "running") return;
+    setBand(next);
+    // an edit in progress is kept (it shows as unsaved against the new bible)
+    if (!dirtyRef.current) setDraft(next.bible);
+    // (also replaces a "busy" answer this page got while the job ran)
+    setGenError(next.bibleJob?.status === "error" ? next.bibleJob.message || "產生視覺聖經沒有完成，請重試。" : null);
+  });
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (dirtyRef.current) e.preventDefault();
@@ -99,17 +112,25 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
     setConfirmGenerate(false);
     setGenerating(true);
     setGenNote(null);
+    setGenError(null);
     try {
       const res = await api.generateBible(id);
       setBand(res.band);
       setDraft(res.band.bible);
       setGenNote(res.logs[res.logs.length - 1] ?? null);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setGenError(err instanceof Error ? err.message : String(err));
+      // it may be running elsewhere (cloud mode answers 409): pick up the band's recorded job
+      void api
+        .getBand(id)
+        .then((b) => setBand((cur) => (cur ? { ...cur, bibleJob: b.bibleJob } : b)))
+        .catch(() => {});
     } finally {
       setGenerating(false);
     }
   };
+
+  const requestGenerate = () => (band && (bibleHasContent(band.bible) || dirty) ? setConfirmGenerate(true) : void generate());
 
   const back = {
     href: bandHref(id),
@@ -129,7 +150,7 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
         actions={
           draft && (
             <>
-              <Button variant="gray" icon={SparkleIcon} onClick={() => (band && (bibleHasContent(band.bible) || dirty) ? setConfirmGenerate(true) : void generate())} loading={generating} disabled={generating || saving}>
+              <Button variant="gray" icon={SparkleIcon} onClick={requestGenerate} loading={generating || jobRunning} disabled={generating || jobRunning || saving}>
                 從作品產生
               </Button>
               {dirty ? (
@@ -165,8 +186,11 @@ export function BibleEditor({ id, initialName }: { id: string; initialName?: str
                   {band.name}所有的歌共用這個世界。研究與設計會把它當成硬性規範，只在必要時偏離，並寫下理由。
                 </p>
               </div>
-              {generating && <Banner icon={<Spinner size={20} />} title="設計師正在整理視覺聖經…" description="閱讀樂團每首歌的主視覺、配色、場景與研究簡報。完成後可以繼續修改。" />}
+              {(generating || jobRunning) && <Banner icon={<Spinner size={20} />} title="設計師正在整理視覺聖經…" description="閱讀樂團每首歌的主視覺、配色、場景與研究簡報。完成後可以繼續修改。" />}
               {genNote && !generating && <Banner tone="success" title="已從作品產生" description={`${genNote}。檢查每一項，照樂團的想法修改後再儲存。`} />}
+              {genError && !generating && !jobRunning && (
+                <Banner tone="error" title="沒有產生視覺聖經" description={genError} actions={<Button onClick={requestGenerate}>重試</Button>} />
+              )}
               {saveError && (
                 <Banner tone="error" title="儲存失敗" description={saveError} actions={<Button onClick={() => void save()}>重試</Button>} />
               )}

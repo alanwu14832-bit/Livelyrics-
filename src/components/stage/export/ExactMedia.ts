@@ -71,6 +71,7 @@ export class ExactMedia {
 
   private async loadImage(asset: Asset, url: string): Promise<boolean> {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.decoding = "async";
     img.src = url;
     try {

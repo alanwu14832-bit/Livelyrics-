@@ -504,6 +504,8 @@ export class ConsoleController {
   private setupAudio(): void {
     if (this.audio || typeof Audio === "undefined") return;
     const el = new Audio();
+    // CORS: the Web Audio analyser reads this element, and cloud mode redirects it to Vercel Blob
+    el.crossOrigin = "anonymous";
     el.preload = "auto";
     el.playbackRate = this.settings.playbackRate;
     el.defaultPlaybackRate = this.settings.playbackRate;

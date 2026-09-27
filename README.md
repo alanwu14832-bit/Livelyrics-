@@ -2,7 +2,7 @@
 
 上傳一首歌，AI 會以「樂團專職舞台視覺設計師」的角度研究歌曲與樂團，設計**主視覺**、每一段的**背景動畫**，以及**歌詞如何跟著主視覺呈現**。演出時，你在自己的電腦上用**控制台**操作（完整資訊、跳歌詞、黑場、覆寫場景），投影機上的**投影視窗**只顯示動畫與歌詞。
 
-- 音訊分析（BPM、節拍、能量、段落、波形）在瀏覽器完成，音檔只存在你的電腦上。
+- 音訊分析（BPM、節拍、能量、段落、波形）在瀏覽器完成。在本機執行時音檔只存在你的電腦上；部署到 Vercel 時存在你自己的 Vercel Blob 儲存空間。
 - 歌詞：自動從 [LRCLIB](https://lrclib.net) 找同步歌詞，或貼上 LRC／純文字，再用「對拍」功能自己對時間。
 - 設計：有 Claude API 金鑰時由 Claude 上網研究再設計；沒有金鑰時使用內建的**離線設計模式**（依音訊與歌詞結構產生方案），一樣能完整使用。
 
@@ -43,6 +43,37 @@ node scripts/seed-demo.mjs
 ```
 
 它會用 `fixtures/demo-song.wav` 與 `fixtures/demo-lyrics.lrc` 建立一個示範專案，並印出控制台網址。也可以直接在首頁把 `fixtures/demo-song.wav` 拖進上傳區、貼上 `fixtures/demo-lyrics.lrc` 的內容（這樣會在瀏覽器做完整的音訊分析，時間軸會有波形）。
+
+## 部署到 Vercel（雲端模式）
+
+本機執行不需要任何設定。部署到 Vercel 時，函式的檔案系統是唯讀且不會保留的，所以 Livelyrics 改用雲端模式：作品、樂團與演出存在 Postgres（Neon），音檔與素材由瀏覽器**直接上傳到 Vercel Blob**（函式的請求內容上限約 4.5 MB，檔案不經過函式）。兩種模式的資料互不相通，雲端一開始是空的。
+
+1. 在 Vercel 匯入這個 repo（Framework Preset：Next.js，其餘用預設值）並部署一次。
+2. 專案的 **Storage** 分頁：
+   - 建立 **Blob** 儲存空間，存取權限選 **Public**（建立後不能更改，Private 不支援），連接到這個專案。會自動加入 `BLOB_READ_WRITE_TOKEN`。
+   - 從 **Marketplace** 加入 **Neon**（Postgres），連接到這個專案。會自動加入 `DATABASE_URL`（也接受 `POSTGRES_URL`、`DATABASE_URL_UNPOOLED`、`POSTGRES_URL_NON_POOLING`）。資料表 `livelyrics_docs` 在第一次使用時自動建立。
+3. **Project Settings › Environment Variables** 加入：
+
+   | 變數 | 說明 |
+   |---|---|
+   | `LIVELYRICS_PASSWORD` | 建議設定：整個網站需要先輸入這個密碼（登入後保持 30 天，改密碼會讓所有人登出）。沒設定時任何知道網址的人都能使用 |
+   | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用離線設計模式 |
+   | `LIVELYRICS_MODEL` | 選用：換模型（預設 claude-opus-5） |
+   | `LIVELYRICS_BLOB_DELIVERY` | 選用：設成 `proxy` 時音檔與素材經由函式轉送，預設 `redirect` 直接從 Blob 讀取（見下方） |
+   | `LIVELYRICS_STORAGE` | 選用：`cloud` 或 `local` 強制指定模式；一般不需要 |
+
+4. 每次新增或修改環境變數後都要重新部署（**Deployments › ⋯ › Redeploy**）才會生效。
+
+還沒設定好儲存空間時，首頁會顯示設定說明，API 會回應 503 並說明缺少哪一項；`/api/status` 會回報目前的儲存模式（`storage.mode`：`local`、`cloud` 或 `unconfigured`）。
+
+限制與注意事項：
+
+- 每個處理步驟（取得歌詞、研究、設計）是一次獨立的請求，最長 300 秒（Hobby 方案加 Fluid compute 的上限）。瀏覽器依序送出每一步，每一步的結果都存在作品上：重新整理或關掉分頁再回來，設計總覽會接上進行中的步驟；超過時間沒完成的步驟會顯示「重試」，從那一步繼續。從作品產生視覺聖經、整場弧線也一樣。
+- Claude 在每一步最多使用約 250 秒，超過就改用離線設計完成這一步（處理紀錄會寫明），不會因為逾時而失敗。
+- 音檔上限 200 MB、素材單檔 500 MB。上傳後伺服器會檢查檔案開頭的格式，不是音檔或圖片／影片的檔案會被拒絕並從 Blob 刪除。刪除作品、素材或樂團時，Blob 上的檔案也會一起刪除。
+- 播放時，音檔與素材的網址會轉址（307）到 Blob 的公開網址，由 Blob 的 CDN 直接提供（支援 Range，回應帶 `Access-Control-Allow-Origin: *`）；頁面以 `crossOrigin="anonymous"` 讀取，WebGL 材質、Web Audio 與匯出都能正常使用。如果某個網路或瀏覽器擋住轉址，把 `LIVELYRICS_BLOB_DELIVERY` 設成 `proxy` 後重新部署。
+- Vercel 的 Hobby 方案只限個人、非商業用途；樂團的商業演出請改用 Pro 方案。
+- 演出時仍建議用本機模式或事先在場地網路測試過：雲端模式的控制台與投影視窗需要連線才能載入音檔與素材。
 
 ## 使用流程
 

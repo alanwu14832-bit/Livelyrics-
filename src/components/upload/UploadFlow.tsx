@@ -10,6 +10,7 @@ import { readAudioMetadata, type AudioFileMetadata } from "@/lib/audio/metadata"
 import { distributeLines, parseLyricsText } from "@/lib/lyrics/lrc";
 import type { AudioAnalysis } from "@/lib/types";
 import { processHref, type ProcessStep } from "@/components/process/steps";
+import { useStorageMode } from "@/components/home/use-storage-mode";
 import { checkAudioFile, formatBytes, pickAudioFile } from "./accept";
 import { Dropzone, heroTileClass, phaseEnterClass } from "./Dropzone";
 import { storeLyricsHandoff } from "./handoff";
@@ -55,8 +56,10 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cloud = useStorageMode() === "cloud";
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -121,6 +124,7 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
     abortRef.current?.abort();
     abortRef.current = null;
     setSubmitting(false);
+    setUploadProgress(null);
     setSubmitError(null);
     setPhase({ kind: "idle", error: null });
   }, []);
@@ -145,21 +149,26 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
       if (phase.kind !== "review" || submitting) return;
       const { file, meta, analysis, duration } = phase;
       setSubmitting(true);
+      setUploadProgress(null);
       setSubmitError(null);
       try {
-        const project = await api.createProject({
-          audio: file,
-          meta: {
-            title: input.title,
-            artist: input.artist,
-            album: input.album || undefined,
-            year: meta.year,
-            // 0 = unknown: the server falls back to the analysis duration
-            duration: duration > 0 ? duration : 0,
+        const project = await api.createProject(
+          {
+            audio: file,
+            meta: {
+              title: input.title,
+              artist: input.artist,
+              album: input.album || undefined,
+              year: meta.year,
+              // 0 = unknown: the server falls back to the analysis duration
+              duration: duration > 0 ? duration : 0,
+            },
+            analysis,
+            bandId: input.bandId,
           },
-          analysis,
-          bandId: input.bandId,
-        });
+          // cloud mode uploads to Vercel Blob first and reports its progress
+          { onProgress: (p) => setUploadProgress(p) },
+        );
 
         let steps: ProcessStep[] | undefined;
         let lyricsText: string | null = null;
@@ -177,6 +186,7 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
         router.push(processHref(project.id, { run: true, steps }));
       } catch (err) {
         setSubmitting(false);
+        setUploadProgress(null);
         setSubmitError(`建立作品失敗：${err instanceof Error ? err.message : String(err)}`);
       }
     },
@@ -193,6 +203,7 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
         duration={phase.duration}
         analysisWarning={phase.warning}
         submitting={submitting}
+        uploadProgress={uploadProgress}
         submitError={submitError}
         defaultBandId={defaultBandId}
         onCancel={reset}
@@ -240,7 +251,9 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
               <div className="mt-8 w-full" aria-live="polite">
                 <ProgressBar value={phase.progress} label={`${phase.label}…`} showValue aria-label="音訊分析進度" />
               </div>
-              <p className="mt-3 text-[12px] leading-[18px] text-label-2">在瀏覽器裡分析節奏、能量、段落與波形，檔案不會上傳到網路。</p>
+              <p className="mt-3 text-[12px] leading-[18px] text-label-2">
+                {cloud ? "在瀏覽器裡分析節奏、能量、段落與波形。按「開始製作」後，音檔才會上傳到這個部署的 Vercel Blob。" : "在瀏覽器裡分析節奏、能量、段落與波形，檔案不會上傳到網路。"}
+              </p>
               <Button variant="plain" onClick={reset} className="mt-4">
                 取消
               </Button>

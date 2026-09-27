@@ -1,7 +1,7 @@
 import { isAssetId } from "@/lib/assets";
 import { patchAssetInList, readAssetPatch, serveAsset } from "@/lib/server/asset-routes";
 import { handle, HttpError, json, requireProjectId } from "@/lib/server/http";
-import { assetPath, getProject, removeAsset, updateProject } from "@/lib/server/storage";
+import { assetFileOf, getProject, removeAsset, updateProject } from "@/lib/server/storage";
 import type { Asset } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ async function serve(req: Request, ctx: Ctx, withBody: boolean): Promise<Respons
   if (!project) throw new HttpError(404, "找不到專案");
   const asset = project.assets.find((a) => a.id === assetId);
   if (!asset) throw new HttpError(404, "找不到素材");
-  return serveAsset(req, assetPath(id, asset), asset, withBody);
+  return serveAsset(req, assetFileOf(id, asset), asset, withBody);
 }
 
 export const GET = handle((req: Request, ctx: Ctx) => serve(req, ctx, true));

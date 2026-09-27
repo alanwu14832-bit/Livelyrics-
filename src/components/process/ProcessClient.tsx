@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
 import { ExportIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
+import { retryFrom } from "@/lib/process-runner";
 import type { PipelineEvent, Project } from "@/lib/types";
 import { validPalette } from "@/components/home/ProjectArt";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
@@ -227,13 +228,20 @@ export function ProcessClient({
   }, [running]);
 
   const retry = () => {
+    // cloud mode records the run on the project, with what it was asked to do
+    const recorded = project?.pipeline && project.pipeline.status !== "done" ? project.pipeline : null;
     if (runState.phase === "error" && lastRequest && !lastRequest.attachOnly) {
       const requested = lastRequest.steps ?? [...PROCESS_STEPS];
       const from = failedStep(runState) ?? runningStep(runState) ?? requested[0] ?? "lyrics";
-      execute({ steps: stepsFrom(requested, from), lyricsText: lastRequest.lyricsText, instruction: lastRequest.instruction });
+      execute({ steps: stepsFrom(requested, from), lyricsText: lastRequest.lyricsText, instruction: lastRequest.instruction ?? recorded?.instruction });
       return;
     }
     if (!project) return;
+    if (recorded) {
+      // a run that stopped (its request ran out of time, the page was closed): pick up where it stopped
+      execute({ steps: retryFrom(recorded), lyricsText: readLyricsHandoff(id) ?? undefined, instruction: recorded.instruction });
+      return;
+    }
     if (project.research && !project.plan) execute({ steps: ["design"] });
     else execute({ lyricsText: readLyricsHandoff(id) ?? undefined });
   };

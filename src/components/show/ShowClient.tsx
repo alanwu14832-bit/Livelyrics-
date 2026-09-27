@@ -14,6 +14,7 @@ import { Alert, AppHeader, Banner, Button, EmptyState, FormRow, InsetGroup, List
 import { Markdown } from "@/components/ui/Markdown";
 import { ChartLineUpIcon, CheckCircleIcon, MusicNotesPlusIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
+import { useJobPolling } from "@/components/band/use-job-polling";
 import { spring } from "@/lib/motion";
 import { OUTPUT_PRESETS, aspectLabel } from "@/lib/output";
 import { ARC_ROLE_INFO, LOOK_KINDS, LOOK_KIND_INFO, SONG_STATUS_INFO, arcDirectiveFor, defaultLook, formatRunningTime, moveItem, newSetItemId, setlistTotals, songItems, songStatus } from "@/lib/show";
@@ -49,6 +50,18 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
   const [canvasBusy, setCanvasBusy] = useState(false);
   const [arcBusy, setArcBusy] = useState(false);
   const [arcError, setArcError] = useState<string | null>(null);
+  // cloud mode: an arc recorded on the show keeps running on the server (refresh, other tab);
+  // only the arc is taken from the server so setlist edits in progress stay
+  const arcJob = show?.arcJob;
+  const arcJobRunning = arcJob?.status === "running";
+  useJobPolling(arcJobRunning && !arcBusy, async () => {
+    const next = await api.getShow(id);
+    setShow((s) => (s ? { ...s, arc: next.arc, arcJob: next.arcJob } : next));
+    // a "busy" answer this page got while the job ran is over now
+    if (next.arcJob?.status !== "running") setArcError(null);
+  });
+  const arcWorking = arcBusy || arcJobRunning;
+  const arcProblem = arcWorking ? null : (arcError ?? (arcJob?.status === "error" ? arcJob.message || "上次規劃整場弧線沒有完成，請重試。" : null));
   const [run, setRun] = useState<ArcRun | null>(null);
   const [designing, setDesigning] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -146,9 +159,14 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
     setArcError(null);
     try {
       const res = await api.planArc(id);
-      setShow((s) => (s ? { ...s, arc: res.show.arc } : res.show));
+      setShow((s) => (s ? { ...s, arc: res.show.arc, arcJob: res.show.arcJob } : res.show));
     } catch (err) {
       setArcError(err instanceof Error ? err.message : String(err));
+      // it may be running elsewhere (cloud mode answers 409): pick up the show's recorded job
+      void api
+        .getShow(id)
+        .then((next) => setShow((s) => (s ? { ...s, arcJob: next.arcJob } : next)))
+        .catch(() => {});
     } finally {
       setArcBusy(false);
     }
@@ -235,7 +253,7 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
         }
         actions={
           show && (
-            <Button variant="tinted" icon={ChartLineUpIcon} onClick={() => void planArc()} loading={arcBusy} disabled={arcBusy || running || !show.items.some((i) => i.kind === "song")}>
+            <Button variant="tinted" icon={ChartLineUpIcon} onClick={() => void planArc()} loading={arcWorking} disabled={arcWorking || running || !show.items.some((i) => i.kind === "song")}>
               {show.arc ? "重新規劃弧線" : "整場弧線"}
             </Button>
           )
@@ -374,7 +392,7 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
                 }}
                 onApply={() => setConfirmCanvas(true)}
               />
-              <ArcPanel show={show} busy={arcBusy} error={arcError} running={running} onPlan={() => void planArc()} onApplyAll={() => void redesignAll()} />
+              <ArcPanel show={show} busy={arcWorking} error={arcProblem} running={running} onPlan={() => void planArc()} onApplyAll={() => void redesignAll()} />
               <NotesGroup value={show.notes} onChange={(notes) => persist({ notes }, (s) => ({ ...s, notes }))} />
               <div className="px-(--row-pad-x)">
                 <Button variant="destructive" icon={TrashIcon} onClick={() => setConfirmDelete(true)}>

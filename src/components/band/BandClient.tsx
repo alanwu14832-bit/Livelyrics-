@@ -16,6 +16,7 @@ import { Alert, AppHeader, Banner, Button, EmptyState, InsetGroup, ListRow, Menu
 import { Markdown } from "@/components/ui/Markdown";
 import { BookOpenIcon, DotsThreeIcon, MusicNotesPlusIcon, PencilSimpleIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon, UploadSimpleIcon, UsersThreeIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
+import { useJobPolling } from "./use-job-polling";
 import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
 import { SONG_STATUS_INFO, songStatus } from "@/lib/show";
 import { formatTimeShort } from "@/lib/timeline";
@@ -87,6 +88,13 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
 
   const band = state.kind === "ok" ? state.band : null;
   const designed = state.kind === "ok" ? state.songs.filter((s) => s.hasPlan).length : 0;
+  // cloud mode: a generation recorded on the band keeps running on the server (refresh, other tab)
+  const jobRunning = band?.bibleJob?.status === "running";
+  const jobError = band?.bibleJob?.status === "error" ? band.bibleJob.message || "上次產生視覺聖經沒有完成，請重試。" : null;
+  useJobPolling(jobRunning && !generating, async () => {
+    const next = await api.getBand(id);
+    setState((s) => (s.kind === "ok" ? { ...s, band: next } : s));
+  });
 
   const generate = async () => {
     setConfirmGenerate(false);
@@ -99,6 +107,8 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
       setGenLogs(res.logs);
     } catch (err) {
       setGenError(err instanceof Error ? err.message : String(err));
+      // it may be running elsewhere (cloud mode answers 409): pick up the band's recorded job
+      void load();
     } finally {
       setGenerating(false);
     }
@@ -187,9 +197,9 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
               band={band}
               designed={designed}
               songCount={state.songs.length}
-              generating={generating}
+              generating={generating || jobRunning}
               logs={genLogs}
-              error={genError}
+              error={genError ?? (generating || jobRunning ? null : jobError)}
               onGenerate={askGenerate}
               onDismissLogs={() => setGenLogs(null)}
             />

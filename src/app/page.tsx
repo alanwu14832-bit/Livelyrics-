@@ -3,6 +3,7 @@ import { ViewTransition } from "react";
 import { HomeClient } from "@/components/home/HomeClient";
 import { PAGE_TRANSITION } from "@/components/home/transitions";
 import { listProjects } from "@/lib/server/storage";
+import { resolveStorageConfig } from "@/lib/server/store";
 import type { ProjectSummary } from "@/lib/types";
 
 /**
@@ -24,9 +25,12 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const { projects, now } = await loadLibrary();
   const band = (await searchParams).band;
   const initialBandId = typeof band === "string" && /^[a-z0-9-]{1,64}$/.test(band) ? band : undefined;
+  // on Vercel without Blob / Postgres the first paint is the setup notice (no library requests)
+  const storage = resolveStorageConfig();
+  const setup = storage.mode === "unconfigured" ? storage.missing : null;
   return (
     <ViewTransition enter={PAGE_TRANSITION} exit={PAGE_TRANSITION} default="none">
-      <HomeClient initialProjects={projects} serverNow={now} initialBandId={initialBandId} />
+      <HomeClient initialProjects={projects} serverNow={now} initialBandId={initialBandId} initialSetup={setup} />
     </ViewTransition>
   );
 }

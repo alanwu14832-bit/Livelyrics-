@@ -6,7 +6,7 @@ import { z } from "zod";
 import { coerceAssets } from "./assets";
 import { FONTS } from "./font-meta";
 import { FONT_IDS, MEDIA_TREATMENTS, SCENE_IDS, type FontId, type MediaTreatment, type SceneId } from "./schema";
-import type { Band, BandBible, BandPaletteColor, LyricPolicyMode } from "./types";
+import type { Band, BandBible, BandPaletteColor, JobState, LyricPolicyMode } from "./types";
 
 /** Band ids: the same shape as project ids (12 lowercase hex chars when generated). */
 export const BAND_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
@@ -162,7 +162,7 @@ export function sanitizeBandName(v: unknown, fallback = "未命名樂團"): stri
 /** band.json -> Band (the folder name is the id). Throws only when the file is not an object. */
 export function coerceBand(raw: unknown, id: string, fallbackTime: string): Band {
   if (!isRecord(raw)) throw new Error("band.json 不是有效的樂團資料");
-  return {
+  const band: Band = {
     id,
     name: sanitizeBandName(raw.name),
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : fallbackTime,
@@ -170,6 +170,17 @@ export function coerceBand(raw: unknown, id: string, fallbackTime: string): Band
     bible: coerceBible(raw.bible),
     assets: coerceAssets(raw.assets).map((a) => ({ ...a, scope: "band" as const })),
   };
+  const job = coerceJob(raw.bibleJob);
+  if (job) band.bibleJob = job;
+  return band;
+}
+
+/** A recorded long job (cloud mode: bible / show arc generation), or undefined. */
+export function coerceJob(v: unknown): JobState | undefined {
+  if (!isRecord(v) || (v.status !== "running" && v.status !== "error") || typeof v.startedAt !== "string") return undefined;
+  const job: JobState = { status: v.status, startedAt: v.startedAt };
+  if (typeof v.message === "string" && v.message) job.message = v.message.slice(0, 1000);
+  return job;
 }
 
 // ---------------------------------------------------------------------------

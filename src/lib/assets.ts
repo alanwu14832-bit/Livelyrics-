@@ -1,7 +1,7 @@
 // Band media assets: limits and pure validation shared by the upload UI, the API routes and the
 // designer (no Node or DOM APIs here).
 
-import type { Asset, AssetKind } from "./types";
+import type { Asset, AssetKind, BlobRef } from "./types";
 
 export const MAX_ASSET_BYTES = 500 * 1024 * 1024;
 export const MAX_ASSETS_PER_PROJECT = 200;
@@ -89,6 +89,20 @@ export function validateDimensions(raw: { width?: unknown; height?: unknown; dur
   return out;
 }
 
+/** A stored Vercel Blob reference (cloud mode), or undefined when malformed. */
+export function coerceBlobRef(v: unknown): BlobRef | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const { url, pathname } = v as { url?: unknown; pathname?: unknown };
+  if (typeof url !== "string" || typeof pathname !== "string" || !pathname || pathname.length > 1024) return undefined;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return undefined;
+  } catch {
+    return undefined;
+  }
+  return { url, pathname };
+}
+
 /** Stored-asset list from project.json, dropping anything malformed (old / hand-edited files). */
 export function coerceAssets(raw: unknown): Asset[] {
   if (!Array.isArray(raw)) return [];
@@ -118,6 +132,8 @@ export function coerceAssets(raw: unknown): Asset[] {
     if (note) asset.note = note;
     const tags = sanitizeTags(a.tags);
     if (tags) asset.tags = tags;
+    const blob = coerceBlobRef(a.blob);
+    if (blob) asset.blob = blob;
     seen.add(a.id);
     out.push(asset);
   }

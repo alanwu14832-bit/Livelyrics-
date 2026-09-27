@@ -1,6 +1,7 @@
 import { applyShowPatch } from "@/lib/show";
 import { bandProjects, deleteShow, getBand, getShow, updateShow } from "@/lib/server/band-storage";
 import { handle, HttpError, json, readJson, requireShowId } from "@/lib/server/http";
+import { withLiveShowJob } from "@/lib/server/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
   const id = requireShowId((await ctx.params).id);
   const show = await getShow(id);
   if (!show) throw new HttpError(404, "找不到演出");
-  return json(show);
+  return json(withLiveShowJob(show));
 });
 
 /** { name?, date?, venue?, notes?, items?, output?, arc? } -> Show */
@@ -29,7 +30,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     const r = applyShowPatch(current, body, ctxIds);
     if (r.ok) return r.show;
   });
-  return json(saved);
+  return json(withLiveShowJob(saved));
 });
 
 export const DELETE = handle(async (_req: Request, ctx: Ctx) => {

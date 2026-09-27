@@ -41,13 +41,44 @@ export function modelName(): string {
   return process.env.LIVELYRICS_MODEL?.trim() || "claude-opus-5";
 }
 
-/** Injection points for tests. */
+/** Injection points for tests, and the time budget of a serverless request. */
 export interface DesignerDeps {
   transport?: ClaudeTransport;
   /** override credential detection */
   configured?: boolean;
   model?: string;
   now?: () => Date;
+  /**
+   * Give Claude at most this long for the whole call (continuations included); when it runs out
+   * the offline designer takes over, like any other Claude failure. Cloud mode sets it so a step
+   * always finishes (and saves) inside the platform's 300 s limit.
+   */
+  timeoutMs?: number;
+}
+
+/** Claude did not finish inside DesignerDeps.timeoutMs (not a cancellation: the offline designer takes over). */
+export class ClaudeTimeoutError extends Error {
+  constructor(seconds: number) {
+    super(`Claude 超過 ${seconds} 秒還沒完成（雲端每個步驟最多 300 秒）`);
+    this.name = "ClaudeTimeoutError";
+  }
+}
+
+/** A transport that gives up at `deadline` (epoch ms) with ClaudeTimeoutError. */
+export function withDeadline(transport: ClaudeTransport, deadline: number, seconds: number): ClaudeTransport {
+  return {
+    async stream(params, handlers, signal) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new ClaudeTimeoutError(seconds);
+      const timer = AbortSignal.timeout(remaining);
+      try {
+        return await transport.stream(params, handlers, signal ? AbortSignal.any([signal, timer]) : timer);
+      } catch (err) {
+        if (timer.aborted && !signal?.aborted) throw new ClaudeTimeoutError(seconds);
+        throw err;
+      }
+    },
+  };
 }
 
 type SafeCallbacks = ReturnType<typeof safeCallbacks>;
@@ -72,10 +103,16 @@ function defaultTransport(): ClaudeTransport {
 }
 
 function resolveDeps(deps: DesignerDeps) {
+  const budget = deps.timeoutMs != null && deps.timeoutMs > 0 ? deps.timeoutMs : null;
+  // the deadline starts with the designer call, so continuations share one budget
+  const deadline = budget != null ? Date.now() + budget : null;
   return {
     configured: deps.configured ?? isClaudeConfigured(),
     model: deps.model ?? modelName(),
-    transport: () => deps.transport ?? defaultTransport(),
+    transport: () => {
+      const t = deps.transport ?? defaultTransport();
+      return deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
+    },
     now: deps.now,
   };
 }
