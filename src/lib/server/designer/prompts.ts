@@ -4,7 +4,9 @@
 
 import { formatBytes, formatDuration } from "@/lib/assets";
 import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_BLENDS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
-import type { Asset, DesignPlan, Research, SongMeta } from "@/lib/types";
+import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
+import { ARC_ROLE_INFO, PALETTE_EMPHASIS_INFO } from "@/lib/show";
+import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta } from "@/lib/types";
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
@@ -114,6 +116,47 @@ function lyricsBlock(input: DesignerInput, st: SongStructure): string {
 }
 
 // ---------------------------------------------------------------------------
+// band bible and show arc
+// ---------------------------------------------------------------------------
+
+/** The band's visual bible as a hard constraint (null when the band has none). */
+export function bibleBlock(bible: BandBible | null | undefined, bandName?: string): string | null {
+  if (!bible || !bibleHasContent(bible)) return null;
+  const rows: string[] = [];
+  if (bandName?.trim()) rows.push(`- 樂團：${clip(bandName, 60)}`);
+  if (bible.summary.trim()) rows.push(`- 世界觀與氣質：\n${bible.summary.trim().slice(0, 3000).split("\n").map((l) => `  ${l}`).join("\n")}`);
+  if (bible.palette.length) rows.push(`- 樂團色盤（配色必須從這裡取，可調整明暗但不換色相）：${bible.palette.map((c) => `${c.hex}（${c.role}，${c.name}）`).join("、")}`);
+  rows.push(`- 字體：CJK ${bible.fonts.cjkFont}（${FONT_CATALOG[bible.fonts.cjkFont]?.label ?? ""}），拉丁 ${bible.fonts.latinFont}（${FONT_CATALOG[bible.fonts.latinFont]?.label ?? ""}），字重 ${bible.fonts.weight}`);
+  if (bible.motifs.length) rows.push(`- 樂團母題：${bible.motifs.join("、")}`);
+  if (bible.sceneAffinity.length) rows.push(`- 偏好場景：${bible.sceneAffinity.map((id) => `${id}（${SCENES[id].label}）`).join("、")}`);
+  if (bible.sceneAvoid.length) rows.push(`- 避免場景（不要使用）：${bible.sceneAvoid.map((id) => `${id}（${SCENES[id].label}）`).join("、")}`);
+  if (bible.treatments.length) rows.push(`- 素材偏好處理：${bible.treatments.map((id) => `${id}（${MEDIA_TREATMENT_INFO[id].label}）`).join("、")}`);
+  rows.push(`- 歌詞政策：${LYRIC_POLICY_INFO[bible.lyricPolicy.mode].label}（${LYRIC_POLICY_INFO[bible.lyricPolicy.mode].description}）${bible.lyricPolicy.note ? `；補充：${clip(bible.lyricPolicy.note, 300)}` : ""}`);
+  if (bible.dos.length) rows.push(`- 要：${bible.dos.join("；")}`);
+  if (bible.donts.length) rows.push(`- 不要：${bible.donts.join("；")}`);
+  return rows.join("\n");
+}
+
+const BIBLE_RULE =
+  "這是樂團所有歌共用的視覺聖經，是硬性規範：這首歌必須活在同一個世界裡（同一套色盤、字體、母題與禁忌）。只有在這首歌真的需要時才偏離，並且在 designerNotes 與該段 rationale 寫明偏離的理由。";
+
+/** The song's place in the show arc (null without one). */
+export function arcBlock(arc: SongArcDirective | null | undefined): string | null {
+  if (!arc) return null;
+  return [
+    `- 演出：「${clip(arc.showName, 60)}」，第 ${arc.position + 1} 首（共 ${arc.total} 首）`,
+    `- 角色：${ARC_ROLE_INFO[arc.role].label}；目標能量 ${arc.energy.toFixed(2)}（0 到 1，相對於整場）`,
+    `- 配色重心：${PALETTE_EMPHASIS_INFO[arc.emphasis].label}（${PALETTE_EMPHASIS_INFO[arc.emphasis].description}）`,
+    arc.note ? `- 弧線說明：${clip(arc.note, 400)}` : "",
+    arc.role === "finale" || arc.role === "encore"
+      ? "- 這首歌可以用整場最大的畫面（tunnel、最高強度、最滿的素材）。"
+      : "- 整場最大的畫面（tunnel、最高強度）留給壓軸，這首歌的最高點要比壓軸收斂。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // research
 // ---------------------------------------------------------------------------
 
@@ -158,6 +201,7 @@ export function lyricExcerpt(input: DesignerInput, st: SongStructure): string {
 }
 
 export function buildResearchPrompt(input: DesignerInput, st: SongStructure): string {
+  const bible = bibleBlock(input.bible, input.bandName);
   return [
     "# 歌曲",
     songBlock(input, st.duration),
@@ -167,6 +211,9 @@ export function buildResearchPrompt(input: DesignerInput, st: SongStructure): st
     "",
     "# 音訊分析（瀏覽器自動分析，可能有誤差）",
     analysisSummary(input, st),
+    ...(bible
+      ? ["", "# 樂團視覺聖經（已確立的樂團世界觀）", BIBLE_RULE, "研究時以它為前提：「設計方向建議」要說明這首歌如何在這個世界裡找到自己的位置，而不是另起爐灶。", bible]
+      : []),
     "",
     "請開始研究，然後依規定的五個標題寫出研究簡報。",
   ].join("\n");
@@ -232,7 +279,8 @@ export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，�
    - 永遠不和歌詞搶：該段有歌詞時用 mask-lyrics、blur-glow，或把 opacity 降到 0.35–0.6；hidden 的器樂段才讓素材滿版 0.8–1。
    - 不是每段都要放素材：留一些段落只用場景，讓素材出現時有份量。素材的 note 與 tags 是操作員的說明（例如哪張是專輯封面），請依此選用。
    - 沒有提供素材時，每段的 media 一律是 null。
-7. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
+7. 樂團視覺聖經：如果提供了「樂團視覺聖經」，它是這個樂團所有歌共用的世界觀，屬於硬性規範：配色取自聖經色盤、字體用聖經字體、避免的場景不用、遵守歌詞政策與禁忌。偏離時要在 rationale 寫出理由。如果提供了「整場弧線中的位置」，依它調整這首歌的整體強度與配色重心。
+8. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
 
 ${catalogBlock()}
 
@@ -304,6 +352,10 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
     "# 樂團素材（id｜種類｜名稱｜尺寸｜…）",
     assetsBlock(req.assets),
   ];
+  const bible = bibleBlock(req.bible, req.bandName);
+  if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", BIBLE_RULE, bible);
+  const arc = arcBlock(req.arc);
+  if (arc) parts.push("", "# 整場弧線中的位置", "這首歌是一整場演出的一部分，依它在弧線中的位置調整強度與配色重心：", arc);
   const instruction = req.instruction?.trim();
   if (req.previous && instruction) {
     parts.push(
