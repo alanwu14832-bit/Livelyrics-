@@ -113,3 +113,14 @@ export function parseRange(header: string | null, size: number): RangeResult {
   if (start > end || start >= size) return { kind: "unsatisfiable" };
   return { kind: "partial", start, end: Math.min(end, size - 1) };
 }
+
+/** Band and show ids share the project id shape (no "." or "/"). */
+export function requireBandId(id: string | undefined): string {
+  if (!isValidProjectId(id)) throw new HttpError(400, "無效的樂團 ID");
+  return id;
+}
+
+export function requireShowId(id: string | undefined): string {
+  if (!isValidProjectId(id)) throw new HttpError(400, "無效的演出 ID");
+  return id;
+}
