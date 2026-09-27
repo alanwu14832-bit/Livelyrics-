@@ -5,8 +5,8 @@ import type { AudioAnalysis } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Claude may think for a while; the route itself has no timeout of its own
-export const maxDuration = 600;
+// Claude may think for a while. 300 s is the Vercel Hobby ceiling; a larger value fails the deploy.
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
