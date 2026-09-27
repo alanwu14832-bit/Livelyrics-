@@ -1,6 +1,7 @@
 import { handle, HttpError, readJson, requireProjectId } from "@/lib/server/http";
 import { attachToRun, normalizeSteps, runPipeline, withLiveStatus } from "@/lib/server/pipeline";
 import { eventListStream, pipelineEventStream, SSE_HEADERS } from "@/lib/server/sse";
+import { withBandAssets } from "@/lib/server/band-storage";
 import { getProject } from "@/lib/server/storage";
 import type { PipelineEvent, Project } from "@/lib/types";
 import { parseProcessRequest } from "@/lib/server/validate";
@@ -24,8 +25,9 @@ function storedOutcome(project: Project): PipelineEvent {
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const request = parseProcessRequest(await readJson(req, MAX_BODY_BYTES, {}));
-  const project = await getProject(id);
-  if (!project) throw new HttpError(404, "找不到專案");
+  const stored = await getProject(id);
+  if (!stored) throw new HttpError(404, "找不到專案");
+  const project = await withBandAssets(stored);
 
   if (request.attachOnly) {
     const watched = attachToRun(id);

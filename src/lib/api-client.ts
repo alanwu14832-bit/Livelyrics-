@@ -1,7 +1,27 @@
 // Typed browser-side wrappers for the local API routes (src/app/api/**).
 // The route handlers must implement exactly these shapes.
 
-import type { Asset, AssetKind, AudioAnalysis, DesignPlan, Lyrics, PipelineEvent, Project, ProjectOutput, ProjectSummary, SongMeta } from "./types";
+import { bandAssetUrl, projectAssetUrl } from "./asset-scope";
+import type { BiblePatch } from "./band";
+import type {
+  Asset,
+  AssetKind,
+  AudioAnalysis,
+  Band,
+  BandSummary,
+  DesignPlan,
+  Lyrics,
+  PipelineEvent,
+  Project,
+  ProjectOutput,
+  ProjectSummary,
+  SetItem,
+  Show,
+  ShowArc,
+  ShowSummary,
+  SongArcDirective,
+  SongMeta,
+} from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -200,4 +220,6 @@ export interface ProcessRequest {
    * ready) or `error` (never processed / last run failed). Other fields are ignored.
    */
   attachOnly?: boolean;
+  /** the song's place in a show arc: the designer follows it (整場弧線) */
+  arc?: SongArcDirective;
 }

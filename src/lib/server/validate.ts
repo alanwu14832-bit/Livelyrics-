@@ -307,6 +307,17 @@ const ProcessRequestSchema = z.object({
   lyricsText: z.string().max(500_000).optional(),
   instruction: z.string().max(4000).optional(),
   attachOnly: z.boolean().optional(),
+  arc: z
+    .object({
+      showName: z.string().max(200),
+      position: z.number().int().min(0).max(200),
+      total: z.number().int().min(1).max(200),
+      role: z.enum(["opener", "build", "peak", "breather", "finale", "encore"]),
+      energy: z.number().min(0).max(1),
+      emphasis: z.enum(["shadow", "primary", "accent", "highlight"]),
+      note: z.string().max(1000),
+    })
+    .optional(),
 });
 
 export function parseProcessRequest(raw: unknown): ProcessRequest {
@@ -318,5 +329,6 @@ export function parseProcessRequest(raw: unknown): ProcessRequest {
   if (r.steps && r.steps.length) out.steps = [...new Set(r.steps)];
   if (r.lyricsText && r.lyricsText.trim()) out.lyricsText = r.lyricsText;
   if (r.instruction && r.instruction.trim()) out.instruction = r.instruction.trim();
+  if (r.arc) out.arc = { ...r.arc, showName: clean(r.arc.showName, 80), note: r.arc.note.trim().slice(0, 400) };
   return out;
 }

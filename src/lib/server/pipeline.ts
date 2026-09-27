@@ -9,7 +9,9 @@ import { remapPlanLines } from "@/lib/lyrics/remap";
 import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
 import type { DesignerCallbacks } from "@/lib/server/designer";
-import type { Lyrics, PipelineEvent, PipelineStepId, Project } from "@/lib/types";
+import { stageAssets } from "@/lib/asset-scope";
+import type { Asset, BandBible, Lyrics, PipelineEvent, PipelineStepId, Project } from "@/lib/types";
+import { getBand, withBandAssets } from "./band-storage";
 import { findBestLyrics } from "./lrclib";
 import { getProject, updateProject } from "./storage";
 
@@ -78,7 +80,7 @@ const registry: Registry = (g.__livelyricsPipeline ??= { runs: new Map() });
 // ---------------------------------------------------------------------------
 
 function requestKey(r: ProcessRequest): string {
-  return JSON.stringify([normalizeSteps(r.steps), r.lyricsText ?? "", r.instruction ?? ""]);
+  return JSON.stringify([normalizeSteps(r.steps), r.lyricsText ?? "", r.instruction ?? "", r.arc ?? null]);
 }
 
 export function normalizeSteps(steps: ProcessRequest["steps"]): PipelineStep[] {
@@ -311,7 +313,7 @@ async function execute(run: RunInternal): Promise<void> {
       p.status = "ready";
       delete p.error;
     });
-    finish(run, "done", { type: "done", project });
+    finish(run, "done", { type: "done", project: await withBandAssets(project).catch(() => project) });
   } catch (err) {
     const message = err instanceof StepFailure ? `${STEP_LABEL[err.step]}步驟失敗：${err.message}` : describeError(err);
     if (!run.discarded) {
@@ -356,8 +358,9 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
     case "lyrics":
       return lyricsStep(run, project, signal);
     case "research": {
+      const band = await bandContext(project);
       const research = await raceAbort(
-        designer.researchSong({ meta: project.meta, lyrics: project.lyrics, analysis: project.analysis }, designerCallbacks(run, "research", signal)),
+        designer.researchSong({ meta: project.meta, lyrics: project.lyrics, analysis: project.analysis, ...band }, designerCallbacks(run, "research", signal)),
         signal,
       );
       if (!research || typeof research.brief !== "string") throw new Error("研究結果格式不正確");
@@ -369,16 +372,21 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       return { project: saved, message: `研究完成：${via}${sources ? `，${sources} 個來源` : ""}` };
     }
     case "design": {
+      const band = await bandContext(project);
       const plan = await raceAbort(
         designer.designSong(
           {
             meta: project.meta,
             lyrics: project.lyrics,
             analysis: project.analysis,
-            assets: project.assets ?? [],
+            // the song's own material and the band's shared library
+            assets: stageAssets({ assets: project.assets ?? [], bandAssets: band.bandAssets }),
+            bible: band.bible,
+            bandName: band.bandName,
             research: project.research,
             instruction: run.request.instruction,
             previous: project.plan,
+            arc: run.request.arc ?? null,
           },
           designerCallbacks(run, "design", signal),
         ),
@@ -395,6 +403,14 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       };
     }
   }
+}
+
+/** The band's bible and library for a project's research / design (empty without a band). */
+async function bandContext(project: Project): Promise<{ bible: BandBible | null; bandName?: string; bandAssets: Asset[] }> {
+  if (!project.bandId) return { bible: null, bandAssets: [] };
+  const band = await getBand(project.bandId).catch(() => null);
+  if (!band) return { bible: null, bandAssets: [] };
+  return { bible: band.bible, bandName: band.name, bandAssets: band.assets };
 }
 
 async function lyricsStep(run: RunInternal, project: Project, signal: AbortSignal): Promise<StepResult> {
