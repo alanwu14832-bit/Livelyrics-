@@ -8,15 +8,18 @@ import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
 import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
-import { StageRenderer, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
 import { placementBox, writingModeFor } from "@/lib/stage/lyrics/layout";
+import { BLEND_CODE, TREATMENT_CODE, beatAt, framing, hashId, resolveMediaFrame, videoTimeAt, type BeatInfo, type MediaLayerState } from "@/lib/stage/media/model";
+import { DEFAULT_OUTPUT, outputAspect, renderSize } from "@/lib/output";
 import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { stageTime, type StageState, type StageStore } from "@/lib/stage/protocol";
 import { clamp, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
 import { sectionIndexForLine } from "@/lib/timeline";
-import type { Project, SceneId } from "@/lib/types";
+import type { Asset, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
+import { MediaSources } from "./MediaSources";
 import { buildGuides, buildTestPattern, type GuidesHandle, type TestPatternHandle } from "./overlays";
 
 export interface StageStats {
@@ -37,8 +40,13 @@ export interface StageEngineOptions {
   forceWebGL1?: boolean;
 }
 
-/** Keep the internal render size within ~QHD; lyrics are DOM and stay crisp regardless. */
+/**
+ * Keep the internal render size within ~QHD; lyrics are DOM and stay crisp regardless. A larger
+ * output canvas (4K, a 3840 × 1080 wall) raises the cap up to that canvas so the projection
+ * window can render it 1:1; adaptive quality still steps down when frames drop.
+ */
 const MAX_PIXELS = 2560 * 1440;
+const MAX_OUTPUT_PIXELS = 3840 * 2160;
 const BLACKOUT_SECONDS = 0.4;
 
 export class StageEngine {
@@ -90,6 +98,19 @@ export class StageEngine {
   private audio: StageAudioFrame | null = null;
   private beatN = 0;
   private lastBeat = 0;
+  private media = new MediaSources();
+  private assetMap = new Map<string, Asset>();
+  private assetsRef: unknown = undefined;
+  private mediaKey = "";
+  private lyricAmt = 0;
+  private frozenAt: number | null = null;
+  private lastMediaT: number | null = null;
+  private lastMediaSection: number | null = null;
+  private fadeOk = false;
+  private mediaLayers = 0;
+  private textBox: [number, number, number, number] | null = null;
+  private textBoxAt = 0;
+  private output: ProjectOutput = DEFAULT_OUTPUT;
 
   constructor(
     private readonly root: HTMLElement,
@@ -146,6 +167,10 @@ export class StageEngine {
       this.typographyPlan = plan;
       this.typography = resolveTypography(plan);
     }
+    const output = project.output && project.output.width > 0 && project.output.height > 0 ? project.output : DEFAULT_OUTPUT;
+    if (output.width !== this.output.width || output.height !== this.output.height) this.sizeDirty = true;
+    this.output = output;
+    this.syncMedia(project);
     const svg = plan?.keyVisual?.motifSvg ?? "";
     const motifKey = `${project.id}|${svg}`;
     if (motifKey !== this.motifKey) {
@@ -155,6 +180,23 @@ export class StageEngine {
         if (token === this.motifToken && !this.destroyed) this.renderer?.setMotif(canvas);
       });
     }
+  }
+
+  /** Load the band media the plan uses (and keep the asset lookup current). */
+  private syncMedia(project: Project) {
+    const assets = Array.isArray(project.assets) ? project.assets : [];
+    const used = new Set<string>();
+    for (const s of project.plan?.sections ?? []) if (s?.media?.assetId) used.add(s.media.assetId);
+    const key = `${project.id}|${assets.map((a) => `${a.id}:${a.file}`).join(",")}|${[...used].sort().join(",")}`;
+    if (assets !== this.assetsRef) {
+      this.assetsRef = assets;
+      this.assetMap = new Map(assets.map((a) => [a.id, a]));
+    }
+    if (key === this.mediaKey) return;
+    this.mediaKey = key;
+    this.media.setAssets(project.id, assets, used);
+    this.renderer?.pruneMedia(new Set(assets.map((a) => a.id)));
+    if (used.size) this.renderer?.prewarmMedia();
   }
 
   setStore(store: StageStore) {
@@ -224,16 +266,12 @@ export class StageEngine {
     this.cssW = Math.max(1, rect.width);
     this.cssH = Math.max(1, rect.height);
     this.dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
-    let w = this.cssW * this.dpr * this.renderScale * this.quality;
-    let h = this.cssH * this.dpr * this.renderScale * this.quality;
-    const px = w * h;
-    if (px > MAX_PIXELS) {
-      const k = Math.sqrt(MAX_PIXELS / px);
-      w *= k;
-      h *= k;
-    }
-    this.renderer?.setSize(Math.round(w), Math.round(h));
-    this.testPattern.setSize(Math.round(this.cssW * (window.devicePixelRatio || 1)), Math.round(this.cssH * (window.devicePixelRatio || 1)));
+    const out = this.output;
+    const cap = Math.min(MAX_OUTPUT_PIXELS, Math.max(MAX_PIXELS, out.width * out.height));
+    const [w, h] = renderSize(this.cssW, this.cssH, this.dpr * this.renderScale * this.quality, out, cap);
+    this.renderer?.setSize(w, h);
+    this.testPattern.setSize(out.width, out.height);
+    this.guides.setCanvas(out.lyricSafe, out.width, out.height);
     this.lyrics.invalidateFit();
   }
 
@@ -286,6 +324,117 @@ export class StageEngine {
       this.slowSince = 0;
       this.fastSince = 0;
     }
+  }
+
+  /** The deterministic beat grid, or the live/tap beat when the song has no analysis grid. */
+  private beatFor(project: Project, t: number, audio: StageAudioFrame): BeatInfo {
+    const b = beatAt(project.analysis, t);
+    if (b) return b;
+    return { index: this.beatN, phase: audio.beat, start: t - audio.beat * 0.5 };
+  }
+
+  private mediaLayer(layer: MediaLayerState, t: number, beat: BeatInfo, playing: boolean, now: number): MediaLayerDraw | null {
+    const { asset, media } = layer;
+    const seed = hashId(`${asset.id}|${layer.sectionIndex}`) % 100000;
+    const isVideo = asset.kind === "video" || asset.mimeType.startsWith("video/");
+    const wanted = isVideo
+      ? videoTimeAt({ treatment: media.treatment, t, sectionStart: layer.sectionStart, duration: asset.duration ?? 0, beat, seed })
+      : 0;
+    const src = this.media.frame(asset, now, isVideo ? { wanted, playing } : undefined);
+    if (!src.source) return null;
+    const span = Math.max(0.001, layer.sectionEnd - layer.sectionStart);
+    // beat index relative to the section start so every section opens on the same framing
+    const uv = framing({
+      treatment: media.treatment,
+      fit: media.fit,
+      canvasAspect: outputAspect(this.output),
+      texAspect: src.width / Math.max(1, src.height),
+      progress: (t - layer.sectionStart) / span,
+      beatIndex: beat.index,
+      seed,
+    });
+    if (asset.kind === "logo") {
+      // a logo sits in the middle at a readable size, never edge to edge
+      const k = 1 / 0.46;
+      uv.sx *= k;
+      uv.sy *= k;
+    }
+    const downbeat = ((beat.index % 4) + 4) % 4 === 0;
+    const punch = media.treatment === "beat-cut" ? Math.exp(-beat.phase * 6) * (downbeat ? 1 : 0.55) : 0;
+    return {
+      key: asset.id,
+      source: src.source,
+      version: src.version,
+      hold: src.hold,
+      width: src.width,
+      height: src.height,
+      weight: clamp(layer.weight * media.opacity, 0, 1, 0),
+      treatment: TREATMENT_CODE[media.treatment] ?? 0,
+      blend: BLEND_CODE[media.blend] ?? 0,
+      contain: media.fit === "contain",
+      uv,
+      colorway: [this.color(layer.colorway[0]), this.color(layer.colorway[1]), this.color(layer.colorway[2])],
+      punch,
+      seed: (seed % 997) / 7,
+    };
+  }
+
+  private mediaDraw(project: Project, state: StageState, t: number, look: StageLook, lyricLook: StageLook, audio: StageAudioFrame, now: number, dt: number): MediaDraw | null {
+    const frozen = !!state.overrides?.freeze;
+    if (frozen && this.frozenAt == null) this.frozenAt = t;
+    if (!frozen) this.frozenAt = null;
+    const mt = frozen && this.frozenAt != null ? this.frozenAt : t;
+    // lyric presence for mask-lyrics: a line on screen that is not hidden
+    const lines = project.lyrics?.lines ?? [];
+    const idx = state.lineIndex;
+    const line = typeof idx === "number" ? lines[idx] : undefined;
+    const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, state.overrides?.lyricStyle).style : "hidden";
+    const showing = !!line && !!line.text?.trim() && style !== "hidden" && state.overrides?.lyricsVisible !== false;
+    const target = showing ? 1 : 0;
+    this.lyricAmt += (target - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
+
+    // cross-fade only while the song plays continuously through a boundary; a paused stage or a
+    // jump (seek, cue, section click) shows the section's media at once
+    const continuous = !!state.playing && !frozen && this.lastMediaT != null && mt >= this.lastMediaT - 0.05 && mt - this.lastMediaT < 0.5;
+    if (!continuous) this.fadeOk = false;
+    if (look.sectionIndex !== this.lastMediaSection) {
+      this.lastMediaSection = look.sectionIndex;
+      this.fadeOk = continuous;
+    }
+    this.lastMediaT = mt;
+    const frame = resolveMediaFrame(project.plan, this.assetMap, look.sectionIndex, mt, look.colorway, this.fadeOk);
+    if (!frame.current && !frame.previous) {
+      this.mediaLayers = 0;
+      this.media.idle(now);
+      return null;
+    }
+    const beat = this.beatFor(project, mt, audio);
+    const playing = !!state.playing && !frozen;
+    const layers: MediaLayerDraw[] = [];
+    for (const l of [frame.current, frame.previous]) {
+      if (!l) continue;
+      const d = this.mediaLayer(l, mt, beat, playing, now);
+      if (d) layers.push(d);
+    }
+    this.media.idle(now);
+    this.mediaLayers = layers.length;
+    if (!layers.length) return null;
+    // the measured text (5 times a second) for mask-lyrics, else the placement box
+    if (layers.some((l) => l.treatment === TREATMENT_CODE["mask-lyrics"]) && now - this.textBoxAt > 200) {
+      this.textBoxAt = now;
+      const b = this.lyrics.textBounds();
+      if (b) this.textBox = b;
+    }
+    let lyricBox: [number, number, number, number];
+    if (this.textBox && showing) {
+      const [x0, y0, x1, y1] = this.textBox;
+      lyricBox = [x0, 1 - y1, x1, 1 - y0];
+    } else {
+      const mode = writingModeFor(style === "hidden" ? lyricLook.lyricStyle : style, lyricLook.placement);
+      const box = placementBox(lyricLook.placement, mode, this.output.lyricSafe, outputAspect(this.output));
+      lyricBox = [box.left / 100, 1 - (box.top + box.height) / 100, (box.left + box.width) / 100, 1 - box.top / 100];
+    }
+    return { layers, time: mt, lyricBox, lyricAmount: this.lyricAmt };
   }
 
   private slotDraw(slot: SceneSlot, audio: StageAudioFrame): SceneDraw {
@@ -382,18 +531,30 @@ export class StageEngine {
     const b = this.blackAmt;
     this.overlay.style.opacity = String(Math.round(b * b * (3 - 2 * b) * 1000) / 1000);
 
-    // scene
+    // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
+    const lyricLook = this.lyricLookFor(project, state, t, look);
+
+    // scene + band media
     let backend: StageStats["backend"] = "fallback";
     const r = this.renderer;
     if (r && !r.lost) {
       backend = r.kind;
       r.idle();
       if (this.blackAmt < 1) {
+        let media: MediaDraw | null = null;
+        try {
+          media = this.mediaDraw(project, state, t, look, lyricLook, audio, now, dt);
+        } catch (e) {
+          // a media problem never takes the scene down
+          this.errors++;
+          if (this.errors <= 3) console.error("[Livelyrics] 素材圖層錯誤：", e);
+        }
         const ok = r.render({
           current: this.slotDraw(df.current, audio),
           previous: df.previous ? this.slotDraw(df.previous, audio) : null,
           transition: df.transition,
           clock: this.clock,
+          media,
         });
         if (!ok) backend = "lost";
       }
@@ -401,8 +562,6 @@ export class StageEngine {
     this.updateFallback(look, backend === "fallback" || backend === "lost");
     this.canvas.style.visibility = backend === "fallback" || backend === "lost" ? "hidden" : "visible";
 
-    // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
-    const lyricLook = this.lyricLookFor(project, state, t, look);
     this.lyrics.update({
       project,
       state,
@@ -413,6 +572,8 @@ export class StageEngine {
       typography: this.typography,
       pulse: audio.pulse * look.params.reactivity,
       visible: ov?.lyricsVisible !== false,
+      aspect: outputAspect(this.output),
+      safe: this.output.lyricSafe,
     });
 
     // overlays
@@ -425,7 +586,9 @@ export class StageEngine {
       const idx = state.lineIndex;
       const line = typeof idx === "number" ? lines[idx] : undefined;
       const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, ov?.lyricStyle).style : lyricLook.lyricStyle;
-      this.guides.setPlacement(style === "hidden" ? null : placementBox(lyricLook.placement, writingModeFor(style, lyricLook.placement)));
+      this.guides.setPlacement(
+        style === "hidden" ? null : placementBox(lyricLook.placement, writingModeFor(style, lyricLook.placement), this.output.lyricSafe, outputAspect(this.output)),
+      );
     }
 
     // stats
@@ -437,6 +600,8 @@ export class StageEngine {
       this.statsAt = now;
       const [w, h] = r?.size ?? [0, 0];
       this.root.dataset.stageBackend = backend;
+      // diagnostics (e2e): how many media layers the last frame drew
+      this.root.dataset.stageMedia = String(this.mediaLayers);
       try {
         this.onStats?.({ fps, backend, width: w, height: h, quality: this.quality, scene: look.scene, sectionIndex: look.sectionIndex });
       } catch {
@@ -453,6 +618,7 @@ export class StageEngine {
     document.fonts?.removeEventListener?.("loadingdone", this.onFontsLoaded);
     this.renderer?.dispose();
     this.renderer = null;
+    this.media.destroy();
     this.lyrics.destroy();
     this.canvas.remove();
     this.fallback.remove();

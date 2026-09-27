@@ -38,6 +38,8 @@ export interface MultipartOptions {
   maxFields?: number;
   /** creates the temp file path for the file part */
   tempPath: () => Promise<string>;
+  /** what the file is called in error messages (default 音檔) */
+  fileLabel?: string;
 }
 
 const HEAD_BYTES = 64;
@@ -130,11 +132,11 @@ function fieldSink(name: string, limit: number, onDone: (value: string) => void)
 
 const discardSink: Sink = { async write() {}, async finish() {}, async abort() {} };
 
-function fileSink(path: string, limit: number, onDone: (size: number, head: Uint8Array) => void): Sink {
+function fileSink(path: string, limit: number, label: string, onDone: (size: number, head: Uint8Array) => void): Sink {
   const stream: WriteStream = createWriteStream(path, { flags: "wx" });
   let streamError: Error | null = null;
   stream.on("error", (err) => (streamError = err));
-  const failed = () => streamError ?? (stream.destroyed ? new Error("寫入暫存音檔失敗") : null);
+  const failed = () => streamError ?? (stream.destroyed ? new Error(`寫入暫存${label}失敗`) : null);
   let size = 0;
   const head = Buffer.alloc(HEAD_BYTES);
   let headLen = 0;
@@ -144,7 +146,7 @@ function fileSink(path: string, limit: number, onDone: (size: number, head: Uint
       const err = failed();
       if (err) throw err;
       size += chunk.length;
-      if (size > limit) throw new MultipartError(413, `音檔太大（上限 ${Math.round(limit / 1024 / 1024)} MB）`);
+      if (size > limit) throw new MultipartError(413, `${label}太大（上限 ${Math.round(limit / 1024 / 1024)} MB）`);
       if (headLen < HEAD_BYTES) headLen += chunk.copy(head, headLen, 0, Math.min(chunk.length, HEAD_BYTES - headLen));
       // events.once rejects if "error" fires while waiting and removes its listeners either way
       if (!stream.write(chunk)) await once(stream, "drain");
@@ -203,7 +205,7 @@ export async function parseMultipart(
       const path = await options.tempPath();
       filePath = path;
       const fileName = headers.fileName;
-      return fileSink(path, options.maxFileBytes, (size, head) => {
+      return fileSink(path, options.maxFileBytes, options.fileLabel ?? "音檔", (size, head) => {
         file = { field: headers.name, fileName, contentType: headers.contentType, size, path, head };
       });
     }

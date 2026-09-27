@@ -1,9 +1,12 @@
 // Placement boxes and per-style typographic metrics for the lyric layer.
-// All boxes live inside the 90 % title-safe area; sizes are in `cqh`
+// Boxes are designed inside the default 90 % title-safe area and mapped into the
+// project's lyric safe area (Project.output.lyricSafe); sizes are in `cqh`
 // (percent of the StageView's height), so the console preview and the
-// projector scale identically.
+// projector scale identically. `adaptMetrics` re-fits the per-style metrics to
+// extreme canvases (32:9 LED strips, 9:16 portrait screens).
 
-import type { LyricPlacement, LyricStyleId, SceneId } from "../../types";
+import type { LyricPlacement, LyricSafeArea, LyricStyleId, SceneId } from "../../types";
+import { DEFAULT_LYRIC_SAFE, safeRectPercent } from "../../output";
 
 /** Fraction of the stage used by the title-safe area (lyrics never leave it). */
 export const TITLE_SAFE = 0.9;
@@ -40,11 +43,7 @@ export function writingModeFor(style: LyricStyleId, placement: LyricPlacement): 
   return style === "vertical" || placement === "vertical-right" || placement === "vertical-left" ? "vertical" : "horizontal";
 }
 
-/**
- * Box for a placement. Vertical text in a horizontal band makes no sense, so the
- * "vertical" style maps horizontal placements onto the nearest vertical column.
- */
-export function placementBox(placement: LyricPlacement, mode: WritingMode): PlacementBox {
+function designBox(placement: LyricPlacement, mode: WritingMode): PlacementBox {
   if (mode === "vertical") {
     switch (placement) {
       case "center":
@@ -57,6 +56,37 @@ export function placementBox(placement: LyricPlacement, mode: WritingMode): Plac
     }
   }
   return BOXES[placement] ?? BOXES.center;
+}
+
+/** The designed boxes assume a 5 % margin on every side (the 90 % title-safe area). */
+const DESIGN_MARGIN = 5;
+const DESIGN_SPAN = 100 - 2 * DESIGN_MARGIN;
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+/**
+ * Box for a placement, in percent of the stage, inside the lyric safe area `safe`
+ * (default: 5 % margins, which reproduces the designed boxes exactly). Vertical text in a
+ * horizontal band makes no sense, so the "vertical" style maps horizontal placements onto
+ * the nearest vertical column. On a portrait canvas the side placements (left / right) span
+ * the full safe width: a half-width column would only fit two or three characters.
+ */
+export function placementBox(placement: LyricPlacement, mode: WritingMode, safe: LyricSafeArea = DEFAULT_LYRIC_SAFE, aspect = 16 / 9): PlacementBox {
+  let box = designBox(placement, mode);
+  if (aspect < 1 && mode === "horizontal" && (placement === "left" || placement === "right")) box = { ...BOXES.center, alignX: box.alignX };
+  if (aspect < 1 && mode === "vertical" && placement !== "center") box = { ...box, left: box.alignX === "end" ? 40 : 6, width: 54 };
+  const sr = safeRectPercent(safe);
+  const mapX = (v: number) => sr.left + ((v - DESIGN_MARGIN) / DESIGN_SPAN) * sr.width;
+  const mapY = (v: number) => sr.top + ((v - DESIGN_MARGIN) / DESIGN_SPAN) * sr.height;
+  const left = mapX(box.left);
+  const top = mapY(box.top);
+  return {
+    left: r3(left),
+    top: r3(top),
+    width: r3(mapX(box.left + box.width) - left),
+    height: r3(mapY(box.top + box.height) - top),
+    alignX: box.alignX,
+    alignY: box.alignY,
+  };
 }
 
 export interface StyleMetrics {
@@ -90,6 +120,61 @@ export const STYLE_METRICS: Record<LyricStyleId, StyleMetrics> = {
   subtitle: { size: 4.6, maxChars: 22, maxLines: 2, translationScale: 0.72, showNext: false, scrim: 0.7, weightDelta: -100, trackingDelta: 0.02, leading: 1.35 },
   hidden: { size: 0, maxChars: 16, maxLines: 2, translationScale: 0.5, showNext: false, scrim: 0, weightDelta: 0, trackingDelta: 0, leading: 1.2 },
 };
+
+/** Canvases in this aspect range use the style metrics as designed. */
+export const STANDARD_ASPECT: readonly [number, number] = [1.5, 2.05];
+
+/** Rough advance of one CJK glyph in ems (tracking and the wider Latin fallback included). */
+const GLYPH_EM = 1.06;
+
+/**
+ * Re-fit a style's metrics to the canvas. `aspect` is width / height, `box` the placement box
+ * in percent of the stage. Sizes stay in cqh (relative to the canvas height), so:
+ * - wide strips (aspect ≥ 2.4) get more characters per row (fewer breaks) where the width
+ *   allows, and a size capped so every row still fits the box height;
+ * - narrow / portrait canvases get fewer characters per row and more rows (up to 4, the
+ *   impact style up to 3) instead of shrinking a 16-character row to an unreadable size.
+ * fitBlock() in the lyric layer remains the final safety net.
+ */
+export function adaptMetrics(metrics: StyleMetrics, style: LyricStyleId, box: Pick<PlacementBox, "width" | "height">, aspect: number, mode: WritingMode): StyleMetrics {
+  if (style === "hidden" || metrics.size <= 0 || !(aspect > 0) || !Number.isFinite(aspect)) return metrics;
+  // the metrics were designed on 16:9 (and hold up to ~16:10 and 2:1): leave those canvases exactly as designed
+  if (aspect >= STANDARD_ASPECT[0] && aspect <= STANDARD_ASPECT[1]) return metrics;
+  const s = metrics.size / 100; // font size in canvas heights
+  const boxW = (box.width / 100) * aspect; // box width in canvas heights
+  const boxH = box.height / 100;
+  const totalChars = metrics.maxChars * metrics.maxLines;
+  if (mode === "vertical") {
+    // columns run down the box height: chars per column from the height, columns across the width
+    const perCol = Math.max(3, Math.floor(boxH / (s * GLYPH_EM)));
+    const cols = Math.max(1, Math.floor(boxW / (s * metrics.leading)));
+    const maxChars = Math.min(metrics.maxChars, perCol);
+    const need = Math.ceil(totalChars / maxChars);
+    const maxLines = Math.min(Math.max(metrics.maxLines, Math.min(need, cols)), 4);
+    const k = Math.min(1, boxW / (maxLines * s * metrics.leading));
+    return k >= 0.999 && maxChars === metrics.maxChars && maxLines === metrics.maxLines ? metrics : { ...metrics, size: r3(metrics.size * k), maxChars, maxLines };
+  }
+  const fitChars = Math.floor(boxW / (s * GLYPH_EM));
+  if (fitChars >= metrics.maxChars) {
+    if (aspect >= 2.4 && style !== "impact") {
+      // a strip: use the width, keep rows short in number
+      const maxChars = Math.min(Math.round(metrics.maxChars * 1.6), fitChars);
+      const rowH = s * metrics.leading;
+      const k = Math.min(1, boxH / (metrics.maxLines * rowH + (metrics.showNext ? rowH * 0.5 : 0)));
+      return { ...metrics, maxChars, size: r3(metrics.size * k) };
+    }
+    return metrics;
+  }
+  const minChars = style === "impact" ? 3 : style === "subtitle" ? 10 : 6;
+  const maxChars = Math.max(minChars, fitChars);
+  const lineCap = style === "impact" ? 3 : 4;
+  const maxLines = Math.min(lineCap, Math.max(metrics.maxLines, Math.ceil(totalChars / maxChars)));
+  // shrink only as much as the rows need (width) and the stack of rows allows (height)
+  const kw = Math.min(1, boxW / (maxChars * s * GLYPH_EM));
+  const kh = Math.min(1, boxH / (maxLines * s * metrics.leading * (1 + (metrics.showNext ? 0.25 : 0))));
+  const k = Math.min(kw, kh);
+  return { ...metrics, size: r3(metrics.size * k), maxChars, maxLines };
+}
 
 /**
  * Scenes with a bright feature where lyrics usually sit (the synthwave sun on the horizon,

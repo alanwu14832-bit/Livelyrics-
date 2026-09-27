@@ -1,11 +1,13 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { AudioAnalysis, DesignPlan, Lyrics, Research, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, DesignPlan, Lyrics, Research, SongMeta } from "@/lib/types";
 
 export interface DesignerInput {
   meta: SongMeta;
   lyrics: Lyrics;
   analysis: AudioAnalysis | null;
+  /** the band's uploaded material (album art, photos, MV clips, logo); sections may only show these */
+  assets?: Asset[];
 }
 
 export interface DesignerCallbacks {

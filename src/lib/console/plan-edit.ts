@@ -1,9 +1,21 @@
 // Pure helpers for the console's quick plan edits and the 1–9 scene bank.
 
-import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
-import type { DesignPlan, LyricPlacement, LyricStyleId, SceneId, SectionDesign } from "@/lib/types";
+import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_BLENDS, MEDIA_FITS, MEDIA_TREATMENTS, SCENE_IDS } from "@/lib/schema";
+import type { DesignPlan, LyricPlacement, LyricStyleId, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
 
-export type SectionPatch = Partial<Pick<SectionDesign, "scene" | "lyricStyle" | "lyricPlacement" | "lyricScale" | "transitionIn">>;
+export type SectionPatch = Partial<Pick<SectionDesign, "scene" | "lyricStyle" | "lyricPlacement" | "lyricScale" | "transitionIn" | "media">>;
+
+const TREATMENT_SET = new Set<string>(MEDIA_TREATMENTS);
+const FIT_SET = new Set<string>(MEDIA_FITS);
+const BLEND_SET = new Set<string>(MEDIA_BLENDS);
+
+/** A well-formed media value (opacity clamped and rounded), or undefined when invalid. */
+export function cleanMedia(m: SectionMedia | null): SectionMedia | null | undefined {
+  if (m === null) return null;
+  if (!m || typeof m.assetId !== "string" || !m.assetId) return undefined;
+  if (!TREATMENT_SET.has(m.treatment) || !FIT_SET.has(m.fit) || !BLEND_SET.has(m.blend) || !Number.isFinite(m.opacity)) return undefined;
+  return { assetId: m.assetId, treatment: m.treatment, fit: m.fit, opacity: Math.round(Math.min(1, Math.max(0, m.opacity)) * 100) / 100, blend: m.blend };
+}
 
 export const LYRIC_SCALE_MIN = 0.6;
 export const LYRIC_SCALE_MAX = 1.8;
@@ -48,6 +60,13 @@ export function patchSection(plan: DesignPlan, index: number, patch: SectionPatc
   if (patch.transitionIn !== undefined && TRANSITIONS.has(patch.transitionIn) && patch.transitionIn !== section.transitionIn) {
     next.transitionIn = patch.transitionIn;
     changed = true;
+  }
+  if (patch.media !== undefined) {
+    const media = cleanMedia(patch.media);
+    if (media !== undefined && JSON.stringify(media) !== JSON.stringify(section.media ?? null)) {
+      next.media = media;
+      changed = true;
+    }
   }
   if (!changed) return plan;
   const sections = plan.sections.slice();

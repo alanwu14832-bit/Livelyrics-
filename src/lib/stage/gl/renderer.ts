@@ -14,6 +14,7 @@ import type { SceneId } from "../../types";
 import type { RGB } from "../color";
 import type { ActiveTransitionKind } from "../director";
 import { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS } from "../scenes/composite";
+import { MEDIA_FRAGMENT, MEDIA_UNIFORMS } from "../scenes/media";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
 
@@ -45,11 +46,58 @@ export interface SceneDraw {
   uniforms: SceneUniformValues;
 }
 
+/** One band-media layer (see src/lib/stage/scenes/media.ts). */
+export interface MediaLayerDraw {
+  /** texture cache key (asset id) */
+  key: string;
+  /** decoded image / canvas / video; null = not ready (layer skipped) */
+  source: TexImageSource | null;
+  /** re-upload when this changes (video: current frame time); images: constant */
+  version: number;
+  /** draw the texture uploaded earlier without refreshing it (video seeking) */
+  hold?: boolean;
+  width: number;
+  height: number;
+  /** opacity x cross-fade weight, 0..1 */
+  weight: number;
+  treatment: number;
+  blend: number;
+  contain: boolean;
+  /** texUV = (screenUV - 0.5) * scale + 0.5 + offset */
+  uv: { sx: number; sy: number; ox: number; oy: number };
+  colorway: [RGB, RGB, RGB];
+  /** 0..1 beat punch */
+  punch: number;
+  seed: number;
+}
+
+export interface MediaDraw {
+  /** [current, previous]; at most two are drawn */
+  layers: MediaLayerDraw[];
+  /** song time, for grain / weave */
+  time: number;
+  /** lyric area in screen uv (x0, y0, x1, y1; y up) */
+  lyricBox: [number, number, number, number];
+  /** 0..1 a lyric line is on screen */
+  lyricAmount: number;
+}
+
 export interface RenderRequest {
   current: SceneDraw;
   previous: SceneDraw | null;
   transition: { kind: ActiveTransitionKind; progress: number } | null;
   clock: number;
+  /** band media over the scene (null / no layers = scene only) */
+  media?: MediaDraw | null;
+}
+
+interface MediaTexture {
+  tex: WebGLTexture;
+  w: number;
+  h: number;
+  source: TexImageSource | null;
+  version: number;
+  mips: boolean;
 }
 
 interface ProgramEntry {
@@ -91,7 +139,8 @@ export class StageRenderer {
   private quad: WebGLBuffer | null = null;
   private motifTex: WebGLTexture | null = null;
   private motifSource: TexImageSource | null = null;
-  private targets: [Target | null, Target | null] = [null, null];
+  private targets: [Target | null, Target | null, Target | null] = [null, null, null];
+  private mediaTex = new Map<string, MediaTexture>();
   private width = 1;
   private height = 1;
   private reported = new Set<string>();
@@ -164,7 +213,8 @@ export class StageRenderer {
     e.preventDefault();
     this.lost = true;
     this.programs.clear();
-    this.targets = [null, null];
+    this.targets = [null, null, null];
+    this.mediaTex.clear();
     this.quad = null;
     this.motifTex = null;
     this.opts.onContextChange?.(true);
@@ -268,6 +318,10 @@ export class StageRenderer {
     );
   }
 
+  private mediaProgram(): ProgramEntry | null {
+    return this.entryFor("media", () => this.compile("media", buildFragmentWithHeader(MEDIA_FRAGMENT, this.gl2), MEDIA_UNIFORMS));
+  }
+
   /** Status of a scene program (for diagnostics / the stage lab). */
   sceneState(id: SceneId): "none" | "pending" | "ready" | "failed" {
     return this.programs.get(`scene:${id}`)?.state ?? "none";
@@ -285,6 +339,13 @@ export class StageRenderer {
     if (!this.queue.includes("composite") && !this.programs.has("composite")) this.queue.push("composite");
   }
 
+  /** Queue the media compositor (called once a project has band material). */
+  prewarmMedia() {
+    this.warm.add("media");
+    // ahead of the scene prewarm queue: the plan's media shows on the very first frames
+    if (!this.queue.includes("media") && !this.programs.has("media")) this.queue.unshift("media");
+  }
+
   /** Background work: compile queued programs (one per call without the parallel extension). */
   idle() {
     if (this.lost || this.disposed) return;
@@ -294,6 +355,7 @@ export class StageRenderer {
           const key = this.queue.shift()!;
           if (this.programs.has(key)) continue;
           if (key === "composite") this.compositeProgram();
+          else if (key === "media") this.mediaProgram();
           else this.sceneProgram(key.slice(6) as SceneId);
         }
         for (const [key, entry] of this.programs) if (entry.state === "pending") this.finalize(key, entry);
@@ -301,6 +363,7 @@ export class StageRenderer {
         const key = this.queue.shift()!;
         if (!this.programs.has(key)) {
           if (key === "composite") this.compositeProgram();
+          else if (key === "media") this.mediaProgram();
           else this.sceneProgram(key.slice(6) as SceneId);
         }
       }
@@ -351,7 +414,64 @@ export class StageRenderer {
     }
   }
 
-  private target(i: 0 | 1): Target | null {
+  /** Drop media textures whose asset is gone (keys = the assets still in the project). */
+  pruneMedia(keep: ReadonlySet<string>) {
+    for (const [key, t] of this.mediaTex) {
+      if (keep.has(key)) continue;
+      if (!this.lost) this.gl.deleteTexture(t.tex);
+      this.mediaTex.delete(key);
+    }
+  }
+
+  /** Upload (or refresh) a media layer's texture; null when it cannot be used this frame. */
+  private mediaTexture(layer: MediaLayerDraw, unit: number): MediaTexture | null {
+    const gl = this.gl;
+    const src = layer.source;
+    if (!src || !(layer.width > 0) || !(layer.height > 0)) return null;
+    let t = this.mediaTex.get(layer.key);
+    if (layer.hold) {
+      if (!t || !t.source) return null;
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t.tex);
+      return t;
+    }
+    if (!t) {
+      const tex = gl.createTexture();
+      if (!tex) return null;
+      t = { tex, w: 0, h: 0, source: null, version: Number.NaN, mips: false };
+      this.mediaTex.set(layer.key, t);
+    }
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    if (t.source !== src || t.version !== layer.version) {
+      try {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      } catch (e) {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        this.report(`media:${layer.key}`, `素材貼圖上傳失敗：${e instanceof Error ? e.message : String(e)}`);
+        return null;
+      }
+      const video = typeof HTMLVideoElement !== "undefined" && src instanceof HTMLVideoElement;
+      const pot = (n: number) => (n & (n - 1)) === 0;
+      const mips = !video && (this.gl2 || (pot(layer.width) && pot(layer.height)));
+      if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      t.source = src;
+      t.version = layer.version;
+      t.w = layer.width;
+      t.h = layer.height;
+      t.mips = mips;
+    }
+    return t;
+  }
+
+  private target(i: 0 | 1 | 2): Target | null {
     const existing = this.targets[i];
     if (existing && existing.w === this.width && existing.h === this.height) return existing;
     if (existing) this.deleteTarget(existing);
@@ -389,7 +509,7 @@ export class StageRenderer {
 
   private freeTargets() {
     for (const t of this.targets) if (t) this.deleteTarget(t);
-    this.targets = [null, null];
+    this.targets = [null, null, null];
   }
 
   // -------------------------------------------------------------------------
@@ -459,52 +579,131 @@ export class StageRenderer {
     const gl = this.gl;
     try {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
-      const tr = req.transition;
-      const prev = req.previous;
-      const composite = tr && prev ? this.compositeProgram() : null;
-      const a = composite ? this.target(0) : null;
-      const b = composite ? this.target(1) : null;
-      if (!tr || !prev || !composite || !composite.program || !a || !b) {
-        this.drawScene(req.current, null);
-        return true;
-      }
-      this.drawScene(req.current, a);
-      const sameLook = prev.lookKey === req.current.lookKey && prev.scene === req.current.scene;
-      if (!sameLook) this.drawScene(prev, b);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.width, this.height);
-      gl.useProgram(composite.program);
-      const L = composite.locations;
-      const res = L.get("uRes");
-      if (res) gl.uniform2f(res, this.width, this.height);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, a.tex);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, sameLook ? a.tex : b.tex);
-      const ua = L.get("uA");
-      const ub = L.get("uB");
-      if (ua) gl.uniform1i(ua, 1);
-      if (ub) gl.uniform1i(ub, 2);
-      const up = L.get("uP");
-      if (up) gl.uniform1f(up, tr.progress);
-      const uk = L.get("uKind");
-      if (uk) gl.uniform1f(uk, TRANSITION_CODE[tr.kind]);
-      const acc = L.get("uAcc");
-      if (acc) gl.uniform3f(acc, req.current.uniforms.accent[0], req.current.uniforms.accent[1], req.current.uniforms.accent[2]);
-      const uc = L.get("uClock");
-      if (uc) gl.uniform1f(uc, req.clock);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      // unbind so the next frame can render into these textures without a feedback loop
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.activeTexture(gl.TEXTURE0);
+      const layers = (req.media?.layers ?? []).filter((l) => l.weight > 0.001 && l.source).slice(0, 2);
+      const mediaProg = layers.length ? this.mediaProgram() : null;
+      const sceneTarget = mediaProg?.program ? this.target(2) : null;
+      // without the media pass (no layers, still compiling, no FBO) the scene goes straight to the screen
+      const out = sceneTarget;
+      this.drawSceneLayer(req, out);
+      if (out && mediaProg?.program) this.drawMedia(mediaProg, out, layers, req.media!);
       return true;
     } catch (e) {
       this.report("render", `繪製失敗：${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
+  }
+
+  /** The scene (with its section transition) into `out` (null = the screen). */
+  private drawSceneLayer(req: RenderRequest, out: Target | null) {
+    const gl = this.gl;
+    const tr = req.transition;
+    const prev = req.previous;
+    const composite = tr && prev ? this.compositeProgram() : null;
+    const a = composite ? this.target(0) : null;
+    const b = composite ? this.target(1) : null;
+    if (!tr || !prev || !composite || !composite.program || !a || !b) {
+      this.drawScene(req.current, out);
+      return;
+    }
+    this.drawScene(req.current, a);
+    const sameLook = prev.lookKey === req.current.lookKey && prev.scene === req.current.scene;
+    if (!sameLook) this.drawScene(prev, b);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.fbo : null);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(composite.program);
+    const L = composite.locations;
+    const res = L.get("uRes");
+    if (res) gl.uniform2f(res, this.width, this.height);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, a.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, sameLook ? a.tex : b.tex);
+    const ua = L.get("uA");
+    const ub = L.get("uB");
+    if (ua) gl.uniform1i(ua, 1);
+    if (ub) gl.uniform1i(ub, 2);
+    const up = L.get("uP");
+    if (up) gl.uniform1f(up, tr.progress);
+    const uk = L.get("uKind");
+    if (uk) gl.uniform1f(uk, TRANSITION_CODE[tr.kind]);
+    const acc = L.get("uAcc");
+    if (acc) gl.uniform3f(acc, req.current.uniforms.accent[0], req.current.uniforms.accent[1], req.current.uniforms.accent[2]);
+    const uc = L.get("uClock");
+    if (uc) gl.uniform1f(uc, req.clock);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    // unbind so the next frame can render into these textures without a feedback loop
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  private drawMedia(entry: ProgramEntry, scene: Target, layers: MediaLayerDraw[], media: MediaDraw) {
+    const gl = this.gl;
+    const texA = layers[0] ? this.mediaTexture(layers[0], 4) : null;
+    const texB = layers[1] ? this.mediaTexture(layers[1], 5) : null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(entry.program);
+    const L = entry.locations;
+    const f1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1f(l, Number.isFinite(v) ? v : 0);
+    };
+    const f2 = (n: string, x: number, y: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform2f(l, x, y);
+    };
+    const f3 = (n: string, v: RGB) => {
+      const l = L.get(n);
+      if (l) gl.uniform3f(l, v[0], v[1], v[2]);
+    };
+    const f4 = (n: string, a: number, b: number, c: number, d: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform4f(l, a, b, c, d);
+    };
+    const i1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1i(l, v);
+    };
+    f2("uRes", this.width, this.height);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+    i1("uScene", 3);
+    f1("uTime", media.time);
+    const box = media.lyricBox;
+    f4("uLyricBox", box[0], box[1], box[2], box[3]);
+    f1("uLyricAmt", media.lyricAmount);
+    const set = (suffix: "A" | "B", layer: MediaLayerDraw | undefined, tex: MediaTexture | null, unit: number) => {
+      i1(`uTex${suffix}`, unit);
+      if (!layer || !tex) {
+        f1(`uW${suffix}`, 0);
+        // a valid texture must still be bound to the sampler: reuse the scene
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+        return;
+      }
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+      f1(`uW${suffix}`, layer.weight);
+      f4(`uMode${suffix}`, layer.treatment, layer.blend, layer.contain ? 1 : 0, tex.mips ? 1 : 0);
+      f4(`uUv${suffix}`, layer.uv.sx, layer.uv.sy, layer.uv.ox, layer.uv.oy);
+      f2(`uSize${suffix}`, tex.w, tex.h);
+      f3(`uC0${suffix}`, layer.colorway[0]);
+      f3(`uC1${suffix}`, layer.colorway[1]);
+      f3(`uC2${suffix}`, layer.colorway[2]);
+      f1(`uPunch${suffix}`, layer.punch);
+      f1(`uSeed${suffix}`, layer.seed);
+    };
+    set("A", layers[0], texA, 4);
+    set("B", layers[1], texB, 5);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    for (const unit of [3, 4, 5]) {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    gl.activeTexture(gl.TEXTURE0);
   }
 
   dispose() {
@@ -521,6 +720,7 @@ export class StageRenderer {
           if (e.fs) gl.deleteShader(e.fs);
         }
         this.freeTargets();
+        for (const t of this.mediaTex.values()) gl.deleteTexture(t.tex);
         if (this.quad) gl.deleteBuffer(this.quad);
         if (this.motifTex) gl.deleteTexture(this.motifTex);
       }
@@ -529,6 +729,7 @@ export class StageRenderer {
       /* already gone */
     }
     this.programs.clear();
+    this.mediaTex.clear();
     this.motifSource = null;
   }
 }

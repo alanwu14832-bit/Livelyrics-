@@ -1,6 +1,7 @@
 // Integration test of the console controller in Node with a fake <audio>, fake window /
 // storage and mocked fetch. Node's global BroadcastChannel carries the real messages.
 
+import { defaultOutput } from "@/lib/output";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { channelName, type StageMessage, type StageState } from "@/lib/stage/protocol";
 import type { Project } from "@/lib/types";
@@ -66,6 +67,8 @@ function makeProject(): Project {
     lyrics: testLyrics(),
     research: null,
     plan: testPlan(),
+    assets: [],
+    output: defaultOutput(),
   };
 }
 

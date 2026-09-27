@@ -2,8 +2,8 @@ import { handle, HttpError, json, readJson, requireProjectId } from "@/lib/serve
 import { remapPlanLines } from "@/lib/lyrics/remap";
 import { cancelRun, withLiveStatus } from "@/lib/server/pipeline";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
-import { applyMetaPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
-import type { DesignPlan, Lyrics, SongMeta } from "@/lib/types";
+import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
+import type { DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const body = await readJson(req, MAX_PATCH_BYTES);
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan? }");
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output? }");
   const patch = body as Record<string, unknown>;
 
   // validate everything before touching the file
@@ -33,12 +33,17 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.meta !== undefined && (typeof patch.meta !== "object" || patch.meta === null || Array.isArray(patch.meta))) {
     throw new HttpError(400, "meta 必須是物件");
   }
+  if (patch.output !== undefined && (typeof patch.output !== "object" || patch.output === null || Array.isArray(patch.output))) {
+    throw new HttpError(400, "output 必須是物件");
+  }
 
   const existing = await getProject(id);
   if (!existing) throw new HttpError(404, "找不到專案");
   let meta: SongMeta | undefined;
   if (patch.meta !== undefined) meta = applyMetaPatch(existing.meta, patch.meta);
-  if (!meta && !lyrics && !plan) return json(withLiveStatus(existing));
+  let output: ProjectOutput | undefined;
+  if (patch.output !== undefined) output = applyOutputPatch(existing.output, patch.output);
+  if (!meta && !lyrics && !plan && !output) return json(withLiveStatus(existing));
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
@@ -48,6 +53,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
       p.lyrics = lyrics;
     }
     if (plan) p.plan = plan;
+    if (output) p.output = applyOutputPatch(p.output, patch.output);
   });
   return json(withLiveStatus(saved));
 });

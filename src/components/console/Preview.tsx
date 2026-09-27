@@ -11,6 +11,7 @@ import { formatCountdown } from "@/lib/console/format";
 import { selectLineIndex, selectOverrides, selectSectionIndex, selectTimeDecis, useStageValue } from "@/lib/console/hooks";
 import { CUE_KIND_LABELS, LYRIC_STYLE_LABELS, PLACEMENT_LABELS, SCENE_LABELS, SECTION_KIND_LABELS, TRANSITION_LABELS, cueColor } from "@/lib/console/labels";
 import { sortedCues, upcomingCue } from "@/lib/console/navigation";
+import { DEFAULT_OUTPUT, aspectLabel, outputAspect } from "@/lib/output";
 import type { PlaybackMode } from "@/lib/stage/protocol";
 import type { LyricStyleId, Project, SectionDesign } from "@/lib/types";
 import { Dot, KeyValues, Pane } from "./ui";
@@ -22,23 +23,10 @@ const BACKEND_LABELS: Record<StageStats["backend"], string> = {
   lost: "GPU 中斷",
 };
 
-function outputAspect(o: OutputStatus): number {
-  if (!o.connected || o.width <= 0 || o.height <= 0) return 16 / 9;
-  return Math.min(5, Math.max(0.3, o.width / o.height));
-}
-
-function aspectLabel(a: number): string {
-  const known: Array<[number, string]> = [
-    [16 / 9, "16:9"],
-    [16 / 10, "16:10"],
-    [4 / 3, "4:3"],
-    [21 / 9, "21:9"],
-    [32 / 9, "32:9"],
-    [1, "1:1"],
-    [9 / 16, "9:16"],
-  ];
-  for (const [v, label] of known) if (Math.abs(v - a) < 0.02) return label;
-  return `${a.toFixed(2)}:1`;
+/** The connected projection window is a different shape than the canvas: it shows black bars. */
+function windowMismatch(o: OutputStatus, canvasAspect: number): boolean {
+  if (!o.connected || o.width <= 0 || o.height <= 0) return false;
+  return Math.abs(o.width / o.height - canvasAspect) / canvasAspect > 0.02;
 }
 
 /** Section name, plus its kind only when the name does not already say it (「前奏 前奏」 never). */
@@ -67,7 +55,9 @@ function BlackoutFrame({ controller }: { controller: ConsoleController }) {
 }
 
 function PreviewPanelImpl({ controller, project, output, hudRef }: { controller: ConsoleController; project: Project; output: OutputStatus; hudRef: RefObject<HudHandle | null> }) {
-  const aspect = outputAspect(output);
+  const canvas = project.output ?? DEFAULT_OUTPUT;
+  const aspect = Math.min(8, Math.max(0.2, outputAspect(canvas)));
+  const mismatch = windowMismatch(output, aspect);
   const [stats, setStats] = useState<StageStats | null>(null);
   const onStats = useCallback((s: StageStats) => {
     setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) ? prev : s));
@@ -95,7 +85,14 @@ function PreviewPanelImpl({ controller, project, output, hudRef }: { controller:
               style={{ aspectRatio: "auto", width: "100%", height: "100%" }}
             />
             <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
-              <FrameLabel>預覽・{aspectLabel(aspect)}</FrameLabel>
+              <FrameLabel className="t-latin tabular">
+                預覽・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
+              </FrameLabel>
+              {mismatch && (
+                <FrameLabel className="text-orange-text">
+                  投影視窗 {output.width} × {output.height}，會加黑邊
+                </FrameLabel>
+              )}
               {stats && (
                 <FrameLabel className={cx("t-latin", (stats.backend === "lost" || stats.backend === "fallback") && "text-orange-text")}>
                   {BACKEND_LABELS[stats.backend]} {Math.round(stats.fps)} fps

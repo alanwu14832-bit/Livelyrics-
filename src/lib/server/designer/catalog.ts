@@ -7,7 +7,8 @@
 // src/lib/font-meta.ts; only the designer-facing descriptions live here.
 
 import { FONTS } from "@/lib/font-meta";
-import type { FontId, LyricPlacement, LyricStyleId, SceneId, SectionKind } from "@/lib/types";
+import type { MEDIA_BLENDS } from "@/lib/schema";
+import type { FontId, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionKind } from "@/lib/types";
 
 export interface SceneInfo {
   label: string;
@@ -104,6 +105,24 @@ export const TRANSITIONS: Record<"cut" | "fade" | "flash" | "wipe" | "bloom", st
   flash: "閃白：爆點、drop、副歌第一拍。",
   wipe: "擦除：有方向感的推進，段落換場。",
   bloom: "光暈綻放：溫柔地亮起來，適合進入抒情段落。",
+};
+
+export const MEDIA_TREATMENT_INFO: Record<MediaTreatment, { label: string; description: string }> = {
+  full: { label: "原樣", description: "素材原樣呈現；適合本身就是完整作品的專輯封面、MV 畫面，或樂團指定要原色出現的時刻。" },
+  duotone: { label: "雙色調", description: "把素材的明暗映射到該段 colorway 的背景色到主色；照片立刻融進這首歌的配色，最常用、最安全。" },
+  "grain-film": { label: "底片顆粒", description: "去飽和、染上配色、加重底片顆粒與輕微晃動閃爍；適合排練照、後台照、回憶感段落。" },
+  "blur-glow": { label: "柔焦光暈", description: "失焦的光暈，只留下形狀與顏色；最不搶歌詞，適合歌詞為主的主歌、抒情段。" },
+  halftone: { label: "網點", description: "印刷網點（海報、zine 質感），用配色印出；適合龐克、獨立搖滾、有態度的段落。" },
+  "mask-lyrics": { label: "避開歌詞", description: "素材滿版，但歌詞出現時歌詞區域的素材會壓暗、退成背景色，歌詞永遠清楚；有歌詞又想放素材時用它。" },
+  "slow-drift": { label: "緩慢推移", description: "Ken Burns 式的緩慢推近與平移，整段慢慢移動；適合前奏、橋段、專輯封面當作世界觀。" },
+  "beat-cut": { label: "跟拍剪接", description: "每一拍跳到新的構圖／影片片段並在重拍閃一下；只給高能量段落（副歌、drop），MV 片段最有效。" },
+};
+
+export const MEDIA_BLEND_INFO: Record<(typeof MEDIA_BLENDS)[number], string> = {
+  normal: "一般：素材蓋在場景上（依 opacity）。",
+  screen: "濾色：只加亮，黑色消失；適合黑底的 logo、光點、煙火素材。",
+  multiply: "色彩增值：只壓暗；讓場景的光從素材的亮部透出。",
+  overlay: "覆疊：增加對比並和場景的色彩混合，質感最融合。",
 };
 
 export const SECTION_KIND_LABELS: Record<SectionKind, string> = {

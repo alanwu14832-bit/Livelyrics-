@@ -15,6 +15,8 @@ export type {
   KeyVisual,
   LineDesign,
   CueNote,
+  SectionMedia,
+  MediaTreatment,
 } from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -129,6 +131,51 @@ export interface Research {
   createdAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Band media assets (album art, photos, MV clips, logo) and the output canvas
+// ---------------------------------------------------------------------------
+
+export type AssetKind = "image" | "video" | "logo";
+
+export interface Asset {
+  /** short id, e.g. "a1b2c3d4e5f6" (lowercase hex) */
+  id: string;
+  kind: AssetKind;
+  /** display name (defaults to the original file name without extension) */
+  name: string;
+  /** stored Content-Type, e.g. "image/png", "video/mp4" */
+  mimeType: string;
+  /** file name inside the project's assets/ folder, e.g. "a1b2c3d4e5f6.png" */
+  file: string;
+  /** intrinsic pixel size, measured in the browser before upload */
+  width: number;
+  height: number;
+  /** seconds (videos only) */
+  duration?: number;
+  bytes: number;
+  createdAt: string;
+  /** operator's note for the designer, e.g. "第二張專輯封面，樂團最愛" */
+  note?: string;
+  tags?: string[];
+}
+
+/** Fractions (0..0.3) of the canvas kept free of lyrics on each side. */
+export interface LyricSafeArea {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** The pixel canvas the show is designed for (projector, LED wall, portrait screen). */
+export interface ProjectOutput {
+  width: number;
+  height: number;
+  /** preset id from OUTPUT_PRESETS (src/lib/output.ts), or "custom" */
+  preset: string;
+  lyricSafe: LyricSafeArea;
+}
+
 export interface Project {
   id: string;
   createdAt: string;
@@ -143,6 +190,10 @@ export interface Project {
   lyrics: Lyrics;
   research: Research | null;
   plan: DesignPlan | null;
+  /** band material; [] for projects created before assets existed */
+  assets: Asset[];
+  /** output canvas; 1920x1080 for projects created before it existed */
+  output: ProjectOutput;
 }
 
 /** lightweight listing entry */

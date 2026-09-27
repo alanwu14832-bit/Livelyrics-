@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StageView } from "@/components/stage/StageView";
 import { api } from "@/lib/api-client";
+import { DEFAULT_OUTPUT, fitCanvas, type Rect } from "@/lib/output";
 import {
   DEFAULT_OVERRIDES,
   channelName,
@@ -154,9 +155,29 @@ export function OutputClient({ id }: { id: string }) {
     };
   }, [id]);
 
+  // ---- letterbox / pillarbox: the canvas at exactly its aspect, black bars around it ----
+  const canvasW = project?.output?.width || DEFAULT_OUTPUT.width;
+  const canvasH = project?.output?.height || DEFAULT_OUTPUT.height;
+  const [frame, setFrame] = useState<Rect | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const dpr = window.devicePixelRatio || 1;
+      setFrame(fitCanvas(window.innerWidth, window.innerHeight, canvasW, canvasH, dpr));
+    };
+    update();
+    window.addEventListener("resize", update);
+    // a devicePixelRatio change (window dragged to another screen) does not always fire resize
+    const mq = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    mq?.addEventListener?.("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      mq?.removeEventListener?.("change", update);
+    };
+  }, [canvasW, canvasH]);
+
   // ---- document title -----------------------------------------------------
   useEffect(() => {
-    document.title = project?.meta?.title ? `${project.meta.title} — 投影輸出` : "投影輸出 — Livelyrics";
+    document.title = project?.meta?.title ? `${project.meta.title}｜投影輸出` : "投影輸出｜Livelyrics";
   }, [project]);
 
   // ---- cursor auto-hide, F / double-click fullscreen ------------------------
@@ -226,7 +247,14 @@ export function OutputClient({ id }: { id: string }) {
       style={{ cursor: cursorHidden ? "none" : "default" }}
       onDoubleClick={() => void toggleFullscreen()}
     >
-      {project && <StageView project={project} store={store} className="absolute inset-0" style={{ aspectRatio: "auto" }} />}
+      {project && frame && (
+        <StageView
+          project={project}
+          store={store}
+          className="absolute"
+          style={{ aspectRatio: "auto", left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
+        />
+      )}
 
       {status === "missing" && !project && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

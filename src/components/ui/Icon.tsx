@@ -61,6 +61,10 @@ import { SubtitlesSlashIcon as PhSubtitlesSlash } from "@phosphor-icons/react/di
 import { SparkleIcon as PhSparkle } from "@phosphor-icons/react/dist/ssr/Sparkle";
 import { PaletteIcon as PhPalette } from "@phosphor-icons/react/dist/ssr/Palette";
 import { FilmSlateIcon as PhFilmSlate } from "@phosphor-icons/react/dist/ssr/FilmSlate";
+import { FilmStripIcon as PhFilmStrip } from "@phosphor-icons/react/dist/ssr/FilmStrip";
+import { ImageIcon as PhImage } from "@phosphor-icons/react/dist/ssr/Image";
+import { ImagesIcon as PhImages } from "@phosphor-icons/react/dist/ssr/Images";
+import { FrameCornersIcon as PhFrameCorners } from "@phosphor-icons/react/dist/ssr/FrameCorners";
 import { CrosshairIcon as PhCrosshair } from "@phosphor-icons/react/dist/ssr/Crosshair";
 import { TargetIcon as PhTarget } from "@phosphor-icons/react/dist/ssr/Target";
 import { CornersOutIcon as PhCornersOut } from "@phosphor-icons/react/dist/ssr/CornersOut";
@@ -159,6 +163,10 @@ export const SubtitlesSlashIcon = /* @__PURE__ */ makeIcon(PhSubtitlesSlash, "Su
 export const SparkleIcon = /* @__PURE__ */ makeIcon(PhSparkle, "SparkleIcon");
 export const PaletteIcon = /* @__PURE__ */ makeIcon(PhPalette, "PaletteIcon");
 export const FilmSlateIcon = /* @__PURE__ */ makeIcon(PhFilmSlate, "FilmSlateIcon");
+export const FilmStripIcon = /* @__PURE__ */ makeIcon(PhFilmStrip, "FilmStripIcon");
+export const ImageIcon = /* @__PURE__ */ makeIcon(PhImage, "ImageIcon");
+export const ImagesIcon = /* @__PURE__ */ makeIcon(PhImages, "ImagesIcon");
+export const FrameCornersIcon = /* @__PURE__ */ makeIcon(PhFrameCorners, "FrameCornersIcon");
 export const CrosshairIcon = /* @__PURE__ */ makeIcon(PhCrosshair, "CrosshairIcon");
 export const TargetIcon = /* @__PURE__ */ makeIcon(PhTarget, "TargetIcon");
 export const CornersOutIcon = /* @__PURE__ */ makeIcon(PhCornersOut, "CornersOutIcon");
@@ -187,4 +195,4 @@ export const CircleHalfIcon = /* @__PURE__ */ makeIcon(PhCircleHalf, "CircleHalf
 export const SunIcon = /* @__PURE__ */ makeIcon(PhSun, "SunIcon");
 
 /** Every icon by name, for the /ui-lab gallery. */
-export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon };
+export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, FilmStripIcon, ImageIcon, ImagesIcon, FrameCornersIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon };

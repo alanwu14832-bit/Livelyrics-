@@ -18,6 +18,7 @@ export function section(id: string, start: number, end: number, over: Partial<Se
     lyricScale: 1,
     lyricColor: "#ffffff",
     transitionIn: "fade",
+    media: null,
     rationale: "",
     ...over,
   };

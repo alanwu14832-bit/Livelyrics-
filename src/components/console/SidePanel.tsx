@@ -135,7 +135,7 @@ export function SidePanel({
       >
         {tab === "design" && <DesignTab controller={controller} project={project} redesigning={snap.redesign.running} onRedesign={onRedesign} />}
         {tab === "research" && <ResearchTab project={project} />}
-        {tab === "control" && <ControlTab controller={controller} project={project} />}
+        {tab === "control" && <ControlTab controller={controller} project={project} output={snap.output} />}
         {tab === "sync" && <SyncTab controller={controller} snap={snap} project={project} />}
       </div>
     </Pane>

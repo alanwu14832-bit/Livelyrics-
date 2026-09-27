@@ -3,6 +3,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DesignPlan, SongMeta } from "@/lib/types";
 import {
+  addAsset,
+  assetPath,
   audioPath,
   createProject,
   createUploadTempPath,
@@ -13,6 +15,7 @@ import {
   listProjects,
   newProjectId,
   projectDir,
+  removeAsset,
   saveProject,
   StorageError,
   updateProject,
@@ -184,6 +187,37 @@ describe("projects", () => {
     expect(p.lyrics.lines).toEqual([]);
     expect(p.plan).toBeNull();
     expect(p.meta.title).toBe("x");
+    // projects from before band media and custom canvases
+    expect(p.assets).toEqual([]);
+    expect(p.output).toEqual({ width: 1920, height: 1080, preset: "1080p", lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 } });
+  });
+
+  it("gives old plan sections media: null", async () => {
+    await fs.mkdir(path.join(root, "projects", "oldplan"), { recursive: true });
+    const plan = planWithPalette(["#000000", "#ffffff"]);
+    const section = { id: "s0", kind: "verse", label: "a", start: 0, end: 10, energy: 0.5, scene: "nebula", sceneParams: { speed: 0.5, density: 0.5, intensity: 0.5, audioReactivity: 0.5 }, colorway: ["#000000", "#ffffff", "#ff0000"], lyricStyle: "line-fade", lyricPlacement: "center", lyricScale: 1, lyricColor: "#ffffff", transitionIn: "fade", rationale: "" };
+    await fs.writeFile(path.join(root, "projects", "oldplan", "project.json"), JSON.stringify({ meta, plan: { ...plan, sections: [section] } }));
+    const p = (await getProject("oldplan"))!;
+    expect(p.plan!.sections[0].media).toBeNull();
+  });
+
+  it("adds and removes assets, clearing the plan sections that showed them", async () => {
+    const created = await createProject({ meta, analysis: null, audio: { tempPath: await upload(), ext: "wav" } });
+    const temp = await upload("\x89PNG fake");
+    const asset = { id: "a1b2c3d4e5f6", kind: "image" as const, name: "封面", mimeType: "image/png", file: "a1b2c3d4e5f6.png", width: 10, height: 10, bytes: 9, createdAt: "2026-01-01T00:00:00Z" };
+    const withAsset = await addAsset(created.id, asset, temp, 10);
+    expect(withAsset.assets).toHaveLength(1);
+    await expect(fs.stat(assetPath(created.id, asset))).resolves.toBeTruthy();
+    await updateProject(created.id, (p) => {
+      p.plan = planWithPalette(["#000000"]);
+      p.plan.sections = [{ ...(({}) as DesignPlan["sections"][number]), id: "s0", media: { assetId: asset.id, treatment: "duotone", fit: "cover", opacity: 1, blend: "normal" } }];
+    });
+    const after = await removeAsset(created.id, asset.id);
+    expect(after!.assets).toEqual([]);
+    expect(after!.plan!.sections[0].media).toBeNull();
+    await expect(fs.stat(assetPath(created.id, asset))).rejects.toThrow();
+    expect(await removeAsset(created.id, asset.id)).toBeNull();
+    expect(() => assetPath(created.id, { id: "../x", file: "../x.png" })).toThrow();
   });
 
   it("cleans up when the audio move fails", async () => {

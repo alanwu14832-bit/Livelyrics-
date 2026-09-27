@@ -85,6 +85,37 @@ export const FONT_IDS = [
 export const FontIdSchema = z.enum(FONT_IDS);
 export type FontId = z.infer<typeof FontIdSchema>;
 
+/** How band material (album art, photos, MV clips, logo) is treated on screen. */
+export const MEDIA_TREATMENTS = [
+  "full", // the material as is (fit / opacity / blend still apply)
+  "duotone", // luminance mapped onto the section colorway (background -> primary)
+  "grain-film", // desaturated, palette-tinted, heavy film grain, gate weave, flicker
+  "blur-glow", // soft out-of-focus glow, highlights bloom (dreamy, lets lyrics lead)
+  "halftone", // printed halftone dots in the colorway (poster / zine look)
+  "mask-lyrics", // full-bleed, knocked back to the background tone where lyrics sit while a line shows
+  "slow-drift", // Ken Burns: slow zoom and pan across the section
+  "beat-cut", // jumps to a new crop / clip offset on every beat, punch on the downbeat
+] as const;
+export const MediaTreatmentSchema = z.enum(MEDIA_TREATMENTS);
+export type MediaTreatment = z.infer<typeof MediaTreatmentSchema>;
+
+export const MEDIA_FITS = ["cover", "contain"] as const;
+export const MEDIA_BLENDS = ["normal", "screen", "multiply", "overlay"] as const;
+
+export const SectionMediaSchema = z.object({
+  assetId: z.string().describe("id of one of the provided band assets (exact)"),
+  treatment: MediaTreatmentSchema,
+  fit: z.enum(MEDIA_FITS).describe("cover = fill the screen (crop), contain = whole image visible"),
+  opacity: z.number().describe("0–1 layer opacity over the scene"),
+  blend: z.enum(MEDIA_BLENDS).describe("how the material mixes with the scene underneath"),
+});
+export type SectionMedia = z.infer<typeof SectionMediaSchema>;
+
+/** `media` is new: plans saved before it existed have no key, which means "no media". */
+const SectionMediaField = z
+  .preprocess((v) => (v === undefined ? null : v), SectionMediaSchema.nullable())
+  .describe("band material shown between the scene and the lyrics in this section; null = scene only");
+
 const hex = z
   .string()
   .describe("CSS hex color like #1a2b3c (6 digits, lowercase)");
@@ -146,6 +177,7 @@ export const SectionDesignSchema = z.object({
   lyricScale: z.number().describe("0.6–1.8 relative lyric size (1 = default readable size)"),
   lyricColor: hex.describe("lyric text color, must contrast ≥ 4.5:1 with colorway[0]"),
   transitionIn: z.enum(["cut", "fade", "flash", "wipe", "bloom"]),
+  media: SectionMediaField,
   rationale: z.string().describe("設計理由：為什麼這段用這個場景與歌詞呈現（繁體中文，1–3 句）"),
 });
 export type SectionDesign = z.infer<typeof SectionDesignSchema>;

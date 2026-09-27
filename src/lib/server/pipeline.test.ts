@@ -68,6 +68,7 @@ function plan(title = "夜色之城"): DesignPlan {
         lyricScale: 1,
         lyricColor: "#ffffff",
         transitionIn: "fade",
+        media: null,
         rationale: "r",
       },
     ],

@@ -8,7 +8,9 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
-import type { AudioAnalysis, Lyrics, Project, ProjectStatus, ProjectSummary, SongMeta } from "@/lib/types";
+import { ASSET_FILE_RE, coerceAssets, isAssetId } from "@/lib/assets";
+import { normalizeOutput } from "@/lib/output";
+import type { Asset, AudioAnalysis, DesignPlan, Lyrics, Project, ProjectStatus, ProjectSummary, SongMeta } from "@/lib/types";
 
 /** Lowercase letters, digits and inner dashes only: never "." or "/" (no path traversal). */
 export const PROJECT_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
@@ -66,6 +68,17 @@ export function newProjectId(): string {
 export function audioPath(project: Pick<Project, "id" | "audioFile">): string {
   if (!AUDIO_FILE_RE.test(project.audioFile)) throw new StorageError("corrupt", "專案的音檔名稱無效");
   return path.join(projectDir(project.id), project.audioFile);
+}
+
+export function assetsDir(id: string): string {
+  return path.join(projectDir(id), "assets");
+}
+
+export function assetPath(projectId: string, asset: Pick<Asset, "id" | "file">): string {
+  if (!isAssetId(asset.id) || !ASSET_FILE_RE.test(asset.file) || !asset.file.startsWith(`${asset.id}.`)) {
+    throw new StorageError("corrupt", "素材的檔名無效");
+  }
+  return path.join(assetsDir(projectId), asset.file);
 }
 
 function isNodeError(err: unknown, code: string): boolean {
@@ -134,6 +147,21 @@ function num(v: unknown, fallback = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
+/** Plans saved before `media` existed: every section gets `media: null`. */
+function coercePlan(raw: Record<string, unknown>): DesignPlan {
+  const plan = raw as unknown as DesignPlan;
+  if (!Array.isArray(plan.sections)) return plan;
+  let changed = false;
+  const sections = plan.sections.map((s) => {
+    if (s && typeof s === "object" && (s as { media?: unknown }).media === undefined) {
+      changed = true;
+      return { ...s, media: null };
+    }
+    return s;
+  });
+  return changed ? { ...plan, sections } : plan;
+}
+
 /** Fill in defaults for anything missing so older / hand-edited files still load. */
 function coerceProject(raw: unknown, id: string, fallbackTime: string): Project {
   if (!isRecord(raw)) throw new StorageError("corrupt", "project.json 不是有效的專案資料");
@@ -165,7 +193,9 @@ function coerceProject(raw: unknown, id: string, fallbackTime: string): Project 
     analysis: isRecord(raw.analysis) ? (raw.analysis as unknown as AudioAnalysis) : null,
     lyrics,
     research: isRecord(raw.research) ? (raw.research as unknown as Project["research"]) : null,
-    plan: isRecord(raw.plan) ? (raw.plan as unknown as Project["plan"]) : null,
+    plan: isRecord(raw.plan) ? coercePlan(raw.plan) : null,
+    assets: coerceAssets(raw.assets),
+    output: normalizeOutput(raw.output),
   };
   if (typeof raw.error === "string" && raw.error) project.error = raw.error;
   return project;
@@ -267,6 +297,8 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     lyrics: { source: "none", synced: false, lines: [] },
     research: null,
     plan: null,
+    assets: [],
+    output: normalizeOutput(null),
   };
   const dir = projectDir(id);
   try {
@@ -403,5 +435,58 @@ export async function deleteProject(id: string): Promise<boolean> {
     await fs.rm(dir, { recursive: true, force: true });
     summaryCache.delete(`${dataDir()}::${id}`);
     return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// band media assets (<project>/assets/<id>.<ext>)
+// ---------------------------------------------------------------------------
+
+export function newAssetId(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * Move an uploaded temp file into the project's assets folder and record it, under the project
+ * lock. Throws StorageError("not_found") when the project is gone (the temp file is left for
+ * the caller to remove).
+ */
+export async function addAsset(id: string, asset: Asset, tempPath: string, maxAssets: number): Promise<Project> {
+  assertId(id);
+  return withLock(id, async () => {
+    const current = await readProjectFile(id);
+    if (!current) throw new StorageError("not_found", "找不到專案（可能已被刪除）");
+    if (current.assets.length >= maxAssets) throw new Error(`素材數量已達上限（${maxAssets} 個）`);
+    const dir = assetsDir(id);
+    await fs.mkdir(dir, { recursive: true });
+    const file = assetPath(id, asset);
+    await moveFile(tempPath, file);
+    try {
+      return await writeProject({ ...current, assets: [...current.assets, asset] });
+    } catch (err) {
+      await fs.rm(file, { force: true }).catch(() => {});
+      throw err;
+    }
+  });
+}
+
+/** Remove an asset: its file, its entry, and every plan section that showed it. False when unknown. */
+export async function removeAsset(id: string, assetId: string): Promise<Project | null> {
+  assertId(id);
+  return withLock(id, async () => {
+    const current = await readProjectFile(id);
+    if (!current) throw new StorageError("not_found", "找不到專案（可能已被刪除）");
+    const asset = current.assets.find((a) => a.id === assetId);
+    if (!asset) return null;
+    const next: Project = { ...current, assets: current.assets.filter((a) => a.id !== assetId) };
+    if (current.plan) {
+      next.plan = {
+        ...current.plan,
+        sections: current.plan.sections.map((s) => (s.media?.assetId === assetId ? { ...s, media: null } : s)),
+      };
+    }
+    const saved = await writeProject(next);
+    await fs.rm(assetPath(id, asset), { force: true }).catch(() => {});
+    return saved;
   });
 }

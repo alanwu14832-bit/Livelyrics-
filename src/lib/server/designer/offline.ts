@@ -4,6 +4,7 @@
 // imagery lexicon, and produces a tasteful, valid DesignPlan plus a research brief
 // that is honest about being a heuristic.
 
+import { assignMedia } from "./media";
 import type {
   CueNote,
   DesignPlan,
@@ -355,6 +356,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricScale: scale,
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
       transitionIn: transitionFor(s, st.sections[i - 1]),
+      media: null,
       rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0),
     };
   });
@@ -492,7 +494,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     cjk: st.cjk,
     chorusCount: st.sections.filter((s) => s.kind === "chorus").length,
   };
-  const sections = buildSections(ctx);
+  const sections = assignMedia(buildSections(ctx), input.assets);
   const title = makeTitle(mood, imagery, seed);
   const motifs = [...imagery.slice(0, 3).map((h) => h.imagery.motif), MOOD_MOTIF[mood.mood]].slice(0, 4);
   const moodKeywords = [...MOOD_KEYWORDS[mood.mood], ...imagery.map((h) => h.imagery.name)].filter((k, i, a) => a.indexOf(k) === i).slice(0, 6);

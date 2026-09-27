@@ -23,7 +23,8 @@ import {
   type WritableStageStore,
 } from "@/lib/stage/protocol";
 import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
-import type { DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, SceneId } from "@/lib/types";
+import { patchOutput } from "@/lib/output";
+import type { Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LiveClock } from "./live-clock";
 import {
   effectiveDuration,
@@ -230,6 +231,8 @@ export class ConsoleController {
   // persistence
   private pendingPlan: DesignPlan | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingOutput: ProjectOutput | null = null;
+  private outputTimer: ReturnType<typeof setTimeout> | null = null;
   private saveChain: Promise<boolean> = Promise.resolve(true);
 
   private redesignAbort: AbortController | null = null;
@@ -322,6 +325,7 @@ export class ConsoleController {
     if (!this.attached) return;
     this.attached = false;
     this.flushSaveOnExit();
+    this.flushOutputOnExit();
     if (this.snapshot.project) this.persistSession();
     this.holdOutput();
     this.loadAbort?.abort();
@@ -408,7 +412,9 @@ export class ConsoleController {
   /** Replace the project (load, reload, re-design) and resync everything. */
   private applyProject(project: Project, opts: { keepPlan?: boolean } = {}): void {
     const current = this.snapshot.project;
-    const next = opts.keepPlan && current?.plan ? { ...project, plan: current.plan } : project;
+    let next = opts.keepPlan && current?.plan ? { ...project, plan: current.plan } : project;
+    // an output edit still waiting to be saved wins over the server's copy
+    if (this.pendingOutput && current) next = { ...next, output: current.output };
     const first = !current;
     this.set({ project: next });
     this.clock.setLimit(this.duration());
@@ -466,6 +472,7 @@ export class ConsoleController {
   private listenWindow(): void {
     const onPageHide = () => {
       this.flushSaveOnExit();
+      this.flushOutputOnExit();
       this.persistSession();
       this.holdOutput();
     };
@@ -1340,6 +1347,75 @@ export class ConsoleController {
     this.set({ save: { status: "pending", error: null } });
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * The project's band media changed (upload, edit, delete). `plan` is the server's plan after a
+   * delete (sections that showed the asset are cleared); without it, sections pointing at
+   * assets that are gone are cleared locally. The projection gets the new project at once.
+   */
+  applyAssets(assets: Asset[], plan?: DesignPlan | null): void {
+    const project = this.snapshot.project;
+    if (!project) return;
+    const ids = new Set(assets.map((a) => a.id));
+    const strip = (p: DesignPlan): DesignPlan =>
+      p.sections.some((s) => s.media && !ids.has(s.media.assetId))
+        ? { ...p, sections: p.sections.map((s) => (s.media && !ids.has(s.media.assetId) ? { ...s, media: null } : s)) }
+        : p;
+    let nextPlan = project.plan;
+    if (plan !== undefined && !this.pendingPlan) nextPlan = plan;
+    else if (nextPlan) nextPlan = strip(nextPlan);
+    if (this.pendingPlan) this.pendingPlan = strip(this.pendingPlan);
+    this.set({ project: { ...project, assets, plan: nextPlan } });
+    this.broadcastProject(true);
+    this.publish();
+  }
+
+  /** Change the output canvas (size preset, custom size, lyric safe area); saved after a short pause. */
+  updateOutput(patch: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> }): void {
+    const project = this.snapshot.project;
+    if (!project) return;
+    const current = project.output;
+    const next = patchOutput(current, patch);
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+    this.set({ project: { ...project, output: next } });
+    this.broadcastProject(true);
+    this.publish();
+    this.pendingOutput = next;
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.outputTimer = setTimeout(() => void this.flushOutput(), 400);
+  }
+
+  private async flushOutput(): Promise<void> {
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.outputTimer = null;
+    const output = this.pendingOutput;
+    if (!output) return;
+    this.pendingOutput = null;
+    try {
+      await api.updateProject(this.id, { output });
+    } catch (err) {
+      if (!this.pendingOutput) this.pendingOutput = output;
+      this.notify(`輸出設定沒有存成功：${errorMessage(err, "儲存失敗")}`, "error");
+    }
+  }
+
+  private flushOutputOnExit(): void {
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.outputTimer = null;
+    const output = this.pendingOutput;
+    if (!output) return;
+    this.pendingOutput = null;
+    try {
+      void fetch(`/api/projects/${encodeURIComponent(this.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ output }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      /* unloading */
+    }
   }
 
   /** Save any pending plan edit now. Resolves true when everything is saved. */

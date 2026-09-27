@@ -1,7 +1,7 @@
 // Typed browser-side wrappers for the local API routes (src/app/api/**).
 // The route handlers must implement exactly these shapes.
 
-import type { AudioAnalysis, DesignPlan, Lyrics, PipelineEvent, Project, ProjectSummary, SongMeta } from "./types";
+import type { Asset, AssetKind, AudioAnalysis, DesignPlan, Lyrics, PipelineEvent, Project, ProjectOutput, ProjectSummary, SongMeta } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -44,7 +44,10 @@ export const api = {
     return fetch("/api/projects", { method: "POST", body: form }).then((r) => json<Project>(r));
   },
 
-  updateProject: (id: string, patch: Partial<{ meta: Partial<SongMeta>; lyrics: Lyrics; plan: DesignPlan }>) =>
+  updateProject: (
+    id: string,
+    patch: Partial<{ meta: Partial<SongMeta>; lyrics: Lyrics; plan: DesignPlan; output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> } }>,
+  ) =>
     fetch(`/api/projects/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -54,6 +57,56 @@ export const api = {
   deleteProject: (id: string) => fetch(`/api/projects/${id}`, { method: "DELETE" }).then((r) => json<{ ok: true }>(r)),
 
   audioUrl: (id: string) => `/api/projects/${id}/audio`,
+
+  // ---- band media assets ---------------------------------------------------
+
+  listAssets: (id: string) => fetch(`/api/projects/${id}/assets`).then((r) => json<{ assets: Asset[] }>(r)),
+
+  /** GET (with HTTP Range) of the stored file; usable as <img>/<video> src and WebGL texture source */
+  assetUrl: (id: string, assetId: string) => `/api/projects/${id}/assets/${assetId}`,
+
+  /**
+   * multipart upload: `file` + `meta` (size measured in the browser). Reports upload progress
+   * (0..1) through XMLHttpRequest, which fetch cannot do. Rejects with the server's message.
+   */
+  uploadAsset(
+    id: string,
+    input: AssetUploadInput,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ asset: Asset; assets: Asset[] }> {
+    const form = new FormData();
+    const { file, ...meta } = input;
+    form.set("meta", JSON.stringify(meta));
+    form.set("file", file);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/projects/${id}/assets`);
+      xhr.responseType = "json";
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) opts.onProgress?.(Math.min(1, e.loaded / e.total));
+      };
+      xhr.onload = () => {
+        const body = xhr.response as { asset?: Asset; assets?: Asset[]; error?: string } | null;
+        if (xhr.status >= 200 && xhr.status < 300 && body?.asset && body.assets) resolve({ asset: body.asset, assets: body.assets });
+        else reject(new Error(body?.error || `${xhr.status} ${xhr.statusText || "上傳失敗"}`));
+      };
+      xhr.onerror = () => reject(new Error("上傳失敗：無法連線到本機伺服器"));
+      xhr.onabort = () => reject(new DOMException("已取消上傳", "AbortError"));
+      opts.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+      xhr.send(form);
+    });
+  },
+
+  updateAsset: (id: string, assetId: string, patch: Partial<{ name: string; note: string | null; tags: string[] | null; kind: AssetKind }>) =>
+    fetch(`/api/projects/${id}/assets/${assetId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => json<{ asset: Asset; assets: Asset[] }>(r)),
+
+  /** also clears the asset from every plan section: the response carries the updated plan */
+  deleteAsset: (id: string, assetId: string) =>
+    fetch(`/api/projects/${id}/assets/${assetId}`, { method: "DELETE" }).then((r) => json<{ ok: true; assets: Asset[]; plan: DesignPlan | null }>(r)),
 
   searchLyrics: (q: { artist: string; title: string; duration?: number }) => {
     const p = new URLSearchParams({ artist: q.artist, title: q.title });
@@ -108,6 +161,20 @@ export const api = {
     return final;
   },
 };
+
+export interface AssetUploadInput {
+  file: File;
+  /** pixel size measured in the browser (src/lib/media-probe.ts) */
+  width: number;
+  height: number;
+  /** seconds, videos only */
+  duration?: number;
+  name?: string;
+  /** "logo" marks an image as the band logo */
+  kind?: AssetKind;
+  note?: string;
+  tags?: string[];
+}
 
 export interface LyricsSearchResult {
   id: number;

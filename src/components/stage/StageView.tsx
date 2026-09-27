@@ -106,7 +106,8 @@ export function StageView({
         overflow: "hidden",
         background: "#000",
         containerType: "size",
-        aspectRatio: "16 / 9",
+        // the project's output canvas (1920 × 1080 unless the show is for another wall)
+        aspectRatio: `${project.output?.width ?? 16} / ${project.output?.height ?? 9}`,
         isolation: "isolate",
         ...style,
       }}

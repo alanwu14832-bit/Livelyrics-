@@ -67,10 +67,33 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects` GET/POST | SERVER | list summaries / create (multipart `audio`, `meta` JSON, `analysis` JSON) |
 | `/api/projects/[id]` GET/PATCH/DELETE | SERVER | project JSON / patch `{meta?, lyrics?, plan?}` / delete |
 | `/api/projects/[id]/audio` GET | SERVER | stored audio with **HTTP Range** support (seeking) |
+| `/api/projects/[id]/assets` GET/POST | SERVER | band media list / upload (multipart `file` + `meta` JSON `{width,height,duration?,name?,kind?,note?,tags?}` measured in the browser; magic-byte sniffed PNG/JPG/WebP/GIF/MP4/MOV/WebM, SVG rejected, 500 MB) → `{asset, assets}` |
+| `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
 | `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 
-Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{project.json,audio.<ext>}`.
+Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`.
+
+### Band media and the output canvas (phase 1a)
+
+- `Project.assets: Asset[]` (image / video / logo; size and video length measured in the browser by
+  `src/lib/media-probe.ts`, validated in `src/lib/assets.ts`, sniffed in `src/lib/server/asset-files.ts`).
+  `Project.output: { width, height, preset, lyricSafe }` (`src/lib/output.ts`: presets, `normalizeOutput`,
+  `patchOutput`, `fitCanvas` letterbox, `safeRectPercent`, `renderSize`). Old project files load with
+  `assets: []`, a 1920 × 1080 canvas with 5 % lyric margins, and `media: null` on every section.
+- `SectionDesign.media: { assetId, treatment, fit, opacity, blend } | null` (required + nullable; a missing
+  key preprocesses to null). Treatments: full, duotone, grain-film, blur-glow, halftone, mask-lyrics,
+  slow-drift, beat-cut. `normalizePlan` drops media whose asset is not in `DesignerInput.assets`.
+- Stage: `src/lib/stage/media/model.ts` (pure: beat grid, framing / Ken Burns / beat-cut crops, video
+  position, cross-fade by song time) + `src/components/stage/MediaSources.ts` (image / muted video
+  elements, seek when drift > 80 ms) + `src/lib/stage/scenes/media.ts` (GLSL compositor between the scene
+  and the DOM lyrics). The media layer is a function of (project, song time, beat grid); cross-fades run
+  only during continuous playback. mask-lyrics dims the measured lyric text area.
+- The StageView keeps `output.width / output.height` as its aspect; the projection window letterboxes it
+  (pixel exact when the window is the canvas size) and renders at most the canvas size; the console
+  preview uses the same aspect. Lyric boxes are mapped into `lyricSafe`, and `adaptMetrics` re-fits the
+  style metrics outside 1.5 to 2.05:1 (strips: longer rows, size capped by the box height; portrait:
+  shorter rows, up to 4).
 
 ## Modules
 

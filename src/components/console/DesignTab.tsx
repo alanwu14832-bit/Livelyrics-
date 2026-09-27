@@ -5,24 +5,81 @@
 // the scale slider). Edits apply to the projection at once and save automatically.
 
 import { memo, useMemo } from "react";
+import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { Button, Disclosure, Slider, Tag, Tooltip, cx } from "@/components/ui";
 import { SparkleIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import type { ConsoleController } from "@/lib/console/controller";
 import { motifDataUrl, readableTextOn, withAlpha } from "@/lib/console/format";
 import { selectSectionIndex, useStageValue } from "@/lib/console/hooks";
-import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, PLACEMENT_LABELS, SCENE_HINTS, SCENE_LABELS, TRANSITION_LABELS } from "@/lib/console/labels";
+import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, MEDIA_TREATMENT_HINTS, MEDIA_TREATMENT_LABELS, PLACEMENT_LABELS, SCENE_HINTS, SCENE_LABELS, TRANSITION_LABELS } from "@/lib/console/labels";
 import { LYRIC_SCALE_MAX, LYRIC_SCALE_MIN } from "@/lib/console/plan-edit";
 import { FONTS, fontStack } from "@/lib/fonts";
-import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
+import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_TREATMENTS, SCENE_IDS } from "@/lib/schema";
 import { formatTimeShort } from "@/lib/timeline";
-import type { DesignPlan, LyricPlacement, LyricStyleId, Project, SceneId, SectionDesign } from "@/lib/types";
+import type { Asset, DesignPlan, LyricPlacement, LyricStyleId, MediaTreatment, Project, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
 import { sectionName } from "./Preview";
 import { Footnote, Group, GroupTitle, KeyValues, PopupSelect } from "./ui";
 
 const SCENE_OPTIONS = SCENE_IDS.map((id) => ({ value: id, label: SCENE_LABELS[id] }));
 const STYLE_OPTIONS = LYRIC_STYLE_IDS.map((id) => ({ value: id, label: LYRIC_STYLE_LABELS[id] }));
 const PLACEMENT_OPTIONS = LYRIC_PLACEMENTS.map((id) => ({ value: id, label: PLACEMENT_LABELS[id] }));
+const TREATMENT_OPTIONS = MEDIA_TREATMENTS.map((id) => ({ value: id, label: MEDIA_TREATMENT_LABELS[id] }));
+const NO_MEDIA = "__none__";
+
+/** A default look for material the operator just picked (lyrics keep priority). */
+function defaultMediaFor(asset: Asset, section: SectionDesign): SectionMedia {
+  const lyrics = section.lyricStyle !== "hidden";
+  if (asset.kind === "logo") return { assetId: asset.id, treatment: "full", fit: "contain", opacity: lyrics ? 0.55 : 0.9, blend: "screen" };
+  if (asset.kind === "video") return { assetId: asset.id, treatment: section.energy >= 0.6 ? "beat-cut" : "blur-glow", fit: "cover", opacity: lyrics ? 0.55 : 0.85, blend: "normal" };
+  return { assetId: asset.id, treatment: lyrics ? "mask-lyrics" : "duotone", fit: "cover", opacity: lyrics ? 0.65 : 0.85, blend: "normal" };
+}
+
+/** 素材 quick edit: which asset, how it is treated, how strongly. */
+function MediaPicker({ controller, section, index, assets, disabled }: { controller: ConsoleController; section: SectionDesign; index: number; assets: Asset[]; disabled: boolean }) {
+  const media = section.media ?? null;
+  const known = media ? assets.find((a) => a.id === media.assetId) : undefined;
+  const options = [{ value: NO_MEDIA, label: "不使用" }, ...assets.map((a) => ({ value: a.id, label: a.name }))];
+  const set = (next: SectionMedia | null) => controller.updateSection(index, { media: next });
+  return (
+    <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-2.5">
+      <PopupSelect<string>
+        label="素材"
+        value={known ? known.id : NO_MEDIA}
+        options={options}
+        disabled={disabled}
+        onChange={(v) => {
+          if (v === NO_MEDIA) return set(null);
+          const asset = assets.find((a) => a.id === v);
+          if (!asset) return;
+          set(media ? { ...media, assetId: asset.id, fit: asset.kind === "logo" ? "contain" : media.fit } : defaultMediaFor(asset, section));
+        }}
+      />
+      {known && media ? (
+        <>
+          <Tooltip content={MEDIA_TREATMENT_HINTS[media.treatment]}>
+            <div className="min-w-0">
+              <PopupSelect<MediaTreatment> label="處理" value={media.treatment} options={TREATMENT_OPTIONS} disabled={disabled} onChange={(treatment) => set({ ...media, treatment })} />
+            </div>
+          </Tooltip>
+          <Slider
+            label="素材透明度"
+            value={media.opacity}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(opacity) => set({ ...media, opacity })}
+            format={(v) => `${Math.round(v * 100)}%`}
+            disabled={disabled}
+            className="col-span-2 -mt-1.5"
+          />
+        </>
+      ) : (
+        <p className="self-end pb-1 text-c-footnote text-label-2">{assets.length ? "只顯示場景" : "先在上方加入素材"}</p>
+      )}
+    </div>
+  );
+}
 
 function copy(controller: ConsoleController, text: string) {
   try {
@@ -170,12 +227,14 @@ function SectionGroup({
   index,
   active,
   disabled,
+  assets,
 }: {
   controller: ConsoleController;
   section: SectionDesign;
   index: number;
   active: boolean;
   disabled: boolean;
+  assets: Asset[];
 }) {
   const [bg, primary, accent] = section.colorway;
   const name = sectionName(section);
@@ -246,6 +305,7 @@ function SectionGroup({
             className="-mt-1.5"
           />
         </div>
+        <MediaPicker controller={controller} section={section} index={index} assets={assets} disabled={disabled} />
       </div>
     </Group>
   );
@@ -261,6 +321,20 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
     return (inChorus ?? lines.find((l) => l.text.trim()))?.text.trim() || plan?.keyVisual.title || "舞台上的每一句歌詞";
   }, [project.lyrics, plan]);
 
+  const assets = project.assets ?? [];
+  const library = (
+    <AssetLibrary
+      projectId={project.id}
+      assets={assets}
+      density="console"
+      onChange={(list, nextPlan) => controller.applyAssets(list, nextPlan)}
+      onRedesign={plan ? () => void controller.redesign("") : undefined}
+      redesignBusy={redesigning}
+      redesignDisabled={redesigning}
+      alwaysOfferRedesign={!!plan && !plan.sections.some((s) => s.media)}
+    />
+  );
+
   if (!plan) {
     return (
       <div className="flex flex-col items-center px-6 py-10 text-center">
@@ -270,6 +344,7 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
         <Button variant="filled" className="mt-4" icon={SparkleIcon} onClick={onRedesign} loading={redesigning}>
           產生設計
         </Button>
+        <div className="mt-8 w-full text-left">{library}</div>
       </div>
     );
   }
@@ -277,12 +352,13 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <KeyVisualCard controller={controller} plan={plan} sampleText={sampleText} />
+      {library}
       <section aria-labelledby="design-sections">
         <GroupTitle id="design-sections">段落設計（{plan.sections.length}）</GroupTitle>
         {redesigning ? <Footnote className="mt-0 mb-1.5">重新設計進行中，完成前暫停手動修改。</Footnote> : <Footnote className="mt-0 mb-1.5">修改會即時套用到投影並自動儲存。</Footnote>}
         <div className="flex flex-col gap-2">
           {plan.sections.map((s, i) => (
-            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} />
+            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={assets} />
           ))}
         </div>
       </section>

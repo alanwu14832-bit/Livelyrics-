@@ -8,11 +8,12 @@
 // song time (deterministic under seeking), or on the time since the console cued
 // the line for untimed lyrics.
 
-import type { LyricPlacement, LyricStyleId, Project, SceneId } from "@/lib/types";
+import type { LyricPlacement, LyricSafeArea, LyricStyleId, Project, SceneId } from "@/lib/types";
 import { lightness, rgba, shade } from "@/lib/stage/color";
 import { chunkIndexAt, impactChunks, type Chunk } from "@/lib/stage/lyrics/chunks";
 import {
   STYLE_METRICS,
+  adaptMetrics,
   clampWeight,
   flexAlign,
   placementBox,
@@ -45,6 +46,10 @@ export interface LyricFrame {
   pulse: number;
   /** overrides.lyricsVisible */
   visible: boolean;
+  /** canvas width / height (the stage element's aspect) */
+  aspect: number;
+  /** Project.output.lyricSafe */
+  safe: LyricSafeArea;
 }
 
 // ---------------------------------------------------------------------------
@@ -718,6 +723,33 @@ export class LyricLayer {
     for (const v of this.leaving) v.invalidateFit();
   }
 
+  /**
+   * Where the current line's text actually sits, as fractions of the layer (x0, y0, x1, y1 with
+   * y down), or null when nothing is shown. Reads layout: callers throttle it.
+   */
+  textBounds(): [number, number, number, number] | null {
+    const v = this.current;
+    if (!v || this.failed) return null;
+    const root = this.root.getBoundingClientRect();
+    if (root.width <= 0 || root.height <= 0) return null;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const el of Array.from(v.group.querySelectorAll<HTMLElement>(`.${styles.block}`))) {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      x0 = Math.min(x0, r.left);
+      y0 = Math.min(y0, r.top);
+      x1 = Math.max(x1, r.right);
+      y1 = Math.max(y1, r.bottom);
+    }
+    if (!Number.isFinite(x0)) return null;
+    const fx = (x: number) => Math.min(1, Math.max(0, (x - root.left) / root.width));
+    const fy = (y: number) => Math.min(1, Math.max(0, (y - root.top) / root.height));
+    return [fx(x0), fy(y0), fx(x1), fy(y1)];
+  }
+
   private prepared(project: Project, index: number, metrics: StyleMetrics, emphasis: string[]): PreparedLine | null {
     const key = `${this.signature}|${index}|${metrics.maxChars}|${metrics.maxLines}|${emphasis.join("\u0001")}`;
     if (this.cache.has(key)) return this.cache.get(key) ?? null;
@@ -809,7 +841,8 @@ export class LyricLayer {
       emphasis = d.emphasis;
       if (style !== "hidden" && (lines[valid].text ?? "").trim()) {
         mode = writingModeFor(style, look.placement);
-        const base = `${this.signature}|${f.typography.key}|${look.placement}|${mode}`;
+        const s = f.safe;
+        const base = `${this.signature}|${f.typography.key}|${look.placement}|${mode}|${f.aspect.toFixed(2)}|${s.top},${s.right},${s.bottom},${s.left}`;
         const cue = lines[valid].start == null ? `|${state.lineStartedAt}` : "";
         key = style === "stack" ? `stack|${look.sectionIndex}|${base}` : `${style}|${valid}|${base}|${emphasis.join("\u0001")}${cue}`;
       }
@@ -844,12 +877,13 @@ export class LyricLayer {
 
   private createView(key: string, style: LyricStyleId, mode: WritingMode, index: number, emphasis: string[], f: LyricFrame): LyricView | null {
     const { project, look, state } = f;
-    const metrics = STYLE_METRICS[style];
+    const box = placementBox(look.placement, mode, f.safe, f.aspect);
+    const metrics = adaptMetrics(STYLE_METRICS[style], style, box, f.aspect, mode);
     const spec: ViewSpec = {
       style,
       placement: look.placement,
       mode,
-      box: placementBox(look.placement, mode),
+      box,
       metrics,
       typography: f.typography,
     };

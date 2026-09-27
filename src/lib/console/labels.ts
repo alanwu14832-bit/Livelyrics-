@@ -2,7 +2,7 @@
 // Kept in sync by hand with the stage lab / designer catalog wording so the
 // operator sees the same names everywhere.
 
-import type { CueNote, LyricPlacement, LyricStyleId, SceneId, SectionDesign, SectionKind } from "@/lib/types";
+import type { CueNote, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionDesign, SectionKind } from "@/lib/types";
 
 export const SCENE_LABELS: Record<SceneId, string> = {
   nebula: "星雲煙霧",
@@ -122,4 +122,26 @@ export const LYRICS_SOURCE_LABELS: Record<string, string> = {
   user: "使用者提供",
   embedded: "音檔內嵌",
   none: "無歌詞",
+};
+
+export const MEDIA_TREATMENT_LABELS: Record<MediaTreatment, string> = {
+  full: "原樣",
+  duotone: "雙色調",
+  "grain-film": "底片顆粒",
+  "blur-glow": "柔焦光暈",
+  halftone: "網點",
+  "mask-lyrics": "避開歌詞",
+  "slow-drift": "緩慢推移",
+  "beat-cut": "跟拍剪接",
+};
+
+export const MEDIA_TREATMENT_HINTS: Record<MediaTreatment, string> = {
+  full: "素材原樣呈現",
+  duotone: "明暗映射到這段的背景色與主色",
+  "grain-film": "去飽和、染色、底片顆粒與輕微晃動",
+  "blur-glow": "失焦光暈，最不搶歌詞",
+  halftone: "海報般的印刷網點，用這段的配色",
+  "mask-lyrics": "歌詞出現時，歌詞區的素材退成背景色",
+  "slow-drift": "整段緩慢推近與平移",
+  "beat-cut": "每一拍換構圖或影片片段，重拍閃一下",
 };

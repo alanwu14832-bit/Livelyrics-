@@ -1,7 +1,9 @@
 // Static DOM for the safe-area guides and the projector test pattern.
 // Built once per StageView; only visibility and the size label change.
 
-import { ACTION_SAFE, TITLE_SAFE, type PlacementBox } from "@/lib/stage/lyrics/layout";
+import { aspectLabel, safeRectPercent } from "@/lib/output";
+import { ACTION_SAFE, type PlacementBox } from "@/lib/stage/lyrics/layout";
+import type { LyricSafeArea } from "@/lib/types";
 
 function div(style: Partial<CSSStyleDeclaration>, text?: string): HTMLDivElement {
   const d = document.createElement("div");
@@ -15,7 +17,11 @@ const inset = (fraction: number) => `${((1 - fraction) / 2) * 100}%`;
 export interface GuidesHandle {
   root: HTMLDivElement;
   setPlacement(box: PlacementBox | null): void;
+  /** the lyric safe area and the canvas size (px) it is drawn for */
+  setCanvas(safe: LyricSafeArea, width: number, height: number): void;
 }
+
+const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
 
 export function buildGuides(): GuidesHandle {
   const root = div({ position: "absolute", inset: "0", pointerEvents: "none", display: "none", fontFamily: "var(--font-sans, sans-serif)" });
@@ -28,7 +34,7 @@ export function buildGuides(): GuidesHandle {
   });
   const title = div({
     position: "absolute",
-    inset: inset(TITLE_SAFE),
+    inset: "5%",
     border: "1px solid rgba(255,196,72,0.7)",
     boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
   });
@@ -42,9 +48,21 @@ export function buildGuides(): GuidesHandle {
       textShadow: "0 1px 2px rgba(0,0,0,0.8)",
       letterSpacing: "0.04em",
     },
-    `標題安全區 ${Math.round(TITLE_SAFE * 100)}%`,
+    "歌詞安全區",
   );
   title.append(label);
+  const sizeLabel = div(
+    {
+      position: "absolute",
+      right: "0.6cqh",
+      top: "0.4cqh",
+      fontSize: "max(9px, 2.1cqh)",
+      color: "rgba(255,255,255,0.85)",
+      textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+      fontVariantNumeric: "tabular-nums",
+    },
+    "",
+  );
   const cross = div({ position: "absolute", left: "50%", top: "50%", width: "4cqh", height: "4cqh", transform: "translate(-50%, -50%)" });
   cross.append(
     div({ position: "absolute", left: "0", right: "0", top: "50%", height: "1px", background: "rgba(255,255,255,0.45)" }),
@@ -62,11 +80,22 @@ export function buildGuides(): GuidesHandle {
     "歌詞區",
   );
   lyricBox.append(lyricLabel);
-  root.append(thirds, action, title, cross, lyricBox);
+  root.append(thirds, action, title, cross, lyricBox, sizeLabel);
 
   let lastKey = "";
+  let canvasKey = "";
   return {
     root,
+    setCanvas(safe, width, height) {
+      const key = `${safe.top},${safe.right},${safe.bottom},${safe.left},${width},${height}`;
+      if (key === canvasKey) return;
+      canvasKey = key;
+      const r = safeRectPercent(safe);
+      Object.assign(title.style, { inset: "auto", left: `${r.left}%`, top: `${r.top}%`, width: `${r.width}%`, height: `${r.height}%` });
+      const same = safe.top === safe.right && safe.top === safe.bottom && safe.top === safe.left;
+      label.textContent = same ? `歌詞安全區 內縮 ${pct(safe.top)}` : `歌詞安全區 上 ${pct(safe.top)} 右 ${pct(safe.right)} 下 ${pct(safe.bottom)} 左 ${pct(safe.left)}`;
+      sizeLabel.textContent = `${width} × ${height} px（${aspectLabel(width, height)}）`;
+    },
     setPlacement(box) {
       const key = box ? `${box.left},${box.top},${box.width},${box.height}` : "";
       if (key === lastKey) return;
@@ -114,7 +143,7 @@ export function buildTestPattern(): TestPatternHandle {
     position: "absolute",
     left: "50%",
     top: "50%",
-    height: "80cqh",
+    height: "min(80cqh, 80cqw)",
     aspectRatio: "1 / 1",
     transform: "translate(-50%, -50%)",
     border: "0.35cqh solid rgba(255,255,255,0.85)",
@@ -141,7 +170,7 @@ export function buildTestPattern(): TestPatternHandle {
     textShadow: "0 0 0.6cqh #000",
   });
   const title = div({ fontSize: "4.2cqh", fontWeight: "700", letterSpacing: "0.08em" }, "Livelyrics 投影測試畫面");
-  const size = div({ fontSize: "3cqh", fontFamily: "var(--font-mono, monospace)", opacity: "0.9" }, "—");
+  const size = div({ fontSize: "3cqh", fontFamily: "var(--font-mono, monospace)", opacity: "0.9" }, "");
   text.append(title, size);
   const corners = [
     { left: "0", top: "0", borderLeft: "0.6cqh solid #fff", borderTop: "0.6cqh solid #fff" },
@@ -154,17 +183,7 @@ export function buildTestPattern(): TestPatternHandle {
   return {
     root,
     setSize(width, height) {
-      const g = gcd(width, height);
-      const aspect = g > 0 ? `${width / g}:${height / g}` : "";
-      const nice = aspect.length <= 7 ? aspect : `${(width / Math.max(1, height)).toFixed(3)}:1`;
-      size.textContent = `${width} × ${height} px · ${nice}`;
+      size.textContent = `${width} × ${height} px（${aspectLabel(width, height)}）`;
     },
   };
-}
-
-function gcd(a: number, b: number): number {
-  a = Math.round(Math.abs(a));
-  b = Math.round(Math.abs(b));
-  while (b) [a, b] = [b, a % b];
-  return a;
 }

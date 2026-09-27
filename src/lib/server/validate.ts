@@ -4,7 +4,9 @@ import { z } from "zod";
 import { normalizeLyrics } from "@/lib/lyrics/lrc";
 import type { ProcessRequest } from "@/lib/api-client";
 import { DesignPlanSchema } from "@/lib/schema";
-import type { AudioAnalysis, AudioSectionGuess, DesignPlan, Lyrics, SongMeta } from "@/lib/types";
+import { MAX_NAME, MAX_NOTE, MAX_TAGS, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags } from "@/lib/assets";
+import { OUTPUT_MAX_PX, OUTPUT_MIN_PX, SAFE_MAX, patchOutput } from "@/lib/output";
+import type { Asset, AudioAnalysis, AudioSectionGuess, DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
 import { HttpError } from "./http";
 
 const MAX_TEXT = 300;
@@ -238,6 +240,62 @@ export function parsePlanPatch(raw: unknown): DesignPlan {
   const plan = parsed.data;
   if (plan.sections.length === 0) throw new HttpError(400, "設計方案至少需要一個段落");
   return plan;
+}
+
+// ---------------------------------------------------------------------------
+// output canvas
+// ---------------------------------------------------------------------------
+
+const Fraction = z.number().min(0).max(SAFE_MAX);
+const OutputPatchSchema = z.object({
+  width: z.number().int().min(OUTPUT_MIN_PX).max(OUTPUT_MAX_PX).optional(),
+  height: z.number().int().min(OUTPUT_MIN_PX).max(OUTPUT_MAX_PX).optional(),
+  preset: z.string().max(32).optional(),
+  lyricSafe: z.object({ top: Fraction.optional(), right: Fraction.optional(), bottom: Fraction.optional(), left: Fraction.optional() }).optional(),
+});
+
+/** Apply a PATCH `output` object on top of the current canvas. */
+export function applyOutputPatch(current: ProjectOutput, raw: unknown): ProjectOutput {
+  const parsed = OutputPatchSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(400, `輸出設定格式錯誤：${issuesText(parsed.error)}`);
+  return patchOutput(current, parsed.data);
+}
+
+// ---------------------------------------------------------------------------
+// assets
+// ---------------------------------------------------------------------------
+
+const AssetPatchSchema = z.object({
+  name: z.string().max(MAX_NAME * 4).optional(),
+  note: z.string().max(MAX_NOTE * 4).nullable().optional(),
+  tags: z.array(z.string().max(200)).max(MAX_TAGS * 4).nullable().optional(),
+  kind: z.string().optional(),
+});
+
+/** Apply a PATCH to an asset's editable fields (name, note, tags; image <-> logo). */
+export function applyAssetPatch(current: Asset, raw: unknown): Asset {
+  const parsed = AssetPatchSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(400, `素材資料格式錯誤：${issuesText(parsed.error)}`);
+  const p = parsed.data;
+  const next: Asset = { ...current };
+  if (p.name !== undefined) next.name = sanitizeAssetName(p.name, current.name);
+  if (p.note !== undefined) {
+    const note = sanitizeNote(p.note ?? "");
+    if (note) next.note = note;
+    else delete next.note;
+  }
+  if (p.tags !== undefined) {
+    const tags = sanitizeTags(p.tags ?? []);
+    if (tags) next.tags = tags;
+    else delete next.tags;
+  }
+  if (p.kind !== undefined) {
+    if (!isAssetKind(p.kind)) throw new HttpError(400, "素材種類無效");
+    const video = current.mimeType.startsWith("video/");
+    if (video !== (p.kind === "video")) throw new HttpError(400, video ? "影片素材只能是影片" : "圖片素材只能是圖片或標誌");
+    next.kind = p.kind;
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------

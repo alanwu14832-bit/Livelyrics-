@@ -2,10 +2,11 @@
 // (structured DesignPlan). Written in Traditional Chinese: the persona is a Taiwanese
 // band's dedicated stage-visual director, and every user-facing field is 繁中.
 
-import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
-import type { DesignPlan, Research, SongMeta } from "@/lib/types";
+import { formatBytes, formatDuration } from "@/lib/assets";
+import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_BLENDS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
+import type { Asset, DesignPlan, Research, SongMeta } from "@/lib/types";
 import { formatTimeShort } from "@/lib/timeline";
-import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
+import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
@@ -182,6 +183,8 @@ function catalogBlock(): string {
   const transitions = (Object.keys(TRANSITIONS) as Array<keyof typeof TRANSITIONS>).map((id) => `- ${id}：${TRANSITIONS[id]}`);
   const fonts = FONT_IDS.map((id) => `- ${id}（${FONT_CATALOG[id].label}，${FONT_CATALOG[id].cjk ? "CJK 中文字體" : "拉丁字體"}）：${FONT_CATALOG[id].description}`);
   const kinds = SECTION_KINDS.map((k) => `${k}＝${SECTION_KIND_LABELS[k]}`).join("、");
+  const treatments = MEDIA_TREATMENTS.map((id) => `- ${id}（${MEDIA_TREATMENT_INFO[id].label}）：${MEDIA_TREATMENT_INFO[id].description}`);
+  const blends = MEDIA_BLENDS.map((id) => `- ${id}：${MEDIA_BLEND_INFO[id]}`);
   return [
     "# 場景 scene（背景 GLSL 動畫，會吃 colorway 三色與 sceneParams）",
     ...scenes,
@@ -199,6 +202,12 @@ function catalogBlock(): string {
     ...fonts,
     "",
     `# 段落種類 kind：${kinds}`,
+    "",
+    "# 樂團素材 media.treatment（素材放在場景之上、歌詞之下，會用該段 colorway 處理）",
+    ...treatments,
+    "",
+    "# 素材混合 media.blend",
+    ...blends,
   ].join("\n");
 }
 
@@ -215,7 +224,15 @@ export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，�
    - 字很密的段落（每秒超過約 5 個字，例如饒舌、快歌主歌）：不要逐字動畫，改 subtitle 或 hidden，把歌詞留給副歌。
 4. 大螢幕可讀性：字重 600 以上（建議 700–900）；歌詞色與該段背景 colorway[0] 的對比至少 4.5:1（建議 7:1 以上）；同時最多 2 行、每行約 16 個中文字內。避開主唱 IMAG（畫面中央偏下、主唱臉的位置）與畫面最下緣（會被觀眾的頭、旗子與手機擋住）：重要的句子放 center 或 upper-third，lower-third 只給安靜的字幕。
 5. 能量對應：場景、速度、密度、亮度與音訊反應跟著音訊能量走；副歌一次比一次強，最後一次副歌是全曲最高點；安靜段真的要安靜（低 intensity、慢、少元素）。轉場配合能量：爆點用 flash 或 cut，推進用 wipe，進入抒情用 bloom，回落用 fade。相鄰段落避免用同一個場景（刻意延續除外）。
-6. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
+6. 樂團自己的素材是最強的識別。有提供素材時，像專業 VJ 一樣使用它們，讓畫面一看就是「這個樂團」而不是通用特效：
+   - 專輯封面就是這首歌的世界：開場、橋段或最後一次副歌用 slow-drift 或 duotone 把封面鋪成整個畫面，配色與母題也從封面取。
+   - 照片（排練、後台、樂手特寫）用 duotone 或 grain-film 處理成 colorway 的顏色，不要原色直接貼上；它們和場景要像同一個世界。
+   - MV 片段在高能量段落（副歌、drop、solo）用 beat-cut 跟著拍子剪；安靜段落改 blur-glow 或 slow-drift。
+   - logo 節制使用：前奏開場與尾奏收尾各一次最有力（fit 用 contain、blend 用 screen），不要每段都出現。
+   - 永遠不和歌詞搶：該段有歌詞時用 mask-lyrics、blur-glow，或把 opacity 降到 0.35–0.6；hidden 的器樂段才讓素材滿版 0.8–1。
+   - 不是每段都要放素材：留一些段落只用場景，讓素材出現時有份量。素材的 note 與 tags 是操作員的說明（例如哪張是專輯封面），請依此選用。
+   - 沒有提供素材時，每段的 media 一律是 null。
+7. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
 
 ${catalogBlock()}
 
@@ -228,7 +245,27 @@ ${catalogBlock()}
 - cues 3–12 個、依時間排序，time 以秒為單位。
 - motifSvg：一個簡潔的主視覺符號（viewBox="0 0 100 100"），只能用 svg、g、path、circle、rect、polygon、polyline、line、ellipse；fill／stroke 用 currentColor；不要文字、腳本、style、外部連結或漸層；2500 字元內。它會被平鋪、環繞與脈動，所以要是清楚、可辨識的剪影，並呼應主視覺母題。
 - designerNotes：150–400 字的 Markdown，說明敘事弧線、歌詞與動畫怎麼搭配、現場注意事項。
+- media：null（只用場景）或 { assetId, treatment, fit, opacity, blend }；assetId 必須是「樂團素材」清單裡逐字相同的 id。用到素材的段落在 rationale 說明為什麼這樣用。
 - 不要重製歌詞；rationale、notes 裡提到歌詞只用幾個字。`;
+
+const MAX_ASSETS_IN_PROMPT = 60;
+
+/** The band's uploaded material, one line per asset (id, kind, size, note, tags). */
+export function assetsBlock(assets: readonly Asset[] | undefined): string {
+  const list: readonly Asset[] = Array.isArray(assets) ? (assets as readonly Asset[]) : [];
+  if (!list.length) return "（沒有提供素材：每段的 media 一律填 null。）";
+  const kind: Record<string, string> = { image: "圖片", video: "影片", logo: "標誌" };
+  const rows = list.slice(0, MAX_ASSETS_IN_PROMPT).map((a) => {
+    const parts = [`${a.id}｜${kind[a.kind] ?? a.kind}｜「${clip(a.name, 60)}」｜${a.width}×${a.height}`];
+    if (a.duration) parts.push(`長度 ${formatDuration(a.duration)}（${a.duration.toFixed(1)} 秒）`);
+    parts.push(formatBytes(a.bytes));
+    if (a.note) parts.push(`說明：${clip(a.note, 200)}`);
+    if (a.tags?.length) parts.push(`標籤：${a.tags.slice(0, 8).join("、")}`);
+    return `- ${parts.join("｜")}`;
+  });
+  if (list.length > MAX_ASSETS_IN_PROMPT) rows.push(`…（其餘 ${list.length - MAX_ASSETS_IN_PROMPT} 個素材省略）`);
+  return rows.join("\n");
+}
 
 function trimBrief(research: Research | null): string {
   const brief = research?.brief?.trim();
@@ -263,6 +300,9 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
     "",
     "# 研究簡報",
     trimBrief(req.research),
+    "",
+    "# 樂團素材（id｜種類｜名稱｜尺寸｜…）",
+    assetsBlock(req.assets),
   ];
   const instruction = req.instruction?.trim();
   if (req.previous && instruction) {

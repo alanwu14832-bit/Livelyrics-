@@ -16,6 +16,7 @@ import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/Proje
 import { useServerStatus } from "@/components/home/ServerStatus";
 import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
+import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { KeyVisualSummary } from "./KeyVisualSummary";
 import {
   applyEvents,
@@ -452,6 +453,17 @@ export function ProcessClient({
           )}
 
           {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} reveal={showDone} />}
+
+          {!running && (
+            <AssetLibrary
+              projectId={project.id}
+              assets={project.assets ?? []}
+              onChange={(assets, nextPlan) => setProject((p) => (p ? { ...p, assets, ...(nextPlan !== undefined ? { plan: nextPlan } : {}) } : p))}
+              onRedesign={plan ? () => redesign("", false) : undefined}
+              redesignDisabled={running}
+              alwaysOfferRedesign={!!plan && !plan.sections.some((s) => s.media)}
+            />
+          )}
 
           {!running && !plan && !error && (
             <EmptyState

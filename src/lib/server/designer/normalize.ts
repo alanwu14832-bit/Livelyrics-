@@ -6,6 +6,9 @@ import {
   FONT_IDS,
   LYRIC_PLACEMENTS,
   LYRIC_STYLE_IDS,
+  MEDIA_BLENDS,
+  MEDIA_FITS,
+  MEDIA_TREATMENTS,
   SCENE_IDS,
   SECTION_KINDS,
   type CueNote,
@@ -18,8 +21,9 @@ import {
   type SceneId,
   type SectionDesign,
   type SectionKind,
+  type SectionMedia,
 } from "@/lib/schema";
-import type { LyricLine } from "@/lib/types";
+import type { Asset, LyricLine } from "@/lib/types";
 import { FONT_CATALOG, SECTION_KIND_LABELS } from "./catalog";
 import { colorName, contrastRatio, ensureContrast, hexToHsl, hsl, luminance, MIN_LYRIC_CONTRAST, normalizeHex } from "./color";
 import { capCues, MAX_CUES, MIN_CUES, suggestCues } from "./cues";
@@ -297,6 +301,26 @@ function pickColorway(raw: unknown, palette: readonly string[]): string[] {
   return out;
 }
 
+/**
+ * A section's `media`: null unless it names one of the project's assets. Missing fields get
+ * defaults (logos are shown whole, video defaults to cutting on the beat).
+ */
+export function normalizeMedia(raw: unknown, assets: ReadonlyMap<string, Asset>): SectionMedia | null {
+  const o = asObj(raw);
+  if (!o || typeof o.assetId !== "string") return null;
+  const asset = assets.get(o.assetId.trim());
+  if (!asset) return null;
+  const fallbackTreatment = asset.kind === "video" ? "beat-cut" : asset.kind === "logo" ? "full" : "duotone";
+  const opacity = num(o.opacity);
+  return {
+    assetId: asset.id,
+    treatment: oneOf(o.treatment, MEDIA_TREATMENTS) ?? fallbackTreatment,
+    fit: oneOf(o.fit, MEDIA_FITS) ?? (asset.kind === "logo" ? "contain" : "cover"),
+    opacity: r2(clamp(opacity ?? 0.85, 0, 1)),
+    blend: oneOf(o.blend, MEDIA_BLENDS) ?? (asset.kind === "logo" ? "screen" : "normal"),
+  };
+}
+
 function draftSection(raw: unknown, order: number, ctx: SectionCtx): Draft | null {
   const o = asObj(raw);
   if (!o) return null;
@@ -337,8 +361,15 @@ function draftSection(raw: unknown, order: number, ctx: SectionCtx): Draft | nul
     lyricScale: r2(clamp(lyricScale ?? 1, 0.6, 1.8)),
     lyricColor,
     transitionIn: oneOf(o.transitionIn, TRANSITIONS) ?? (e >= 0.7 ? "flash" : "fade"),
+    media: mediaFor(o.media, ctx),
     rationale: text(o.rationale, "", 400),
   };
+}
+
+function mediaFor(raw: unknown, ctx: SectionCtx): SectionMedia | null {
+  const media = normalizeMedia(raw, ctx.assets);
+  if (!media && asObj(raw)) ctx.droppedMedia++;
+  return media;
 }
 
 interface SectionCtx {
@@ -346,6 +377,8 @@ interface SectionCtx {
   duration: number;
   palette: string[];
   contrastFixes: number;
+  assets: ReadonlyMap<string, Asset>;
+  droppedMedia: number;
 }
 
 function audioBoundaries(input: DesignerInput): number[] {
@@ -445,6 +478,7 @@ function finishSection(d: Draft, lines: readonly LyricLine[]): Omit<SectionDesig
     lyricScale: d.lyricScale,
     lyricColor: d.lyricColor,
     transitionIn: d.transitionIn,
+    media: d.media,
     rationale: d.rationale || `${d.label}：${d.scene}／${lyricStyle}。`,
   };
 }
@@ -535,10 +569,12 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput): Nor
   const palette = keyVisual.palette.map((p) => p.hex);
   const lyricsLines = Array.isArray(input.lyrics?.lines) ? input.lyrics.lines : [];
 
-  const ctx: SectionCtx = { input, duration, palette, contrastFixes: 0 };
+  const assets = new Map((Array.isArray(input.assets) ? input.assets : []).filter((a) => a && typeof a.id === "string").map((a) => [a.id, a] as const));
+  const ctx: SectionCtx = { input, duration, palette, contrastFixes: 0, assets, droppedMedia: 0 };
   const rawSections = asArray(root.sections);
   let drafts = rawSections.map((s, i) => draftSection(s, i, ctx)).filter((d): d is Draft => d != null);
   if (drafts.length < rawSections.length) repairs.push(`略過 ${rawSections.length - drafts.length} 個缺少時間的段落`);
+  if (ctx.droppedMedia) repairs.push(`移除 ${ctx.droppedMedia} 個指向不存在素材的段落素材`);
   if (ctx.contrastFixes) repairs.push(`調整 ${ctx.contrastFixes} 段歌詞顏色以達到 4.5:1 對比`);
   const before = drafts.map((d) => `${d.start}-${d.end}`).join(",");
   drafts = repairTimeline(drafts, duration, audioBoundaries(input));

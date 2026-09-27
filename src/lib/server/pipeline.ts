@@ -375,6 +375,7 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
             meta: project.meta,
             lyrics: project.lyrics,
             analysis: project.analysis,
+            assets: project.assets ?? [],
             research: project.research,
             instruction: run.request.instruction,
             previous: project.plan,

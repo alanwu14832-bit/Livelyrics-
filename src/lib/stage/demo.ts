@@ -3,6 +3,7 @@
 // breakdown 40–48, chorus 48–64, outro 64–73) with a hand-written design plan and
 // deterministic fake analysis envelopes.
 
+import { defaultOutput } from "../output";
 import type { AudioAnalysis, DesignPlan, LyricLine, Project } from "../types";
 
 export const DEMO_DURATION = 73;
@@ -183,6 +184,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 1,
         lyricColor: P.moon,
         transitionIn: "fade",
+        media: null,
         rationale: "以主視覺符號開場，讓觀眾先認得這首歌的「燈火」。",
       },
       {
@@ -200,6 +202,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 0.95,
         lyricColor: P.moon,
         transitionIn: "bloom",
+        media: null,
         rationale: "敘事段落，霧般的星雲維持低亮度，歌詞在下三分之一穩定跟唱。",
       },
       {
@@ -217,6 +220,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 1.1,
         lyricColor: P.moon,
         transitionIn: "flash",
+        media: null,
         rationale: "第一次爆點：閃白進場，光點隨大鼓脈動，歌詞逐字跳出帶動合唱。",
       },
       {
@@ -234,6 +238,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 1,
         lyricColor: "#eef6f2",
         transitionIn: "fade",
+        media: null,
         rationale: "收掉能量，水墨與直排文字製造文學感的留白。",
       },
       {
@@ -251,6 +256,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 1,
         lyricColor: P.moon,
         transitionIn: "wipe",
+        media: null,
         rationale: "最高潮：網格向前衝，歌詞像詩一樣堆疊，讓全場看見整段副歌。",
       },
       {
@@ -268,6 +274,7 @@ export function createDemoPlan(): DesignPlan {
         lyricScale: 1.25,
         lyricColor: "#fff4e6",
         transitionIn: "fade",
+        media: null,
         rationale: "天亮的暖色漸層，最後一句放大，安靜收尾。",
       },
     ],
@@ -323,6 +330,8 @@ export function createDemoProject(): Project {
       createdAt: created,
     },
     plan: createDemoPlan(),
+    assets: [],
+    output: defaultOutput(),
   };
 }
 

@@ -8,12 +8,13 @@
 import { memo, useMemo } from "react";
 import { Button, Kbd, Slider, Tooltip, cx } from "@/components/ui";
 import { CheckIcon, EyeSlashIcon, MoonIcon, SnowflakeIcon, SquareHalfIcon } from "@/components/ui/Icon";
-import type { ConsoleController } from "@/lib/console/controller";
+import type { ConsoleController, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, selectSectionIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, SCENE_HINTS, SCENE_LABELS } from "@/lib/console/labels";
 import { sceneBank } from "@/lib/console/plan-edit";
 import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
 import type { Project, SceneId } from "@/lib/types";
+import { OutputSettings } from "./OutputSettings";
 import { Footnote, Group, GroupTitle, TINT_ON_SOFT, ToggleTile } from "./ui";
 
 /** 「目前段落」 marker for the plan's own choice in this section. */
@@ -26,7 +27,7 @@ function PlanMark({ className }: { className?: string }) {
   );
 }
 
-function ControlTabImpl({ controller, project }: { controller: ConsoleController; project: Project }) {
+function ControlTabImpl({ controller, project, output }: { controller: ConsoleController; project: Project; output: OutputStatus }) {
   const ov = useStageValue(controller.store, selectOverrides);
   const sectionIndex = useStageValue(controller.store, selectSectionIndex);
   const plan = project.plan;
@@ -190,6 +191,8 @@ function ControlTabImpl({ controller, project }: { controller: ConsoleController
           />
         </Group>
       </section>
+
+      <OutputSettings controller={controller} project={project} output={output} />
     </div>
   );
 }
