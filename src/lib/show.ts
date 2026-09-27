@@ -27,6 +27,7 @@ import type {
   SetLook,
   Show,
   ShowArc,
+  SongArcDirective,
   SongArcNote,
 } from "./types";
 
@@ -519,4 +520,14 @@ export function applyShowPatch(current: Show, raw: unknown, ctx: { projectIds: R
   }
   if (p.arc !== undefined) next.arc = p.arc === null ? null : coerceArc(p.arc, next.items);
   return { ok: true, show: next };
+}
+
+/** The re-design directive for one song of the show, from its arc note (null without one). */
+export function arcDirectiveFor(show: Pick<Show, "name" | "items" | "arc">, itemId: string): SongArcDirective | null {
+  const note = show.arc?.songs.find((s) => s.itemId === itemId);
+  if (!note) return null;
+  const songs = songItems(show.items);
+  const item = songs.find((s) => s.id === itemId);
+  if (!item) return null;
+  return { showName: show.name, position: item.position, total: songs.length, role: note.role, energy: note.energy, emphasis: note.emphasis, note: note.note };
 }

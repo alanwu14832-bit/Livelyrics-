@@ -142,3 +142,25 @@ describe("show file and edits", () => {
     expect(applyShowPatch(show, { date: "tomorrow" }, ctx).ok).toBe(false);
   });
 });
+
+describe("arc directives", () => {
+  it("builds the re-design directive from the arc note and the current order", async () => {
+    const { arcDirectiveFor } = await import("./show");
+    const show = coerceShow(
+      {
+        bandId: "b1",
+        name: "巡演",
+        items: [
+          { id: "w", kind: "walk-in", title: "進場", look: {} },
+          { id: "a", kind: "song", projectId: "p1" },
+          { id: "b", kind: "song", projectId: "p2" },
+        ],
+        arc: { engine: "offline", songs: [{ itemId: "b", role: "finale", energy: 1, emphasis: "highlight", note: "壓軸" }] },
+      },
+      "s1",
+      "",
+    );
+    expect(arcDirectiveFor(show, "b")).toEqual({ showName: "巡演", position: 1, total: 2, role: "finale", energy: 1, emphasis: "highlight", note: "壓軸" });
+    expect(arcDirectiveFor(show, "a")).toBeNull();
+  });
+});
