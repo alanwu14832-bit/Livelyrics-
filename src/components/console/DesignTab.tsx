@@ -6,6 +6,7 @@
 
 import { memo, useMemo } from "react";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
+import { stageAssets } from "@/lib/asset-scope";
 import { Button, Disclosure, Slider, Tag, Tooltip, cx } from "@/components/ui";
 import { SparkleIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
@@ -39,7 +40,7 @@ function defaultMediaFor(asset: Asset, section: SectionDesign): SectionMedia {
 function MediaPicker({ controller, section, index, assets, disabled }: { controller: ConsoleController; section: SectionDesign; index: number; assets: Asset[]; disabled: boolean }) {
   const media = section.media ?? null;
   const known = media ? assets.find((a) => a.id === media.assetId) : undefined;
-  const options = [{ value: NO_MEDIA, label: "不使用" }, ...assets.map((a) => ({ value: a.id, label: a.name }))];
+  const options = [{ value: NO_MEDIA, label: "不使用" }, ...assets.map((a) => ({ value: a.id, label: a.scope === "band" ? `樂團：${a.name}` : a.name }))];
   const set = (next: SectionMedia | null) => controller.updateSection(index, { media: next });
   return (
     <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-2.5">
@@ -322,6 +323,8 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   }, [project.lyrics, plan]);
 
   const assets = project.assets ?? [];
+  // the section picker also offers the band's shared library
+  const pickable = stageAssets(project);
   const library = (
     <AssetLibrary
       projectId={project.id}
@@ -358,7 +361,7 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
         {redesigning ? <Footnote className="mt-0 mb-1.5">重新設計進行中，完成前暫停手動修改。</Footnote> : <Footnote className="mt-0 mb-1.5">修改會即時套用到投影並自動儲存。</Footnote>}
         <div className="flex flex-col gap-2">
           {plan.sections.map((s, i) => (
-            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={assets} />
+            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={pickable} />
           ))}
         </div>
       </section>

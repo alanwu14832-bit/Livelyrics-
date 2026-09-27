@@ -7,6 +7,7 @@
 // UI state) and `store` (per-frame stage state). attach()/detach() are symmetric and
 // repeatable, so React StrictMode's mount → unmount → mount is safe.
 
+import { stageAssets } from "@/lib/asset-scope";
 import { api } from "@/lib/api-client";
 import { createMediaElementAnalyser, createMicAnalyser, listAudioInputs, resumeAudioContext, type AudioInputDevice, type LiveAnalyser } from "@/lib/audio/live";
 import {
@@ -1374,7 +1375,7 @@ export class ConsoleController {
   applyAssets(assets: Asset[], plan?: DesignPlan | null): void {
     const project = this.snapshot.project;
     if (!project) return;
-    const ids = new Set(assets.map((a) => a.id));
+    const ids = new Set(stageAssets({ assets, bandAssets: project.bandAssets }).map((a) => a.id));
     const strip = (p: DesignPlan): DesignPlan =>
       p.sections.some((s) => s.media && !ids.has(s.media.assetId))
         ? { ...p, sections: p.sections.map((s) => (s.media && !ids.has(s.media.assetId) ? { ...s, media: null } : s)) }
