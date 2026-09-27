@@ -15,6 +15,7 @@ import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
 import { formatTime } from "@/lib/timeline";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
+import { useStorageMode } from "@/components/home/use-storage-mode";
 import { capsuleItems } from "./feedback";
 import { Dot } from "./ui";
 import { useRafLoop } from "./useRaf";
@@ -65,6 +66,7 @@ const SAVED_SHOWN_MS = 2500;
 function Subtitle({ controller, snap }: { controller: ConsoleController; snap: ConsoleSnapshot }) {
   const project = snap.project;
   const save = snap.save;
+  const cloud = useStorageMode() === "cloud";
   // 「已儲存」 is a moment, not a state: show it briefly after each save
   const [savedFresh, setSavedFresh] = useState(false);
   const [prevStatus, setPrevStatus] = useState(save.status);
@@ -87,7 +89,7 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
   }
   if (save.status === "error") {
     return (
-      <AlertLink tip={save.error ? `儲存失敗：${save.error}` : "修改沒有存進這台電腦，按一下再試一次"} onClick={() => void controller.flushSave()}>
+      <AlertLink tip={save.error ? `儲存失敗：${save.error}` : cloud ? "修改沒有存進雲端，按一下再試一次" : "修改沒有存進這台電腦，按一下再試一次"} onClick={() => void controller.flushSave()}>
         儲存失敗・重試
       </AlertLink>
     );

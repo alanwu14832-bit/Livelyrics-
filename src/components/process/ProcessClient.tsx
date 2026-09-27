@@ -83,6 +83,12 @@ export function ProcessClient({
   const [justFinished, setJustFinished] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const server = useServerStatus();
+  // read inside the run callbacks: copy that names the server differs in cloud mode
+  const cloudRef = useRef(false);
+  const cloud = server.state.kind === "ok" && server.state.status.storage?.mode === "cloud";
+  useEffect(() => {
+    cloudRef.current = cloud;
+  }, [cloud]);
 
   const started = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
@@ -166,7 +172,7 @@ export function ProcessClient({
           // fetch() network failures are TypeErrors ("Failed to fetch", "Load failed", "NetworkError…")
           const message =
             err instanceof TypeError
-              ? "與本機伺服器的連線中斷（處理可能仍在背景進行，重新整理頁面即可接上）"
+              ? `與${cloudRef.current ? "" : "本機"}伺服器的連線中斷（處理可能仍在背景進行，重新整理頁面即可接上）`
               : err instanceof Error
                 ? err.message || "處理失敗"
                 : String(err);

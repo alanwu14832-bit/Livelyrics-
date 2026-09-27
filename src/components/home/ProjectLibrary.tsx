@@ -17,6 +17,7 @@ import { easeOut, spring } from "@/lib/motion";
 import { formatTimeShort } from "@/lib/timeline";
 import type { ProjectSummary } from "@/lib/types";
 import { AssignBandSheet } from "./AssignBandSheet";
+import { useStorageMode } from "./use-storage-mode";
 import { ProjectArt, validPalette } from "./ProjectArt";
 import { formatAbsoluteTime, formatRelativeTime } from "./relative-time";
 import { PUSH, artTransitionName, titleTransitionName } from "./transitions";
@@ -65,6 +66,7 @@ export function ProjectLibrary({
   serverNow?: number;
 }) {
   const router = useRouter();
+  const cloud = useStorageMode() === "cloud";
   const [state, setState] = useState<LoadState>(() => (initialProjects ? { kind: "ok", projects: sortProjects(initialProjects) } : { kind: "loading" }));
   const [now, setNow] = useState(() => serverNow ?? Date.now());
   const [filter, setFilter] = useState("");
@@ -236,7 +238,7 @@ export function ProjectLibrary({
       <Alert
         open={pendingDelete != null}
         title={`刪除「${pendingDelete?.title ?? ""}」？`}
-        message="音檔、歌詞、研究與設計方案都會從這台電腦移除，無法復原。"
+        message={cloud ? "音檔、歌詞、研究與設計方案都會從雲端儲存空間刪除，無法復原。" : "音檔、歌詞、研究與設計方案都會從這台電腦移除，無法復原。"}
         confirmLabel="刪除"
         destructive
         busy={deleting}

@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { AppHeader, BackLink, Button, EmptyState, Skeleton, SkeletonGroup, Spinner, cx } from "@/components/ui";
 import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
 import { MusicNotesIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { useStorageMode } from "@/components/home/use-storage-mode";
 import type { Project } from "@/lib/types";
 import type { ConsoleIntro } from "./ConsoleApp";
 import { TitleBlock } from "./TopBar";
@@ -98,6 +99,7 @@ export function NotFoundState() {
 }
 
 export function LoadErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const cloud = useStorageMode() === "cloud";
   return (
     <StateFrame title="無法載入">
       <EmptyState
@@ -106,7 +108,7 @@ export function LoadErrorState({ message, onRetry }: { message: string; onRetry:
         description={
           <>
             <p>{message}</p>
-            <p className="mt-1">請確認本機的 Livelyrics 伺服器仍在執行。</p>
+            <p className="mt-1">{cloud ? "請確認網路連線正常，再按重試。" : "請確認本機的 Livelyrics 伺服器仍在執行。"}</p>
           </>
         }
         action={

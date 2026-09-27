@@ -26,7 +26,7 @@ const FOCUS_ON_BUTTON =
  * Large drag-and-drop target (click / keyboard opens the file picker). While `active`,
  * files dropped anywhere on the page are accepted too.
  */
-export function Dropzone({ onFiles, active = true, error }: { onFiles: (files: File[]) => void; active?: boolean; error?: string | null }) {
+export function Dropzone({ onFiles, active = true, error, cloud = false }: { onFiles: (files: File[]) => void; active?: boolean; error?: string | null; cloud?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [pageDrag, setPageDrag] = useState(false);
@@ -120,7 +120,7 @@ export function Dropzone({ onFiles, active = true, error }: { onFiles: (files: F
           <span className="block">
             {AUDIO_FORMATS_LABEL}，最大 {formatBytes(MAX_UPLOAD_BYTES)}。
           </span>
-          <span className="block">音訊分析在你的瀏覽器完成，音檔只存在這台電腦。</span>
+          <span className="block">{cloud ? "音訊分析在你的瀏覽器完成，音檔存在這個部署的 Vercel Blob。" : "音訊分析在你的瀏覽器完成，音檔只存在這台電腦。"}</span>
         </span>
         <input
           ref={inputRef}

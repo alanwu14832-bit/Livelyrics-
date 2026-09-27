@@ -264,5 +264,5 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
     );
   }
 
-  return <Dropzone onFiles={start} active error={phase.error} />;
+  return <Dropzone onFiles={start} active error={phase.error} cloud={cloud} />;
 }
