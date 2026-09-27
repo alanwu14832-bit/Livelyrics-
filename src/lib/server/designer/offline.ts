@@ -5,7 +5,9 @@
 // that is honest about being a heuristic.
 
 import { assignMedia } from "./media";
+import { activeBible, applyLyricPolicy, applyTreatments, avoidScene, biasScenes, biblePalette } from "./bible-style";
 import type {
+  BandBible,
   CueNote,
   DesignPlan,
   FontId,
@@ -187,13 +189,24 @@ interface SectionPlanCtx {
   imagery: ImageryHit[];
   cjk: boolean;
   chorusCount: number;
+  /** the band's visual bible, when it decides anything */
+  bible: BandBible | null;
+  /** index of the loudest section that has lyrics (lyric policy without a chorus) */
+  loudestLyricIndex: number;
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
+  return avoidScene(chooseSceneRaw(s, i, prev, ordinal, ctx), ctx.bible, prev, biasScenes(SCENE_CANDIDATES[s.kind], ctx.bible));
+}
+
+function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
   const e = s.energy;
+  const cands = (k: SectionKind) => biasScenes(SCENE_CANDIDATES[k], ctx.bible);
   if (s.kind === "chorus") {
-    // choruses escalate: particles -> grid / shards -> tunnel on the last one
-    const ladder = SCENE_CANDIDATES.chorus;
+    // choruses escalate: particles -> grid / shards -> tunnel on the last one (avoided scenes left out)
+    const avoided = new Set(ctx.bible?.sceneAvoid ?? []);
+    const kept = SCENE_CANDIDATES.chorus.filter((sc) => !avoided.has(sc));
+    const ladder = kept.length ? kept : cands("chorus");
     const base = ctx.mood.mood === "explosive" ? 1 : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % 2;
     let idx = Math.min(ladder.length - 1, base + ordinal);
     if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
@@ -201,10 +214,14 @@ function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal:
     return pick === prev ? ladder[(idx + ladder.length - 1) % ladder.length] : pick;
   }
   if (s.kind === "breakdown" && e < 0.18 && s.lineIds.length) return "blackout";
-  const lexScene = ctx.imagery.map((h) => h.imagery.scene).find((sc) => SCENE_CANDIDATES[s.kind].includes(sc) && fits(sc, e) && sc !== prev);
+  const kindList = cands(s.kind);
+  // a scene the band prefers wins over the lyric lexicon
+  const preferred = ctx.bible?.sceneAffinity.length ? kindList.find((sc) => ctx.bible!.sceneAffinity.includes(sc) && fits(sc, e) && sc !== prev) : undefined;
+  if (preferred && s.kind !== "intro" && s.kind !== "outro") return preferred;
+  const lexScene = ctx.imagery.map((h) => h.imagery.scene).find((sc) => kindList.includes(sc) && fits(sc, e) && sc !== prev);
   if (lexScene && (s.kind === "verse" || s.kind === "bridge" || s.kind === "breakdown")) return lexScene;
-  const pool = SCENE_CANDIDATES[s.kind].filter((sc) => fits(sc, e) && sc !== prev);
-  const list = pool.length ? pool : SCENE_CANDIDATES[s.kind].filter((sc) => sc !== prev);
+  const pool = kindList.filter((sc) => fits(sc, e) && sc !== prev);
+  const list = pool.length ? pool : kindList.filter((sc) => sc !== prev);
   if (s.kind === "intro" || s.kind === "outro") return list.includes("motif") ? "motif" : list[0];
   return list[(ctx.seed + i * 7 + ordinal) % list.length] ?? "nebula";
 }
@@ -330,8 +347,12 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
     const total = counts.get(s.kind) ?? 1;
     const scene = chooseScene(s, i, prevScene, ordinal, ctx);
     prevScene = scene;
-    const { style, placement, scale } = chooseLyrics(s, ordinal, ctx);
     const last = s.kind === "chorus" && ordinal === total - 1 && total > 1;
+    const { style, placement, scale } = applyLyricPolicy(
+      chooseLyrics(s, ordinal, ctx),
+      { kind: s.kind, energy: s.energy, hasLines: s.lineIds.length > 0 },
+      { bible: ctx.bible, isLastChorus: s.kind === "chorus" && ordinal === total - 1, isLoudest: i === ctx.loudestLyricIndex, hasChorus: ctx.chorusCount > 0 },
+    );
     const colorway = colorwayFor(s.kind, last, palette);
     const e = s.energy;
     const chorusBoost = s.kind === "chorus" ? 0.08 + 0.04 * ordinal : 0;
@@ -484,7 +505,14 @@ export function offlineContext(input: DesignerInput): OfflineContext {
 /** Deterministic heuristic DesignPlan (already normalized). */
 export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}): DesignPlan {
   const { structure: st, mood, imagery, seed } = offlineContext(input);
-  const palette = makePalette(seed, mood, imagery, options.hue, options.mono);
+  const bible = activeBible(input.bible);
+  // the band's palette unless the operator asked for another hue / monochrome (a stated deviation)
+  const fromBible = options.hue == null && !options.mono ? biblePalette(bible) : null;
+  const palette: Palette = fromBible ?? makePalette(seed, mood, imagery, options.hue, options.mono);
+  let loudestLyricIndex = -1;
+  st.sections.forEach((s, i) => {
+    if (s.lineIds.length && (loudestLyricIndex < 0 || s.energy > st.sections[loudestLyricIndex].energy)) loudestLyricIndex = i;
+  });
   const ctx: SectionPlanCtx = {
     st,
     mood,
@@ -493,10 +521,13 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     imagery,
     cjk: st.cjk,
     chorusCount: st.sections.filter((s) => s.kind === "chorus").length,
+    bible,
+    loudestLyricIndex,
   };
-  const sections = assignMedia(buildSections(ctx), input.assets);
+  const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible);
   const title = makeTitle(mood, imagery, seed);
-  const motifs = [...imagery.slice(0, 3).map((h) => h.imagery.motif), MOOD_MOTIF[mood.mood]].slice(0, 4);
+  const ownMotifs = [...imagery.slice(0, 3).map((h) => h.imagery.motif), MOOD_MOTIF[mood.mood]];
+  const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...ownMotifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
   const moodKeywords = [...MOOD_KEYWORDS[mood.mood], ...imagery.map((h) => h.imagery.name)].filter((k, i, a) => a.indexOf(k) === i).slice(0, 6);
   const emblem = imagery[0]?.imagery.emblem ?? MOOD_EMBLEM[mood.mood];
   const tempoText = mood.bpm ? `約 ${mood.bpm} BPM 的${MOOD_LABEL[mood.mood]}` : MOOD_LABEL[mood.mood];
@@ -508,7 +539,18 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       ? "主歌讓畫面退後、把空間留給主唱；副歌讓光與節拍一起爆開，邀請全場合唱。"
       : "這首歌不放歌詞：安靜的段落讓畫面退後，能量高的段落讓光與節拍一起爆開。",
     "視覺始終是配角：它是樂團背後的一道牆，托起表演而不搶戲。",
+    bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
   ].join("");
+  const baseTypography = makeTypography(mood, seed, imagery);
+  const typography = bible
+    ? {
+        ...baseTypography,
+        cjkFont: bible.fonts.cjkFont,
+        latinFont: bible.fonts.latinFont,
+        weight: bible.fonts.weight,
+        rationale: `${FONT_CATALOG[bible.fonts.cjkFont].label}＋${FONT_CATALOG[bible.fonts.latinFont].label}：沿用樂團視覺聖經的字體，整場演出的歌詞是同一種聲音。`,
+      }
+    : baseTypography;
 
   const cues: CueNote[] = suggestCues(sections, st.duration, input.lyrics?.lines ?? []);
   const plan: DesignPlan = {
@@ -520,7 +562,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       palette: palette.entries,
       motifs: motifs.length >= 2 ? motifs : [...motifs, "光的節奏"],
       motifSvg: generateMotifSvg(`${input.meta?.title ?? ""}|${input.meta?.artist ?? ""}`, emblem),
-      typography: makeTypography(mood, seed, imagery),
+      typography,
     },
     sections,
     lines: buildLines(ctx, sections),
