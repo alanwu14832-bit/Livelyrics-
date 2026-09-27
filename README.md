@@ -144,4 +144,6 @@ npm test            # vitest
 npm run build
 ```
 
+commit 訊息以 `WIP:` 開頭的推送不會在 Vercel 建置（`vercel.json` 的 `ignoreCommand`），用來保存進行中的工作，不會把做到一半的版本放上預覽網址。
+
 架構、模組分工與資料契約見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。產品設計依據的業界研究見 [`reports/音樂祭大螢幕歌詞與視覺設計.md`](reports/音樂祭大螢幕歌詞與視覺設計.md)。
