@@ -11,6 +11,10 @@ Livelyrics is a **local web app** a band's visual operator runs on their own lap
 4. The **projection output** (`/p/[id]/output`, a second browser window on the projector) shows
    **only animation + lyrics**, driven by the console over a `BroadcastChannel`.
 
+The same app also runs on Vercel in **cloud mode** (Postgres documents, Vercel Blob files, one pipeline
+step per request, optional password gate); see "Cloud mode (Vercel)" below. Local mode is the default and
+unchanged.
+
 Research basis: `reports/音樂祭大螢幕歌詞與視覺設計.md` (industry practice). Key principles that must
 show up in the product:
 
@@ -35,6 +39,8 @@ show up in the product:
   + `remark-gfm` (via `src/components/ui/Markdown.tsx`), `vitest` for unit tests (`src/**/*.test.ts`).
 - **Do not add dependencies** (package.json is frozen during parallel work). WebGL is hand-written GLSL.
   Exception agreed for phase 1b: `mediabunny` (MP4 / WebM muxing for the video export, browser only).
+  Cloud mode: `@vercel/blob` (server: head / del; browser: `@vercel/blob/client` upload), `@neondatabase/serverless`
+  (server, SQL over HTTP), dev only `@electric-sql/pglite` (Postgres in WASM for the tests).
 - UI language: **Traditional Chinese (繁體中文)** for all user-facing text.
 
 ## Shared contracts (already written — do not change without coordination)
@@ -68,13 +74,16 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/output` | STAGE | projection window — animation + lyrics only |
 | `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
 | `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan |
-| `/api/status` | SERVER | `{ claude, model, dataDir }` |
-| `/api/projects` GET/POST | SERVER | list summaries / create (multipart `audio`, `meta` JSON, `analysis` JSON) |
+| `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
+| `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
+| `/api/auth/login` POST, `/api/auth/logout` POST | SERVER | password gate: JSON `{ password, next? }` or a plain form post → session cookie / clear it |
+| `/api/blob/upload` POST | SERVER | cloud: signs one browser upload to Vercel Blob (`@vercel/blob/client` `handleUpload`, see "Cloud mode") |
+| `/api/projects` GET/POST | SERVER | list summaries / create (local: multipart `audio`, `meta` JSON, `analysis` JSON; cloud: JSON `{ blob, fileName, meta, analysis, bandId? }` after the browser uploaded to Blob) |
 | `/api/projects/[id]` GET/PATCH/DELETE | SERVER | project JSON / patch `{meta?, lyrics?, plan?}` / delete |
-| `/api/projects/[id]/audio` GET | SERVER | stored audio with **HTTP Range** support (seeking) |
+| `/api/projects/[id]/audio` GET | SERVER | stored audio with **HTTP Range** support (seeking); cloud: 307 to the blob |
 | `/api/projects/[id]/assets` GET/POST | SERVER | band media list / upload (multipart `file` + `meta` JSON `{width,height,duration?,name?,kind?,note?,tags?}` measured in the browser; magic-byte sniffed PNG/JPG/WebP/GIF/MP4/MOV/WebM, SVG rejected, 500 MB) → `{asset, assets}` |
 | `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
-| `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` |
+| `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` (cloud: one step per request with `run`, `maxDuration` 300) |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 | `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
 | `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
@@ -85,8 +94,10 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/shows/[id]/arc` POST | SERVER | 整場弧線 (Claude or offline) saved on the show → `{ show, engine, logs }` |
 | `/api/shows/[id]/apply-output` POST | SERVER | copy the show's canvas onto every song of its setlist → `{ updated, show }` |
 
-Data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/`: `projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`,
+Local data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/`: `projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`,
 `bands/<id>/{band.json,assets/<assetId>.<ext>}`, `shows/<id>/show.json` (all atomic writes, tolerant readers, per-key locks).
+Cloud data lives in one Postgres table and a Vercel Blob store (see "Cloud mode (Vercel)"). No route sets
+`maxDuration` above 300 (a higher value fails the Vercel deploy).
 
 ### Bands, the visual bible and shows (phase 2a)
 
@@ -165,6 +176,80 @@ pure helpers in `src/lib/band.ts` (vocabularies, `defaultBible`, `coerceBible` /
   design overview header has 「匯出影片」. Dev builds expose `window.__livelyricsExport` (`debugStage`,
   `exportToOpfs`) for the render checks.
 
+### Cloud mode (Vercel)
+
+Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
+requests, ~4.5 MB request bodies and at most 300 s per request (Hobby + Fluid compute). Cloud mode
+keeps every contract above and changes only where things are kept and how long work is driven.
+
+- **Mode** (`src/lib/server/store/mode.ts`, resolved from the environment on every call, never at
+  import, so `next build` needs no variables): `cloud` when `BLOB_READ_WRITE_TOKEN` and a database URL
+  (`DATABASE_URL`, `POSTGRES_URL`, `DATABASE_URL_UNPOOLED`, `POSTGRES_URL_NON_POOLING`) are set, or
+  `LIVELYRICS_STORAGE=cloud`; `unconfigured` on Vercel (`VERCEL=1`) without them: every storage call throws
+  `StorageError("unconfigured")` → 503 JSON in Chinese naming what to create, and the home page shows
+  `StorageSetupNotice` (server-rendered from `resolveStorageConfig`); otherwise `local`
+  (`LIVELYRICS_STORAGE=local` forces it). `isCloudStorage()` / `storageMode()` in `store/index.ts`.
+- **Stores** (`src/lib/server/store/types.ts`): `DocumentStore` (projects, bands, shows by kind + id,
+  atomic read-modify-write, create with a fresh id, list with a stored summary) and `FileStore` (place,
+  remove, serve, inspect). `storage.ts` / `band-storage.ts` keep the domain logic (coercion of old
+  documents, summaries, cascades) for both modes on top of `docs()` / `files()`.
+  Local: `local-docs.ts` + `local-files.ts` (the previous behaviour, same files and locks). Cloud:
+  `sql-docs.ts` on a `{ query(text, params) }` client (`neon.ts` wraps `@neondatabase/serverless`
+  `neon(url).query`; tests use PGlite) with one table created on first use:
+  `livelyrics_docs(kind, id, data json, summary json, version, created_at, updated_at, PRIMARY KEY (kind, id))`
+  (`json`, not `jsonb`: key order and exact text are kept). Updates are optimistic: read `version`,
+  `UPDATE ... WHERE version = $n`, retry the mutate on a conflict (the HTTP driver has no interactive
+  transactions); `update` never recreates a deleted document. `summary` holds the library record so
+  the list does not download every analysis. Files: `blob-files.ts` (Vercel Blob, a **Public** store).
+- **Uploads** go browser → Blob, never through a function. `src/lib/upload-policy.ts` (shared): targets
+  `audio` / `project-asset` / `band-asset`, pathnames `audio/song.<ext>`, `projects/<id>/asset.<ext>`,
+  `bands/<id>/asset.<ext>` (Blob adds a random suffix), types, limits (audio 200 MB, assets 500 MB),
+  multipart above 16 MB. `src/lib/cloud-upload.ts` (browser, loaded only in cloud mode) sniffs the type
+  from the first bytes with the server's rules, then `upload()` with progress. `/api/blob/upload`
+  (`src/lib/server/blob-upload.ts`) re-checks the `clientPayload` (target exists, pathname = prefix + type,
+  declared size and sniffed type within the policy) and signs a token bound to that pathname, content
+  type and size with `addRandomSuffix`. No upload-completed callback: the browser then registers the
+  blob with the existing create / asset routes as JSON; the route `inspect`s it (a blob of this store,
+  under the target's prefix, `head` for size and type, the first 64 bytes by a Range GET) and sniffs the
+  magic bytes again; a file that fails is deleted. Deleting a project, an asset or a band deletes its
+  blobs (failures are logged, never block the document change).
+- **Serving**: the audio / asset GET routes answer 307 to the public blob URL (`Cache-Control: private,
+  max-age=3600`; blob URLs never change). Blob's CDN answers Range (206) and sends
+  `Access-Control-Allow-Origin: *` on GET / 206 / 404; OPTIONS answers 405, so only requests without a
+  preflight work cross-origin (media elements, plain `fetch`). Rule: **every `<audio>` / `<video>` /
+  `<img>` / `new Image()` that loads a stored file sets `crossOrigin="anonymous"`** (console audio,
+  lyrics editor audio, `MediaSources`, `ExactMedia`, asset thumbnails), so WebGL textures, Web Audio and
+  the export's canvas readback stay CORS-clean after the redirect. `LIVELYRICS_BLOB_DELIVERY=proxy`
+  streams the blob through the function instead (forwards Range / If-Range / If-None-Match).
+  Under Next's fetch an awaited `cancel()` of a response body can stay pending; `blob-files.ts` never
+  awaits one.
+- **Pipeline** (`pipeline.ts`): the in-memory run registry cannot work across instances, so the page
+  drives the run: `src/lib/process-runner.ts` `runStepwise` sends one POST per step
+  (`ProcessRequest.run = { id, steps }`, `steps` = the one step), each an SSE stream bounded by
+  `maxDuration = 300`. `claimCloudRun` records `Project.pipeline` (`PipelineRecord`: run id, steps,
+  current step, results, failed step, instruction, arc) atomically and refuses (409
+  `PipelineBusyError`) while a fresh step of the run or another fresh run is recorded; `runCloudSteps`
+  saves each step's result on the project, then the record. The request keeps running after a client
+  disconnect via `after()`. Budgets: Claude gets `CLOUD_DESIGNER_BUDGET_MS` (250 s, then
+  `ClaudeTimeoutError` → the offline designer finishes the step), the step stops at 285 s, a record
+  untouched for `CLOUD_STALE_MS` (330 s) is stale (`withLiveStatus` reports `CLOUD_STALE_ERROR`). A
+  refreshed process page (`attachOnly`) continues between steps, polls a running step
+  (`GET /api/projects/<id>` every 3 s) and shows 重試 for a stale or failed one (`retryFrom` the record).
+- **Band jobs** (`src/lib/server/jobs.ts`): 從作品產生視覺聖經 and 整場弧線 record `Band.bibleJob` /
+  `Show.arcJob` (`JobState`) while they run (409 for a second one, `maxDuration` 300, the same Claude
+  budget), clear it with the result, keep `{ status: "error" }` on failure; GET reports a job older than
+  `JOB_STALE_MS` as failed. The bible editor and the show page poll while one runs
+  (`src/components/band/use-job-polling.ts`).
+- **Password gate** (`src/proxy.ts`, Next 16 proxy = middleware, Node runtime; `src/lib/server/auth.ts`):
+  only with `LIVELYRICS_PASSWORD`. Cookie `livelyrics_session` = `v1.<issued>.<HMAC-SHA256>` with an
+  HKDF-derived key (no password or secret stored, 30 days, httpOnly, SameSite=Lax, Secure on https and
+  localhost, constant-time compare). Unauthenticated API → 401 JSON, pages → `/login?next=...`. Public: `/login`,
+  `/api/auth/*`, `/_next/static`, `/_next/image`, `/favicon.ico`.
+- **Tests**: `store/testing/pglite.ts` (the SQL store on PGlite), `store/testing/fake-blob.ts` (in-memory
+  Blob API with Range and the CORS header), `store/neon.test.ts` (the real Neon driver against an emulated
+  SQL-over-HTTP endpoint), `cloud-storage.test.ts`, `blob-upload.test.ts`, `pipeline-cloud.test.ts`,
+  `jobs.test.ts`, `auth.test.ts`, `src/proxy.test.ts`, `src/lib/process-runner.test.ts`.
+
 ## Modules
 
 ### SERVER — `src/lib/server/**` (except `designer/`), `src/lib/lyrics/**`, `src/app/api/**`
@@ -173,7 +258,8 @@ pure helpers in `src/lib/band.ts` (vocabularies, `defaultBible`, `coerceBible` /
 - LRCLIB client (`https://lrclib.net/api/search`, `/api/get`), `User-Agent: Livelyrics/0.1 (+https://github.com/alanwu14832-bit/Livelyrics-)`,
   prefer synced results whose duration is within ±3 s; timeout + graceful failure.
 - Pipeline `lyrics → research → design`, saving the project after each step; status
-  `processing` → `ready` | `error`. Per-project **in-memory run registry**: a POST while a run is active
+  `processing` → `ready` | `error`. Local mode: per-project **in-memory run registry** (cloud mode records
+  the run on the project instead, see "Cloud mode"): a POST while a run is active
   attaches to it (replays past events, then streams live) — survives page refresh / React StrictMode.
   A run keeps going if the client disconnects. Steps: lyrics uses `lyricsText` if given, else keeps
   existing synced lyrics, else LRCLIB, else plain → `distributeLines`; research/design call DESIGNER.
@@ -188,6 +274,7 @@ pure helpers in `src/lib/band.ts` (vocabularies, `defaultBible`, `coerceBible` /
   exactly as made; the renderer repairs anything out of range.
 - All route handlers: `export const runtime = "nodejs"`, `dynamic = "force-dynamic"`; JSON errors
   `{ error: string }` with proper status codes; validate ids (no path traversal); size limit ~200 MB.
+  `maxDuration` at most 300 (only the process, bible and arc routes set it).
   Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`
