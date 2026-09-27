@@ -124,7 +124,16 @@ async function readBandFile(id: string): Promise<Band | null> {
 }
 
 async function writeBand(band: Band): Promise<Band> {
-  const saved: Band = { ...band, updatedAt: new Date().toISOString(), assets: band.assets.map(({ scope: _scope, ...a }) => a) };
+  const saved: Band = {
+    ...band,
+    updatedAt: new Date().toISOString(),
+    // scope is implied by where the file lives; it is added again on read
+    assets: band.assets.map((a) => {
+      const copy = { ...a };
+      delete copy.scope;
+      return copy;
+    }),
+  };
   try {
     await writeJsonAtomic(path.join(bandDir(band.id), BAND_FILE), saved);
   } catch (err) {
@@ -297,12 +306,13 @@ export async function takenAssetIds(bandId: string | undefined): Promise<Set<str
  * "band"). A project whose band is gone reads as unassigned.
  */
 export async function withBandAssets(project: Project): Promise<Project> {
-  const { bandAssets: _drop, ...rest } = project;
+  const rest: Project = { ...project };
+  delete rest.bandAssets;
   if (!rest.bandId || !isValidBandId(rest.bandId)) return rest;
   const band = await readBandFile(rest.bandId).catch(() => null);
   if (!band) {
-    const { bandId: _gone, ...unassigned } = rest;
-    return unassigned;
+    delete rest.bandId;
+    return rest;
   }
   return { ...rest, bandAssets: asBandAssets(band.assets) };
 }

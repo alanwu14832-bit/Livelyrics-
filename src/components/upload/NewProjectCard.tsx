@@ -125,6 +125,13 @@ export function NewProjectCard({
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [filledFromLrc, setFilledFromLrc] = useState<string[]>([]);
   const ids = { title: useId(), artist: useId(), album: useId(), band: useId() };
+
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  // pasted LRC headers ([ti:] [ar:] [al:]) fill song info the user has not typed themselves,
+  // when the field is empty or still just the file name (research and LRCLIB need real names)
+  const fromFileName = useMemo(() => parseFileName(file.name), [file.name]);
+  const edited = useRef({ title: false, artist: false, album: false });
   const [bands, setBands] = useState<BandSummary[]>([]);
   const [bandId, setBandId] = useState<string>(defaultBandId ?? "");
   useEffect(() => {
@@ -144,12 +151,6 @@ export function NewProjectCard({
       alive = false;
     };
   }, [defaultBandId]);
-  const titleRef = useRef<HTMLInputElement>(null);
-
-  // pasted LRC headers ([ti:] [ar:] [al:]) fill song info the user has not typed themselves,
-  // when the field is empty or still just the file name (research and LRCLIB need real names)
-  const fromFileName = useMemo(() => parseFileName(file.name), [file.name]);
-  const edited = useRef({ title: false, artist: false, album: false });
   const changePasteText = (text: string) => {
     setPasteText(text);
     if (pasteError && text.trim()) setPasteError(null);
