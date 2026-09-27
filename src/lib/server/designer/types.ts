@@ -1,6 +1,6 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, DesignPlan, Lyrics, Research, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, Research, SongArcDirective, SongMeta } from "@/lib/types";
 
 export interface DesignerInput {
   meta: SongMeta;
@@ -8,6 +8,9 @@ export interface DesignerInput {
   analysis: AudioAnalysis | null;
   /** the band's uploaded material (album art, photos, MV clips, logo); sections may only show these */
   assets?: Asset[];
+  /** the band's visual bible: a hard constraint for research and design (stay in this world) */
+  bible?: BandBible | null;
+  bandName?: string;
 }
 
 export interface DesignerCallbacks {
@@ -25,6 +28,8 @@ export interface DesignRequest extends DesignerInput {
   instruction?: string;
   /** the current plan (re-design keeps what the instruction does not ask to change) */
   previous?: DesignPlan | null;
+  /** the song's place in a show's arc (energy, palette emphasis, role) */
+  arc?: SongArcDirective | null;
 }
 
 /** Callbacks that never throw into the designer. */

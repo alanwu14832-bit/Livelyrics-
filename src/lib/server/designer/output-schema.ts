@@ -80,6 +80,11 @@ function strict(node: unknown): Json {
   return out;
 }
 
+/** Strict structured-output JSON schema for any zod object (same rules as the DesignPlan schema). */
+export function jsonOutputFormat(schema: z.ZodType): BetaJSONOutputFormat {
+  return { type: "json_schema", schema: strict(z.toJSONSchema(schema, { target: "draft-2020-12", unrepresentable: "any" })) };
+}
+
 let cached: Json | null = null;
 
 /** JSON schema of DesignPlan for output_config.format (enums enforced, all fields required). */

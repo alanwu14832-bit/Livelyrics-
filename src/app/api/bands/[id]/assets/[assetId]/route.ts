@@ -43,10 +43,10 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   return json({ asset: updated, assets: saved.assets });
 });
 
-/** Deletes the file; songs and show looks that showed it fall back to the scene -> { ok, assets, plan: null } */
+/** Deletes the file; songs and show looks that showed it fall back to the scene -> { ok, assets } */
 export const DELETE = handle(async (_req: Request, ctx: Ctx) => {
   const { id, assetId } = await ids(ctx);
   const saved = await removeBandAsset(id, assetId);
   if (!saved) throw new HttpError(404, "找不到素材");
-  return json({ ok: true as const, assets: saved.assets, plan: null });
+  return json({ ok: true as const, assets: saved.assets });
 });
