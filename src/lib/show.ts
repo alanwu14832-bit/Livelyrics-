@@ -175,7 +175,7 @@ export function coerceLook(raw: unknown, assetIds?: ReadonlySet<string>): SetLoo
   const scene = isScene(o.scene) ? o.scene : "gradient";
   const given = Array.isArray(o.colorway) ? o.colorway.map((c) => normalizeBibleHex(c)).filter((c): c is string => !!c) : [];
   const fallback = colorwayFor([]);
-  const colorway: [string, string, string] = [given[0] ?? fallback[0], given[1] ?? given[0] ?? fallback[1], given[2] ?? given[1] ?? fallback[2]];
+  const colorway: [string, string, string] = [given[0] ?? fallback[0], given[1] ?? given[0] ?? fallback[1], given[2] ?? given[1] ?? given[0] ?? fallback[2]];
   let media: SectionMedia | null = null;
   const m = isRecord(o.media) ? o.media : null;
   if (m && isAssetId(m.assetId) && (!assetIds || assetIds.has(m.assetId))) {
