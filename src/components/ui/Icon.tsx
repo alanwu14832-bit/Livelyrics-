@@ -97,6 +97,22 @@ import { CheckIcon } from "./kit-icons";
 import { MinusIcon } from "./kit-icons";
 import { PlusIcon } from "./kit-icons";
 import { XIcon } from "./kit-icons";
+import { UsersThreeIcon as PhUsersThree } from "@phosphor-icons/react/dist/ssr/UsersThree";
+import { TicketIcon as PhTicket } from "@phosphor-icons/react/dist/ssr/Ticket";
+import { CalendarBlankIcon as PhCalendarBlank } from "@phosphor-icons/react/dist/ssr/CalendarBlank";
+import { DotsSixVerticalIcon as PhDotsSixVertical } from "@phosphor-icons/react/dist/ssr/DotsSixVertical";
+import { ArrowUpIcon as PhArrowUp } from "@phosphor-icons/react/dist/ssr/ArrowUp";
+import { ArrowDownIcon as PhArrowDown } from "@phosphor-icons/react/dist/ssr/ArrowDown";
+import { BookOpenIcon as PhBookOpen } from "@phosphor-icons/react/dist/ssr/BookOpen";
+import { MapPinIcon as PhMapPin } from "@phosphor-icons/react/dist/ssr/MapPin";
+import { ListNumbersIcon as PhListNumbers } from "@phosphor-icons/react/dist/ssr/ListNumbers";
+import { SignInIcon as PhSignIn } from "@phosphor-icons/react/dist/ssr/SignIn";
+import { SignOutIcon as PhSignOut } from "@phosphor-icons/react/dist/ssr/SignOut";
+import { CoffeeIcon as PhCoffee } from "@phosphor-icons/react/dist/ssr/Coffee";
+import { HourglassIcon as PhHourglass } from "@phosphor-icons/react/dist/ssr/Hourglass";
+import { ChartLineUpIcon as PhChartLineUp } from "@phosphor-icons/react/dist/ssr/ChartLineUp";
+import { FlagIcon as PhFlag } from "@phosphor-icons/react/dist/ssr/Flag";
+import { SwatchesIcon as PhSwatches } from "@phosphor-icons/react/dist/ssr/Swatches";
 import { SpinnerIcon } from "./kit-icons";
 import { CheckCircleIcon } from "./kit-icons";
 import { WarningCircleIcon } from "./kit-icons";
@@ -194,5 +210,23 @@ export const PlugIcon = /* @__PURE__ */ makeIcon(PhPlug, "PlugIcon");
 export const CircleHalfIcon = /* @__PURE__ */ makeIcon(PhCircleHalf, "CircleHalfIcon");
 export const SunIcon = /* @__PURE__ */ makeIcon(PhSun, "SunIcon");
 
+// bands and shows
+export const UsersThreeIcon = /* @__PURE__ */ makeIcon(PhUsersThree, "UsersThreeIcon");
+export const TicketIcon = /* @__PURE__ */ makeIcon(PhTicket, "TicketIcon");
+export const CalendarBlankIcon = /* @__PURE__ */ makeIcon(PhCalendarBlank, "CalendarBlankIcon");
+export const DotsSixVerticalIcon = /* @__PURE__ */ makeIcon(PhDotsSixVertical, "DotsSixVerticalIcon");
+export const ArrowUpIcon = /* @__PURE__ */ makeIcon(PhArrowUp, "ArrowUpIcon");
+export const ArrowDownIcon = /* @__PURE__ */ makeIcon(PhArrowDown, "ArrowDownIcon");
+export const BookOpenIcon = /* @__PURE__ */ makeIcon(PhBookOpen, "BookOpenIcon");
+export const MapPinIcon = /* @__PURE__ */ makeIcon(PhMapPin, "MapPinIcon");
+export const ListNumbersIcon = /* @__PURE__ */ makeIcon(PhListNumbers, "ListNumbersIcon");
+export const SignInIcon = /* @__PURE__ */ makeIcon(PhSignIn, "SignInIcon");
+export const SignOutIcon = /* @__PURE__ */ makeIcon(PhSignOut, "SignOutIcon");
+export const CoffeeIcon = /* @__PURE__ */ makeIcon(PhCoffee, "CoffeeIcon");
+export const HourglassIcon = /* @__PURE__ */ makeIcon(PhHourglass, "HourglassIcon");
+export const ChartLineUpIcon = /* @__PURE__ */ makeIcon(PhChartLineUp, "ChartLineUpIcon");
+export const FlagIcon = /* @__PURE__ */ makeIcon(PhFlag, "FlagIcon");
+export const SwatchesIcon = /* @__PURE__ */ makeIcon(PhSwatches, "SwatchesIcon");
+
 /** Every icon by name, for the /ui-lab gallery. */
-export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, FilmStripIcon, ImageIcon, ImagesIcon, FrameCornersIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon };
+export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, FilmStripIcon, ImageIcon, ImagesIcon, FrameCornersIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon, UsersThreeIcon, TicketIcon, CalendarBlankIcon, DotsSixVerticalIcon, ArrowUpIcon, ArrowDownIcon, BookOpenIcon, MapPinIcon, ListNumbersIcon, SignInIcon, SignOutIcon, CoffeeIcon, HourglassIcon, ChartLineUpIcon, FlagIcon, SwatchesIcon };
