@@ -41,6 +41,11 @@ export interface LookControllerOptions {
   resume?: boolean;
   /** the look's durationHint (the countdown); lookToProject cannot tell it from its default length */
   durationHint?: number | null;
+  /**
+   * The key of the overrides saved in this tab's session; default the project id. The show
+   * console names the show too, so two shows' looks (e.g. both auto standbys) never share one.
+   */
+  sessionKey?: string;
 }
 
 const NOTICE_MS = 4500;
@@ -62,6 +67,7 @@ export class LookController {
   private readonly outputTarget: OutputTarget | null;
   private readonly resume: boolean;
   private readonly hint: number | null;
+  private readonly sessionKey: string;
   private attached = false;
   private restored = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -77,6 +83,7 @@ export class LookController {
     this.channelTarget = opts.channel ?? null;
     this.outputTarget = opts.output ?? null;
     this.resume = opts.resume ?? false;
+    this.sessionKey = opts.sessionKey || project.id;
     const hint = opts.durationHint;
     this.hint = typeof hint === "number" && Number.isFinite(hint) && hint > 0 ? hint : null;
     this.link = new ProjectionLink(this.consoleId, {
@@ -119,7 +126,7 @@ export class LookController {
     this.attached = true;
     if (!this.restored) {
       this.restored = true;
-      const session = this.resume ? loadSession(this.id) : null;
+      const session = this.resume ? loadSession(this.sessionKey) : null;
       if (session) {
         this.overrides = session.overrides;
         if (session.overrides.blackout) this.notify("已還原重新整理前的黑場狀態（按 B 解除）", "warn");
@@ -192,7 +199,7 @@ export class LookController {
 
   private persist(): void {
     if (this.channelTarget == null) return;
-    saveSession(this.id, { overrides: this.overrides, audioTime: 0 });
+    saveSession(this.sessionKey, { overrides: this.overrides, audioTime: 0 });
   }
 
   // ---------------------------------------------------------------- clock + state

@@ -12,8 +12,9 @@ import { selectLineIndex, selectOverrides, selectSectionIndex, selectTimeDecis, 
 import { CUE_KIND_LABELS, LYRIC_STYLE_LABELS, PLACEMENT_LABELS, SCENE_LABELS, SECTION_KIND_LABELS, TRANSITION_LABELS, cueColor } from "@/lib/console/labels";
 import { sortedCues, upcomingCue } from "@/lib/console/navigation";
 import { DEFAULT_OUTPUT, aspectLabel, outputAspect } from "@/lib/output";
-import type { PlaybackMode } from "@/lib/stage/protocol";
+import type { PlaybackMode, StageStore } from "@/lib/stage/protocol";
 import type { LyricStyleId, Project, SectionDesign } from "@/lib/types";
+import { StageSlot, useSharedStats, type SharedStage } from "./SharedStage";
 import { Dot, KeyValues, Pane } from "./ui";
 
 const BACKEND_LABELS: Record<StageStats["backend"], string> = {
@@ -41,7 +42,12 @@ function FrameLabel({ children, className }: { children: ReactNode; className?: 
   return <span className={cx("inline-flex h-6 items-center rounded-pill bg-black/60 px-2.5 text-c-footnote font-medium whitespace-nowrap text-label-2-on-material", className)}>{children}</span>;
 }
 
-function BlackoutFrame({ controller }: { controller: ConsoleController }) {
+/** Anything that drives a stage: a song's ConsoleController or a show look's LookController. */
+export interface StageSource {
+  readonly store: StageStore;
+}
+
+function BlackoutFrame({ controller }: { controller: StageSource }) {
   const ov = useStageValue(controller.store, selectOverrides);
   if (!ov.blackout) return null;
   return (
@@ -54,14 +60,32 @@ function BlackoutFrame({ controller }: { controller: ConsoleController }) {
   );
 }
 
-function PreviewPanelImpl({ controller, project, output, hudRef }: { controller: ConsoleController; project: Project; output: OutputStatus; hudRef: RefObject<HudHandle | null> }) {
+function PreviewPanelImpl({
+  controller,
+  project,
+  output,
+  hudRef,
+  label = "預覽",
+  shared,
+}: {
+  controller: StageSource;
+  project: Project;
+  output: OutputStatus;
+  hudRef: RefObject<HudHandle | null>;
+  /** the frame label's first word (the show console's look preview says 播出中) */
+  label?: string;
+  /** the show console's one preview stage: shown here instead of a StageView of this panel's own */
+  shared?: SharedStage | null;
+}) {
   const canvas = project.output ?? DEFAULT_OUTPUT;
   const aspect = Math.min(8, Math.max(0.2, outputAspect(canvas)));
   const mismatch = windowMismatch(output, aspect);
-  const [stats, setStats] = useState<StageStats | null>(null);
+  const [ownStats, setStats] = useState<StageStats | null>(null);
   const onStats = useCallback((s: StageStats) => {
     setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) ? prev : s));
   }, []);
+  const sharedStats = useSharedStats(shared);
+  const stats = shared ? sharedStats : ownStats;
 
   return (
     <Pane label="投影預覽" order={1} className="flex-1 p-3">
@@ -75,18 +99,22 @@ function PreviewPanelImpl({ controller, project, output, hudRef }: { controller:
               boxShadow: "0 0 0 0.5px rgba(255,255,255,0.08), 0 20px 50px -20px rgba(0,0,0,0.6)",
             }}
           >
-            <StageView
-              project={project}
-              store={controller.store}
-              showGuides
-              renderScale={0.5}
-              onStats={onStats}
-              className="h-full w-full"
-              style={{ aspectRatio: "auto", width: "100%", height: "100%" }}
-            />
+            {shared ? (
+              <StageSlot stage={shared} />
+            ) : (
+              <StageView
+                project={project}
+                store={controller.store}
+                showGuides
+                renderScale={0.5}
+                onStats={onStats}
+                className="h-full w-full"
+                style={{ aspectRatio: "auto", width: "100%", height: "100%" }}
+              />
+            )}
             <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
               <FrameLabel className="t-latin tabular">
-                預覽・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
+                {label}・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
               </FrameLabel>
               {mismatch && (
                 <FrameLabel className="text-orange-text">

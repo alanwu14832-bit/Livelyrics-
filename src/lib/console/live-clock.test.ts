@@ -63,3 +63,28 @@ describe("LiveClock", () => {
     expect(c.time(0)).toBe(0);
   });
 });
+
+describe("LiveClock.capHold (LIVE loop)", () => {
+  it("parks at the cap instead of running into the next section", () => {
+    const c = new LiveClock();
+    c.jump(20, null, 0);
+    c.start(0);
+    c.capHold(24);
+    expect(c.time(2000)).toBeCloseTo(22);
+    expect(c.time(10000)).toBeCloseTo(24);
+    expect(c.isHeld(10000)).toBe(true);
+    // an earlier hold point stays
+    c.jump(20, 22, 10000);
+    c.capHold(24);
+    expect(c.holdAt).toBe(22);
+  });
+
+  it("brings a clock that already ran past the cap back to it", () => {
+    const c = new LiveClock();
+    c.jump(20, null, 0);
+    c.start(0);
+    expect(c.time(8000)).toBeCloseTo(28);
+    c.capHold(24);
+    expect(c.time(8000)).toBeCloseTo(24);
+  });
+});

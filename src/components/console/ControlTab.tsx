@@ -8,26 +8,52 @@
 import { memo, useMemo } from "react";
 import { Button, Kbd, Slider, Tooltip, cx } from "@/components/ui";
 import { CheckIcon, EyeSlashIcon, MoonIcon, SnowflakeIcon, SquareHalfIcon } from "@/components/ui/Icon";
-import type { ConsoleController, OutputStatus } from "@/lib/console/controller";
+import { ConsoleController, type OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, selectSectionIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, SCENE_HINTS, SCENE_LABELS } from "@/lib/console/labels";
 import { sceneBank } from "@/lib/console/plan-edit";
 import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
+import type { StageOverrides, StageStore } from "@/lib/stage/protocol";
 import type { Project, SceneId } from "@/lib/types";
 import { OutputSettings } from "./OutputSettings";
 import { Footnote, Group, GroupTitle, TINT_ON_SOFT, ToggleTile } from "./ui";
 
-/** 「目前段落」 marker for the plan's own choice in this section. */
-function PlanMark({ className }: { className?: string }) {
+/** What the safety controls drive: a song's ConsoleController, or a show look's LookController. */
+export interface OverrideControls {
+  readonly store: StageStore;
+  resetOverrides(): void;
+  toggleBlackout(): void;
+  toggleLyrics(): void;
+  toggleFreeze(): void;
+  toggleTestPattern(): void;
+  setSceneOverride(scene: SceneId | null): void;
+  setOverrides(patch: Partial<StageOverrides>): void;
+}
+
+/** 「目前段落」 (a song) / 「畫面設計」 (a show look) marker for the plan's own choice. */
+function PlanMark({ label, className }: { label: string; className?: string }) {
   return (
     <span className={cx("inline-flex shrink-0 items-center gap-1 text-c-footnote text-label-2", className)}>
       <CheckIcon size={12} />
-      目前段落
+      {label}
     </span>
   );
 }
 
-function ControlTabImpl({ controller, project, output }: { controller: ConsoleController; project: Project; output: OutputStatus }) {
+function ControlTabImpl({
+  controller,
+  project,
+  output,
+  noun = "歌詞",
+}: {
+  controller: OverrideControls;
+  project: Project;
+  output?: OutputStatus;
+  /** what the text layer is called: 歌詞 (songs) or 文字 (a show look's text) */
+  noun?: "歌詞" | "文字";
+}) {
+  // a show look is one section long: its plan mark is the look's own design
+  const planLabel = noun === "文字" ? "畫面設計" : "目前段落";
   const ov = useStageValue(controller.store, selectOverrides);
   const sectionIndex = useStageValue(controller.store, selectSectionIndex);
   const plan = project.plan;
@@ -55,8 +81,8 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
         </GroupTitle>
         <div className="mt-1 grid grid-cols-2 gap-2">
           <ToggleTile label="黑場" sub={ov.blackout ? "畫面已淡出為全黑" : "一鍵淡出為全黑"} hotkey="B" tone="red" icon={MoonIcon} active={ov.blackout} onClick={() => controller.toggleBlackout()} />
-          <ToggleTile label={ov.lyricsVisible ? "歌詞顯示中" : "歌詞已隱藏"} sub="只切換歌詞層" hotkey="L" icon={EyeSlashIcon} active={!ov.lyricsVisible} onClick={() => controller.toggleLyrics()} />
-          <ToggleTile label="凍結畫面" sub={ov.freeze ? "動畫停格，歌詞照常" : "停住背景動畫"} hotkey="F" icon={SnowflakeIcon} active={ov.freeze} onClick={() => controller.toggleFreeze()} />
+          <ToggleTile label={ov.lyricsVisible ? `${noun}顯示中` : `${noun}已隱藏`} sub={`只切換${noun}層`} hotkey="L" icon={EyeSlashIcon} active={!ov.lyricsVisible} onClick={() => controller.toggleLyrics()} />
+          <ToggleTile label="凍結畫面" sub={ov.freeze ? `動畫停格，${noun}照常` : "停住背景動畫"} hotkey="F" icon={SnowflakeIcon} active={ov.freeze} onClick={() => controller.toggleFreeze()} />
           <ToggleTile label="測試圖" sub="安全區與對位檢查" icon={SquareHalfIcon} active={ov.testPattern} onClick={() => controller.toggleTestPattern()} />
         </div>
       </section>
@@ -95,7 +121,7 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
                     <Kbd className={cx(active && "bg-tint-soft")}>{i + 1}</Kbd>
                     <span className="min-w-0 truncate text-c-body font-medium">{SCENE_LABELS[scene]}</span>
                   </span>
-                  {inPlan && <PlanMark className={cx(active && TINT_ON_SOFT)} />}
+                  {inPlan && <PlanMark label={planLabel} className={cx(active && TINT_ON_SOFT)} />}
                 </button>
               </Tooltip>
             );
@@ -135,7 +161,7 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
             </Button>
           }
         >
-          歌詞呈現覆寫
+          {noun}呈現覆寫
         </GroupTitle>
         <div className="mt-1 grid grid-cols-3 gap-1.5">
           {LYRIC_STYLE_IDS.map((style) => {
@@ -153,13 +179,13 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
                   )}
                 >
                   <span className="min-w-0 truncate">{LYRIC_STYLE_LABELS[style]}</span>
-                  {inPlan && <CheckIcon size={12} aria-label="目前段落" className={cx("ml-auto shrink-0", active ? "" : "text-label-2")} />}
+                  {inPlan && <CheckIcon size={12} aria-label={planLabel} className={cx("ml-auto shrink-0", active ? "" : "text-label-2")} />}
                 </button>
               </Tooltip>
             );
           })}
         </div>
-        <Footnote>打勾的是目前段落的設計。覆寫會套用到所有段落，直到按下「跟隨設計」。</Footnote>
+        <Footnote>{noun === "文字" ? "打勾的是這個畫面的設計。覆寫會一直套用，直到按下「跟隨設計」。" : "打勾的是目前段落的設計。覆寫會套用到所有段落，直到按下「跟隨設計」。"}</Footnote>
       </section>
 
       <section aria-labelledby="ctl-master">
@@ -179,7 +205,7 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
             hint="降低可避免搶走舞台燈光；100% 為設計值"
           />
           <Slider
-            label="歌詞字級"
+            label={`${noun}字級`}
             value={ov.lyricScale}
             min={0.5}
             max={2}
@@ -192,7 +218,7 @@ function ControlTabImpl({ controller, project, output }: { controller: ConsoleCo
         </Group>
       </section>
 
-      <OutputSettings controller={controller} project={project} output={output} />
+      {controller instanceof ConsoleController && output && <OutputSettings controller={controller} project={project} output={output} />}
     </div>
   );
 }

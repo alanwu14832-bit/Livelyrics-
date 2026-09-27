@@ -118,7 +118,8 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   const receiveProject = useCallback(
     (next: Project, transition: StageTransition | undefined) => {
       const shown = shownRef.current;
-      const fade = transition?.kind === "fade" && transition.ms > 0 && shown?.id !== next.id;
+      // only a take carries a transition (edits never do), so a re-take of the same item fades too
+      const fade = transition?.kind === "fade" && transition.ms > 0;
       if (!fade) {
         // same project (an edit), a cut, or the first project without a transition: at once
         if (takeRef.current && takeRef.current.project.id !== next.id) {

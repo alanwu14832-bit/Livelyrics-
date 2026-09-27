@@ -124,12 +124,18 @@ function TimelineImpl({
   duration,
   fallbackPeaks,
   mode,
+  hold = null,
+  loop = null,
 }: {
   controller: ConsoleController;
   project: Project;
   duration: number;
   fallbackPeaks: number[] | null;
   mode: PlaybackMode;
+  /** 保持段落: the held section (marked on its block) */
+  hold?: number | null;
+  /** 循環段落: the looped section (its region is shaded, with tint edges) */
+  loop?: number | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -170,7 +176,7 @@ function TimelineImpl({
   // anything the static drawing depends on bumps the version so the next frame redraws
   useEffect(() => {
     versionRef.current++;
-  }, [project, peaks, duration, mode]);
+  }, [project, peaks, duration, mode, hold, loop]);
 
   // a new song length: back to the whole song
   const [prevTotal, setPrevTotal] = useState(total);
@@ -460,6 +466,8 @@ function TimelineImpl({
       lines,
       duration,
       cues,
+      hold,
+      loop,
     });
   });
 
@@ -587,6 +595,25 @@ interface DrawInput {
   lines: LyricLine[];
   duration: number;
   cues: CueNote[];
+  hold: number | null;
+  loop: number | null;
+}
+
+/** A small tint label (保持 / 循環) on a surface-coloured pill so ruler numbers never cross it. */
+function drawTag(ctx: CanvasRenderingContext2D, pal: Palette, text: string, x: number, y: number, h: number) {
+  ctx.save();
+  ctx.font = `600 11px ${pal.font}`;
+  const w = ctx.measureText(text).width + 10;
+  ctx.fillStyle = pal.surface;
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.fillStyle = tokenAlpha(pal.tint, 0.22);
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.fillStyle = pal.label;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x + 5, y + h / 2 + 0.5);
+  ctx.restore();
 }
 
 function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
@@ -654,6 +681,17 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     }
     ctx.restore();
   });
+
+  // 循環段落: the looped section's region, shaded under the waveform
+  const looped = d.loop != null ? sections[d.loop] : undefined;
+  if (looped) {
+    const x0 = X(looped.start);
+    const x1 = X(looped.end);
+    if (x1 > 0 && x0 < w) {
+      ctx.fillStyle = tokenAlpha(pal.tint, 0.12);
+      ctx.fillRect(Math.max(0, x0), WAVE_TOP - 4, Math.min(w, x1) - Math.max(0, x0), h - WAVE_TOP + 4);
+    }
+  }
 
   // beat grid (only when there is room for it)
   if (beats.length > 1) {
@@ -741,6 +779,25 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     ctx.lineWidth = 1.5;
     ctx.stroke();
   });
+
+  // loop edges and the 保持 / 循環 tags on their section blocks
+  if (looped) {
+    const x0 = X(looped.start);
+    const x1 = X(looped.end);
+    ctx.fillStyle = pal.tint;
+    if (x0 >= -2 && x0 <= w + 2) ctx.fillRect(Math.round(x0), SECTION_TOP, 2, h - SECTION_TOP);
+    if (x1 >= -2 && x1 <= w + 2) ctx.fillRect(Math.round(x1) - 2, SECTION_TOP, 2, h - SECTION_TOP);
+    const tagX = Math.min(Math.max(2, x1 - 46), w - 46);
+    if (x1 > 0 && x0 < w) drawTag(ctx, pal, "循環", tagX, SECTION_TOP + 3, SECTION_H - 6);
+  }
+  const held = d.hold != null ? sections[d.hold] : undefined;
+  if (held) {
+    const x0 = X(held.start);
+    const x1 = X(held.end);
+    const loopTag = looped && d.loop === d.hold ? 46 : 0;
+    const tagX = Math.min(Math.max(2, x1 - 46 - loopTag), w - 46 - loopTag);
+    if (x1 > 0 && x0 < w) drawTag(ctx, pal, "保持", tagX, SECTION_TOP + 3, SECTION_H - 6);
+  }
 
   // hover
   if (d.hover && !d.dragging) {

@@ -24,6 +24,22 @@ export function formatCountdown(seconds: number): string {
   return `${m} 分 ${String(s).padStart(2, "0")} 秒後`;
 }
 
+/** A show look's clock: m:ss, h:mm:ss past an hour (whole seconds, never ahead of time). */
+export function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor((Number.isFinite(seconds) ? seconds : 0) + 1e-6));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** A look's countdown against its planned length: 「還有 3:18」, then 「超過 0:42」 (it never ends on its own). */
+export function countdownText(elapsed: number, planned: number): { text: string; over: boolean } {
+  const left = planned - elapsed;
+  if (left >= 0) return { text: `還有 ${formatElapsed(Math.ceil(left - 1e-6))}`, over: false };
+  return { text: `超過 ${formatElapsed(-left)}`, over: true };
+}
+
 /** "120" / "92.4"; "" when there is no tempo (the caller says so in words, never a dash). */
 export function formatBpm(bpm: number | null | undefined): string {
   return typeof bpm === "number" && Number.isFinite(bpm) && bpm > 0 ? bpm.toFixed(bpm >= 100 ? 0 : 1) : "";

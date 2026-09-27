@@ -49,7 +49,7 @@ show up in the product:
 |---|---|
 | `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error) |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
-| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `StageStore`, `createStageStore()`, `stageTime()` |
+| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
 | `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
 | `src/lib/font-meta.ts` | `FONTS` registry + `fontStack(cjkFont, latinFont)` without next/font, so server code and tests can import it |
@@ -67,7 +67,9 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/` | HOME | upload dropzone + server status, 樂團 (band shelf), 作品庫 (project library); `?band=<id>` preselects the band of a new song |
 | `/b/[id]` | HOME | 樂團: visual bible summary + 「從作品產生視覺聖經」, shows, the band's songs, the shared 樂團素材 library |
 | `/b/[id]/bible` | HOME | 視覺聖經 editor (every field, live stage preview) |
-| `/s/[id]` | HOME | 演出: setlist editor (songs + walk-in / interlude / standby / walk-out looks, reorder, running time, readiness, show canvas, 整場弧線) |
+| `/s/[id]` | HOME | 演出: setlist editor (songs + walk-in / interlude / standby / walk-out looks, reorder, running time, readiness, show canvas, 整場弧線); 「開始演出」 |
+| `/s/[id]/live` | CONSOLE | 演出控制台: setlist rail with GO / standby, and the console of the item on air (song console or look console) |
+| `/s/[id]/output` | STAGE | the show's one projection window (show channel; performs the take transitions itself) |
 | `/p/[id]/process` | HOME | runs/observes the pipeline with live progress, then hands off to the console |
 | `/p/[id]/lyrics` | HOME | lyrics editor: import/paste/LRCLIB pick, tap-sync, nudge, auto-distribute |
 | `/p/[id]` | CONSOLE | operator console |
@@ -124,11 +126,83 @@ pure helpers in `src/lib/band.ts` (vocabularies, `defaultBible`, `coerceBible` /
 - Show: `items` are songs (`projectId`) and looks (`walk-in | walk-out | interlude | standby` with `{ scene, colorway, media,
   text?, durationHint? }`). A look renders through the existing StageView as a synthetic single-section plan
   (`lookToPlan` / `lookToProject`: the bible's palette and fonts, the look's text as the only lyric line, the band library as
-  `bandAssets`, the show's canvas). The live console does not run shows yet; it can use these helpers as they are.
+  `bandAssets`, the show's canvas). The show console (phase 2b, below) runs a show with these helpers.
 - 整場弧線: `designer/arc.ts`. `planShowArc` (Claude structured output or `offlineArc`: confident opener, build, a breather
   past the middle, the peak, the biggest looks held for the finale) gives each song a role, target energy, palette emphasis
   and note. `ProcessRequest.arc` (`SongArcDirective`) re-designs one song to follow it: Claude reads it in the design prompt,
   the offline path applies `applyArc` (intensity by energy, tunnel only for the finale, colorway emphasis from the palette).
+
+### Live show mode (phase 2b)
+
+The show console runs a whole set with one projection window: `/s/[id]` 「開始演出」 (readiness summary from
+`readinessIssues`; an Alert lists the songs that are not ready, 「仍要開始」 goes ahead) → `/s/[id]/live`, whose
+「開啟投影視窗」 / O opens `/s/[id]/output`. `/p/[id]` and `/p/[id]/output` work exactly as before.
+
+- **Show channel.** `showChannelName(showId)` = `livelyrics:show:<id>`. Only the item on air talks on it: each
+  take sends `project` with a `transition`, then that item's states; the armed item is announced with
+  `preload`. Protocol additions (all optional, so older windows and consoles keep working): `transition?:
+  StageTransition` (`{ kind: "fade" | "cut"; ms }`, `DEFAULT_TAKE_TRANSITION` = fade 800 ms, at most 3000) on
+  `project`; `{ type: "preload"; project }`; `sender?` (the console window's id) on `project` / `state` /
+  `preload` / `ping`; `StageState.sectionHeld?`. `parseStageMessage` (with `sanitizeStageState`,
+  `sanitizeTransition`) checks every incoming message field by field; both projection windows use it.
+- **Projection** (`src/components/stage/ProjectionOutput.tsx`, the one projection component). `/p/[id]/output`
+  renders it with `channelName(id)` and a fixed `projectId` (only that project, API fallback before the
+  console connects, the "not found" state: the old behaviour); `/s/[id]/output` with the show channel and no
+  fixed project. A `project` with a fade (also for the same item again) dims an overlay to black over ms / 2
+  (`--ease-in-out`), swaps the StageView's project under black, waits for the new project's lyric fonts
+  (`warmFonts`, bounded) and three frames, then fades back in over ms / 2; states of the incoming project wait
+  until it is committed, and a take during a fade retargets it. A cut swaps at once. `preload` goes to
+  `ProjectWarmer` (`src/components/stage/warm.ts`): FontFaceSet loads of the characters the project can show
+  with next/font's family names, band media through a `MediaSources` of its own (`crossOrigin="anonymous"`
+  kept). `StageEngine.setProject` restarts its director (section transition, media, freeze, lyric state) when
+  the project id changes. Both windows hold a screen wake lock (`src/lib/use-wake-lock.ts`, re-acquired on
+  `visibilitychange`).
+- **Controllers.** `new ConsoleController(id, { channel?, consoleId?, output?, resume? })`: `channel` defaults
+  to `channelName(id)`; `null` is silent (no channel, no pings, no session writes: the armed, preloaded song,
+  whose `<audio preload="auto">` loads without playing); `setChannel(channel, { transition })` puts it on air
+  (project and state at once) or takes it off (`null`); `setPreload(project)`; `detach()` stops its audio.
+  `output` (`OutputTarget`) is where 「開啟投影視窗」 goes (`openProjectionWindow` keeps an already open window).
+  `resume: false` (a fresh take) skips the tab-session restore, so a song taken again starts clean. The link
+  itself is `src/lib/console/link.ts` (`ProjectionLink`: heartbeat, output status, other-console detection):
+  every controller of one console window shares its `consoleId` and stamps it as `sender`, so the short
+  overlap of two controllers during a take never reads as another console, while a second show console tab
+  does. `LookController` (`look-controller.ts`) is a look on air: `lookToProject(item, { band, output,
+  showId })`, a clock from the take (`takenAt`) that never ends, the `durationHint` countdown, the overrides,
+  no audio. `ShowLiveController` (`show-controller.ts`) owns the item controllers: before the first GO an idle
+  `ProjectionLink` answers the output (「投影已連線」) and warms the first item; GO / S / a re-take reuse the
+  preloaded controller (or make one), carry the blackout across (the show's master: GO under black stays
+  black), detach the old item before the new one goes on air, arm the following item and preload it. GO is
+  ignored for `GO_LOCK_MS` (800) after a take; S never is. 「GO 後自動播放」 plays TRACK as soon as the song can.
+- **Show state** (`src/lib/console/show-live.ts`, pure): `LiveState { current, armed, takenAt }` with
+  `initialLive`, `arm`, `take`, `go`, `takeStandby`, `reconcileLive`; `railItems`, `readinessIssues`,
+  `arcRoleLabel`; `standbyItem` (the show's first standby look, else `defaultLook("standby", bible)` under
+  `AUTO_STANDBY_ID`). `sessionStorage["livelyrics:show-live:<id>"]` keeps current, armed, take time and the
+  toggles for a reload of the console tab (it comes back to the item on air without a transition; the song
+  restores its overrides, position and hold / loop through `session.ts`, a look its overrides under
+  `show-<showId>-<itemId>`; the output resyncs through `hello`). `localStorage["livelyrics:show-live-prefs:<id>"]`
+  remembers 淡出淡入 / 直接切換 and 「GO 後自動播放」 per show.
+- **UI** (`src/app/s/[id]/live/page.tsx` → `src/components/show-live/`). `ShowLiveApp` binds the controller,
+  holds a wake lock and shows `SetlistRail` (the GO block naming the armed item, the take transition, the
+  autoplay switch, the rows: kind swatch, title, length, readiness, arc role; on air red with its progress,
+  armed with the tint ring, played rows dimmed, the arc directive of the song on air; the standby key) beside
+  the console of the item on air: `SongConsole` from `ConsoleApp.tsx` (the `/p/[id]` console itself, given
+  `show` slots: the G / S keys, the help group, the shared stage; no back link, a compact top bar), or
+  `LookConsole` (preview, elapsed / countdown, text, next item, `ControlTab` safety controls), or `PreShow`.
+  The whole show has one preview StageView (`src/components/console/SharedStage.tsx`: rendered through a
+  portal into a detached host that each view's preview frame adopts), so a take never builds a WebGL context
+  or compiles shaders again on the main thread the popup projection shares. `useConsoleHotkeys` is the song
+  console's key handling, shared by every view.
+- **Section strip** (段落列, `src/components/console/SectionStrip.tsx`, in both consoles between the preview
+  and the readout). A section button jumps there (TRACK seeks to its start; LIVE cues its first line and pins
+  the section, so a pickup line that starts before the section still shows it). 保持段落 (H): the controller
+  publishes the held `sectionIndex` with `sectionHeld`, and every layer takes scene, colours, media and lyric
+  style from that section (`lyricLookAt`, the LyricLayer stack) while the lyrics follow time and cues; the
+  release returns to the section at the current time or cue. 循環段落 (R): TRACK seeks back to the section's
+  start at its end (`loopSeekTarget`, 20 ms ahead in the tick, also on `ended`) and the timeline tints the
+  region; LIVE `next()` after the section's last line cues its first (`loopNextLine`) and the clock parks 50 ms
+  before the section's end (`LiveClock.capHold`). The same key turns it off; jumping to another section ends a
+  hold or loop elsewhere. Both persist in the tab session. The 「保持中」 / 「循環」 capsules, the strip and the
+  timeline tags are console chrome only.
 
 ### Band media and the output canvas (phase 1a)
 
@@ -307,7 +381,7 @@ keeps every contract above and changes only where things are kept and how long w
   — connect analyser → destination), `createMicAnalyser()`, tap tempo; features 0..1.
 - Unit tests with synthetic signals (click track tempo, loud/quiet section boundaries).
 
-### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts), `src/app/p/[id]/output/**`, `src/app/stage-lab/**`
+### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts), `src/app/p/[id]/output/**`, `src/app/s/[id]/output/**`, `src/app/stage-lab/**`
 - `<StageView project store showGuides renderScale />`: WebGL scene layer + DOM lyric layer +
   blackout/transition overlay + optional test pattern & safe-area guides. Reads `store.get()` in a
   rAF loop (no React re-render per frame). Extrapolates time with `stageTime()`.
@@ -320,11 +394,12 @@ keeps every contract above and changes only where things are kept and how long w
   emphasis words, translations, CJK line breaking (~16 chars, punctuation rules), fit-to-safe-area,
   legibility shadow/outline, word timing synthesized when `line.words` is absent, live-cued lines use
   `lineStartedAt`. Per-line `styleOverride` from `plan.lines`.
-- Output page: fullscreen black, no chrome, cursor auto-hide, F / double-click fullscreen, sends
-  `hello`, answers `ping` with `pong`, applies `project`/`state`; loads the project via API as a
-  fallback so it can show the key visual idle frame before the console connects.
+- Output page (`ProjectionOutput`, both windows): fullscreen black, no chrome, cursor auto-hide, F /
+  double-click fullscreen, sends `hello`, answers `ping` with `pong`, applies `project`/`state`; the
+  per-song window loads the project via API as a fallback so it can show the key visual idle frame before
+  the console connects; the show window performs take transitions and warms `preload`s (phase 2b).
 
-### CONSOLE — `src/app/p/[id]/page.tsx`, `src/components/console/**`, `src/lib/console/**`
+### CONSOLE — `src/app/p/[id]/page.tsx`, `src/app/s/[id]/live/**`, `src/components/console/**`, `src/components/show-live/**`, `src/lib/console/**`
 - Controller: owns the `<audio>` (src `api.audioUrl(id)`), modes **track** (time = audio time + offset)
   and **live** (operator cues lines; virtual time jumps to the cued line's start and runs until the next
   line's start; optional mic analyser + tap tempo), computes line/section, publishes `StageState`
@@ -338,7 +413,10 @@ keeps every contract above and changes only where things are kept and how long w
   研究 brief & sources / 控制 overrides / 同步 offset, BPM, tap, mic).
 - Hotkeys (shown in a `?` overlay): Space play/pause (live: next line), →/↓ next line, ←/↑ previous line,
   Enter cue selected, B blackout, L lyrics on/off, F freeze, 1–9 scene override, 0 follow plan,
-  [ / ] offset −/+ 0.05 s, T tap tempo, O open output, M mode switch, ? help.
+  [ / ] offset −/+ 0.05 s, T tap tempo, O open output, M mode switch, ? help; PageDown or . / PageUp or ,
+  next / previous section, H 保持段落, R 循環段落 (phase 2b). The show console adds G (GO) and S (standby);
+  the per-song console ignores them. Physical key codes (`KeyH`, `Period`…), so an active IME does not
+  change them; every toggle and jump ignores key repeat.
 - Re-design dialog: free-text instruction → `api.process(id, {steps:["design"], instruction})` with
   streamed progress; then broadcast the new project.
 

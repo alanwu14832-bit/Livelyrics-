@@ -4,7 +4,7 @@
 // closes instantly (no animation). Inset rows with Kbd caps; show hotkeys keep working while it
 // is open (the console passes them through), ? or Esc closes it.
 
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Button, Kbd, Sheet } from "@/components/ui";
 import { HOTKEY_HELP, type HotkeyHelpGroup } from "@/lib/console/hotkeys";
 import { Group, GroupTitle } from "./ui";
@@ -36,8 +36,27 @@ function HelpGroup({ group }: { group: HotkeyHelpGroup }) {
   );
 }
 
-export function HelpOverlay({ open, onClose, onKeyDown }: { open: boolean; onClose: () => void; onKeyDown?: (e: KeyboardEvent<HTMLDialogElement>) => void }) {
-  const [playback, ...rest] = HOTKEY_HELP;
+export function HelpOverlay({
+  open,
+  onClose,
+  onKeyDown,
+  groups = HOTKEY_HELP,
+  lead,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onKeyDown?: (e: KeyboardEvent<HTMLDialogElement>) => void;
+  /** the key groups to explain (default: the song console's) */
+  groups?: HotkeyHelpGroup[];
+  /** a group shown first, above the others (the show console's GO / standby) */
+  lead?: HotkeyHelpGroup;
+  /** replaces the TRACK / LIVE explanation at the bottom */
+  footer?: ReactNode;
+}) {
+  // playback and sections on the left (after the show's own keys), the rest on the right
+  const left = groups.slice(0, 2);
+  const right = groups.slice(2);
   return (
     <Sheet
       open={open}
@@ -55,21 +74,30 @@ export function HelpOverlay({ open, onClose, onKeyDown }: { open: boolean; onClo
     >
       <p className="text-c-body text-label-2">在輸入框打字時快捷鍵會暫停。按 ? 或 Esc 關閉；黑場、歌詞、凍結與場景鍵在這裡也有效。</p>
       <div className="mt-4 grid grid-cols-2 items-start gap-4">
-        {playback && <HelpGroup group={playback} />}
         <div className="flex flex-col gap-4">
-          {rest.map((g) => (
+          {lead && <HelpGroup group={lead} />}
+          {left.map((g) => (
+            <HelpGroup key={g.title} group={g} />
+          ))}
+        </div>
+        <div className="flex flex-col gap-4">
+          {right.map((g) => (
             <HelpGroup key={g.title} group={g} />
           ))}
         </div>
       </div>
       <Group className="mt-4 flex flex-col gap-1 px-3 py-2.5 text-c-body text-label-2">
-        <p>
-          <span className="font-semibold text-label t-latin">TRACK</span>：跟著控制台播放的音檔時間自動換句。
-        </p>
-        <p>
-          <span className="font-semibold text-label t-latin">LIVE</span>：由你逐句送出。時間會跳到該句開頭，停在下一句開始前。
-        </p>
-        <p>任何時候按 B 都能立刻淡出為全黑；投影視窗只顯示動畫與歌詞，所有資訊都留在這台電腦上。</p>
+        {footer ?? (
+          <>
+            <p>
+              <span className="font-semibold text-label t-latin">TRACK</span>：跟著控制台播放的音檔時間自動換句。
+            </p>
+            <p>
+              <span className="font-semibold text-label t-latin">LIVE</span>：由你逐句送出。時間會跳到該句開頭，停在下一句開始前。
+            </p>
+            <p>任何時候按 B 都能立刻淡出為全黑；投影視窗只顯示動畫與歌詞，所有資訊都留在這台電腦上。</p>
+          </>
+        )}
       </Group>
     </Sheet>
   );

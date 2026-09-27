@@ -3,7 +3,8 @@ import { DesignPlanSchema } from "../schema";
 import { contrastRatio } from "./color";
 import { createDemoProject } from "./demo";
 import { initialStageState, type StageState } from "./protocol";
-import { resolveLineDesign, resolveLook, resolveSectionIndex } from "./resolve";
+import { lyricLookAt, resolveLineDesign, resolveLook, resolveSectionIndex } from "./resolve";
+import { section, testLyrics, testPlan } from "../console/test-fixtures";
 
 const project = createDemoProject();
 const state = (patch: Partial<StageState> = {}): StageState => ({ ...initialStageState("demo"), ...patch });
@@ -61,5 +62,31 @@ describe("resolveLineDesign", () => {
     expect(resolveLineDesign(project.plan, "l4", "word-pop", null)).toEqual({ style: "impact", emphasis: ["Hey"] });
     expect(resolveLineDesign(project.plan, "l4", "word-pop", "subtitle").style).toBe("subtitle");
     expect(resolveLineDesign(project.plan, "l6", "word-pop", undefined)).toEqual({ style: "word-pop", emphasis: [] });
+  });
+});
+
+describe("lyricLookAt and a held section (保持段落)", () => {
+  const plan = testPlan([
+    section("s0", 0, 8),
+    section("s1", 8, 24, { lyricStyle: "line-fade", scene: "nebula", colorway: ["#101018", "#4455cc", "#ff5a36"] }),
+    section("s2", 24, 40, { lyricStyle: "karaoke", scene: "tunnel", colorway: ["#000000", "#ffcc00", "#ff0055"] }),
+  ]);
+  const songProject = { ...project, plan, lyrics: testLyrics(), meta: { ...project.meta, duration: 40 } };
+
+  it("styles a line by its own section while following time", () => {
+    const s = state({ lineIndex: 4, sectionIndex: 1 });
+    const look = resolveLook(songProject, s, 26);
+    expect(look.sectionIndex).toBe(1);
+    expect(lyricLookAt(songProject, s, 26, look).lyricStyle).toBe("karaoke"); // l4 is sung in s2
+  });
+
+  it("keeps the held section's look for every line", () => {
+    const s = state({ lineIndex: 4, sectionIndex: 1, sectionHeld: true });
+    const look = resolveLook(songProject, s, 26);
+    expect(look.scene).toBe("nebula");
+    const lyric = lyricLookAt(songProject, s, 26, look);
+    expect(lyric).toBe(look);
+    expect(lyric.lyricStyle).toBe("line-fade");
+    expect(lyric.colorway[1]).toBe("#4455cc");
   });
 });

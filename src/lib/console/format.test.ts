@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, formatBpm, formatCountdown, formatOffset, formatOffsetSeconds, hostOf, motifDataUrl, readableTextOn, withAlpha } from "./format";
+import { contrast, countdownText, formatBpm, formatCountdown, formatElapsed, formatOffset, formatOffsetSeconds, hostOf, motifDataUrl, readableTextOn, withAlpha } from "./format";
 import { peaksFromChannels } from "./peaks";
 
 describe("format helpers", () => {
@@ -54,5 +54,22 @@ describe("peaksFromChannels", () => {
     expect(peaksFromChannels([ch], 4)).toEqual([1, 0.5, 0.2, 0]);
     expect(peaksFromChannels([], 4)).toEqual([]);
     expect(peaksFromChannels([new Float32Array(3)], 10)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("show look clock", () => {
+  it("formats elapsed time", () => {
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(59.9)).toBe("0:59");
+    expect(formatElapsed(65)).toBe("1:05");
+    expect(formatElapsed(3725)).toBe("1:02:05");
+    expect(formatElapsed(Number.NaN)).toBe("0:00");
+  });
+
+  it("counts down to the planned length, then counts the overtime", () => {
+    expect(countdownText(0, 300)).toEqual({ text: "還有 5:00", over: false });
+    expect(countdownText(101.2, 300)).toEqual({ text: "還有 3:19", over: false });
+    expect(countdownText(300, 300)).toEqual({ text: "還有 0:00", over: false });
+    expect(countdownText(342.5, 300)).toEqual({ text: "超過 0:42", over: true });
   });
 });

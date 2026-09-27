@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
 import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
-import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
+import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
 import { formatTime } from "@/lib/timeline";
@@ -127,8 +127,7 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
 }
 
 /** The projection as one split control: status segment (dot, 「投影已連線」, size) + 「開啟」. */
-function OutputControl({ snap, onOpen }: { snap: ConsoleSnapshot; onOpen: () => void }) {
-  const o = snap.output;
+export function OutputControl({ output: o, onOpen }: { output: OutputStatus; onOpen: () => void }) {
   const detail = o.connected ? `投影視窗已連線：${o.width}×${o.height}，${o.fullscreen ? "全螢幕" : "視窗模式"}${o.count > 1 ? `，共 ${o.count} 個視窗` : ""}` : "投影視窗未連線。開啟後拖到投影機或 LED 螢幕上。";
   return (
     <div className="flex h-8 shrink-0 items-stretch rounded-sm bg-fill-3">
@@ -168,11 +167,17 @@ export function TopBar({
   snap,
   onRedesign,
   onHelp,
+  back = true,
+  compact = false,
 }: {
   controller: ConsoleController;
   snap: ConsoleSnapshot;
   onRedesign: () => void;
   onHelp: () => void;
+  /** 「‹ 作品庫」; false in the show console (its setlist rail has the way back) */
+  back?: boolean;
+  /** the show console (narrower, beside the rail): 重新設計 as an icon, no 匯出 */
+  compact?: boolean;
 }) {
   const project = snap.project;
   const live = snap.mode === "live";
@@ -204,11 +209,13 @@ export function TopBar({
     >
       {/* left: back, title, capsules (pushed right, next to the transport) */}
       <div className="flex min-w-0 items-center gap-3">
-        <BackLink
-          onNavigate={(e) => {
-            if (!controller.confirmLeave()) e.preventDefault();
-          }}
-        />
+        {back && (
+          <BackLink
+            onNavigate={(e) => {
+              if (!controller.confirmLeave()) e.preventDefault();
+            }}
+          />
+        )}
         <TitleBlock id={controller.id} title={project?.meta?.title || "未命名歌曲"} palette={palette} subtitle={<Subtitle controller={controller} snap={snap} />} />
         <StatusCapsules items={capsules} className="ml-auto shrink-0" aria-label="目前狀態" />
       </div>
@@ -276,17 +283,23 @@ export function TopBar({
 
       {/* right: projection, re-design, help */}
       <div className="flex min-w-0 items-center justify-end gap-2">
-        <OutputControl snap={snap} onOpen={() => controller.openOutput()} />
-        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
-          <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
-            重新設計
-          </Button>
+        <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
+        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : compact ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
+          {compact ? (
+            <Button variant="quiet" size="icon" aria-label="重新設計" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign} />
+          ) : (
+            <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
+              重新設計
+            </Button>
+          )}
         </Tooltip>
-        <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
-          <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
-            匯出
-          </Button>
-        </Tooltip>
+        {!compact && (
+          <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
+            <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
+              匯出
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
           <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={onHelp} />
         </Tooltip>

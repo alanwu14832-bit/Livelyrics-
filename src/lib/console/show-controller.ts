@@ -41,9 +41,10 @@ import {
 
 type LookItem = Extract<SetItem, { kind: LookItemKind }>;
 
+/** One item's controller; `seq` is unique per controller (a React key: a re-take is a fresh console). */
 export type ItemControl =
-  | { kind: "song"; itemId: string; controller: ConsoleController }
-  | { kind: "look"; itemId: string; controller: LookController; item: LookItem };
+  | { kind: "song"; itemId: string; seq: number; controller: ConsoleController }
+  | { kind: "look"; itemId: string; seq: number; controller: LookController; item: LookItem };
 
 export interface ShowLiveSnapshot {
   load: LoadState;
@@ -93,6 +94,7 @@ export class ShowLiveController {
   private nextSub: (() => void) | null = null;
   private autoplaySub: (() => void) | null = null;
   private autoplayTimer: ReturnType<typeof setTimeout> | null = null;
+  private seq = 0;
 
   constructor(showId: string) {
     this.showId = showId;
@@ -251,7 +253,7 @@ export class ShowLiveController {
     if (item.kind === "song") {
       const controller = new ConsoleController(item.projectId, { channel: null, consoleId: this.consoleId, output: this.outputTarget, resume: opts.resume });
       controller.attach();
-      return { kind: "song", itemId: item.id, controller };
+      return { kind: "song", itemId: item.id, seq: ++this.seq, controller };
     }
     const controller = new LookController(this.lookProject(item), {
       channel: null,
@@ -260,9 +262,10 @@ export class ShowLiveController {
       takenAt: opts.takenAt ?? null,
       resume: opts.resume,
       durationHint: item.look.durationHint ?? null,
+      sessionKey: `show-${this.showId}-${item.id}`,
     });
     controller.attach();
-    return { kind: "look", itemId: item.id, controller, item };
+    return { kind: "look", itemId: item.id, seq: ++this.seq, controller, item };
   }
 
   private projectOf(control: ItemControl | null): Project | null {
@@ -421,6 +424,22 @@ export class ShowLiveController {
     const win = openProjectionWindow(this.outputTarget, this.outputWindow);
     if (win) this.outputWindow = win;
     return !!win;
+  }
+
+  /**
+   * Leaving the show console stops the item on air (the projection holds its last frame). While
+   * the show is live, ask first. True = go ahead.
+   */
+  confirmLeave(): boolean {
+    const onAir = this.snapshot.onAir;
+    if (onAir?.kind === "song") return onAir.controller.confirmLeave();
+    const connected = onAir ? onAir.controller.getSnapshot().output.connected : this.snapshot.output.connected;
+    if (!connected) return true;
+    try {
+      return window.confirm("演出進行中：離開演出控制台後投影畫面會停在最後一格。確定要離開嗎？");
+    } catch {
+      return true;
+    }
   }
 
   private saveSession(): void {

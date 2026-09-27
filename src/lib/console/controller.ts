@@ -153,8 +153,9 @@ export interface ConsoleControllerOptions {
   /** where 「開啟投影視窗」 goes; default this song's own output (/p/[id]/output) */
   output?: OutputTarget;
   /**
-   * Restore this tab's saved playback position and section hold / loop (a console reload).
-   * Default true; a show take starts the song at its start (false). Overrides always come back.
+   * Restore this tab's saved overrides, playback position and section hold / loop (a console
+   * reload). Default true; a fresh show take (false) starts the song at its start, as designed —
+   * the show console carries a blackout across takes itself.
    */
   resume?: boolean;
 }

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  LOOP_LOOKAHEAD,
   effectiveDuration,
   lastStartedLine,
+  lineSections,
+  linesInSection,
+  loopNextLine,
+  loopSeekTarget,
   liveHoldTime,
   liveNextLine,
   livePrevLine,
@@ -104,5 +109,41 @@ describe("lyrics stats and duration", () => {
     expect(effectiveDuration(null, 0, 50, lyrics)).toBe(50);
     expect(effectiveDuration(undefined, undefined, undefined, lyrics)).toBe(30);
     expect(effectiveDuration(undefined, undefined, undefined, null)).toBe(0);
+  });
+});
+
+describe("section membership and loops (段落列 / 循環段落)", () => {
+  const plan = testPlan();
+  // sections s0 0-8, s1 8-24, s2 24-40; l0 8, l1 12, l2 untimed, l3 16, l4 26
+  it("groups lines by section, untimed lines with the timed line before them", () => {
+    expect(lineSections(plan, lines, 40)).toEqual([1, 1, 1, 1, 2]);
+    expect(linesInSection(plan, lines, 1, 40)).toEqual([0, 1, 2, 3]);
+    expect(linesInSection(plan, lines, 2, 40)).toEqual([4]);
+    expect(linesInSection(plan, lines, 0, 40)).toEqual([]);
+    expect(lineSections(null, lines, 40)).toEqual([null, null, null, null, null]);
+  });
+
+  it("LIVE loop wraps only after the section's last line", () => {
+    const s1 = linesInSection(plan, lines, 1, 40);
+    expect(loopNextLine(s1, 3)).toBe(0); // last line of s1 -> its first
+    expect(loopNextLine(s1, 1)).toBeNull(); // mid-section: the normal next line
+    expect(loopNextLine(s1, 4)).toBeNull(); // not in the section
+    expect(loopNextLine(s1, null)).toBeNull();
+    expect(loopNextLine([], 3)).toBeNull();
+    expect(loopNextLine([4], 4)).toBe(4); // a one-line section repeats its line
+  });
+
+  it("TRACK loop seeks back once playback reaches the section end", () => {
+    const s = { start: 24, end: 40 };
+    expect(loopSeekTarget(s, 30)).toBeNull();
+    expect(loopSeekTarget(s, 39.97)).toBeNull();
+    expect(loopSeekTarget(s, 40 - LOOP_LOOKAHEAD)).toBe(24);
+    expect(loopSeekTarget(s, 41)).toBe(24);
+    expect(loopSeekTarget(s, 39.99, 0.05)).toBe(24);
+    // degenerate sections never loop on the spot
+    expect(loopSeekTarget({ start: 10, end: 10.01 }, 10.02)).toBeNull();
+    expect(loopSeekTarget({ start: 10, end: 10.01 }, 10.2)).toBe(10);
+    expect(loopSeekTarget(null, 5)).toBeNull();
+    expect(loopSeekTarget({ start: 5, end: Number.NaN }, 5)).toBeNull();
   });
 });

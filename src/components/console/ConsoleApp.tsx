@@ -7,11 +7,17 @@
 // borders, a solid 52 px top bar. Keyboard first: every hotkey acts in the same frame and answers
 // with the HUD over the preview (0 ms in, 900 ms hold, 250 ms fade) plus the top bar's status
 // capsules. None of that feedback ever reaches the projection window.
+//
+// The same song console runs inside the show console (/s/[id]/live, phase 2b): SongConsole takes
+// an existing controller (the show owns its lifecycle) and `show` slots — the GO / standby keys,
+// the show's key group in the help sheet, a top bar without 「‹ 作品庫」 beside the setlist rail.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Banner, Button, ToastStack, type HudHandle, type ToastItem } from "@/components/ui";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Banner, Button, EmptyState, Spinner, ToastStack, type HudHandle, type ToastItem } from "@/components/ui";
+import { MusicNotesIcon, WarningCircleIcon, type UiIcon } from "@/components/ui/Icon";
+import type { ConsoleController } from "@/lib/console/controller";
 import { useConsoleController, useConsoleSnapshot } from "@/lib/console/hooks";
-import { hotkeyAction, targetOwnsKey, type HotkeyAction, type TargetLike } from "@/lib/console/hotkeys";
+import { hotkeyAction, type HotkeyAction, type HotkeyHelpGroup } from "@/lib/console/hotkeys";
 import { CuePanel } from "./CuePanel";
 import { hudForAction } from "./feedback";
 import { HelpOverlay } from "./HelpOverlay";
@@ -19,10 +25,13 @@ import { LyricsList } from "./LyricsList";
 import { PanelBoundary } from "./PanelBoundary";
 import { PreviewPanel, StageReadout } from "./Preview";
 import { RedesignDialog } from "./RedesignDialog";
+import { SectionStrip } from "./SectionStrip";
+import type { SharedStage } from "./SharedStage";
 import { SidePanel } from "./SidePanel";
 import { ConsoleSkeleton, LoadErrorState, NotFoundState, NotReadyState } from "./States";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
+import { useConsoleHotkeys } from "./useConsoleHotkeys";
 
 /** What the server already knows about the song, so the loading state shows its title and art. */
 export interface ConsoleIntro {
@@ -31,17 +40,35 @@ export interface ConsoleIntro {
   palette: string[];
 }
 
-function asTarget(t: EventTarget | null): TargetLike | null {
-  if (!t || typeof (t as Element).tagName !== "string") return null;
-  const el = t as HTMLElement;
-  return { tagName: el.tagName, type: (el as HTMLInputElement).type, isContentEditable: el.isContentEditable, role: el.getAttribute("role") };
+/** The show console's hooks into the song console. */
+export interface ShowSlots {
+  /** GO and standby (the show console's keys); true when handled */
+  onAction: (action: HotkeyAction) => boolean;
+  /** the show's key group, first in the help sheet */
+  help: HotkeyHelpGroup;
+  /** the show console's one preview stage (kept across takes) */
+  stage?: SharedStage | null;
 }
 
 /** Hotkeys that also work while the shortcut help sheet is open (it only explains them). */
-const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode"]);
+const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode", "hold", "loop"]);
 
 export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | null }) {
   const controller = useConsoleController(id);
+  return <SongConsole controller={controller} intro={intro} />;
+}
+
+/** A load state inside the show console's column (the song console proper has full-page ones). */
+function ColumnState({ icon, title, description }: { icon: UiIcon | ReactNode; title: string; description?: ReactNode }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-bg p-6 text-label">
+      <EmptyState icon={icon} title={title} description={description} />
+    </div>
+  );
+}
+
+export function SongConsole({ controller, intro, show }: { controller: ConsoleController; intro?: ConsoleIntro | null; show?: ShowSlots }) {
+  const id = controller.id;
   const snap = useConsoleSnapshot(controller);
   const [helpOpen, setHelpOpen] = useState(false);
   const [redesignOpen, setRedesignOpen] = useState(false);
@@ -49,13 +76,15 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
   const hud = useRef<HudHandle>(null);
 
   const project = snap.project;
-  const notReady = !!project && !project.plan && (project.status === "new" || project.status === "processing") && !openAnyway;
+  // the show goes on: a song taken on stage opens even when it is not designed yet
+  const notReady = !show && !!project && !project.plan && (project.status === "new" || project.status === "processing") && !openAnyway;
   const active = snap.load.status === "ready" && !!project && !notReady;
 
   useEffect(() => {
+    if (show) return; // the show console names the tab after the show
     const title = project?.meta?.title;
     document.title = title ? `${title}｜控制台` : "控制台｜Livelyrics";
-  }, [project?.meta?.title]);
+  }, [project?.meta?.title, show]);
 
   // the toast stack owns notice lifetimes (it pauses while hovered, focused or hidden)
   useEffect(() => {
@@ -65,9 +94,9 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
   const toasts = useMemo<ToastItem[]>(() => snap.notices.map((n) => ({ id: String(n.id), tone: n.tone, message: n.message })), [snap.notices]);
   const dismissToast = useCallback((toastId: string) => controller.dismissNotice(Number(toastId)), [controller]);
 
-  /** Run a hotkey action and answer with the HUD in the same frame. */
+  /** Run a hotkey action and answer with the HUD in the same frame. False: not this console's key. */
   const dispatch = useCallback(
-    (action: HotkeyAction) => {
+    (action: HotkeyAction): boolean => {
       const noticesBefore = controller.getSnapshot().notices.length;
       switch (action.type) {
         case "togglePlay":
@@ -112,67 +141,37 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
         case "mode":
           controller.toggleMode({ announce: false }); // the HUD says 「LIVE 模式」 / 「TRACK 模式」
           break;
+        case "hold":
+          controller.toggleHold();
+          break;
+        case "loop":
+          controller.toggleLoop();
+          break;
+        case "section":
+          controller.stepSection(action.delta);
+          break;
+        case "go":
+        case "standby":
+          return show ? show.onAction(action) : false;
         case "help":
           setHelpOpen((v) => !v);
-          return;
+          return true;
         case "escape":
           controller.clearLine();
-          return;
+          return true;
       }
       // a blocked popup already explains itself in a notice: no 「已開啟」 HUD then
       const after = controller.getSnapshot().notices;
-      if (action.type === "openOutput" && after.length > noticesBefore && after[after.length - 1]?.tone === "error") return;
+      if (action.type === "openOutput" && after.length > noticesBefore && after[after.length - 1]?.tone === "error") return true;
       const content = hudForAction(action, controller);
       if (content) hud.current?.show(content);
+      return true;
     },
-    [controller],
+    [controller, show],
   );
 
-  // keyboard-first operation
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
-      if (redesignOpen || helpOpen) return; // the sheets are modal and pass through their own keys
-      const target = asTarget(e.target);
-      if (targetOwnsKey(target, e.code)) return;
-      const action = hotkeyAction(e);
-      if (!action) return;
-      dispatch(action);
-      e.preventDefault();
-      // a hotkey answers with the HUD: dismiss the focused control's tooltip (e.g. the one shown
-      // when a sheet returned focus to its opener). Non-bubbling, so no hotkey handler sees it.
-      if (e.target instanceof HTMLElement && e.target !== document.body) e.target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: false }));
-    };
-    // Space on a focused button would also "click" it on keyup: Space belongs to the transport
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || redesignOpen || helpOpen) return;
-      if (!targetOwnsKey(asTarget(e.target), e.code)) e.preventDefault();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [active, dispatch, helpOpen, redesignOpen]);
-
-  // A mouse click must not leave focus on a control: Enter (cue) or arrows (next line) would
-  // otherwise re-trigger that button / move that slider. Keyboard (Tab) focus is kept.
-  useEffect(() => {
-    if (!active) return;
-    const onClick = (e: MouseEvent) => {
-      if (e.detail === 0) return; // keyboard activation
-      const el = document.activeElement;
-      if (!(el instanceof HTMLElement) || el === document.body || el.closest('dialog, [role="dialog"]')) return;
-      const tag = el.tagName;
-      if (tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable) return;
-      if (tag === "INPUT" && !["range", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type)) return;
-      el.blur();
-    };
-    window.addEventListener("click", onClick);
-    return () => window.removeEventListener("click", onClick);
-  }, [active]);
+  // keyboard-first operation (the sheets are modal and pass through their own keys)
+  useConsoleHotkeys({ active, paused: redesignOpen || helpOpen, onAction: dispatch });
 
   // B from inside the re-design sheet (outside its text field): blackout, with the HUD
   const blackoutFromSheet = useCallback(() => dispatch({ type: "blackout" }), [dispatch]);
@@ -184,24 +183,46 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
       if (action.type === "help") {
         e.preventDefault();
         setHelpOpen(false);
-      } else if (HELP_PASSTHROUGH.has(action.type)) {
+      } else if (HELP_PASSTHROUGH.has(action.type) || (show && action.type === "standby")) {
         e.preventDefault();
         dispatch(action);
       }
     },
-    [dispatch],
+    [dispatch, show],
   );
 
-  if (snap.load.status === "not-found") return <NotFoundState />;
-  if (snap.load.status === "error" && !project) return <LoadErrorState message={snap.load.message} onRetry={() => void controller.reload()} />;
-  if (!project) return <ConsoleSkeleton id={id} intro={intro ?? null} />;
-  if (notReady) return <NotReadyState project={project} onOpenAnyway={() => setOpenAnyway(true)} />;
+  if (show) {
+    if (snap.load.status === "not-found") return <ColumnState icon={MusicNotesIcon} title="找不到這首歌" description="它可能已從作品庫刪除。按 S 切到待機畫面，或在演出清單選下一個項目。" />;
+    if (snap.load.status === "error" && !project)
+      return (
+        <ColumnState
+          icon={<WarningCircleIcon size={44} className="text-red" />}
+          title="這首歌無法載入"
+          description={
+            <>
+              <p>{snap.load.message}</p>
+              <p className="mt-3">
+                <Button variant="gray" onClick={() => void controller.reload()}>
+                  重試
+                </Button>
+              </p>
+            </>
+          }
+        />
+      );
+    if (!project) return <ColumnState icon={<Spinner size={20} />} title="載入這首歌…" />;
+  } else {
+    if (snap.load.status === "not-found") return <NotFoundState />;
+    if (snap.load.status === "error" && !project) return <LoadErrorState message={snap.load.message} onRetry={() => void controller.reload()} />;
+    if (!project) return <ConsoleSkeleton id={id} intro={intro ?? null} />;
+    if (notReady) return <NotReadyState project={project} onOpenAnyway={() => setOpenAnyway(true)} />;
+  }
 
   const openRedesign = () => setRedesignOpen(true);
 
   return (
-    <div className="flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg text-label">
-      <TopBar controller={controller} snap={snap} onRedesign={openRedesign} onHelp={() => setHelpOpen(true)} />
+    <div className={show ? "flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-label" : "flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg text-label"}>
+      <TopBar controller={controller} snap={snap} onRedesign={openRedesign} onHelp={() => setHelpOpen(true)} back={!show} compact={!!show} />
       <main
         className="grid min-h-0 flex-1 gap-1.5 p-1.5"
         style={{
@@ -233,7 +254,8 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
                 }
               />
             )}
-            <PreviewPanel controller={controller} project={project} output={snap.output} hudRef={hud} />
+            <PreviewPanel controller={controller} project={project} output={snap.output} hudRef={hud} shared={show?.stage} />
+            <SectionStrip controller={controller} project={project} hold={snap.sectionHold} loop={snap.sectionLoop} />
             <StageReadout controller={controller} project={project} mode={snap.mode} />
           </div>
         </PanelBoundary>
@@ -241,13 +263,13 @@ export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | n
           <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} />
         </PanelBoundary>
         <PanelBoundary area="timeline" label="時間軸">
-          <Timeline controller={controller} project={project} duration={snap.duration} fallbackPeaks={snap.fallbackPeaks} mode={snap.mode} />
+          <Timeline controller={controller} project={project} duration={snap.duration} fallbackPeaks={snap.fallbackPeaks} mode={snap.mode} hold={snap.sectionHold} loop={snap.sectionLoop} />
         </PanelBoundary>
         <PanelBoundary area="cues" label="現場提示">
           <CuePanel controller={controller} project={project} />
         </PanelBoundary>
       </main>
-      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} onKeyDown={helpKey} />
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} onKeyDown={helpKey} lead={show?.help} />
       <RedesignDialog
         open={redesignOpen}
         controller={controller}

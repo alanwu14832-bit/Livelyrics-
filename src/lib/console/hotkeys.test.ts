@@ -80,3 +80,44 @@ describe("targetOwnsKey", () => {
     expect(targetOwnsKey(null, "Enter")).toBe(false);
   });
 });
+
+describe("phase 2b keys", () => {
+  it("maps sections, hold, loop, GO and standby by physical key", () => {
+    expect(hotkeyAction(key("PageDown"))).toEqual({ type: "section", delta: 1 });
+    expect(hotkeyAction(key("PageUp"))).toEqual({ type: "section", delta: -1 });
+    expect(hotkeyAction(key("Period", { key: "." }))).toEqual({ type: "section", delta: 1 });
+    expect(hotkeyAction(key("Comma", { key: "," }))).toEqual({ type: "section", delta: -1 });
+    expect(hotkeyAction(key("KeyH", { key: "h" }))).toEqual({ type: "hold" });
+    expect(hotkeyAction(key("KeyR", { key: "r" }))).toEqual({ type: "loop" });
+    expect(hotkeyAction(key("KeyG", { key: "g" }))).toEqual({ type: "go" });
+    expect(hotkeyAction(key("KeyS", { key: "s" }))).toEqual({ type: "standby" });
+    // a Chinese IME reports "Process" (注音 ㄘ on G, ㄋ on S): the physical key still counts
+    expect(hotkeyAction(key("KeyG", { key: "Process" }))).toEqual({ type: "go" });
+    expect(hotkeyAction(key("KeyS", { key: "ㄋ" }))).toEqual({ type: "standby" });
+  });
+
+  it("never repeats GO, standby, hold, loop or a section jump", () => {
+    for (const code of ["KeyG", "KeyS", "KeyH", "KeyR", "PageDown", "PageUp", "Period", "Comma"]) {
+      expect(hotkeyAction(key(code, { repeat: true }))).toBeNull();
+    }
+  });
+
+  it("leaves modified and shifted variants alone", () => {
+    expect(hotkeyAction(key("KeyS", { metaKey: true }))).toBeNull(); // ⌘S
+    expect(hotkeyAction(key("KeyR", { ctrlKey: true }))).toBeNull(); // reload
+    expect(hotkeyAction(key("KeyG", { shiftKey: true }))).toBeNull();
+    expect(hotkeyAction(key("Period", { shiftKey: true, key: ">" }))).toBeNull();
+  });
+
+  it("does not collide with the existing keys", () => {
+    const codes = ["Space", "ArrowRight", "ArrowLeft", "Enter", "KeyM", "KeyB", "KeyL", "KeyF", "Digit1", "BracketLeft", "KeyT", "KeyO", "Escape"];
+    const types = codes.map((c) => hotkeyAction(key(c))?.type);
+    for (const t of ["section", "hold", "loop", "go", "standby"]) expect(types).not.toContain(t);
+  });
+
+  it("a focused slider or select keeps Page Up / Down", () => {
+    expect(targetOwnsKey({ tagName: "INPUT", type: "range" }, "PageDown")).toBe(true);
+    expect(targetOwnsKey({ tagName: "SELECT" }, "PageUp")).toBe(true);
+    expect(targetOwnsKey({ tagName: "BUTTON" }, "PageDown")).toBe(false);
+  });
+});

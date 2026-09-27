@@ -7,13 +7,15 @@
 // notes for the whole set, which can re-design one song or all of them to follow the arc.
 
 import { AnimatePresence, MotionConfig, Reorder, motion } from "motion/react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { BandArt, bandHref } from "@/components/home/BandShelf";
 import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
 import { Alert, AppHeader, Banner, Button, EmptyState, FormRow, InsetGroup, ListRow, Menu, MenuItem, ProgressBar, Select, Sheet, Skeleton, SkeletonGroup, Spinner, TextArea, cx, rowInputClass } from "@/components/ui";
 import { Markdown } from "@/components/ui/Markdown";
-import { ChartLineUpIcon, CheckCircleIcon, MusicNotesPlusIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon } from "@/components/ui/Icon";
+import { BroadcastIcon, ChartLineUpIcon, CheckCircleIcon, MusicNotesPlusIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
+import { readinessIssues } from "@/lib/console/show-live";
 import { useJobPolling } from "@/components/band/use-job-polling";
 import { spring } from "@/lib/motion";
 import { OUTPUT_PRESETS, aspectLabel } from "@/lib/output";
@@ -65,7 +67,9 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
   const [run, setRun] = useState<ArcRun | null>(null);
   const [designing, setDesigning] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmStart, setConfirmStart] = useState(false);
   const [announce, setAnnounce] = useState("");
+  const router = useRouter();
   const showRef = useRef<Show | null>(null);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const runRef = useRef<{ cancelled: boolean; abort: AbortController | null }>({ cancelled: false, abort: null });
@@ -126,6 +130,13 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
 
   const songMap = useMemo(() => new Map(songs.map((p) => [p.id, p])), [songs]);
   const totals = useMemo(() => (show ? setlistTotals(show.items, songMap) : null), [show, songMap]);
+  const notReady = useMemo(() => (show ? readinessIssues(show.items, songMap) : []), [show, songMap]);
+  const liveHref = `/s/${encodeURIComponent(id)}/live`;
+  /** 開始演出: straight into the show console, or first the songs that are not ready. */
+  const startShow = () => {
+    if (notReady.length > 0) setConfirmStart(true);
+    else router.push(liveHref, { transitionTypes: ["push"] });
+  };
   const inSet = useMemo(() => new Set(show?.items.filter((i) => i.kind === "song").map((i) => (i as { projectId: string }).projectId)), [show]);
 
   const move = (from: number, to: number) => {
@@ -253,9 +264,14 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
         }
         actions={
           show && (
-            <Button variant="tinted" icon={ChartLineUpIcon} onClick={() => void planArc()} loading={arcWorking} disabled={arcWorking || running || !show.items.some((i) => i.kind === "song")}>
-              {show.arc ? "重新規劃弧線" : "整場弧線"}
-            </Button>
+            <>
+              <Button variant="tinted" icon={ChartLineUpIcon} onClick={() => void planArc()} loading={arcWorking} disabled={arcWorking || running || !show.items.some((i) => i.kind === "song")}>
+                {show.arc ? "重新規劃弧線" : "整場弧線"}
+              </Button>
+              <Button variant="filled" icon={BroadcastIcon} onClick={startShow} disabled={show.items.length === 0}>
+                開始演出
+              </Button>
+            </>
           )
         }
       />
@@ -427,6 +443,26 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
             onCancel={() => setConfirmCanvas(false)}
           />
           <Alert
+            open={confirmStart}
+            title={`還有 ${notReady.length} 首歌沒準備好`}
+            message="仍可以開始：沒有設計的歌會用預設畫面，缺歌詞的歌只有畫面，處理中或失敗的歌可能無法播出。"
+            confirmLabel="仍要開始"
+            onConfirm={() => {
+              setConfirmStart(false);
+              router.push(liveHref, { transitionTypes: ["push"] });
+            }}
+            onCancel={() => setConfirmStart(false)}
+          >
+            <ul className="mt-3 flex max-h-48 flex-col gap-1 overflow-y-auto rounded-md bg-fill-4 px-3 py-2 text-left">
+              {notReady.map((issue) => (
+                <li key={issue.itemId} className="flex items-baseline justify-between gap-3 text-[13px] leading-5">
+                  <span className="min-w-0 truncate text-label">{issue.title}</span>
+                  <span className={cx("shrink-0", SONG_STATUS_INFO[issue.status].tone === "red" ? "text-red-text" : "text-orange-text")}>{SONG_STATUS_INFO[issue.status].label}</span>
+                </li>
+              ))}
+            </ul>
+          </Alert>
+          <Alert
             open={confirmDelete}
             title={`刪除「${show.name}」？`}
             message="只會刪除這份歌單與它的弧線，歌曲本身不受影響。"
@@ -583,7 +619,7 @@ function ArcPanel({ show, busy, error, running, onPlan, onApplyAll }: { show: Sh
                 {arc.engine === "claude" ? `Claude${arc.model ? `（${arc.model}）` : ""}規劃` : "離線設計師規劃"}，已依弧線設計 {applied}／{arc.songs.length} 首
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="filled" icon={SparkleIcon} onClick={onApplyAll} disabled={running || busy || arc.songs.length === 0}>
+                <Button variant="tinted" icon={SparkleIcon} onClick={onApplyAll} disabled={running || busy || arc.songs.length === 0}>
                   依弧線重新設計全部
                 </Button>
               </div>
