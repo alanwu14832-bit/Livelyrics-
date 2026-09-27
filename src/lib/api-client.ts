@@ -56,17 +56,27 @@ export const api = {
     audio: File;
     meta: Pick<SongMeta, "title" | "artist" | "album" | "year" | "duration">;
     analysis: AudioAnalysis | null;
+    /** assign the new song to a band */
+    bandId?: string | null;
   }) {
     const form = new FormData();
     form.set("audio", input.audio);
     form.set("meta", JSON.stringify(input.meta));
     form.set("analysis", JSON.stringify(input.analysis));
+    if (input.bandId) form.set("bandId", input.bandId);
     return fetch("/api/projects", { method: "POST", body: form }).then((r) => json<Project>(r));
   },
 
   updateProject: (
     id: string,
-    patch: Partial<{ meta: Partial<SongMeta>; lyrics: Lyrics; plan: DesignPlan; output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> } }>,
+    patch: Partial<{
+      meta: Partial<SongMeta>;
+      lyrics: Lyrics;
+      plan: DesignPlan;
+      output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> };
+      /** assign to a band (null = no band) */
+      bandId: string | null;
+    }>,
   ) =>
     fetch(`/api/projects/${id}`, {
       method: "PATCH",
@@ -83,7 +93,7 @@ export const api = {
   listAssets: (id: string) => fetch(`/api/projects/${id}/assets`).then((r) => json<{ assets: Asset[] }>(r)),
 
   /** GET (with HTTP Range) of the stored file; usable as <img>/<video> src and WebGL texture source */
-  assetUrl: (id: string, assetId: string) => `/api/projects/${id}/assets/${assetId}`,
+  assetUrl: (id: string, assetId: string) => projectAssetUrl(id, assetId),
 
   /**
    * multipart upload: `file` + `meta` (size measured in the browser). Reports upload progress
@@ -94,13 +104,22 @@ export const api = {
     input: AssetUploadInput,
     opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
   ): Promise<{ asset: Asset; assets: Asset[] }> {
+    return api.uploadOwnedAsset({ kind: "project", id }, input, opts);
+  },
+
+  /** Upload into a project's library or a band's shared library (same contract). */
+  uploadOwnedAsset(
+    owner: AssetOwner,
+    input: AssetUploadInput,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ asset: Asset; assets: Asset[] }> {
     const form = new FormData();
     const { file, ...meta } = input;
     form.set("meta", JSON.stringify(meta));
     form.set("file", file);
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", `/api/projects/${id}/assets`);
+      xhr.open("POST", assetsBase(owner));
       xhr.responseType = "json";
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && e.total > 0) opts.onProgress?.(Math.min(1, e.loaded / e.total));
@@ -127,6 +146,71 @@ export const api = {
   /** also clears the asset from every plan section: the response carries the updated plan */
   deleteAsset: (id: string, assetId: string) =>
     fetch(`/api/projects/${id}/assets/${assetId}`, { method: "DELETE" }).then((r) => json<{ ok: true; assets: Asset[]; plan: DesignPlan | null }>(r)),
+
+  /** file URL of an asset in a project or band library */
+  ownedAssetUrl: (owner: AssetOwner, assetId: string) => (owner.kind === "band" ? bandAssetUrl(owner.id, assetId) : projectAssetUrl(owner.id, assetId)),
+
+  updateOwnedAsset: (owner: AssetOwner, assetId: string, patch: Partial<{ name: string; note: string | null; tags: string[] | null; kind: AssetKind }>) =>
+    fetch(`${assetsBase(owner)}/${assetId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => json<{ asset: Asset; assets: Asset[] }>(r)),
+
+  /** project: `plan` is the updated plan; band: every song and show look that showed it is cleared on the server */
+  deleteOwnedAsset: (owner: AssetOwner, assetId: string) =>
+    fetch(`${assetsBase(owner)}/${assetId}`, { method: "DELETE" }).then((r) => json<{ ok: true; assets: Asset[]; plan?: DesignPlan | null }>(r)),
+
+  // ---- bands ----------------------------------------------------------------
+
+  listBands: () => fetch("/api/bands").then((r) => json<BandSummary[]>(r)),
+
+  getBand: (id: string) => fetch(`/api/bands/${id}`).then((r) => json<Band>(r)),
+
+  createBand: (name: string) =>
+    fetch("/api/bands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => json<Band>(r)),
+
+  /** `bible` is partial: only the fields given change */
+  updateBand: (id: string, patch: { name?: string; bible?: BiblePatch }) =>
+    fetch(`/api/bands/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).then((r) => json<Band>(r)),
+
+  /** deletes the band, its library and its shows; its songs stay, unassigned */
+  deleteBand: (id: string) => fetch(`/api/bands/${id}`, { method: "DELETE" }).then((r) => json<{ ok: true }>(r)),
+
+  /** 從作品產生視覺聖經 (Claude or the offline designer); replaces the bible */
+  generateBible: (id: string, signal?: AbortSignal) =>
+    fetch(`/api/bands/${id}/bible`, { method: "POST", signal }).then((r) => json<{ band: Band; engine: "claude" | "offline"; logs: string[] }>(r)),
+
+  // ---- shows ----------------------------------------------------------------
+
+  listShows: (bandId?: string) => fetch(`/api/shows${bandId ? `?bandId=${encodeURIComponent(bandId)}` : ""}`).then((r) => json<ShowSummary[]>(r)),
+
+  getShow: (id: string) => fetch(`/api/shows/${id}`).then((r) => json<Show>(r)),
+
+  createShow: (input: { bandId: string; name: string; date?: string; venue?: string }) =>
+    fetch("/api/shows", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) }).then((r) => json<Show>(r)),
+
+  updateShow: (
+    id: string,
+    patch: Partial<{
+      name: string;
+      date: string | null;
+      venue: string | null;
+      notes: string;
+      items: SetItem[];
+      output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> };
+      arc: ShowArc | null;
+    }>,
+  ) => fetch(`/api/shows/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).then((r) => json<Show>(r)),
+
+  deleteShow: (id: string) => fetch(`/api/shows/${id}`, { method: "DELETE" }).then((r) => json<{ ok: true }>(r)),
+
+  /** 整場弧線 (Claude or the offline designer); saved on the show */
+  planArc: (id: string, signal?: AbortSignal) =>
+    fetch(`/api/shows/${id}/arc`, { method: "POST", signal }).then((r) => json<{ show: Show; engine: "claude" | "offline"; logs: string[] }>(r)),
+
+  /** copy the show's canvas onto every song of its setlist */
+  applyShowOutput: (id: string) => fetch(`/api/shows/${id}/apply-output`, { method: "POST" }).then((r) => json<{ updated: number; show: Show }>(r)),
 
   searchLyrics: (q: { artist: string; title: string; duration?: number }) => {
     const p = new URLSearchParams({ artist: q.artist, title: q.title });
@@ -181,6 +265,13 @@ export const api = {
     return final;
   },
 };
+
+/** Whose media library: a song's own or the band's shared one. */
+export type AssetOwner = { kind: "project"; id: string } | { kind: "band"; id: string };
+
+function assetsBase(owner: AssetOwner): string {
+  return owner.kind === "band" ? `/api/bands/${owner.id}/assets` : `/api/projects/${owner.id}/assets`;
+}
 
 export interface AssetUploadInput {
   file: File;
