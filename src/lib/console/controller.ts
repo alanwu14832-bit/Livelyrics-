@@ -1,7 +1,9 @@
 // The operator console's engine. Owns the clock (the <audio> element in TRACK mode, a
-// virtual cue clock in LIVE mode), every operator decision (overrides, cues, offset) and
-// the link to the projection window: it writes StageState into a StageStore for the
-// console's own preview and mirrors it onto BroadcastChannel(channelName(id)).
+// virtual cue clock in LIVE mode), every operator decision (overrides, cues, offset, section
+// hold / loop) and the link to the projection window: it writes StageState into a StageStore for
+// the console's own preview and mirrors it onto a BroadcastChannel — channelName(id) for the
+// per-song console, the show's channel for a show item on air, none for an armed show item that
+// is only preloaded (see `ConsoleControllerOptions`).
 //
 // Framework-agnostic: React binds to it through subscribe()/getSnapshot() (low-frequency
 // UI state) and `store` (per-frame stage state). attach()/detach() are symmetric and
@@ -21,18 +23,23 @@ import {
   type StageMessage,
   type StageOverrides,
   type StageState,
+  type StageTransition,
   type WritableStageStore,
 } from "@/lib/stage/protocol";
 import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
 import { patchOutput } from "@/lib/output";
 import type { Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
+import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
 import { LiveClock } from "./live-clock";
 import {
   effectiveDuration,
   lastStartedLine,
+  lineSections,
   liveHoldTime,
   liveNextLine,
   livePrevLine,
+  loopNextLine,
+  loopSeekTarget,
   nextTimedLineAfter,
   timedRatio,
   trackNextLine,
@@ -60,15 +67,7 @@ export interface AudioStatus {
   buffering: boolean;
 }
 
-export interface OutputStatus {
-  connected: boolean;
-  /** number of projection windows answering pings */
-  count: number;
-  /** device pixels of the most recently heard output */
-  width: number;
-  height: number;
-  fullscreen: boolean;
-}
+export type { OutputStatus } from "./link";
 
 export interface MicStatus {
   status: "off" | "starting" | "on" | "error";
@@ -131,6 +130,10 @@ export interface ConsoleSnapshot {
   tap: { bpm: number | null; count: number };
   /** keyboard "standby" line (Enter sends it) */
   selectedIndex: number | null;
+  /** 保持段落: the section whose look stays on stage while time and cues move on (null = follow) */
+  sectionHold: number | null;
+  /** 循環段落: TRACK jumps back to this section's start at its end; LIVE wraps its last line to its first */
+  sectionLoop: number | null;
   save: SaveStatus;
   redesign: RedesignState;
   notices: Notice[];
@@ -138,9 +141,27 @@ export interface ConsoleSnapshot {
   fallbackPeaks: number[] | null;
 }
 
+/** How a console drives the projection. The per-song console (/p/[id]) uses the defaults. */
+export interface ConsoleControllerOptions {
+  /**
+   * The BroadcastChannel to drive; default channelName(id). null = silent: no channel, no pings,
+   * nothing persisted (the show console's armed, preloaded song) until setChannel() puts it on air.
+   */
+  channel?: string | null;
+  /** shared by every controller of one console window: their messages never count as another console */
+  consoleId?: string;
+  /** where 「開啟投影視窗」 goes; default this song's own output (/p/[id]/output) */
+  output?: OutputTarget;
+  /**
+   * Restore this tab's saved playback position and section hold / loop (a console reload).
+   * Default true; a show take starts the song at its start (false). Overrides always come back.
+   */
+  resume?: boolean;
+}
+
 const TICK_MS = 33;
-const HEARTBEAT_MS = 1000;
-const OUTPUT_TIMEOUT_MS = 3000;
+/** LIVE loop: the clock parks this far before the looped section's end (it never shows the next section) */
+const LOOP_HOLD_MARGIN = 0.05;
 const SAVE_DEBOUNCE_MS = 700;
 const PROJECT_BROADCAST_MS = 100;
 const NOTICE_MS = 4500;
@@ -191,6 +212,8 @@ function linesOf(project: Project | null): LyricLine[] {
 export class ConsoleController {
   readonly id: string;
   readonly store: WritableStageStore;
+  /** this console window (see ConsoleControllerOptions.consoleId) */
+  readonly consoleId: string;
 
   private snapshot: ConsoleSnapshot;
   private readonly listeners = new Set<() => void>();
@@ -199,7 +222,15 @@ export class ConsoleController {
 
   private attached = false;
   private sessionRestored = false;
-  private channel: BroadcastChannel | null = null;
+  private readonly resume: boolean;
+  /** the channel to drive (null = silent) */
+  private channelTarget: string | null;
+  private readonly link: ProjectionLink;
+  private readonly outputTarget: OutputTarget;
+  /** show take: announce the next project broadcast with this transition */
+  private pendingTransition: StageTransition | null = null;
+  /** show mode: the armed item, announced to the output so it warms fonts and media */
+  private preloadProject: Project | null = null;
   private audio: HTMLAudioElement | null = null;
   private audioCleanup: (() => void) | null = null;
   private resumeAt = 0;
@@ -221,10 +252,17 @@ export class ConsoleController {
   private liveLine: number | null = null;
   private lastCued: number | null = null;
   private readonly tapClock = new TapClock();
+  /** 保持段落 / 循環段落 (section indices; null = off) */
+  private hold: number | null = null;
+  private loop: number | null = null;
+  /**
+   * LIVE section jump: show this section until the clock reaches its start (its first line may be
+   * a pickup sung just before the boundary). Cleared by any other seek, cue or mode change.
+   */
+  private sectionPin: { index: number; until: number } | null = null;
+  private lineSectionCache: { project: Project; duration: number; sections: Array<number | null> } | null = null;
 
   // projection link
-  private readonly outputs = new Map<string, { at: number; width: number; height: number; fullscreen: boolean }>();
-  private lastOtherConsoleAt = 0;
   private outputWindow: Window | null = null;
   private projectBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
   private lastProjectBroadcast = 0;
@@ -245,10 +283,22 @@ export class ConsoleController {
   /** false while the UI's toast stack owns notice lifetimes (it pauses on hover, focus and a hidden tab) */
   private noticeAutoDismiss = true;
 
-  constructor(id: string) {
+  constructor(id: string, opts: ConsoleControllerOptions = {}) {
     this.id = id;
     this.store = createStageStore(initialStageState(id));
     this.settings = defaultSettings();
+    this.consoleId = opts.consoleId || randomId();
+    this.channelTarget = opts.channel === undefined ? channelName(id) : opts.channel;
+    this.resume = opts.resume ?? true;
+    this.outputTarget = opts.output ?? { url: `/p/${encodeURIComponent(id)}/output`, name: `livelyrics-output-${id}` };
+    this.link = new ProjectionLink(this.consoleId, {
+      onHello: () => {
+        this.broadcastProject(true);
+        this.publish();
+        if (this.preloadProject) this.link.post({ type: "preload", project: this.preloadProject });
+      },
+      onStatus: (output, otherConsole) => this.set({ output, otherConsole }),
+    });
     this.snapshot = {
       load: { status: "loading" },
       project: null,
@@ -261,11 +311,13 @@ export class ConsoleController {
       muted: false,
       duration: 0,
       audio: { status: "idle", error: null, buffering: false },
-      output: { connected: false, count: 0, width: 0, height: 0, fullscreen: false },
+      output: DISCONNECTED,
       otherConsole: false,
       mic: { status: "off", error: null, deviceId: "", devices: [] },
       tap: { bpm: null, count: 0 },
       selectedIndex: null,
+      sectionHold: null,
+      sectionLoop: null,
       save: { status: "idle", error: null },
       redesign: { running: false, instruction: "", log: [], text: "", error: null, finishedAt: null },
       notices: [],
@@ -315,7 +367,7 @@ export class ConsoleController {
       mic: { ...this.snapshot.mic, deviceId: this.settings.micDeviceId },
     });
     this.restoreSession();
-    this.openChannel();
+    if (this.channelTarget) this.openLink(this.channelTarget);
     this.heartbeatTimer = setInterval(() => this.heartbeat(), HEARTBEAT_MS);
     this.listenWindow();
     if (this.snapshot.project) this.onProjectReady(this.snapshot.project);
@@ -327,7 +379,7 @@ export class ConsoleController {
     this.attached = false;
     this.flushSaveOnExit();
     this.flushOutputOnExit();
-    if (this.snapshot.project) this.persistSession();
+    if (this.snapshot.project && !this.silent) this.persistSession();
     this.holdOutput();
     this.loadAbort?.abort();
     this.loadAbort = null;
@@ -344,8 +396,7 @@ export class ConsoleController {
     this.windowCleanup = null;
     this.releaseMic();
     this.releaseAudio();
-    this.channel?.close();
-    this.channel = null;
+    this.link.close();
     for (const t of this.noticeTimers.values()) clearTimeout(t);
     this.noticeTimers.clear();
     // a running re-design keeps going on the server; the next load shows its result
@@ -354,17 +405,62 @@ export class ConsoleController {
     if (this.deltaTimer) clearTimeout(this.deltaTimer);
     this.deltaTimer = null;
     this.deltaBuffer = "";
-    this.outputs.clear();
   }
 
-  /** After a reload of this tab: keep the operator's overrides (a blackout stays black) and position. */
+  /** Not on any channel (a preloaded show item): nothing is sent or persisted. */
+  private get silent(): boolean {
+    return this.channelTarget == null;
+  }
+
+  private openLink(name: string): void {
+    if (!this.link.open(name)) this.notify("此瀏覽器不支援 BroadcastChannel，投影視窗無法同步。", "error");
+  }
+
+  /**
+   * Show mode: put this controller on air on `channel` — its project goes out at once (with
+   * `transition`, performed by the output) and so does its state — or take it off air (null:
+   * silent, the output keeps its last frame). A controller that is not attached yet goes on air
+   * when it attaches.
+   */
+  setChannel(channel: string | null, opts: { transition?: StageTransition | null } = {}): void {
+    if (channel === this.channelTarget && (channel == null || this.link.isOpen)) return;
+    if (channel == null) {
+      this.holdOutput();
+      this.link.close();
+      this.channelTarget = null;
+      this.pendingTransition = null;
+      return;
+    }
+    this.channelTarget = channel;
+    this.pendingTransition = opts.transition ?? null;
+    if (!this.attached) return;
+    this.openLink(channel);
+    this.broadcastProject(true);
+    this.publish();
+    if (this.preloadProject) this.link.post({ type: "preload", project: this.preloadProject });
+  }
+
+  /** Show mode: announce the armed item so the output warms its fonts and media (null: none). */
+  setPreload(project: Project | null): void {
+    this.preloadProject = project;
+    if (project) this.link.post({ type: "preload", project });
+  }
+
+  /**
+   * After a reload of this tab: keep the operator's overrides (a blackout stays black), position
+   * and section hold / loop. A fresh show take (resume: false) starts the song as designed instead.
+   */
   private restoreSession(): void {
     if (this.sessionRestored) return;
     this.sessionRestored = true;
+    if (!this.resume) return;
     const session = loadSession(this.id);
     if (!session) return;
     this.overrides = session.overrides;
     if (session.audioTime > 0 && this.resumeAt === 0) this.resumeAt = session.audioTime;
+    this.hold = session.hold ?? null;
+    this.loop = session.loop ?? null;
+    if (this.hold != null || this.loop != null) this.set({ sectionHold: this.hold, sectionLoop: this.loop });
     if (session.overrides.blackout) this.notify("已還原重新整理前的黑場狀態（按 B 解除）", "warn");
   }
 
@@ -378,9 +474,17 @@ export class ConsoleController {
   }
 
   private persistSession(): void {
+    // a preloaded show item is not on stage: its (start) position must not overwrite what the
+    // same song saved while it was on air
+    if (this.silent) return;
     const el = this.audio;
     const audioTime = el && el.readyState > 0 && Number.isFinite(el.currentTime) ? el.currentTime : this.resumeAt;
-    saveSession(this.id, { overrides: this.overrides, audioTime });
+    saveSession(this.id, {
+      overrides: this.overrides,
+      audioTime,
+      ...(this.hold != null ? { hold: this.hold } : {}),
+      ...(this.loop != null ? { loop: this.loop } : {}),
+    });
   }
 
   /** Re-fetch the project from the server (e.g. after the lyrics editor saved). */
@@ -420,13 +524,28 @@ export class ConsoleController {
     this.set({ project: next });
     this.clock.setLimit(this.duration());
     this.set({ duration: this.duration() });
-    if (first) this.onProjectReady(next);
-    else {
+    if (first) {
+      this.clampSections();
+      this.onProjectReady(next);
+    } else {
       this.clampIndices();
+      this.clampSections();
       this.broadcastProject(true);
       this.publish();
     }
     this.schedulePoll(next);
+  }
+
+  /** A hold / loop restored from the session, or kept across a re-design, must name a section that exists. */
+  private clampSections(): void {
+    const n = this.snapshot.project?.plan?.sections.length ?? 0;
+    const fix = (i: number | null) => (i != null && i < n ? i : null);
+    const hold = fix(this.hold);
+    const loop = fix(this.loop);
+    if (hold === this.hold && loop === this.loop) return;
+    this.hold = hold;
+    this.loop = loop;
+    this.set({ sectionHold: hold, sectionLoop: loop });
   }
 
   private onProjectReady(project: Project): void {
@@ -523,7 +642,18 @@ export class ConsoleController {
     const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
       ["play", sync],
       ["pause", sync],
-      ["ended", sync],
+      [
+        "ended",
+        () => {
+          // a loop on the song's last section: back to its start and keep playing
+          const s = this.settings.mode === "track" && this.loop != null ? this.snapshot.project?.plan?.sections[this.loop] : undefined;
+          if (s) {
+            this.seekTo(s.start + 0.001);
+            void el.play().catch(() => {});
+          }
+          sync();
+        },
+      ],
       ["seeked", () => this.publish()],
       ["seeking", () => this.publish()],
       ["durationchange", sync],
@@ -659,7 +789,18 @@ export class ConsoleController {
       this.lineIndex = line;
       this.lineStartedAt = now;
     }
-    this.sectionIndex = sectionIndexAt(project.plan, t);
+    const sections = project.plan?.sections.length ?? 0;
+    if (this.hold != null && this.hold < sections) this.sectionIndex = this.hold;
+    else this.sectionIndex = this.timeSection(t);
+  }
+
+  /** The section playback is in (ignores a hold): a LIVE section jump's pin, else the section at t. */
+  private timeSection(t: number): number | null {
+    const plan = this.snapshot.project?.plan ?? null;
+    const pin = this.sectionPin;
+    if (pin && plan && pin.index < plan.sections.length && t < pin.until - 1e-6) return pin.index;
+    this.sectionPin = null;
+    return sectionIndexAt(plan, t);
   }
 
   private clampIndices(): void {
@@ -705,6 +846,7 @@ export class ConsoleController {
       lineIndex: this.lineIndex,
       lineStartedAt: this.lineStartedAt,
       sectionIndex: this.sectionIndex,
+      ...(this.hold != null && this.sectionIndex === this.hold ? { sectionHeld: true } : {}),
       overrides: this.overrides,
       audio: this.sampleAudio(t, playing),
     };
@@ -735,6 +877,7 @@ export class ConsoleController {
 
   private tick(): void {
     try {
+      this.loopTrack();
       this.publish();
       const playing = this.isPlaying();
       if (playing !== this.snapshot.playing) this.set({ playing });
@@ -744,83 +887,28 @@ export class ConsoleController {
     }
   }
 
+  /** TRACK 循環段落: playback that reaches the end of the looped section goes back to its start. */
+  private loopTrack(): void {
+    if (this.loop == null || this.settings.mode !== "track" || !this.isPlaying()) return;
+    const section = this.snapshot.project?.plan?.sections[this.loop];
+    const target = loopSeekTarget(section, this.songTime());
+    if (target != null) this.seekTo(target + 0.001);
+  }
+
   // -------------------------------------------------------------------------
   // Projection link
   // -------------------------------------------------------------------------
 
-  private openChannel(): void {
-    if (typeof BroadcastChannel === "undefined") {
-      this.notify("此瀏覽器不支援 BroadcastChannel，投影視窗無法同步。", "error");
-      return;
-    }
-    const channel = new BroadcastChannel(channelName(this.id));
-    channel.onmessage = (ev: MessageEvent<StageMessage>) => this.onMessage(ev.data);
-    this.channel = channel;
-  }
-
   private post(msg: StageMessage): void {
-    try {
-      this.channel?.postMessage(msg);
-    } catch (err) {
-      console.warn("[Livelyrics] 無法傳送到投影視窗：", err);
-    }
-  }
-
-  private onMessage(msg: StageMessage | null | undefined): void {
-    if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
-    switch (msg.type) {
-      case "hello":
-        this.broadcastProject(true);
-        this.publish();
-        break;
-      case "pong": {
-        if (typeof msg.outputId !== "string") return;
-        const known = this.outputs.has(msg.outputId);
-        this.outputs.set(msg.outputId, {
-          at: Date.now(),
-          width: Number.isFinite(msg.width) ? msg.width : 0,
-          height: Number.isFinite(msg.height) ? msg.height : 0,
-          fullscreen: !!msg.fullscreen,
-        });
-        const o = this.snapshot.output;
-        if (!known || !o.connected || o.width !== msg.width || o.height !== msg.height || o.fullscreen !== !!msg.fullscreen) this.updateOutputStatus();
-        break;
-      }
-      case "state":
-      case "ping":
-        // only consoles send these: someone else is driving this projection too
-        this.lastOtherConsoleAt = Date.now();
-        if (!this.snapshot.otherConsole) this.set({ otherConsole: true });
-        break;
-      default:
-        break;
-    }
-  }
-
-  private updateOutputStatus(): void {
-    const now = Date.now();
-    let latest: { at: number; width: number; height: number; fullscreen: boolean } | null = null;
-    for (const [id, o] of this.outputs) {
-      if (now - o.at > OUTPUT_TIMEOUT_MS) this.outputs.delete(id);
-      else if (!latest || o.at > latest.at) latest = o;
-    }
-    const next: OutputStatus = latest
-      ? { connected: true, count: this.outputs.size, width: latest.width, height: latest.height, fullscreen: latest.fullscreen }
-      : { connected: false, count: 0, width: 0, height: 0, fullscreen: false };
-    const o = this.snapshot.output;
-    if (o.connected !== next.connected || o.count !== next.count || o.width !== next.width || o.height !== next.height || o.fullscreen !== next.fullscreen) {
-      this.set({ output: next });
-    }
+    this.link.post(msg);
   }
 
   private heartbeat(): void {
-    this.post({ type: "ping", at: Date.now() });
+    // ping the outputs, drop the ones that went quiet, expire the other-console flag
+    this.link.heartbeat();
     if (this.snapshot.project) this.persistSession();
     // idle consoles resend the state once a second so a missed message heals itself
     if (!this.tickTimer) this.publish();
-    this.updateOutputStatus();
-    const other = Date.now() - this.lastOtherConsoleAt < OUTPUT_TIMEOUT_MS;
-    if (other !== this.snapshot.otherConsole) this.set({ otherConsole: other });
   }
 
   private broadcastProject(immediate = false): void {
@@ -828,7 +916,11 @@ export class ConsoleController {
       this.projectBroadcastTimer = null;
       this.lastProjectBroadcast = Date.now();
       const project = this.snapshot.project;
-      if (project) this.post({ type: "project", project });
+      if (!project || !this.link.isOpen) return;
+      // a show take announces its transition with the first project that goes out
+      const transition = this.pendingTransition;
+      this.pendingTransition = null;
+      this.post(transition ? { type: "project", project, transition } : { type: "project", project });
     };
     if (immediate) {
       if (this.projectBroadcastTimer) clearTimeout(this.projectBroadcastTimer);
@@ -853,7 +945,6 @@ export class ConsoleController {
     }
   }
 
-  /** Open (or focus) the projection window. Must run inside a user gesture. */
   /** The export page in its own tab, with the 單格預覽 at the playhead (the console keeps running). */
   exportUrl(): string {
     const t = Math.max(0, Math.round(this.songTime() * 100) / 100);
@@ -871,39 +962,15 @@ export class ConsoleController {
     if (!win) this.notify("瀏覽器封鎖了新分頁。請允許此網站開啟彈出視窗後再試一次。", "error");
   }
 
+  /** Open (or focus) the projection window: this song's, or the show's in show mode. Must run inside a user gesture. */
   openOutput(): void {
     if (typeof window === "undefined") return;
-    const url = `/p/${encodeURIComponent(this.id)}/output`;
-    const name = `livelyrics-output-${this.id}`;
-    const features = "popup,width=1280,height=720";
-    const existing = this.outputWindow;
-    if (existing && !existing.closed) {
-      existing.focus();
-      return;
-    }
-    // "" keeps an already-open output (e.g. after a console reload) instead of reloading it
-    let win: Window | null = null;
-    try {
-      win = window.open("", name, features);
-    } catch {
-      win = null;
-    }
+    const win = openProjectionWindow(this.outputTarget, this.outputWindow);
     if (!win) {
       this.notify("瀏覽器封鎖了彈出視窗。請允許此網站開啟彈出視窗後再試一次。", "error");
       return;
     }
-    try {
-      const path = win.location.pathname;
-      if (win.location.href === "about:blank" || !path.endsWith("/output")) win.location.replace(url);
-    } catch {
-      win.location.href = url;
-    }
     this.outputWindow = win;
-    try {
-      win.focus();
-    } catch {
-      /* focus is best effort */
-    }
   }
 
   requestOutputFullscreen(): void {
@@ -977,10 +1044,23 @@ export class ConsoleController {
     this.ensureTicking();
   }
 
-  /** Seek to song time `t` (seconds). LIVE: moves the virtual clock. */
+  /**
+   * Seek to song time `t` (seconds). LIVE: moves the virtual clock. Seeking out of a looped
+   * section ends the loop (the operator is navigating elsewhere); a hold stays.
+   */
   seek(t: number): void {
+    if (!Number.isFinite(t)) return;
+    if (this.loop != null) {
+      const s = this.snapshot.project?.plan?.sections[this.loop];
+      if ((!s || t < s.start - 1e-3 || t >= s.end) && this.applyLoop(null)) this.persistSession();
+    }
+    this.seekTo(t);
+  }
+
+  private seekTo(t: number): void {
     const project = this.snapshot.project;
     if (!project || !Number.isFinite(t)) return;
+    this.sectionPin = null;
     const d = this.duration();
     const target = Math.max(0, d > 0 ? Math.min(t, d) : t);
     const now = Date.now();
@@ -1025,21 +1105,56 @@ export class ConsoleController {
     this.seek(line.start + 0.001);
   }
 
-  /** LIVE: show line `index` now; the virtual clock jumps to its start and runs until the next line. */
+  /**
+   * LIVE: show line `index` now; the virtual clock jumps to its start and runs until the next line.
+   * Inside a looped section the clock never runs past the section's end (the next cue wraps back
+   * to its first line); a line outside it ends the loop.
+   */
   cueLine(index: number): void {
+    this.cue(index, null);
+  }
+
+  private cue(index: number, pin: { index: number; until: number } | null): void {
     const project = this.snapshot.project;
     const lines = linesOf(project);
     const line = lines[index];
     if (!project || !line) return;
+    if (this.loop != null && !this.loopLines().includes(index) && this.applyLoop(null)) this.persistSession();
     const now = Date.now();
     const t = line.start ?? this.clock.time(now);
-    this.clock.jump(t, liveHoldTime(lines, index, t), now);
+    let hold = liveHoldTime(lines, index, t);
+    const section = this.loop != null ? project.plan?.sections[this.loop] : undefined;
+    if (section) hold = Math.max(t, Math.min(hold ?? Number.POSITIVE_INFINITY, section.end - LOOP_HOLD_MARGIN));
+    this.sectionPin = pin;
+    this.clock.jump(t, hold, now);
     this.clock.start(now);
     this.liveLine = index;
     this.lastCued = index;
     this.lineStartedAt = now;
     this.lineIndex = index;
     this.afterClockChange();
+  }
+
+  /** Lines of the looped section, in order ([] without a loop). */
+  private loopLines(): number[] {
+    return this.loop == null ? [] : this.sectionLines(this.loop);
+  }
+
+  /** Lines that belong to section `index` (the lyrics list's grouping), cached per project. */
+  private sectionLines(index: number): number[] {
+    const project = this.snapshot.project;
+    if (!project?.plan) return [];
+    const duration = this.duration();
+    let cache = this.lineSectionCache;
+    if (!cache || cache.project !== project || cache.duration !== duration) {
+      cache = { project, duration, sections: lineSections(project.plan, linesOf(project), duration) };
+      this.lineSectionCache = cache;
+    }
+    const out: number[] = [];
+    cache.sections.forEach((s, i) => {
+      if (s === index) out.push(i);
+    });
+    return out;
   }
 
   /** LIVE: take the lyric off the screen (the next cue continues after it). */
@@ -1055,7 +1170,9 @@ export class ConsoleController {
     if (!project?.lyrics) return;
     const t = this.songTime();
     if (this.settings.mode === "live") {
-      const i = liveNextLine(project.lyrics.lines, this.liveLine, this.lastCued, t);
+      // 循環段落: after the looped section's last line the next cue is its first line again
+      const wrap = this.loop != null ? loopNextLine(this.loopLines(), this.liveLine ?? this.lastCued) : null;
+      const i = wrap ?? liveNextLine(project.lyrics.lines, this.liveLine, this.lastCued, t);
       if (i != null) this.cueLine(i);
       return;
     }
@@ -1077,13 +1194,20 @@ export class ConsoleController {
     else this.seek(0);
   }
 
-  /** The line "next" would show (the UI's 下一句 marker). */
+  /** The line "next" would show (the UI's 下一句 marker); a loop brings its section's first line back. */
   upcomingLine(): number | null {
     const lyrics = this.snapshot.project?.lyrics;
     if (!lyrics) return null;
     const t = this.songTime();
-    if (this.settings.mode === "live") return liveNextLine(lyrics.lines, this.liveLine, this.lastCued, t);
-    return trackNextLine(lyrics, t);
+    const loopLines = this.loop != null ? this.loopLines() : [];
+    if (this.settings.mode === "live") {
+      const wrap = loopLines.length ? loopNextLine(loopLines, this.liveLine ?? this.lastCued) : null;
+      return wrap ?? liveNextLine(lyrics.lines, this.liveLine, this.lastCued, t);
+    }
+    const next = trackNextLine(lyrics, t);
+    // TRACK: the loop jumps back before the next section's first line is reached
+    if (loopLines.length && (next == null || !loopLines.includes(next))) return loopLines.find((i) => lyrics.lines[i]?.start != null) ?? next;
+    return next;
   }
 
   /** Enter: send the standby line and advance the standby to the following line. */
@@ -1111,9 +1235,122 @@ export class ConsoleController {
     this.select(base + delta);
   }
 
+  /**
+   * Jump to a plan section (段落列, the timeline, PageUp / PageDown). TRACK: seek to its start.
+   * LIVE: cue its first line and show the section at once (an instrumental section runs the clock
+   * from its start). Jumping to another section ends a hold and a loop.
+   */
   jumpToSection(index: number): void {
-    const section = this.snapshot.project?.plan?.sections[index];
-    if (section) this.seek(section.start + 0.001);
+    const project = this.snapshot.project;
+    const section = project?.plan?.sections[index];
+    if (!project || !section) return;
+    // (published once, with the jump)
+    let changed = false;
+    if (this.hold != null && this.hold !== index) changed = this.applyHold(null) || changed;
+    if (this.loop != null && this.loop !== index) changed = this.applyLoop(null) || changed;
+    if (changed) this.persistSession();
+    if (this.settings.mode !== "live") {
+      this.seekTo(section.start + 0.001);
+      return;
+    }
+    // a first line sung just before the boundary: the section still shows from the jump on
+    const pin = { index, until: section.start };
+    const first = this.sectionLines(index)[0];
+    if (first != null && linesOf(project)[first]) {
+      this.cue(first, pin);
+      return;
+    }
+    const lines = linesOf(project);
+    const now = Date.now();
+    const start = section.start + 0.001;
+    const next = nextTimedLineAfter(lines, start - 0.05);
+    const nextStart = next != null ? lines[next].start : null;
+    let hold = nextStart != null && nextStart > start ? nextStart : null;
+    if (this.loop === index) hold = Math.max(start, Math.min(hold ?? Number.POSITIVE_INFINITY, section.end - LOOP_HOLD_MARGIN));
+    this.sectionPin = pin;
+    this.clock.jump(start, hold, now);
+    this.clock.start(now);
+    this.liveLine = null;
+    this.lastCued = lastStartedLine(lines, start);
+    this.afterClockChange();
+  }
+
+  /** PageDown / PageUp (and . / ,): the section after / before the one on stage. */
+  stepSection(delta: 1 | -1): void {
+    const plan = this.snapshot.project?.plan;
+    if (!plan || plan.sections.length === 0) return;
+    const current = this.sectionIndex ?? sectionIndexAt(plan, this.songTime()) ?? 0;
+    const target = Math.min(plan.sections.length - 1, Math.max(0, current + delta));
+    if (target === current) return;
+    this.jumpToSection(target);
+  }
+
+  /** 保持段落 (H): keep the section on stage now (scene, colours, lyric style, media) while time and cues move on. */
+  toggleHold(): void {
+    if (this.hold != null) {
+      this.setHold(null);
+      return;
+    }
+    const plan = this.snapshot.project?.plan;
+    if (!plan || plan.sections.length === 0) return;
+    this.setHold(this.sectionIndex ?? sectionIndexAt(plan, this.songTime()));
+  }
+
+  /** Hold section `index`, or release (null): the stage then goes to the section at the current time or cue. */
+  setHold(index: number | null): void {
+    if (!this.applyHold(index)) return;
+    this.persistSession();
+    this.publish();
+  }
+
+  /** Set the hold without publishing; true when it changed. */
+  private applyHold(index: number | null): boolean {
+    const n = this.snapshot.project?.plan?.sections.length ?? 0;
+    const next = index != null && Number.isInteger(index) && index >= 0 && index < n ? index : null;
+    if (next === this.hold) return false;
+    this.hold = next;
+    this.set({ sectionHold: next });
+    return true;
+  }
+
+  /**
+   * 循環段落 (R): loop the section being played — TRACK: the one at the playhead, LIVE: the
+   * section of the line on screen (the clock may already run towards the next one).
+   */
+  toggleLoop(): void {
+    if (this.loop != null) {
+      this.setLoop(null);
+      return;
+    }
+    const project = this.snapshot.project;
+    const plan = project?.plan;
+    if (!project || !plan || plan.sections.length === 0) return;
+    let index: number | null = null;
+    if (this.settings.mode === "live") {
+      const ref = this.liveLine ?? this.lastCued;
+      if (ref != null) index = lineSections(plan, linesOf(project), this.duration())[ref] ?? null;
+    }
+    this.setLoop(index ?? this.timeSection(this.songTime()));
+  }
+
+  /** Loop section `index` (null = off). LIVE: the clock stops at the section's end instead of running into the next. */
+  setLoop(index: number | null): void {
+    if (!this.applyLoop(index)) return;
+    this.persistSession();
+    this.publish();
+  }
+
+  /** Set the loop without publishing; true when it changed. */
+  private applyLoop(index: number | null): boolean {
+    const project = this.snapshot.project;
+    const n = project?.plan?.sections.length ?? 0;
+    const next = index != null && Number.isInteger(index) && index >= 0 && index < n ? index : null;
+    if (next === this.loop) return false;
+    this.loop = next;
+    this.set({ sectionLoop: next });
+    const section = next != null ? project?.plan?.sections[next] : undefined;
+    if (section && this.settings.mode === "live") this.clock.capHold(section.end - LOOP_HOLD_MARGIN);
+    return true;
   }
 
   /**
@@ -1131,6 +1368,7 @@ export class ConsoleController {
     const lines = linesOf(project);
     const now = Date.now();
     const t = this.songTime(now);
+    this.sectionPin = null;
     if (mode === "live") {
       this.audio?.pause();
       const current = this.lineIndex;
@@ -1138,6 +1376,8 @@ export class ConsoleController {
       const hold = current != null ? liveHoldTime(lines, current, t) : next != null ? lines[next].start : null;
       this.clock.stop(now);
       this.clock.jump(t, hold, now);
+      const looped = this.loop != null ? project.plan?.sections[this.loop] : undefined;
+      if (looped) this.clock.capHold(looped.end - LOOP_HOLD_MARGIN);
       this.liveLine = current;
       this.lastCued = current ?? lastStartedLine(lines, t);
     } else {

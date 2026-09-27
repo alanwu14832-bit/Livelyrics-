@@ -44,6 +44,16 @@ export class LiveClock {
     this.hold = hold != null && Number.isFinite(hold) && hold > this.anchorT ? hold : hold === null ? null : this.anchorT;
   }
 
+  /**
+   * Stop at `at` at the latest (a looped section's end), keeping an earlier hold point. A clock
+   * already past `at` parks there.
+   */
+  capHold(at: number): void {
+    if (!Number.isFinite(at)) return;
+    const cap = Math.max(this.anchorT, at);
+    this.hold = this.hold == null ? cap : Math.min(this.hold, cap);
+  }
+
   start(now: number): void {
     if (this.running) return;
     this.anchorAt = now;

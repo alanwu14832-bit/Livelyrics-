@@ -146,11 +146,13 @@ export function resolveLineDesign(
 
 /**
  * The look for the lyric layer: the current line's own section when it differs from the
- * playhead's (a pickup line keeps its section's style across the boundary).
+ * playhead's (a pickup line keeps its section's style across the boundary). While the console
+ * holds a section (保持段落) every line takes the held section's look.
  */
 export function lyricLookAt(project: Project, state: StageState, t: number, look: StageLook): StageLook {
   const lines = project.lyrics?.lines;
   const idx = state.lineIndex;
+  if (state.sectionHeld === true) return look;
   if (!project.plan || !Array.isArray(lines) || typeof idx !== "number" || !lines[idx]) return look;
   const duration = project.meta?.duration || project.analysis?.duration || 0;
   const own = sectionIndexForLine(project.plan, lines, idx, duration);

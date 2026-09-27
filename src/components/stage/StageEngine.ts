@@ -162,8 +162,10 @@ export class StageEngine {
   // inputs
 
   setProject(project: Project | null) {
+    const previousId = this.project?.id ?? null;
     this.project = project;
     if (!project) return;
+    if (previousId != null && project.id !== previousId) this.startOver();
     this.seed = (hashString(project.id || "stage") % 1000) / 37;
     const plan = project.plan;
     if (plan !== this.typographyPlan) {
@@ -183,6 +185,22 @@ export class StageEngine {
         if (token === this.motifToken && !this.destroyed) this.renderer?.setMotif(canvas);
       });
     }
+  }
+
+  /**
+   * Another project replaced the one on stage (the show output's next item): its first frame is
+   * its own look, without a section cross-fade from the previous item (the take's fade through
+   * black, or a deliberate cut, is the transition) and without the old media / freeze state.
+   */
+  private startOver() {
+    this.director.reset();
+    this.lastMediaT = null;
+    this.lastMediaSection = null;
+    this.fadeOk = false;
+    this.frozenAt = null;
+    this.lyricAmt = 0;
+    this.textBox = null;
+    this.audio = null;
   }
 
   /** Load the band media the plan uses (and keep the asset lookup current). */

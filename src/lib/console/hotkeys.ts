@@ -1,6 +1,8 @@
 // Console keyboard map (docs/ARCHITECTURE.md → CONSOLE → Hotkeys). Pure: maps a
 // keyboard-event-like object to an action. Physical key codes are used for letters and
 // digits so the shortcuts keep working while a Chinese IME (注音/倉頡) is active.
+// GO and standby only do something in the show console (/s/[id]/live); the per-song console
+// ignores them.
 
 export type HotkeyAction =
   | { type: "togglePlay" }
@@ -18,7 +20,17 @@ export type HotkeyAction =
   | { type: "openOutput" }
   | { type: "mode" }
   | { type: "help" }
-  | { type: "escape" };
+  | { type: "escape" }
+  /** PageDown / PageUp, . / , : the next / previous plan section */
+  | { type: "section"; delta: 1 | -1 }
+  /** H: 保持段落 */
+  | { type: "hold" }
+  /** R: 循環段落 */
+  | { type: "loop" }
+  /** G: take the armed item (show console) */
+  | { type: "go" }
+  /** S: take the standby look (show console) */
+  | { type: "standby" };
 
 export interface KeyLike {
   key: string;
@@ -65,6 +77,7 @@ export function hotkeyAction(e: KeyLike): HotkeyAction | null {
     default:
       break;
   }
+  // everything below is a toggle or a jump: holding the key never repeats it
   if (repeat) return null;
 
   const digit = DIGIT.exec(code);
@@ -86,6 +99,20 @@ export function hotkeyAction(e: KeyLike): HotkeyAction | null {
       return { type: "openOutput" };
     case "KeyM":
       return { type: "mode" };
+    case "KeyH":
+      return { type: "hold" };
+    case "KeyR":
+      return { type: "loop" };
+    case "KeyG":
+      return { type: "go" };
+    case "KeyS":
+      return { type: "standby" };
+    case "PageDown":
+    case "Period":
+      return { type: "section", delta: 1 };
+    case "PageUp":
+    case "Comma":
+      return { type: "section", delta: -1 };
     default:
       return null;
   }
@@ -153,6 +180,15 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
     ],
   },
   {
+    title: "段落",
+    entries: [
+      { keys: ["PgDn", "."], label: "下一段" },
+      { keys: ["PgUp", ","], label: "上一段" },
+      { keys: ["H"], label: "保持段落：畫面停在這一段，歌詞照常前進" },
+      { keys: ["R"], label: "循環段落：TRACK 回到段落開頭，LIVE 從最後一句接回第一句" },
+    ],
+  },
+  {
     title: "畫面控制",
     entries: [
       { keys: ["B"], label: "一鍵黑場" },
@@ -173,3 +209,13 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
     ],
   },
 ];
+
+/** The show console's own keys (演出控制台), shown first in its help sheet. */
+export const SHOW_HOTKEY_HELP: HotkeyHelpGroup = {
+  title: "演出",
+  entries: [
+    { keys: ["G"], label: "GO：播出待命的項目" },
+    { keys: ["S"], label: "緊急切到待機畫面" },
+    { keys: ["O"], label: "開啟／聚焦演出投影視窗" },
+  ],
+};

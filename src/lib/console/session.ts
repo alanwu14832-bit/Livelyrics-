@@ -1,6 +1,6 @@
 // Show state that must survive a console reload in the same tab (sessionStorage): the
 // operator's overrides — a reload during a blackout must not light the stage back up —
-// and the TRACK playback position. Best effort; storage may be unavailable.
+// the TRACK playback position and a section hold / loop. Best effort; storage may be unavailable.
 
 import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
 import { DEFAULT_OVERRIDES, type StageOverrides } from "@/lib/stage/protocol";
@@ -10,6 +10,10 @@ export interface ConsoleSession {
   overrides: StageOverrides;
   /** audio element time (s) in TRACK mode */
   audioTime: number;
+  /** 保持段落: the held section index (absent = none) */
+  hold?: number;
+  /** 循環段落: the looped section index (absent = none) */
+  loop?: number;
 }
 
 export function sessionKey(projectId: string): string {
@@ -43,7 +47,15 @@ export function parseSession(raw: string | null | undefined): ConsoleSession | n
   try {
     const d = JSON.parse(raw) as Record<string, unknown> | null;
     if (!d || typeof d !== "object" || Array.isArray(d)) return null;
-    return { overrides: parseOverrides(d.overrides), audioTime: clampNum(d.audioTime, 0, 24 * 3600, 0) };
+    const section = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v < 1000 ? v : null);
+    const hold = section(d.hold);
+    const loop = section(d.loop);
+    return {
+      overrides: parseOverrides(d.overrides),
+      audioTime: clampNum(d.audioTime, 0, 24 * 3600, 0),
+      ...(hold != null ? { hold } : {}),
+      ...(loop != null ? { loop } : {}),
+    };
   } catch {
     return null;
   }

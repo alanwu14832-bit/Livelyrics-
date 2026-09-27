@@ -891,12 +891,14 @@ export class LyricLayer {
     let view: LyricView | null = null;
     if (style === "stack") {
       const duration = project.meta?.duration || project.analysis?.duration || 0;
+      // a held section (保持段落) stacks every line under its look
+      const held = state.sectionHeld === true;
       const sameSection = (i: number) => {
         const l = lines[i];
         if (!l) return false;
         const d = resolveLineDesign(project.plan, l.id, look.lyricStyle, state.overrides?.lyricStyle);
         if (d.style !== "stack") return false;
-        if (look.sectionIndex == null || l.start == null) return true;
+        if (held || look.sectionIndex == null || l.start == null) return true;
         return sectionIndexForLine(project.plan, lines, i, duration) === look.sectionIndex;
       };
       const prepare = (i: number) => {

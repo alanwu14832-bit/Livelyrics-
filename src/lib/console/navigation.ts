@@ -88,6 +88,53 @@ export function sectionOfLine(plan: DesignPlan | null, lines: LyricLine[], index
   return sectionIndexForLine(plan, lines, index, songDuration);
 }
 
+/**
+ * The section every line belongs to, the way the lyrics list groups them: a timed line its own
+ * (sectionOfLine), an untimed line the one of the timed line before it (null before the first
+ * timed line, or without a plan).
+ */
+export function lineSections(plan: DesignPlan | null, lines: LyricLine[], songDuration: number): Array<number | null> {
+  let current: number | null = null;
+  return lines.map((_, i) => {
+    const own = sectionOfLine(plan, lines, i, songDuration);
+    if (own != null) current = own;
+    return own ?? current;
+  });
+}
+
+/** Lines of section `index` in order (see lineSections). */
+export function linesInSection(plan: DesignPlan | null, lines: LyricLine[], index: number, songDuration: number): number[] {
+  const out: number[] = [];
+  lineSections(plan, lines, songDuration).forEach((s, i) => {
+    if (s === index) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * LIVE 循環段落: the line the next cue shows instead of the normal next one — the section's first
+ * line after its last — or null when the normal next line applies (`ref`, the line on screen or
+ * cued last, is not the looped section's last line).
+ */
+export function loopNextLine(sectionLines: readonly number[], ref: number | null): number | null {
+  if (sectionLines.length === 0 || ref == null) return null;
+  return sectionLines[sectionLines.length - 1] === ref ? sectionLines[0] : null;
+}
+
+/** How early (s) TRACK playback jumps back: the console's clock ticks every 33 ms. */
+export const LOOP_LOOKAHEAD = 0.02;
+
+/**
+ * TRACK 循環段落: where playback jumps back to (the looped section's start) once it reaches the
+ * section's end, or null while it is still inside.
+ */
+export function loopSeekTarget(section: { start: number; end: number } | null | undefined, t: number, lookahead = LOOP_LOOKAHEAD): number | null {
+  if (!section || !Number.isFinite(section.start) || !Number.isFinite(section.end) || section.end <= section.start || !Number.isFinite(t)) return null;
+  // a section shorter than the lookahead would loop forever on the spot
+  const edge = Math.max(section.start + 0.1, section.end - lookahead);
+  return t >= edge ? section.start : null;
+}
+
 export interface UpcomingCue {
   index: number;
   cue: CueNote;
