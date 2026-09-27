@@ -10,12 +10,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ViewTransition, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Banner, Button, EmptyState, Menu, MenuItem, MenuSeparator, Skeleton, SkeletonGroup, SkeletonText, Spinner, TextField } from "@/components/ui";
-import { ArrowClockwiseIcon, DotsThreeIcon, MagnifyingGlassIcon, MonitorPlayIcon, MusicNotesIcon, PencilSimpleIcon, SparkleIcon, TrashIcon } from "@/components/ui/Icon";
+import { ArrowClockwiseIcon, DotsThreeIcon, MagnifyingGlassIcon, MonitorPlayIcon, MusicNotesIcon, PencilSimpleIcon, SparkleIcon, TrashIcon, UsersThreeIcon } from "@/components/ui/Icon";
 import { processHref } from "@/components/process/steps";
 import { api } from "@/lib/api-client";
 import { easeOut, spring } from "@/lib/motion";
 import { formatTimeShort } from "@/lib/timeline";
 import type { ProjectSummary } from "@/lib/types";
+import { AssignBandSheet } from "./AssignBandSheet";
 import { ProjectArt, validPalette } from "./ProjectArt";
 import { formatAbsoluteTime, formatRelativeTime } from "./relative-time";
 import { PUSH, artTransitionName, titleTransitionName } from "./transitions";
@@ -69,6 +70,7 @@ export function ProjectLibrary({
   const [filter, setFilter] = useState("");
   const [pendingDelete, setPendingDelete] = useState<ProjectSummary | null>(null);
   const [pendingReprocess, setPendingReprocess] = useState<ProjectSummary | null>(null);
+  const [assigning, setAssigning] = useState<ProjectSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const skeletonCount = useSyncExternalStore(noSubscribe, () => readCount() || 3, () => 3);
@@ -211,13 +213,25 @@ export function ProjectLibrary({
                   exit={{ opacity: 0, scale: 0.96, filter: "blur(4px)", transition: { duration: 0.15, ease: easeOut } }}
                   transition={spring}
                 >
-                  <ProjectCard project={p} now={now} onDelete={() => setPendingDelete(p)} onReprocess={() => reprocess(p)} />
+                  <ProjectCard project={p} now={now} onDelete={() => setPendingDelete(p)} onReprocess={() => reprocess(p)} onAssign={() => setAssigning(p)} />
                 </motion.li>
               ))}
             </AnimatePresence>
           </ul>
         </MotionConfig>
       )}
+
+      <AssignBandSheet
+        open={assigning != null}
+        projectId={assigning?.id ?? null}
+        songTitle={assigning?.title ?? ""}
+        currentBandId={assigning?.bandId}
+        onClose={() => setAssigning(null)}
+        onAssigned={(bandId) => {
+          const id = assigning?.id;
+          setState((s) => (s.kind === "ok" ? { ...s, projects: s.projects.map((p) => (p.id === id ? { ...p, bandId: bandId ?? undefined } : p)) } : s));
+        }}
+      />
 
       <Alert
         open={pendingDelete != null}
@@ -293,7 +307,7 @@ function CardMeta({ project: p, now }: { project: ProjectSummary; now: number })
   );
 }
 
-function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: ProjectSummary; now: number; onDelete: () => void; onReprocess: () => void }) {
+function ProjectCard({ project: p, now, onDelete, onReprocess, onAssign }: { project: ProjectSummary; now: number; onDelete: () => void; onReprocess: () => void; onAssign: () => void }) {
   const ready = p.status === "ready";
   const hasDesign = validPalette(p.palette).length > 0;
   const href = ready ? consoleHref(p.id) : p.status === "new" ? processHref(p.id, { run: true }) : processHref(p.id);
@@ -345,6 +359,9 @@ function ProjectCard({ project: p, now, onDelete, onReprocess }: { project: Proj
           </MenuItem>
           <MenuItem icon={ArrowClockwiseIcon} onSelect={onReprocess} disabled={p.status === "processing"}>
             重新處理…
+          </MenuItem>
+          <MenuItem icon={UsersThreeIcon} onSelect={onAssign}>
+            {p.bandId ? "更換樂團…" : "指定樂團…"}
           </MenuItem>
           <MenuSeparator />
           <MenuItem icon={TrashIcon} destructive onSelect={onDelete}>

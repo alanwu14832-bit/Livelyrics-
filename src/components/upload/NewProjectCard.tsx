@@ -8,13 +8,17 @@
 // Kept for the e2e: section[aria-label="新作品"], the title input[required] (the form is
 // noValidate so the card shows its own inline error), the 「開始製作」 button name.
 
-import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api } from "@/lib/api-client";
 import { Button, FormRow, InsetGroup, cx, rowInputClass } from "@/components/ui";
 import { MusicNotesIcon, WarningIcon } from "@/components/ui/Icon";
 import { parseFileName, type AudioFileMetadata } from "@/lib/audio/metadata";
 import { prefersReducedMotion } from "@/lib/motion";
 import { formatTimeShort } from "@/lib/timeline";
-import type { AudioAnalysis } from "@/lib/types";
+import type { AudioAnalysis, BandSummary } from "@/lib/types";
+
+/** the pop-up chevron of a borderless row select (label-2 on both appearances) */
+const SELECT_CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6l3-3 3 3M5 10l3 3 3-3'/%3E%3C/svg%3E")`;
 import { formatBytes } from "./accept";
 import { phaseEnterClass } from "./Dropzone";
 import { lrcHeaderTags } from "./lyrics-choice";
@@ -29,6 +33,8 @@ export interface NewProjectInput {
   lyricsMode: LyricsMode;
   pick: LyricsPick | null;
   pasteText: string;
+  /** the band the song belongs to (null = none) */
+  bandId: string | null;
 }
 
 function bpmConfidence(c: number): { label: string; weak: boolean } {
@@ -94,9 +100,11 @@ export function NewProjectCard({
   analysisWarning,
   submitting,
   submitError,
+  defaultBandId,
   onCancel,
   onSubmit,
 }: {
+  defaultBandId?: string;
   file: File;
   meta: AudioFileMetadata;
   analysis: AudioAnalysis | null;
@@ -116,7 +124,26 @@ export function NewProjectCard({
   const [titleError, setTitleError] = useState<string | null>(null);
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [filledFromLrc, setFilledFromLrc] = useState<string[]>([]);
-  const ids = { title: useId(), artist: useId(), album: useId() };
+  const ids = { title: useId(), artist: useId(), album: useId(), band: useId() };
+  const [bands, setBands] = useState<BandSummary[]>([]);
+  const [bandId, setBandId] = useState<string>(defaultBandId ?? "");
+  useEffect(() => {
+    let alive = true;
+    api
+      .listBands()
+      .then((list) => {
+        if (!alive) return;
+        setBands(list);
+        // a preselected band that does not exist is dropped; its name fills an empty artist
+        const chosen = list.find((b) => b.id === defaultBandId);
+        if (!chosen) setBandId("");
+        else if (!edited.current.artist) setArtist((a) => a.trim() || chosen.name);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [defaultBandId]);
   const titleRef = useRef<HTMLInputElement>(null);
 
   // pasted LRC headers ([ti:] [ar:] [al:]) fill song info the user has not typed themselves,
@@ -161,7 +188,7 @@ export function NewProjectCard({
     }
     setTitleError(null);
     setPasteError(null);
-    onSubmit({ title: title.trim(), artist: artist.trim(), album: album.trim(), lyricsMode, pick, pasteText });
+    onSubmit({ title: title.trim(), artist: artist.trim(), album: album.trim(), lyricsMode, pick, pasteText, bandId: bandId || null });
   };
 
   const bounds = analysis?.sections.map((s) => s.start) ?? [];
@@ -246,6 +273,29 @@ export function NewProjectCard({
                   autoComplete="off"
                 />
               </FormRow>
+              {bands.length > 0 && (
+                <FormRow label="樂團" htmlFor={ids.band}>
+                  <select
+                    id={ids.band}
+                    value={bandId}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setBandId(next);
+                      const b = bands.find((x) => x.id === next);
+                      if (b && !artist.trim()) setArtist(b.name);
+                    }}
+                    className={cx(rowInputClass, "cursor-default appearance-none bg-[length:12px] bg-[right_2px_center] bg-no-repeat pr-5")}
+                    style={{ backgroundImage: SELECT_CHEVRON }}
+                  >
+                    <option value="">不指定</option>
+                    {bands.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormRow>
+              )}
             </InsetGroup>
 
             <div className="mt-7 px-(--row-pad-x)">

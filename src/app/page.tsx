@@ -19,11 +19,14 @@ async function loadLibrary(): Promise<{ projects: ProjectSummary[] | null; now: 
   }
 }
 
-export default async function Home() {
+/** `?band=<id>` preselects the band for a new song (the band page's 「加入歌曲」). */
+export default async function Home({ searchParams }: PageProps<"/">) {
   const { projects, now } = await loadLibrary();
+  const band = (await searchParams).band;
+  const initialBandId = typeof band === "string" && /^[a-z0-9-]{1,64}$/.test(band) ? band : undefined;
   return (
     <ViewTransition enter={PAGE_TRANSITION} exit={PAGE_TRANSITION} default="none">
-      <HomeClient initialProjects={projects} serverNow={now} />
+      <HomeClient initialProjects={projects} serverNow={now} initialBandId={initialBandId} />
     </ViewTransition>
   );
 }

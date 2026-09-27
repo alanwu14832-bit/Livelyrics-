@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { AppHeader, cx, pageContainerClass } from "@/components/ui";
 import { UploadFlow } from "@/components/upload/UploadFlow";
+import { BandShelf } from "./BandShelf";
 import { Brand } from "./Brand";
 import { ProjectLibrary } from "./ProjectLibrary";
 import type { ProjectSummary } from "@/lib/types";
@@ -19,7 +20,7 @@ function reveal(step: number) {
   return cx("animate-[ui-reveal_var(--dur-spring)_var(--ease-spring)_backwards]", step === 1 && "[animation-delay:60ms]", step === 2 && "[animation-delay:120ms]", step === 3 && "[animation-delay:180ms]");
 }
 
-export function HomeClient({ initialProjects = null, serverNow }: { initialProjects?: ProjectSummary[] | null; serverNow?: number }) {
+export function HomeClient({ initialProjects = null, serverNow, initialBandId }: { initialProjects?: ProjectSummary[] | null; serverNow?: number; initialBandId?: string }) {
   const { state, reload } = useServerStatus();
   const [connectOpen, setConnectOpen] = useState(false);
   const [intro] = useState(() => !introPlayed);
@@ -48,10 +49,11 @@ export function HomeClient({ initialProjects = null, serverNow }: { initialProje
             </div>
           </div>
           <div data-motion={motion} className={cx("mt-10", intro && reveal(3))}>
-            <UploadFlow />
+            <UploadFlow defaultBandId={initialBandId} />
           </div>
         </section>
-        <ProjectLibrary className="mt-24" initialProjects={initialProjects} serverNow={serverNow} />
+        <BandShelf className="mt-24" />
+        <ProjectLibrary className="mt-20" initialProjects={initialProjects} serverNow={serverNow} />
       </main>
       <ConnectClaudeSheet open={connectOpen} onClose={() => setConnectOpen(false)} state={state} onRecheck={reload} />
     </div>

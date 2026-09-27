@@ -11,7 +11,7 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { Alert, Button, ProgressBar, SegmentedControl, Sheet, TextArea, TextField, cx } from "@/components/ui";
 import { FilmStripIcon, ImageIcon, ImagesIcon, SparkleIcon, TrashIcon, UploadSimpleIcon, WarningCircleIcon } from "@/components/ui/Icon";
-import { api } from "@/lib/api-client";
+import { api, type AssetOwner } from "@/lib/api-client";
 import { ASSET_ACCEPT, ASSET_FORMATS_LABEL, ASSET_KIND_LABELS, MAX_ASSET_BYTES, formatBytes, formatDuration, isVideoAsset, sanitizeTags } from "@/lib/assets";
 import { looksLikeMedia, probeMedia } from "@/lib/media-probe";
 import type { Asset, DesignPlan } from "@/lib/types";
@@ -24,7 +24,10 @@ interface Upload {
 }
 
 export interface AssetLibraryProps {
-  projectId: string;
+  /** a song's own library (the band's shared one: pass `owner` instead) */
+  projectId?: string;
+  /** whose library this is; defaults to the project `projectId` */
+  owner?: AssetOwner;
   assets: Asset[];
   /** new list after an upload / edit / delete; `plan` is the server's plan after a delete */
   onChange: (assets: Asset[], plan?: DesignPlan | null) => void;
@@ -41,8 +44,8 @@ export interface AssetLibraryProps {
 
 let uploadSeq = 0;
 
-function Thumb({ projectId, asset, className }: { projectId: string; asset: Asset; className?: string }) {
-  const url = api.assetUrl(projectId, asset.id);
+function Thumb({ owner, asset, className }: { owner: AssetOwner; asset: Asset; className?: string }) {
+  const url = api.ownedAssetUrl(owner, asset.id);
   const [failed, setFailed] = useState(false);
   const video = isVideoAsset(asset);
   if (failed) {
@@ -80,7 +83,7 @@ function KindIcon({ asset }: { asset: Asset }) {
 }
 
 /** Card: thumbnail (16:9, black), name, kind + size / length. The whole card opens the editor. */
-function AssetCard({ projectId, asset, onOpen, compact }: { projectId: string; asset: Asset; onOpen: () => void; compact: boolean }) {
+function AssetCard({ owner, asset, onOpen, compact }: { owner: AssetOwner; asset: Asset; onOpen: () => void; compact: boolean }) {
   return (
     <li className="min-w-0">
       <button
@@ -90,7 +93,7 @@ function AssetCard({ projectId, asset, onOpen, compact }: { projectId: string; a
         aria-label={`${asset.name}（${ASSET_KIND_LABELS[asset.kind]}），編輯`}
       >
         <span className="relative block aspect-video w-full overflow-hidden">
-          <Thumb projectId={projectId} asset={asset} className="absolute inset-0 size-full" />
+          <Thumb owner={owner} asset={asset} className="absolute inset-0 size-full" />
           {asset.duration ? (
             <span className="absolute right-1.5 bottom-1.5 rounded-xs bg-black/70 px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white tabular">
               {formatDuration(asset.duration)}
@@ -113,13 +116,13 @@ function AssetCard({ projectId, asset, onOpen, compact }: { projectId: string; a
 }
 
 function EditSheet({
-  projectId,
+  owner,
   asset,
   onClose,
   onSaved,
   onDelete,
 }: {
-  projectId: string;
+  owner: AssetOwner;
   asset: Asset | null;
   onClose: () => void;
   onSaved: (assets: Asset[]) => void;
@@ -154,7 +157,7 @@ function EditSheet({
     setSaving(true);
     setError(null);
     try {
-      const res = await api.updateAsset(projectId, a.id, {
+      const res = await api.updateOwnedAsset(owner, a.id, {
         name,
         note: note.trim() ? note : null,
         tags: sanitizeTags(tags) ?? null,
@@ -184,7 +187,7 @@ function EditSheet({
       {a && (
         <div className="flex flex-col gap-5 px-5 pt-2 pb-5">
           <div className="relative aspect-video w-full overflow-hidden rounded-md bg-black">
-            <Thumb projectId={projectId} asset={a} className="absolute inset-0 size-full" />
+            <Thumb owner={owner} asset={a} className="absolute inset-0 size-full" />
           </div>
           <p className="-mt-3 text-[12px] leading-4 text-label-2 tabular">
             {ASSET_KIND_LABELS[a.kind]}，{a.width} × {a.height}
@@ -240,6 +243,7 @@ function EditSheet({
 
 export function AssetLibrary({
   projectId,
+  owner: ownerProp,
   assets,
   onChange,
   density = "page",
@@ -251,6 +255,8 @@ export function AssetLibrary({
   headingId,
 }: AssetLibraryProps) {
   const compact = density === "console";
+  const owner: AssetOwner = ownerProp ?? { kind: "project", id: projectId ?? "" };
+  const band = owner.kind === "band";
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [over, setOver] = useState(false);
@@ -276,8 +282,8 @@ export function AssetLibrary({
       if (!looksLikeMedia(file)) throw new Error(`不支援這種檔案。支援格式：${ASSET_FORMATS_LABEL}`);
       if (file.size > MAX_ASSET_BYTES) throw new Error(`檔案太大（上限 ${MAX_ASSET_BYTES / 1024 / 1024} MB）`);
       const probe = await probeMedia(file);
-      const res = await api.uploadAsset(
-        projectId,
+      const res = await api.uploadOwnedAsset(
+        owner,
         {
           file,
           width: probe.width,
@@ -315,8 +321,9 @@ export function AssetLibrary({
     setDeleting(true);
     setDeleteError(null);
     try {
-      const res = await api.deleteAsset(projectId, a.id);
-      onChange(res.assets, res.plan);
+      const res = await api.deleteOwnedAsset(owner, a.id);
+      if (band || res.plan === undefined) onChange(res.assets);
+      else onChange(res.assets, res.plan);
       setConfirm(null);
       setEditing(null);
     } catch (err) {
@@ -333,7 +340,8 @@ export function AssetLibrary({
     <section aria-labelledby={titleId} className={cx("min-w-0", className)} data-testid="asset-library">
       <div className={cx("flex min-h-7 items-center justify-between gap-2", compact ? "" : "mb-1.5 px-4")}>
         <h2 id={titleId} className={cx("min-w-0 truncate", compact ? "text-c-footnote font-semibold text-label-2" : "text-[13px] leading-5 text-label-2")}>
-          素材{assets.length > 0 ? `（${assets.length}）` : ""}
+          {band ? "樂團素材" : "素材"}
+          {assets.length > 0 ? `（${assets.length}）` : ""}
         </h2>
         <Button size="sm" variant="plain" icon={UploadSimpleIcon} onClick={() => inputRef.current?.click()} className="-mr-1">
           加入素材
@@ -385,13 +393,16 @@ export function AssetLibrary({
             </span>
             <span className={cx("font-semibold text-label", compact ? "text-c-body" : "text-[15px] leading-5")}>把樂團的素材拖到這裡</span>
             <span id={hintId} className={cx("max-w-[32em] text-label-2", compact ? "text-c-footnote" : "text-[13px] leading-5")}>
-              專輯封面、樂團照片、MV 片段或 logo。設計師會用這首歌的配色處理它們，讓畫面一看就是你們。{ASSET_FORMATS_LABEL}，單檔 500 MB 以內。
+              {band
+                ? "logo、專輯封面、樂團照片、MV 片段：放在這裡的素材，樂團的每首歌與演出畫面都能用。"
+                : "專輯封面、樂團照片、MV 片段或 logo。設計師會用這首歌的配色處理它們，讓畫面一看就是你們。"}
+              {ASSET_FORMATS_LABEL}，單檔 500 MB 以內。
             </span>
           </button>
         ) : (
           <ul className={cx("grid gap-2", compact ? "grid-cols-2" : "grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3")} aria-label="素材">
             {assets.map((a) => (
-              <AssetCard key={a.id} projectId={projectId} asset={a} compact={compact} onOpen={() => setEditing(a)} />
+              <AssetCard key={a.id} owner={owner} asset={a} compact={compact} onOpen={() => setEditing(a)} />
             ))}
             <li className="min-w-0">
               <button
@@ -443,14 +454,14 @@ export function AssetLibrary({
         <p className="mt-1.5 px-4 text-[12px] leading-4 text-label-2">點素材可以改名、標成 logo，或寫一句說明給設計師（例如哪張是專輯封面）。</p>
       )}
 
-      <EditSheet projectId={projectId} asset={editing} onClose={() => setEditing(null)} onSaved={(list) => onChange(list)} onDelete={(a) => setConfirm(a)} />
+      <EditSheet owner={owner} asset={editing} onClose={() => setEditing(null)} onSaved={(list) => onChange(list)} onDelete={(a) => setConfirm(a)} />
 
       <Alert
         open={confirm != null}
         title={`刪除「${confirm?.name ?? ""}」？`}
         message={
           <>
-            檔案會從這個作品移除，用到它的段落改回只顯示場景。
+            {band ? "檔案會從樂團素材庫移除，所有歌曲與演出畫面中用到它的地方改回只顯示場景。" : "檔案會從這個作品移除，用到它的段落改回只顯示場景。"}
             {deleteError && <span className="mt-1 block text-red-text">{deleteError}</span>}
           </>
         }

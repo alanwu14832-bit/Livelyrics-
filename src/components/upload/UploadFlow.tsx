@@ -51,7 +51,7 @@ function fallbackMeta(file: File): AudioFileMetadata {
   return { title: file.name.replace(/\.[^.]+$/, ""), artist: "" };
 }
 
-export function UploadFlow() {
+export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
   const [submitting, setSubmitting] = useState(false);
@@ -158,6 +158,7 @@ export function UploadFlow() {
             duration: duration > 0 ? duration : 0,
           },
           analysis,
+          bandId: input.bandId,
         });
 
         let steps: ProcessStep[] | undefined;
@@ -193,6 +194,7 @@ export function UploadFlow() {
         analysisWarning={phase.warning}
         submitting={submitting}
         submitError={submitError}
+        defaultBandId={defaultBandId}
         onCancel={reset}
         onSubmit={submit}
       />
