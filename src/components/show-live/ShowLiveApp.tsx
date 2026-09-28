@@ -7,7 +7,7 @@
 // only binds to it. The console tab keeps the screen awake, and a reload of the tab comes back to
 // the item that was on air.
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppHeader, Button, EmptyState, Kbd, Skeleton, SkeletonGroup, Tooltip } from "@/components/ui";
 import { ProjectorScreenIcon, QuestionIcon, TicketIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { SongConsole, type ShowSlots } from "@/components/console/ConsoleApp";
@@ -16,7 +16,7 @@ import { SharedStageView, useSharedStage } from "@/components/console/SharedStag
 import { OutputControl } from "@/components/console/TopBar";
 import { Pane } from "@/components/console/ui";
 import { useConsoleHotkeys } from "@/components/console/useConsoleHotkeys";
-import { HOTKEY_HELP, SHOW_HOTKEY_HELP, type HotkeyAction } from "@/lib/console/hotkeys";
+import { HOTKEY_HELP, SHOW_HOTKEY_HELP, hotkeyAction, type HotkeyAction } from "@/lib/console/hotkeys";
 import { ShowLiveController, type ItemControl, type ShowLiveSnapshot } from "@/lib/console/show-controller";
 import type { StageStore } from "@/lib/stage/protocol";
 import type { Project } from "@/lib/types";
@@ -74,6 +74,22 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
     [openOutput, onShowAction],
   );
   useConsoleHotkeys({ active: true, paused: helpOpen, onAction: dispatch });
+  // the help sheet only explains: ? closes it, S (the panic key) still works through it
+  const helpKey = useCallback(
+    (e: ReactKeyboardEvent) => {
+      if (e.nativeEvent.isComposing) return;
+      const action = hotkeyAction(e);
+      if (action?.type === "help") {
+        e.preventDefault();
+        setHelpOpen(false);
+      } else if (action?.type === "standby") {
+        e.preventDefault();
+        setHelpOpen(false);
+        onShowAction(action);
+      }
+    },
+    [onShowAction],
+  );
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-label">
@@ -132,6 +148,7 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
       <HelpOverlay
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
+        onKeyDown={helpKey}
         lead={SHOW_HOTKEY_HELP}
         groups={PRESHOW_HELP}
         footer={<p>GO 之後，這裡會換成播出中項目的控制台：歌曲是完整的歌曲控制台，進場、串場、待機與散場是畫面控制台。</p>}

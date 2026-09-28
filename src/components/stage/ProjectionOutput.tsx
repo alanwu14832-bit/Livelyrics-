@@ -34,6 +34,8 @@ const HELLO_RETRY_MS = 2000;
 const SILENCE_MS = 5000;
 /** a take never stays black longer than this waiting for fonts */
 const SWAP_READY_MAX_MS = 1200;
+/** a fade-out that lags its timer (busy main thread) gets this long to reach black before the swap */
+const SWAP_OPAQUE_MAX_MS = 600;
 /** fade curve of a take: the design tokens' --ease-in-out (defined on :root) */
 const TAKE_EASE = "var(--ease-in-out, cubic-bezier(0.77, 0, 0.175, 1))";
 
@@ -54,6 +56,30 @@ const frames = (n: number) =>
   new Promise<void>((resolve) => {
     const step = (left: number) => (left <= 0 ? resolve() : requestAnimationFrame(() => step(left - 1)));
     step(n);
+  });
+
+/**
+ * Resolves once the take overlay is fully black. The fade-out's CSS transition starts at the next
+ * style recalc, so on a busy main thread it can still be short of black when its timer fires; a
+ * swap then would show through. Capped by a timeout too (rAF stops in a hidden window).
+ */
+const untilOpaque = (el: HTMLElement | null, maxMs: number) =>
+  new Promise<void>((resolve) => {
+    if (!el) return resolve();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(cap);
+      resolve();
+    };
+    const cap = window.setTimeout(finish, maxMs);
+    const check = () => {
+      if (done) return;
+      if (Number(getComputedStyle(el).opacity) >= 0.999) finish();
+      else requestAnimationFrame(check);
+    };
+    check();
   });
 
 export function ProjectionOutput({ channel, projectId, title }: { channel: string; projectId?: string; title?: string }) {
@@ -92,25 +118,33 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
     shownRef.current = next;
     setProject(next);
     setStatus("ready");
-    if (prev && prev.id !== next.id && !pendingState.current) pendingState.current = { ...initialStageState(next.id), sentAt: Date.now() };
+    // a new project never renders with the previous one's state: its own (if any came) or a clean one
+    if (prev && prev.id !== next.id && pendingState.current?.projectId !== next.id) pendingState.current = { ...initialStageState(next.id), sentAt: Date.now() };
   }, []);
 
   const finishTake = useCallback(
     (seq: number) => {
       const take = takeRef.current;
       if (!take || take.seq !== seq) return;
-      const next = take.project;
-      swap(next);
-      take.phase = "in";
-      // under black: the StageView adopts the project, its fonts load, a few frames render
-      void warmFonts(next, SWAP_READY_MAX_MS)
-        .then(() => frames(3))
-        .then(() => {
-          const t = takeRef.current;
-          if (!t || t.seq !== seq) return;
-          setFade(0, t.half);
-          takeRef.current = null;
-        });
+      // swap only under full black (a newer project may still replace take.project until then)
+      void untilOpaque(fadeRef.current, SWAP_OPAQUE_MAX_MS).then(() => {
+        const current = takeRef.current;
+        if (!current || current.seq !== seq) return;
+        // ends a transition that is still short of black at the cap
+        setFade(1, 0);
+        const next = current.project;
+        swap(next);
+        current.phase = "in";
+        // under black: the StageView adopts the project, its fonts load, a few frames render
+        void warmFonts(next, SWAP_READY_MAX_MS)
+          .then(() => frames(3))
+          .then(() => {
+            const t = takeRef.current;
+            if (!t || t.seq !== seq) return;
+            setFade(0, t.half);
+            takeRef.current = null;
+          });
+      });
     },
     [setFade, swap],
   );
@@ -164,11 +198,17 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   /** Show mode: apply a state now, or keep it until its project is on stage (stale ones are dropped). */
   const receiveState = useCallback(
     (state: StageState) => {
+      const take = takeRef.current;
+      // fading out towards this project (also a re-take of the one on stage): it starts under black
+      if (take?.phase === "out" && state.projectId === take.project.id) {
+        pendingState.current = state;
+        return;
+      }
       if (state.projectId === committedRef.current && shownRef.current?.id === state.projectId) {
         store.set(state);
         return;
       }
-      const incoming = takeRef.current?.project.id;
+      const incoming = take?.project.id;
       const shown = shownRef.current?.id;
       // swapped but not rendered yet, fading towards it, or the first project of the show
       if (state.projectId === shown || state.projectId === incoming || !shown) pendingState.current = state;

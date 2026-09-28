@@ -112,6 +112,14 @@ const look = (text, durationHint) => ({ scene: "gradient", colorway: ["#07070b",
       if (d?.type === "project") window.__projects.push({ id: d.project.id, transition: d.transition ?? null });
       if (d?.type === "preload") window.__preloads.push(d.project.id);
     };
+    // the darkest the take overlay got since the test last reset it (sampled every frame)
+    window.__fadeMax = 0;
+    const sample = () => {
+      const el = document.querySelector("[data-take-fade]");
+      if (el) window.__fadeMax = Math.max(window.__fadeMax, Number(getComputedStyle(el).opacity) || 0);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
   });
   const page = await context.newPage();
   watch(page, "console");
@@ -255,11 +263,26 @@ const look = (text, durationHint) => ({ scene: "gradient", colorway: ["#07070b",
     check("the song is re-taken from the rail", st?.projectId === song1.id && st.t < 0.5, JSON.stringify({ projectId: st?.projectId, t: st?.t }));
 
     // ---------------------------------------------------------- GO: interlude, song 2, walk-out
-    await go();
+    const fadeOpacity = () => output.evaluate(() => Number(getComputedStyle(document.querySelector("[data-take-fade]")).opacity));
+    await output.evaluate(() => {
+      window.__fadeMax = 0;
+    });
+    await page.mouse.move(5, 5);
+    await page.keyboard.press("g");
+    await page.waitForTimeout(1000);
     st = await last();
     check("GO takes the interlude", st?.projectId === "look-mc", st?.projectId);
     ms = await until((t) => shows(t, INTERLUDE_TEXT));
     check("output shows the interlude text", ms >= 0, `${ms + 1000} ms after GO`);
+    let fadeEnd = -1;
+    for (const t0 = Date.now(); Date.now() - t0 < 4000; await output.waitForTimeout(100)) {
+      if ((await fadeOpacity()) === 0) {
+        fadeEnd = Date.now() - t0;
+        break;
+      }
+    }
+    const darkest = await output.evaluate(() => window.__fadeMax);
+    check("the output fades through black by itself", darkest >= 0.9 && fadeEnd >= 0, JSON.stringify({ darkestOverlay: darkest, clearAfterText: `${fadeEnd} ms` }));
     await go();
     st = await last();
     check("GO takes the second song", st?.projectId === song2.id, st?.projectId);
@@ -280,6 +303,15 @@ const look = (text, durationHint) => ({ scene: "gradient", colorway: ["#07070b",
       return { walkin: title("walkin"), walkout: title("walkout") };
     });
     check("played items are dimmed in the rail", rowColors.walkin?.state === "past" && rowColors.walkout?.state === "on-air" && rowColors.walkin.color !== rowColors.walkout.color, JSON.stringify(rowColors));
+    // re-take the item on air from the rail: the same item fades through black again
+    const takesBefore = (await projects()).length;
+    await page.locator('aside[aria-label="演出清單"] li[data-item-id="walkout"] > button').click();
+    await page.waitForTimeout(300);
+    await go();
+    const retake = (await projects()).slice(takesBefore);
+    check("re-taking the item on air fades it in again", retake.some((p) => p.id === "look-walkout" && p.transition?.kind === "fade"), JSON.stringify(retake));
+    ms = await until((t) => shows(t, WALKOUT_TEXT));
+    check("output shows the walk-out after the re-take", ms >= 0 && (await last())?.projectId === "look-walkout", `${ms + 1000} ms after GO`);
     await shot(page, "show-06-console-walkout");
 
     // ---------------------------------------------------------- reload the console tab

@@ -170,8 +170,23 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
     [controller, show],
   );
 
+  // In the show console the show's keys work before the song is on stage too (it is loading, or
+  // failed to load): S must always reach the standby look, G the next item.
+  const onKey = useCallback(
+    (action: HotkeyAction): boolean => {
+      if (active) return dispatch(action);
+      if (!show) return false;
+      if (action.type === "go" || action.type === "standby") return show.onAction(action);
+      if (action.type === "openOutput") {
+        controller.openOutput();
+        return true;
+      }
+      return false;
+    },
+    [active, controller, dispatch, show],
+  );
   // keyboard-first operation (the sheets are modal and pass through their own keys)
-  useConsoleHotkeys({ active, paused: redesignOpen || helpOpen, onAction: dispatch });
+  useConsoleHotkeys({ active: active || !!show, paused: redesignOpen || helpOpen, onAction: onKey });
 
   // B from inside the re-design sheet (outside its text field): blackout, with the HUD
   const blackoutFromSheet = useCallback(() => dispatch({ type: "blackout" }), [dispatch]);
