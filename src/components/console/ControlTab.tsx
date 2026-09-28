@@ -15,7 +15,10 @@ import { sceneBank } from "@/lib/console/plan-edit";
 import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
 import type { StageOverrides, StageStore } from "@/lib/stage/protocol";
 import type { Project, SceneId } from "@/lib/types";
+import { limiterView, useLimiterStats } from "@/lib/console/limiter-status";
+import type { SafetyPatch } from "@/lib/stage/safety";
 import { OutputSettings } from "./OutputSettings";
+import { SafetySettings, SafetyTile, safetyOf, useSafetyToggle } from "./SafetyControls";
 import { Footnote, Group, GroupTitle, TINT_ON_SOFT, ToggleTile } from "./ui";
 
 /** What the safety controls drive: a song's ConsoleController, or a show look's LookController. */
@@ -28,6 +31,8 @@ export interface OverrideControls {
   toggleTestPattern(): void;
   setSceneOverride(scene: SceneId | null): void;
   setOverrides(patch: Partial<StageOverrides>): void;
+  /** LED 安全模式 (the song's output settings, or the show's for a look) */
+  updateSafety(patch: SafetyPatch): void;
 }
 
 /** 「目前段落」 (a song) / 「畫面設計」 (a show look) marker for the plan's own choice. */
@@ -63,6 +68,9 @@ function ControlTabImpl({
   const others = SCENE_IDS.filter((s) => !bank.includes(s));
   const anyOverride =
     ov.blackout || !ov.lyricsVisible || ov.freeze || ov.scene != null || ov.lyricStyle != null || ov.testPattern || ov.intensity !== 1 || ov.lyricScale !== 1;
+  const safety = safetyOf(project);
+  const limiter = limiterView(useLimiterStats(project.id), output);
+  const { request: toggleSafety, alert: safetyAlert } = useSafetyToggle((patch) => controller.updateSafety(patch));
 
   return (
     <div className="flex flex-col gap-5 px-3 pb-4">
@@ -84,8 +92,12 @@ function ControlTabImpl({
           <ToggleTile label={ov.lyricsVisible ? `${noun}顯示中` : `${noun}已隱藏`} sub={`只切換${noun}層`} hotkey="L" icon={EyeSlashIcon} active={!ov.lyricsVisible} onClick={() => controller.toggleLyrics()} />
           <ToggleTile label="凍結畫面" sub={ov.freeze ? `動畫停格，${noun}照常` : "停住背景動畫"} hotkey="F" icon={SnowflakeIcon} active={ov.freeze} onClick={() => controller.toggleFreeze()} />
           <ToggleTile label="測試圖" sub="安全區與對位檢查" icon={SquareHalfIcon} active={ov.testPattern} onClick={() => controller.toggleTestPattern()} />
+          <SafetyTile safety={safety} damping={limiter.damping} onToggle={toggleSafety} />
         </div>
       </section>
+
+      <SafetySettings project={project} output={output} onChange={(patch) => controller.updateSafety(patch)} />
+      {safetyAlert}
 
       <section aria-labelledby="ctl-scene">
         <GroupTitle

@@ -26,6 +26,7 @@ import { PanelBoundary } from "@/components/console/PanelBoundary";
 import { PreviewPanel } from "@/components/console/Preview";
 import type { SharedStage } from "@/components/console/SharedStage";
 import { OutputControl } from "@/components/console/TopBar";
+import { SafetyCapsule } from "@/components/console/SafetyControls";
 import { Pane, PaneHeader } from "@/components/console/ui";
 import { useConsoleHotkeys } from "@/components/console/useConsoleHotkeys";
 import { useRafLoop } from "@/components/console/useRaf";
@@ -156,6 +157,7 @@ function LookTopBar({ controller, item, onHelp }: { controller: LookController; 
         <LookClock controller={controller} />
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
+        <SafetyCapsule project={snap.project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
           <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={onHelp} />
@@ -311,7 +313,7 @@ export function LookConsole({
           <Pane label="安全控制" order={3}>
             <PaneHeader title="控制" meta={<span>{LOOK_KIND_INFO[item.kind].label}畫面</span>} />
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <ControlTab controller={controller} project={snap.project} noun="文字" />
+              <ControlTab controller={controller} project={snap.project} noun="文字" output={snap.output} />
             </div>
           </Pane>
         </PanelBoundary>

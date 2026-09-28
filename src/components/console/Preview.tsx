@@ -3,7 +3,7 @@
 // Centre column: the live preview (the projection's look, at the output window's aspect) with the
 // keyboard HUD over its lower third, and the readout of what is on stage now and next.
 
-import { memo, useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { StageView, type StageStats } from "@/components/stage/StageView";
 import { HUD, StatusCapsule, Tag, cx, type HudHandle } from "@/components/ui";
 import type { ConsoleController, OutputStatus } from "@/lib/console/controller";
@@ -14,6 +14,9 @@ import { sortedCues, upcomingCue } from "@/lib/console/navigation";
 import { DEFAULT_OUTPUT, aspectLabel, outputAspect } from "@/lib/output";
 import type { PlaybackMode, StageStore } from "@/lib/stage/protocol";
 import type { LyricStyleId, Project, SectionDesign } from "@/lib/types";
+import { limiterView, publishLimiter, useLimiterStats } from "@/lib/console/limiter-status";
+import { projectSafety, safeTransition } from "@/lib/stage/safety";
+import { LedSimControls, LedSimStage, ledGeometry, useLedSim } from "./LedSim";
 import { StageSlot, useSharedStats, type SharedStage } from "./SharedStage";
 import { Dot, KeyValues, Pane } from "./ui";
 
@@ -81,17 +84,37 @@ function PreviewPanelImpl({
   const aspect = Math.min(8, Math.max(0.2, outputAspect(canvas)));
   const mismatch = windowMismatch(output, aspect);
   const [ownStats, setStats] = useState<StageStats | null>(null);
-  const onStats = useCallback((s: StageStats) => {
-    setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) ? prev : s));
-  }, []);
+  const projectId = project.id;
+  const onStats = useCallback(
+    (s: StageStats) => {
+      // LED 安全模式: the limiter's state for the control tab and the capsule
+      publishLimiter(projectId, s.safety);
+      setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) ? prev : s));
+    },
+    [projectId],
+  );
   const sharedStats = useSharedStats(shared);
   const stats = shared ? sharedStats : ownStats;
+  const limiter = limiterView(useLimiterStats(projectId), output);
+  // LED 模擬 (console only): the preview drawn at the wall's LED resolution
+  const [sim, setSim] = useLedSim();
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [frameWidth, setFrameWidth] = useState(0);
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setFrameWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const geometry = sim.on && frameWidth > 0 ? ledGeometry(sim, aspect, frameWidth) : null;
 
   return (
     <Pane label="投影預覽" order={1} className="flex-1 p-3">
       <div className="relative min-h-0 flex-1" style={{ containerType: "size" }}>
         <div className="absolute inset-0 flex items-center justify-center">
           <div
+            ref={frameRef}
             className="relative overflow-hidden rounded-md bg-black"
             style={{
               width: `min(100cqw, calc(100cqh * ${aspect}))`,
@@ -99,19 +122,22 @@ function PreviewPanelImpl({
               boxShadow: "0 0 0 0.5px rgba(255,255,255,0.08), 0 20px 50px -20px rgba(0,0,0,0.6)",
             }}
           >
-            {shared ? (
-              <StageSlot stage={shared} />
-            ) : (
-              <StageView
-                project={project}
-                store={controller.store}
-                showGuides
-                renderScale={0.5}
-                onStats={onStats}
-                className="h-full w-full"
-                style={{ aspectRatio: "auto", width: "100%", height: "100%" }}
-              />
-            )}
+            <LedSimStage settings={sim} geometry={geometry}>
+              {shared ? (
+                <StageSlot stage={shared} />
+              ) : (
+                <StageView
+                  project={project}
+                  store={controller.store}
+                  showGuides={!sim.on}
+                  renderScale={0.5}
+                  onStats={onStats}
+                  className="h-full w-full"
+                  style={{ aspectRatio: "auto", width: "100%", height: "100%" }}
+                />
+              )}
+            </LedSimStage>
+            <LedSimControls settings={sim} geometry={geometry} onChange={setSim} className="absolute right-2 bottom-2" />
             <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
               <FrameLabel className="t-latin tabular">
                 {label}・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
@@ -124,6 +150,11 @@ function PreviewPanelImpl({
               {stats && (
                 <FrameLabel className={cx("t-latin", (stats.backend === "lost" || stats.backend === "fallback") && "text-orange-text")}>
                   {BACKEND_LABELS[stats.backend]} {Math.round(stats.fps)} fps
+                </FrameLabel>
+              )}
+              {limiter.damping && (
+                <FrameLabel className="text-orange-text">
+                  <span data-limiter-label="">已抑制閃爍</span>
                 </FrameLabel>
               )}
             </div>
@@ -205,7 +236,14 @@ function StageReadoutImpl({ controller, project, mode }: { controller: ConsoleCo
               style && { key: "歌詞", value: LYRIC_STYLE_LABELS[style] ?? style, tone: style === "hidden" ? "orange" : "default" },
               section && { key: "位置", value: PLACEMENT_LABELS[section.lyricPlacement] ?? section.lyricPlacement },
               section && { key: "字級", value: `×${(section.lyricScale * ov.lyricScale).toFixed(2)}` },
-              section && { key: "轉場", value: TRANSITION_LABELS[section.transitionIn] ?? section.transitionIn },
+              section && {
+                key: "轉場",
+                // LED 安全模式 softens flash / bloom into a fade
+                value:
+                  safeTransition(section.transitionIn, projectSafety(project)) !== section.transitionIn
+                    ? `${TRANSITION_LABELS.fade}（安全模式，原為${TRANSITION_LABELS[section.transitionIn]}）`
+                    : (TRANSITION_LABELS[section.transitionIn] ?? section.transitionIn),
+              },
               section && { key: "能量", value: `${Math.round(section.energy * 100)}%` },
               !plan && { key: "設計", value: "尚無設計方案", tone: "orange" },
             ]}

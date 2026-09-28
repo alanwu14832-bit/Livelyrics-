@@ -20,6 +20,7 @@ import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_TREATMENTS, SCENE_IDS } from "
 import { formatTimeShort } from "@/lib/timeline";
 import type { Asset, DesignPlan, LyricPlacement, LyricStyleId, MediaTreatment, Project, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
 import { sectionName } from "./Preview";
+import { SafetyCheck } from "./SafetyControls";
 import { Footnote, Group, GroupTitle, KeyValues, PopupSelect } from "./ui";
 
 const SCENE_OPTIONS = SCENE_IDS.map((id) => ({ value: id, label: SCENE_LABELS[id] }));
@@ -355,6 +356,8 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <KeyVisualCard controller={controller} plan={plan} sampleText={sampleText} />
+      {/* LED 安全模式 pre-show check: what safe mode changes in this song */}
+      <SafetyCheck project={project} />
       {library}
       <section aria-labelledby="design-sections">
         <GroupTitle id="design-sections">段落設計（{plan.sections.length}）</GroupTitle>

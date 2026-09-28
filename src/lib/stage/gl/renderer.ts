@@ -840,21 +840,30 @@ export class StageRenderer {
     set1("uAlpha", Number.isFinite(alpha) ? alpha : 1);
     set1("uSoften", soften);
     set1("uFirst", first ? 1 : 0);
+    set1("uGain", Number.isFinite(gain) ? gain : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.width, this.height);
-    gl.useProgram(present.program);
-    const P = present.locations;
-    const pr = P.get("uRes");
-    if (pr) gl.uniform2f(pr, this.width, this.height);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, next.tex);
-    const ut = P.get("uTex");
-    if (ut) gl.uniform1i(ut, 1);
-    const ug = P.get("uGain");
-    if (ug) gl.uniform1f(ug, gain);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (this.gl2) {
+      // WebGL2: a straight copy to the screen
+      const gl2 = gl as WebGL2RenderingContext;
+      gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, next.fbo);
+      gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, null);
+      gl2.blitFramebuffer(0, 0, this.width, this.height, 0, 0, this.width, this.height, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
+      gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.width, this.height);
+      gl.useProgram(present.program);
+      const P = present.locations;
+      const pr = P.get("uRes");
+      if (pr) gl.uniform2f(pr, this.width, this.height);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, next.tex);
+      const ut = P.get("uTex");
+      if (ut) gl.uniform1i(ut, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
 
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, null);

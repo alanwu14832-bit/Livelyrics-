@@ -33,6 +33,8 @@ import {
   type VideoCodecChoice,
 } from "@/lib/export/settings";
 import { aspectLabel } from "@/lib/output";
+import { SafetyCheck, SafetyOffAlert, safetyOf } from "@/components/console/SafetyControls";
+import { safetySummary } from "@/lib/stage/safety";
 import { formatTime, formatTimeShort } from "@/lib/timeline";
 import type { Project } from "@/lib/types";
 import { ExportCanceled, debugExportToOpfs, debugStage, renderPreview, runExport, type DebugExportOptions, type ExportProgress, type ExportResult } from "./runExport";
@@ -118,6 +120,9 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
   const [cap, setCap] = useState<Capability>({ checking: true, webcodecs: true, plans: {}, missing: [], alpha: false, audio: {} });
   const [job, setJob] = useState<JobState>({ kind: "idle" });
   const abortRef = useRef<AbortController | null>(null);
+  /** LED 安全模式 for this export: null = the project's own setting (default); off only after a confirm */
+  const [safeOverride, setSafeOverride] = useState<boolean | null>(null);
+  const [askUnsafe, setAskUnsafe] = useState<null | "toggle" | "start">(null);
   const [preview, setPreview] = useState<PreviewState>({ busy: false, t: null, images: null, error: null, warnings: [] });
   const [previewView, setPreviewView] = useState<PreviewView>("full");
   const [timeText, setTimeText] = useState("");
@@ -240,12 +245,25 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
     };
   }, [running]);
 
+  const baseSafety = safetyOf(project);
+  const exportSafe = safeOverride ?? baseSafety.enabled;
+  // the project the offline renderer gets: the output's LED safety settings, on or off for this export
+  const exportProject = useMemo(
+    () => (project ? { ...project, output: { ...project.output, safety: { ...safetyOf(project), enabled: exportSafe } } } : null),
+    [project, exportSafe],
+  );
   const settings: ExportSettings = { variants, lyricFormat, codec, quality, rate, range, audio: withAudio };
   const plannedBytes = Object.values(cap.plans).reduce((a, p) => a + estimateBytes(p!.bitrate, range.end - range.start, withAudio), 0);
   const canStart = !!project && !cap.checking && variants.length > 0 && Object.keys(cap.plans).length > 0 && frames > 0 && !running;
 
-  const start = useCallback(async () => {
-    if (!project) return;
+  const start = useCallback(async (confirmed = false) => {
+    if (!exportProject) return;
+    // an export without LED safety always asks first
+    if (!exportProject.output.safety.enabled && !confirmed) {
+      setAskUnsafe("start");
+      return;
+    }
+    const project = exportProject;
     let dir: FileSystemDirectoryHandle | null = null;
     let folder: string | null = null;
     const picker = directoryPicker();
@@ -279,22 +297,22 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
     }
     // settings is rebuilt every render; the values it holds are the deps below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, toFolder, frames, range, cap, variants, lyricFormat, codec, quality, rate, withAudio]);
+  }, [exportProject, toFolder, frames, range, cap, variants, lyricFormat, codec, quality, rate, withAudio]);
 
   const previewTime = parseTimeInput(timeText);
   const runPreview = useCallback(async () => {
-    if (!project) return;
+    if (!exportProject) return;
     const t = parseTimeInput(timeText);
     if (t == null) return;
     const at = Math.min(Math.max(0, t), Math.max(0, duration - 0.001));
     setPreview((p) => ({ ...p, busy: true, error: null }));
     try {
-      const r = await renderPreview(project, at, fps);
+      const r = await renderPreview(exportProject, at, fps);
       setPreview({ busy: false, t: at, images: { full: r.full, background: r.background, matte: r.matte }, error: null, warnings: r.warnings });
     } catch (e) {
       setPreview((p) => ({ ...p, busy: false, error: e instanceof Error ? e.message : String(e) }));
     }
-  }, [project, timeText, duration, fps]);
+  }, [exportProject, timeText, duration, fps]);
 
   // ---------------------------------------------------------------------------
 
@@ -455,6 +473,34 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
             )}
           </InsetGroup>
 
+          <InsetGroup
+            header="LED 安全模式"
+            footer={
+              exportSafe
+                ? `${safetySummary({ ...baseSafety, enabled: true })}。完整與背景版本照這個設定算出，說明文字檔會寫明；歌詞層 matte 是鍵控訊號，不降亮度。`
+                : "這次匯出不套用亮度上限與閃爍限制。交給音樂祭前請再確認。"
+            }
+          >
+            <ListRow
+              title="套用 LED 安全模式"
+              subtitle={exportSafe ? `最高亮度 ${Math.round(baseSafety.brightness * 100)}%，閃爍每秒最多 3 次` : "已關閉：全亮度、不限制閃爍"}
+              htmlFor="export-safe"
+              accessory={
+                <Switch
+                  id="export-safe"
+                  checked={exportSafe}
+                  disabled={running}
+                  onChange={(on) => {
+                    if (on) setSafeOverride(true);
+                    else setAskUnsafe("toggle");
+                  }}
+                />
+              }
+            />
+          </InsetGroup>
+          {!exportSafe && <Banner tone="warning" title="沒有 LED 安全保護" description="閃白、光暈與快速閃爍會照原設計輸出，LED 牆播放時可能讓前排觀眾不適。" />}
+          {exportProject && <SafetyCheck project={exportProject} title="安全模式調整的段落" variant="page" footer="影片照這些調整算出，並套用亮度上限與閃爍限制；說明文字檔會寫明使用的設定。" />}
+
           <InsetGroup header="其他" footer={withAudio ? `附上歌曲音訊（${cap.audio.mp4 === "aac" ? "AAC" : "Opus"}），只建議用在排練預覽；交給音樂祭的版本請關閉。` : "音樂祭交件通常不含音訊，現場用 timecode 或 click 對齊第一格。"}>
             <ListRow title="附上音訊" subtitle="排練預覽用" htmlFor="with-audio" accessory={<Switch id="with-audio" checked={withAudio} onChange={setWithAudio} disabled={running} />} />
             {canPickFolder && (
@@ -473,7 +519,7 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="filled" size="lg" icon={ExportIcon} onClick={() => void start()} disabled={!canStart} loading={cap.checking && variants.length > 0}>
+            <Button variant="filled" size="lg" icon={ExportIcon} onClick={() => void start(false)} disabled={!canStart} loading={cap.checking && variants.length > 0}>
               開始匯出
             </Button>
             <span className="text-[13px] leading-5 text-label-2 tabular">{Object.keys(cap.plans).length > 0 ? `${Object.keys(cap.plans).length} 個檔案，預估 ${formatBytes(plannedBytes)}` : variants.length === 0 ? "至少選一個版本" : ""}</span>
@@ -531,6 +577,17 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
         </div>
       </div>
 
+      <SafetyOffAlert
+        open={askUnsafe != null}
+        context="export"
+        onCancel={() => setAskUnsafe(null)}
+        onConfirm={() => {
+          const why = askUnsafe;
+          setAskUnsafe(null);
+          setSafeOverride(false);
+          if (why === "start") void start(true);
+        }}
+      />
       <ProgressSheet
         job={job}
         onCancel={() => abortRef.current?.abort()}

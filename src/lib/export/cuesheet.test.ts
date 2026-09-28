@@ -78,3 +78,24 @@ describe("cue sheet", () => {
     expect(text).not.toMatch(/[–—]/);
   });
 });
+
+describe("LED 安全模式 in the sidecars", () => {
+  const safety = { enabled: true, preset: "led" as const, brightness: 0.7, flashLimit: true, redProtect: true, soften: 0.25 };
+  it("the cue sheet and README state the safety settings used", () => {
+    const csv = buildCueSheet(project(), { start: 0, end: 40 }, FRAME_RATES["30"], safety);
+    expect(csv.split("\r\n")[1]).toContain("LED 安全模式");
+    expect(csv).toContain("最高亮度 70%");
+    const base = { project: project(), range: { start: 0, end: 40 }, rate: FRAME_RATES["30"], width: 1920, height: 1080, files: [], cueSheetName: "x_cues.csv", createdAt: "2026-09-28" };
+    const on = buildReadme({ ...base, safety, limiterEngaged: 2 });
+    expect(on).toContain("LED 安全模式：開");
+    expect(on).toContain("抑制閃爍 2 次");
+    expect(on).toContain("不是正式的光敏性癲癇");
+    expect(on).toContain("LED safe mode ON");
+    expect(on).not.toMatch(/[–—]/);
+    const off = buildReadme({ ...base, safety: { ...safety, enabled: false } });
+    expect(off).toContain("LED 安全模式：關閉");
+    expect(off).toContain("LED safe mode OFF");
+    // without the field (older callers) nothing changes
+    expect(buildCueSheet(project(), { start: 0, end: 40 }, FRAME_RATES["30"])).not.toContain("LED 安全模式");
+  });
+});

@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { BandArt, bandHref } from "@/components/home/BandShelf";
 import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
-import { Alert, AppHeader, Banner, Button, EmptyState, FormRow, InsetGroup, ListRow, Menu, MenuItem, ProgressBar, Select, Sheet, Skeleton, SkeletonGroup, Spinner, TextArea, cx, rowInputClass } from "@/components/ui";
+import { Alert, AppHeader, Banner, Button, EmptyState, FormRow, InsetGroup, ListRow, Menu, MenuItem, ProgressBar, Select, Sheet, Skeleton, SkeletonGroup, Spinner, Switch, TextArea, cx, rowInputClass } from "@/components/ui";
 import { Markdown } from "@/components/ui/Markdown";
 import { BroadcastIcon, ChartLineUpIcon, CheckCircleIcon, MusicNotesPlusIcon, PlusIcon, SparkleIcon, TicketIcon, TrashIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
@@ -19,6 +19,8 @@ import { readinessIssues } from "@/lib/console/show-live";
 import { useJobPolling } from "@/components/band/use-job-polling";
 import { spring } from "@/lib/motion";
 import { OUTPUT_PRESETS, aspectLabel } from "@/lib/output";
+import { SAFETY_PRESETS, patchSafety, safetyPresetLabel, type SafetyPatch } from "@/lib/stage/safety";
+import { safetyOf, useSafetyToggle } from "@/components/console/SafetyControls";
 import { ARC_ROLE_INFO, LOOK_KINDS, LOOK_KIND_INFO, SONG_STATUS_INFO, arcDirectiveFor, defaultLook, formatRunningTime, moveItem, newSetItemId, setlistTotals, songItems, songStatus } from "@/lib/show";
 import { formatTimeShort } from "@/lib/timeline";
 import type { Band, LookItemKind, ProjectSummary, SetItem, Show } from "@/lib/types";
@@ -407,6 +409,11 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
                   persist({ output: { width: p.width, height: p.height, preset: p.id } }, (s) => ({ ...s, output }));
                 }}
                 onApply={() => setConfirmCanvas(true)}
+                onSafety={(patch) => {
+                  const safety = patchSafety(safetyOf(show), patch);
+                  setCanvasNote(null);
+                  persist({ output: { safety: patch } }, (s) => ({ ...s, output: { ...s.output, safety } }));
+                }}
               />
               <ArcPanel show={show} busy={arcWorking} error={arcProblem} running={running} onPlan={() => void planArc()} onApplyAll={() => void redesignAll()} />
               <NotesGroup value={show.notes} onChange={(notes) => persist({ notes }, (s) => ({ ...s, notes }))} />
@@ -437,7 +444,7 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
           <Alert
             open={confirmCanvas}
             title="套用到所有歌曲？"
-            message={`歌單裡每首歌的輸出畫面都會改成 ${show.output.width} × ${show.output.height}（${aspectLabel(show.output.width, show.output.height)}），包括歌詞安全區。`}
+            message={`歌單裡每首歌的輸出畫面都會改成 ${show.output.width} × ${show.output.height}（${aspectLabel(show.output.width, show.output.height)}），包括歌詞安全區與 LED 安全模式（${safetyOf(show).enabled ? safetyPresetLabel(safetyOf(show)) : "關閉"}）。`}
             confirmLabel="套用"
             onConfirm={() => void applyCanvas()}
             onCancel={() => setConfirmCanvas(false)}
@@ -555,12 +562,31 @@ function DetailsGroup({ show, onChange }: { show: Show; onChange: (patch: ShowPa
   );
 }
 
-function CanvasGroup({ show, songCount, busy, note, onPreset, onApply }: { show: Show; songCount: number; busy: boolean; note: string | null; onPreset: (id: string) => void; onApply: () => void }) {
+function CanvasGroup({
+  show,
+  songCount,
+  busy,
+  note,
+  onPreset,
+  onApply,
+  onSafety,
+}: {
+  show: Show;
+  songCount: number;
+  busy: boolean;
+  note: string | null;
+  onPreset: (id: string) => void;
+  onApply: () => void;
+  onSafety: (patch: SafetyPatch) => void;
+}) {
   const selectId = useId();
+  const safetyId = useId();
   const o = show.output;
   const known = OUTPUT_PRESETS.some((p) => p.id === o.preset);
+  const safety = safetyOf(show);
+  const { request: toggleSafety, alert: safetyAlert } = useSafetyToggle(onSafety, "venue");
   return (
-    <InsetGroup header="輸出畫面" headerLevel={2} footer={note ?? "這個場地的 LED 或投影尺寸。套用後，歌單裡每首歌的控制台、投影與匯出都用這個畫面。"}>
+    <InsetGroup header="輸出畫面" headerLevel={2} footer={note ?? "這個場地的 LED 或投影尺寸與 LED 安全模式。套用後，歌單裡每首歌的控制台、投影與匯出都用這個畫面。"}>
       <ListRow
         title={<label htmlFor={selectId}>畫面尺寸</label>}
         accessory={
@@ -587,6 +613,27 @@ function CanvasGroup({ show, songCount, busy, note, onPreset, onApply }: { show:
           套用到所有歌曲
         </Button>
       </div>
+      <ListRow
+        title={<label htmlFor={safetyId}>LED 安全模式</label>}
+        subtitle={safety.enabled ? `${safetyPresetLabel(safety)}，閃爍每秒最多 3 次` : <span className="text-orange-text">已關閉：沒有亮度與閃爍保護</span>}
+        accessory={<Switch id={safetyId} checked={safety.enabled} onChange={toggleSafety} data-venue-safety="" />}
+      />
+      {safety.enabled && (
+        <ListRow
+          title="亮度預設"
+          accessory={
+            <Select aria-label="亮度預設" value={safety.preset} onChange={(e) => onSafety(e.target.value === "custom" ? { preset: "custom", brightness: safety.brightness } : { preset: e.target.value as SafetyPatch["preset"] })} className="w-40">
+              {SAFETY_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label} {Math.round(p.brightness * 100)}%
+                </option>
+              ))}
+              {safety.preset === "custom" && <option value="custom">自訂 {Math.round(safety.brightness * 100)}%</option>}
+            </Select>
+          }
+        />
+      )}
+      {safetyAlert}
     </InsetGroup>
   );
 }

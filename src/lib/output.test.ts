@@ -115,3 +115,17 @@ describe("lyric safe area and extreme aspects", () => {
     expect(rows * (m.size / 100) * m.leading).toBeLessThanOrEqual(box.height / 100 + 1e-6);
   });
 });
+
+describe("LED 安全模式 in the output settings", () => {
+  it("patches safety and keeps the rest of the canvas", () => {
+    const hd = normalizeOutput(undefined);
+    const off = patchOutput(hd, { safety: { enabled: false } });
+    expect(off.safety.enabled).toBe(false);
+    expect(off.width).toBe(1920);
+    expect(patchOutput(off, { safety: { preset: "outdoor", enabled: true } }).safety).toMatchObject({ enabled: true, preset: "outdoor", brightness: 0.55, flashLimit: true });
+    // a size edit never touches the safety settings
+    expect(patchOutput(off, { preset: "4k" }).safety.enabled).toBe(false);
+    // bad values are clamped
+    expect(normalizeOutput({ safety: { brightness: 9, soften: "x", enabled: "no" } }).safety).toMatchObject({ brightness: 1, soften: 0.25, enabled: true });
+  });
+});

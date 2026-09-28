@@ -8,9 +8,10 @@
 // item on air (project + store), and each console view's preview frame adopts that host
 // (StageSlot). The canvas moves between frames with its context and warm shaders intact.
 
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { StageView, type StageStats } from "@/components/stage/StageView";
+import { publishLimiter } from "@/lib/console/limiter-status";
 import type { StageStore } from "@/lib/stage/protocol";
 import type { Project } from "@/lib/types";
 
@@ -57,8 +58,18 @@ export function useSharedStage(): SharedStage | null {
 
 /** The single preview StageView, portaled into the shared host (render it once, at a stable place). */
 export function SharedStageView({ stage, project, store }: { stage: SharedStage; project: Project; store: StageStore }) {
+  const id = project.id;
+  const report = stage.report;
+  const onStats = useCallback(
+    (s: StageStats) => {
+      // LED 安全模式: the item on air's limiter state for the control tab and the capsule
+      publishLimiter(id, s.safety);
+      report(s);
+    },
+    [id, report],
+  );
   return createPortal(
-    <StageView project={project} store={store} showGuides renderScale={0.5} onStats={stage.report} className="h-full w-full" style={{ aspectRatio: "auto", width: "100%", height: "100%" }} />,
+    <StageView project={project} store={store} showGuides renderScale={0.5} onStats={onStats} className="h-full w-full" style={{ aspectRatio: "auto", width: "100%", height: "100%" }} />,
     stage.host,
   );
 }

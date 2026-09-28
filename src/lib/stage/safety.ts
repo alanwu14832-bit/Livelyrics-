@@ -177,7 +177,7 @@ export function safetyPresetLabel(s: OutputSafety): string {
 export function safetySummary(s: OutputSafety): string {
   if (!s.enabled) return "LED 安全模式：關閉（未限制亮度與閃爍）";
   const parts = [
-    `最高亮度 ${Math.round(s.brightness * 100)}%（${safetyPresetLabel(s)}）`,
+    `最高亮度 ${Math.round(s.brightness * 100)}%（${safetyPresetById(s.preset)?.label ?? "自訂"}）`,
     s.flashLimit ? "閃爍限制開（每秒最多 3 次，WCAG 2.3.1）" : "閃爍限制關",
     s.redProtect ? "紅閃保護開" : "紅閃保護關",
     `柔化 ${Math.round(s.soften * 100)}%`,

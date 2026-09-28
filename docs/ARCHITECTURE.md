@@ -49,7 +49,8 @@ show up in the product:
 |---|---|
 | `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error) |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
-| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
+| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
+| `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
 | `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
 | `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
 | `src/lib/font-meta.ts` | `FONTS` registry + `fontStack(cjkFont, latinFont)` without next/font, so server code and tests can import it |
@@ -203,6 +204,112 @@ The show console runs a whole set with one projection window: `/s/[id]` 「開�
   before the section's end (`LiveClock.capHold`). The same key turns it off; jumping to another section ends a
   hold or loop elsewhere. Both persist in the tab session. The 「保持中」 / 「循環」 capsules, the strip and the
   timeline tags are console chrome only.
+
+### LED 安全模式 (phase 3)
+
+Festival LED walls are bright enough that full-field flashes, bloom peaks, beat strobes and large
+dark / bright flips blind the front rows and carry a photosensitive-seizure risk. Safe mode is **on
+by default** and works on three layers: a brightness cap, source-level softening and a flash limiter.
+All of it is pure logic in `src/lib/stage/safety.ts` (tests: `safety.test.ts`) plus GL passes in
+`src/lib/stage/scenes/safety.ts`.
+
+- **Settings.** `ProjectOutput.safety: OutputSafety` `{ enabled, preset, brightness, flashLimit,
+  redProtect, soften }` (types in `src/lib/types.ts`). Presets `SAFETY_PRESETS`: 室內投影 100 %,
+  LED 牆 70 %, 戶外強光 LED 55 %, or custom 20..100 %. `normalizeOutput` fills it (`normalizeSafety`:
+  a file or wire value without it = safe mode on, LED 牆, flash limit and red protection on, soften
+  25 %); `patchOutput(…, { safety })` / `patchSafety` (a preset sets the brightness, a brightness
+  becomes custom, turning safe mode on turns the flash limit on). PATCH `output.safety` on projects
+  (`validate.ts` `SafetyPatchSchema`) and shows (`show.ts`); `apply-output` copies it with the canvas,
+  so the show page's 輸出畫面 is the venue setting. `activeSafety` / `projectSafety(project)` (cached
+  per output object) give what a frame applies (`SAFETY_OFF` when disabled).
+- **Brightness cap and soften (exact on every layer).** The cap is a linear-light fraction of full
+  white; the renderer multiplies encoded values by `gain = brightness^(1/2.2)`. `softenChannel` is a
+  shoulder on the brightest encoded values (knee `1 − 0.55 s`, top `1 − 0.25 s`). The GL safety pass
+  applies soften then gain per pixel to scene + media; the lyric layer gets the same transform per
+  colour (`transformHex` on text, fill, accent, glow, shadow and scrim colours in `LyricLayer`), so
+  the DOM lyrics are capped exactly without a full-frame overlay, and the export (which paints the
+  DOM's computed colours through `LyricPainter`) matches. The CSS fallback background, the test
+  pattern and — if the safety shaders fail to compile — the scene canvas get `filter: brightness()`.
+- **Source-level safety** (the director and resolve stop asking for the dangerous things):
+  `resolveLook` turns `flash` and `bloom` into `fade` (`safeTransition`) and clamps audio
+  reactivity to 0.5 (0.25 for a look whose background or primary is a WCAG saturated red,
+  `safeReactivity`); `StageLook.safe` says so. `AudioFeatureMixer.update(…, { safe, hold })`: slower
+  attacks, the beat pulse capped at 1 and rate-limited by `PulseGate` to ≤ 3 rises a second (`hold`
+  forces it down while the limiter damps). The lyric layer in safe mode (`LyricFrame.safety`) swaps
+  impact chunks slower (320 / 300 ms) without the beat scale or overshoot. `safetyReport(plan,
+  safety, { bpm })` lists the sections these rules change (the design tab's 「LED 安全檢查」 and the
+  export page), with the same rules.
+- **Flash limiter.** Thresholds (`FLASH`, WCAG 2.3.1 / ITU-R BT.1702 / Harding-style): a transition is
+  a change of ≥ 0.1 relative luminance where the darker state is below 0.8; a flash is a pair of
+  opposing transitions; ≤ 3 flashes (6 transitions) in any 1 s. Red: `(R − G − B) × 320` changes by
+  more than 20 with `R / (R + G + B) ≥ 0.8` in either state (linear RGB); every red transition counts
+  as a red flash, ≤ 3 a second. Area: the frame is a luminance grid (`gridSize`: 32 cells on the long
+  side, 32 × 18 for 16:9); a transition counts when cells covering ≥ 25 % of any 1/3 × 1/3 window (the
+  WCAG 10° field, 341 × 256 on 1024 × 768) complete it in the same direction within 0.1 s (summed-area
+  table). `FlashDetector` runs a hysteresis extreme tracker per cell (general and red). `FlashLimiter`
+  keeps a model of the displayed grid (`displayed = mix(displayed, source, α)`, what the GPU does per
+  pixel) and counts transitions on both the source and the displayed grid; it engages when the
+  displayed count reaches 4 (2 flashes; margin for the readback lag) or the source would exceed 6, or
+  2 displayed / > 3 source red transitions. Damping sets α = 1 − e^(−dt / τ) with τ = 1 s (a temporal
+  low-pass: a 10 Hz full-field strobe becomes a steady grey with < 0.08 ripple), holds 0.3 s after the
+  last trigger and releases over 0.6 s. A slow fade or a 1 Hz pulse is never touched (tests). The lyric
+  layer's share is estimated (`LyricEstimate`: its measured text box 5 × a second, its displayed colour,
+  35 % ink × visibility) and blended into the grid; it is counted but not low-passed.
+- **GL pipeline** (`StageRenderer`, `RenderRequest.safety`): with safe mode on, scene + transition +
+  media render into target S (black until the four safety programs are compiled; they are prewarmed
+  first). `down1` S → (cols·8 × rows·8) with soften per tap, `down2` → the cols × rows grid; `lowpass`
+  F = mix(F_prev, soften(S) × gain, α) into a ping-pong pair (8-bit feedback moves at least one code
+  value so it always converges; a static dither under the cap); present = `blitFramebuffer` (WebGL2) or
+  a copy shader (WebGL1). Readback: WebGL2 reads the tiny grid into a pixel-pack buffer with a fence and
+  collects it 1–2 frames later (`takeGrids`, ring of 3, no GPU stall); WebGL1 and the export read it
+  synchronously (a stall on a 32 × 18 target). `StageEngine` asks `limiter.alphaFor(dt)` before
+  rendering, records α per render serial and feeds each grid to `limiter.observe` with the combined α of
+  the frames since the last observed one. Off = the old path (scene straight to the screen). Cost: two
+  full-frame passes (low-pass, blit) plus two tiny ones and ~0.1 ms of CPU per frame; on a laptop GPU
+  well under 1 ms (not measured on real hardware here: the container has only SwiftShader, where a
+  640 × 360 stage goes from 60 to ~48 fps).
+- **Determinism.** The limiter is a pure function of the frame sequence (grids + frame times): the
+  same frames give the same α sequence (tested). Live, α is chosen one to two frames before that
+  frame's grid is known; the offline export (`OfflineStage.renderScene`) uses the zero-lag `step()`
+  (render S, read the grid synchronously, choose α, `composeSafety(α)`), so its result depends only
+  on song time and the frame rate. A jump pre-rolls the last `LIMITER_PREROLL_SECONDS` (1.5 s) through
+  the limiter as well; a frame is therefore identical for the same range start, and independent of
+  where the export started except while a damping episode spans that start.
+- **Protocol** (backward compatible). The settings travel inside `project.output.safety` with every
+  `project` / `preload` message; `parseStageMessage` repairs a project's output with `normalizeOutput`
+  (a project without an output is left alone: the renderer's default is safe mode on). `pong` may carry
+  `limiter: LimiterReport { on, damping, engaged }` (`sanitizeLimiter`), which the console link keeps
+  in `OutputStatus.limiter`. The projection windows (`/p/[id]/output`, `/s/[id]/output`) apply whatever
+  project they show; older consoles (no field) therefore get safe mode on.
+- **Console** (`src/components/console/SafetyControls.tsx`): `SafetyTile` in the control tab's sticky
+  安全控制 block (next to 黑場), `SafetySettings` below it (presets, 最高亮度, 柔化亮部, 閃爍限制, 紅閃保護,
+  「已抑制閃爍 n 次」 per section), `SafetyCapsule` in the top bars of the song console, the look console
+  and the show console's pre-show header (orange when off, 「已抑制閃爍」 while damping). Turning safe
+  mode off always goes through `SafetyOffAlert` (the risk in Traditional Chinese); on never asks.
+  `ConsoleController.updateSafety` / `LookController.updateSafety` (the show's venue setting: saved
+  on the show through `onSafety`). The preview reports its engine's `StageStats.safety` to
+  `src/lib/console/limiter-status.ts`; `limiterView` prefers the projection's pong report for "damping
+  now". `StageReadout` names a softened transition. The export page (`ExportClient`) applies the
+  project's settings by default, shows the check, asks before an unprotected export, and the cue sheet
+  (first row, `type = note`) and README state the settings (`safetySummary`) and the damping count.
+- **LED 模擬** (`src/components/console/LedSim.tsx`, console preview only): pitch P2.6 / P3.9 / P4.8 /
+  P6 and wall width → LEDs across (`ledGrid`), zoom 1× / 2× / 4× by layout (the stage renders at the
+  magnified size); an SVG filter samples the stage once per LED cell (feFlood + feTile + feComposite,
+  dilated), adds a bloom (blur + screen), and a CSS radial-gradient overlay draws the dark gaps. Cells
+  below 2 preview px are enlarged (the label says so). Remembered per browser (`localStorage`), never
+  sent to the output.
+- **Stage lab**: `?safe=0` shows the designed flash / bloom at full brightness.
+- **E2E**: `scripts/e2e-led.cjs` (strobe designs: flash transitions and hard cuts at 4 flashes a second;
+  the projection canvas sampled every frame; the confirm dialogs; the presets' luminance; LED 模擬 only
+  in the console; the pre-show check; the export default).
+- **Known limits.** Not a certified PSE test: the grid is 32 × 18 (small patterns and thin lines
+  average out), the DOM lyric layer is estimated rather than measured, luminance is relative (the
+  wall's nits, gamma and processor brightness are unknown to the app), and the live limiter reacts
+  after a lag of 1–2 frames (the engage margin covers strobes up to the frame rate; the first
+  transitions of a sudden strobe still show). A section that changes faster than its transition
+  restarts the transition from the outgoing look (the limiter, not the source, then smooths it). The
+  blackout and the show's take fades are operator-driven and not limited. Recommend a Harding-style
+  analysis of exported video for broadcast.
 
 ### Band media and the output canvas (phase 1a)
 

@@ -17,6 +17,7 @@ import { formatTime } from "@/lib/timeline";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { useStorageMode } from "@/components/home/use-storage-mode";
 import { capsuleItems } from "./feedback";
+import { SafetyCapsule } from "./SafetyControls";
 import { Dot } from "./ui";
 import { useRafLoop } from "./useRaf";
 
@@ -283,6 +284,7 @@ export function TopBar({
 
       {/* right: projection, re-design, help */}
       <div className="flex min-w-0 items-center justify-end gap-2">
+        <SafetyCapsule project={project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
         <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : compact ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
           {compact ? (

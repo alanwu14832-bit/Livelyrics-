@@ -15,7 +15,7 @@
 import { api } from "@/lib/api-client";
 import { lookToProject } from "@/lib/show";
 import { DEFAULT_TAKE_TRANSITION, showChannelName, type StageTransition } from "@/lib/stage/protocol";
-import type { Band, LookItemKind, Project, ProjectSummary, SetItem, Show } from "@/lib/types";
+import type { Band, LookItemKind, OutputSafety, Project, ProjectSummary, SetItem, Show } from "@/lib/types";
 import { ConsoleController, type LoadState } from "./controller";
 import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
 import { LookController } from "./look-controller";
@@ -263,9 +263,20 @@ export class ShowLiveController {
       resume: opts.resume,
       durationHint: item.look.durationHint ?? null,
       sessionKey: `show-${this.showId}-${item.id}`,
+      onSafety: (safety) => this.saveShowSafety(safety),
     });
     controller.attach();
     return { kind: "look", itemId: item.id, seq: ++this.seq, controller, item };
+  }
+
+  /** LED 安全模式 changed on a look: it is the show's (venue) setting, so every later look takes it. */
+  private saveShowSafety(safety: OutputSafety): void {
+    const show = this.snapshot.show;
+    if (!show) return;
+    this.set({ show: { ...show, output: { ...show.output, safety } } });
+    api.updateShow(this.showId, { output: { safety } }).catch((err: unknown) => {
+      console.error("[Livelyrics] 演出的 LED 安全設定沒有存成功：", err);
+    });
   }
 
   private projectOf(control: ItemControl | null): Project | null {

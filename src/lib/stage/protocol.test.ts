@@ -104,3 +104,17 @@ describe("parseStageMessage", () => {
     expect(parseStageMessage({ type: "close" })).toEqual({ type: "close" });
   });
 });
+
+describe("LED 安全模式 on the wire", () => {
+  it("repairs a project's output safety settings and reads the pong's limiter report", () => {
+    const project = { id: "p", meta: { title: "歌" }, output: { width: 1920, height: 1080, preset: "1080p", lyricSafe: {}, safety: { enabled: "yes", brightness: 7 } } };
+    const msg = parseStageMessage({ type: "project", project });
+    expect(msg?.type === "project" && msg.project.output.safety).toMatchObject({ enabled: true, brightness: 1 });
+    const old = parseStageMessage({ type: "project", project: { ...project, output: { width: 1920, height: 1080, preset: "1080p", lyricSafe: {} } } });
+    expect(old?.type === "project" && old.project.output.safety.enabled).toBe(true);
+    const pong = parseStageMessage({ type: "pong", outputId: "o", at: 1, width: 1, height: 1, fullscreen: false, limiter: { on: true, damping: true, engaged: 2.7 } });
+    expect(pong).toMatchObject({ limiter: { on: true, damping: true, engaged: 2 } });
+    const oldPong = parseStageMessage({ type: "pong", outputId: "o", at: 1, width: 1, height: 1, fullscreen: false });
+    expect(oldPong && "limiter" in oldPong).toBe(false);
+  });
+});

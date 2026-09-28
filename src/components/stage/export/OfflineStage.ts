@@ -241,7 +241,9 @@ export class OfflineStage {
       const scenes = new Set<SceneId>(["gradient"]);
       for (const s of project.plan?.sections ?? []) if ((SCENE_IDS as readonly string[]).includes(s.scene)) scenes.add(s.scene);
       const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on);
-      if (bad.length) warnings.push(`有 ${bad.length} 個著色器無法編譯，該段會改用漸層場景。`);
+      if (this.safety.on && this.renderer.safetyState() !== "ready") warnings.push("LED 安全模式的著色器無法在這台電腦編譯：影片不會套用場景的亮度上限與閃爍限制，請換一台電腦匯出。");
+      const sceneBad = bad.filter((k) => !k.startsWith("safety-"));
+      if (sceneBad.length) warnings.push(`有 ${sceneBad.length} 個著色器無法編譯，該段會改用漸層場景。`);
     }
     return { warnings };
   }

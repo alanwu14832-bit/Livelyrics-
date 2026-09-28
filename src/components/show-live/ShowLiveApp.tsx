@@ -14,6 +14,7 @@ import { SongConsole, type ShowSlots } from "@/components/console/ConsoleApp";
 import { HelpOverlay } from "@/components/console/HelpOverlay";
 import { SharedStageView, useSharedStage } from "@/components/console/SharedStage";
 import { OutputControl } from "@/components/console/TopBar";
+import { SafetyCapsule } from "@/components/console/SafetyControls";
 import { Pane } from "@/components/console/ui";
 import { useConsoleHotkeys } from "@/components/console/useConsoleHotkeys";
 import { HOTKEY_HELP, SHOW_HOTKEY_HELP, hotkeyAction, type HotkeyAction } from "@/lib/console/hotkeys";
@@ -99,6 +100,7 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
           <p className="truncate text-c-footnote text-label-2">{[snap.band?.name, `${snap.rail.length} 個項目`, total > 0 ? `約 ${formatRunningTime(total)}` : ""].filter(Boolean).join("・")}</p>
         </div>
         <div className="flex items-center gap-2">
+          {snap.show && <SafetyCapsule project={{ id: `show-${snap.show.id}`, output: snap.show.output }} output={snap.output} />}
           <OutputControl output={snap.output} onOpen={openOutput} />
           <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
             <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={() => setHelpOpen(true)} />

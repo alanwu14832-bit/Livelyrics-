@@ -30,6 +30,8 @@ export interface StageLabInitial {
   freeze?: string;
   lyrics?: string;
   slowmo?: string;
+  /** LED 安全模式 (default on, like every projection); safe=0 shows the designed flash / bloom */
+  safe?: string;
 }
 
 const STYLE_LABELS: Record<LyricStyleId, string> = {
@@ -102,7 +104,11 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
     const preset = DEMO_COLORWAYS.find((c) => c.id === cw);
     return preset && preset.id !== "plan" ? preset.colors : null;
   }, [cw]);
-  const project = useMemo(() => applyDesignOverrides(baseProject, placement, colorway), [baseProject, placement, colorway]);
+  const safe = flag(initial.safe, true);
+  const project = useMemo(() => {
+    const p = applyDesignOverrides(baseProject, placement, colorway);
+    return safe ? p : { ...p, output: { ...p.output, safety: { ...p.output.safety, enabled: false } } };
+  }, [baseProject, placement, colorway, safe]);
 
   const [store] = useState(() => createStageStore({ ...initialStageState(baseProject.id), t: num(initial.t, 0, 0, duration) }));
   // `at` is re-anchored on the first publish (Date.now() is impure during render)

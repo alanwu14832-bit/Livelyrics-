@@ -106,7 +106,6 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   const warmer = useRef<ProjectWarmer | null>(null);
   /** LED 安全模式: the stage's limiter state, reported to the console on every pong */
   const limiterRef = useRef<StageStats["safety"]>(null);
-  const limiterProject = useRef<string | null>(null);
   const onStats = useCallback((s: StageStats) => {
     limiterRef.current = s.safety;
   }, []);
@@ -281,12 +280,8 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
           break;
         case "ping": {
           const dpr = window.devicePixelRatio || 1;
+          // the stage resets its limiter (and its counts) whenever another project goes on stage
           const lim = limiterRef.current;
-          if (limiterProject.current !== shownRef.current?.id) {
-            // a new item on stage: its count starts at 0 (the stage resets its limiter too)
-            limiterProject.current = shownRef.current?.id ?? null;
-            limiterRef.current = null;
-          }
           post({
             type: "pong",
             outputId,

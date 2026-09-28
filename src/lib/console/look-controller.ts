@@ -16,7 +16,9 @@ import {
   type StageTransition,
   type WritableStageStore,
 } from "@/lib/stage/protocol";
-import type { Project, SceneId } from "@/lib/types";
+import { patchOutput } from "@/lib/output";
+import type { SafetyPatch } from "@/lib/stage/safety";
+import type { OutputSafety, Project, SceneId } from "@/lib/types";
 import type { Notice, NoticeTone } from "./controller";
 import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
 import { loadSession, saveSession } from "./session";
@@ -46,6 +48,11 @@ export interface LookControllerOptions {
    * console names the show too, so two shows' looks (e.g. both auto standbys) never share one.
    */
   sessionKey?: string;
+  /**
+   * LED 安全模式 changed from this look's controls: the show console saves it on the show (the
+   * venue's setting, used by every look) — the look's own project changes at once either way.
+   */
+  onSafety?: (safety: OutputSafety) => void;
 }
 
 const NOTICE_MS = 4500;
@@ -68,6 +75,7 @@ export class LookController {
   private readonly resume: boolean;
   private readonly hint: number | null;
   private readonly sessionKey: string;
+  private readonly onSafety: ((safety: OutputSafety) => void) | null;
   private attached = false;
   private restored = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -84,6 +92,7 @@ export class LookController {
     this.outputTarget = opts.output ?? null;
     this.resume = opts.resume ?? false;
     this.sessionKey = opts.sessionKey || project.id;
+    this.onSafety = opts.onSafety ?? null;
     const hint = opts.durationHint;
     this.hint = typeof hint === "number" && Number.isFinite(hint) && hint > 0 ? hint : null;
     this.link = new ProjectionLink(this.consoleId, {
@@ -280,6 +289,21 @@ export class LookController {
     this.overrides = { ...DEFAULT_OVERRIDES };
     this.persist();
     this.publish();
+  }
+
+  /** LED 安全模式 of the look (the show's venue setting): the projection gets it at once. */
+  updateSafety(patch: SafetyPatch): void {
+    const project = this.snapshot.project;
+    const output = patchOutput(project.output, { safety: patch });
+    if (JSON.stringify(output.safety) === JSON.stringify(project.output?.safety)) return;
+    this.set({ project: { ...project, output } });
+    this.broadcastProject();
+    this.publish();
+    try {
+      this.onSafety?.(output.safety);
+    } catch (err) {
+      console.error("[Livelyrics] LED 安全設定儲存失敗：", err);
+    }
   }
 
   // ---------------------------------------------------------------- projection window
