@@ -14,6 +14,7 @@
 // Both the console's preview and the projection window render through the same
 // <StageView project store /> component, so the preview is exactly the output.
 
+import { normalizeOutput } from "../output";
 import type { LyricStyleId, Project, SceneId } from "../types";
 
 export type PlaybackMode = "track" | "live";
@@ -142,11 +143,25 @@ export type StageMessage =
    * width/height are the output viewport in physical pixels (CSS px × devicePixelRatio,
    * rounded), e.g. 1920×1080 on a projector — use them for the preview's aspect ratio.
    */
-  | { type: "pong"; outputId: string; at: number; width: number; height: number; fullscreen: boolean }
+  | { type: "pong"; outputId: string; at: number; width: number; height: number; fullscreen: boolean; limiter?: LimiterReport }
   /** console -> output: ask the output window to toggle fullscreen (needs a user gesture there; best effort) */
   | { type: "fullscreen" }
   /** console -> output: ask the output window to close */
   | { type: "close" };
+
+/**
+ * LED 安全模式 (phase 3): what the projection window's flash limiter is doing, reported on every
+ * pong (optional: older outputs never send it). The safety settings themselves travel inside
+ * `project.output.safety` with every `project` message.
+ */
+export interface LimiterReport {
+  /** safe mode is on in the output */
+  on: boolean;
+  /** the limiter is damping right now */
+  damping: boolean;
+  /** damping episodes since the output took the current project */
+  engaged: number;
+}
 
 export function channelName(projectId: string): string {
   return `livelyrics:${projectId}`;
@@ -224,6 +239,21 @@ function isProjectLike(v: unknown): v is Project {
 }
 
 /**
+ * The project from the wire with its output canvas (size, lyric area, LED safety) repaired. A
+ * project without one is left alone: the renderer then uses the default canvas, and missing LED
+ * safety settings always mean safe mode on (projectSafety in safety.ts).
+ */
+function withSafeOutput(p: Project): Project {
+  const out = (p as { output?: unknown }).output;
+  return isRecord(out) ? { ...p, output: normalizeOutput(out) } : p;
+}
+
+export function sanitizeLimiter(raw: unknown): LimiterReport | null {
+  if (!isRecord(raw)) return null;
+  return { on: raw.on === true, damping: raw.damping === true, engaged: finite(raw.engaged) && raw.engaged >= 0 ? Math.floor(raw.engaged) : 0 };
+}
+
+/**
  * One channel message, checked field by field; null for anything unknown or malformed (the
  * receiver ignores it). A project is only checked for its id and meta: the renderer repairs the
  * rest (resolve.ts) and never throws on bad plan data.
@@ -237,10 +267,10 @@ export function parseStageMessage(raw: unknown): StageMessage | null {
     case "project": {
       if (!isProjectLike(raw.project)) return null;
       const transition = sanitizeTransition(raw.transition);
-      return { type: "project", project: raw.project, ...(transition ? { transition } : {}), ...sender };
+      return { type: "project", project: withSafeOutput(raw.project), ...(transition ? { transition } : {}), ...sender };
     }
     case "preload":
-      return isProjectLike(raw.project) ? { type: "preload", project: raw.project, ...sender } : null;
+      return isProjectLike(raw.project) ? { type: "preload", project: withSafeOutput(raw.project), ...sender } : null;
     case "state": {
       const state = sanitizeStageState(raw.state);
       return state ? { type: "state", state, ...sender } : null;
@@ -256,6 +286,7 @@ export function parseStageMessage(raw: unknown): StageMessage | null {
         width: finite(raw.width) ? raw.width : 0,
         height: finite(raw.height) ? raw.height : 0,
         fullscreen: raw.fullscreen === true,
+        ...(sanitizeLimiter(raw.limiter) ? { limiter: sanitizeLimiter(raw.limiter)! } : {}),
       };
     case "fullscreen":
       return { type: "fullscreen" };

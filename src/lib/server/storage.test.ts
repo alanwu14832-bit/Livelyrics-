@@ -189,7 +189,14 @@ describe("projects", () => {
     expect(p.meta.title).toBe("x");
     // projects from before band media and custom canvases
     expect(p.assets).toEqual([]);
-    expect(p.output).toEqual({ width: 1920, height: 1080, preset: "1080p", lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 } });
+    expect(p.output).toEqual({
+      width: 1920,
+      height: 1080,
+      preset: "1080p",
+      lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      // and from before LED 安全模式: safe mode on, LED 牆 preset
+      safety: { enabled: true, preset: "led", brightness: 0.7, flashLimit: true, redProtect: true, soften: 0.25 },
+    });
   });
 
   it("gives old plan sections media: null", async () => {

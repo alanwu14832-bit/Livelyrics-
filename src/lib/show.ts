@@ -274,7 +274,7 @@ export function lookToPlan(look: SetLook, bible: BandBible | null | undefined, o
  */
 export function lookToProject(
   item: Extract<SetItem, { kind: LookItemKind }>,
-  ctx: { band: Pick<Band, "id" | "name" | "bible" | "assets"> | null; output?: ProjectOutput | null; showId?: string },
+  ctx: { band: Pick<Band, "id" | "name" | "bible" | "assets"> | null; output?: ProjectOutput | Omit<ProjectOutput, "safety"> | null; showId?: string },
 ): Project {
   const duration = item.look.durationHint && item.look.durationHint > 0 ? item.look.durationHint : LOOK_DEFAULT_SECONDS;
   const plan = lookToPlan(item.look, ctx.band?.bible, { kind: item.kind, title: item.title, seed: `${ctx.showId ?? ""}|${item.id}`, duration });
@@ -478,6 +478,16 @@ const ShowPatchSchema = z.object({
       height: z.number().int().optional(),
       preset: z.string().max(32).optional(),
       lyricSafe: z.object({ top: z.number().optional(), right: z.number().optional(), bottom: z.number().optional(), left: z.number().optional() }).optional(),
+      safety: z
+        .object({
+          enabled: z.boolean().optional(),
+          preset: z.enum(["indoor", "led", "outdoor", "custom"]).optional(),
+          brightness: z.number().optional(),
+          flashLimit: z.boolean().optional(),
+          redProtect: z.boolean().optional(),
+          soften: z.number().optional(),
+        })
+        .optional(),
     })
     .optional(),
   /** notes of the arc pass; `appliedAt` updates arrive this way too */

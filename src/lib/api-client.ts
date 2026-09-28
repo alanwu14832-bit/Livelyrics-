@@ -7,6 +7,7 @@
 
 import { bandAssetUrl, projectAssetUrl } from "./asset-scope";
 import type { BiblePatch } from "./band";
+import type { OutputPatch } from "./output";
 import { abortableSleep, ProcessBusyError, runStepwise } from "./process-runner";
 import type {
   Asset,
@@ -18,7 +19,6 @@ import type {
   Lyrics,
   PipelineEvent,
   Project,
-  ProjectOutput,
   ProjectSummary,
   SetItem,
   Show,
@@ -178,7 +178,7 @@ export const api = {
       meta: Partial<SongMeta>;
       lyrics: Lyrics;
       plan: DesignPlan;
-      output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> };
+      output: OutputPatch;
       /** assign to a band (null = no band) */
       bandId: string | null;
     }>,
@@ -323,7 +323,7 @@ export const api = {
       venue: string | null;
       notes: string;
       items: SetItem[];
-      output: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> };
+      output: OutputPatch;
       arc: ShowArc | null;
     }>,
   ) => fetch(`/api/shows/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).then((r) => json<Show>(r)),

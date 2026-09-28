@@ -2,6 +2,7 @@
 // projection window and the console preview share (letterbox / pillarbox fit, lyric safe area).
 // No DOM: used by the server (storage, PATCH validation), the stage and the console.
 
+import { DEFAULT_SAFETY, normalizeSafety, patchSafety, type SafetyPatch } from "./stage/safety";
 import type { LyricSafeArea, ProjectOutput } from "./types";
 
 export interface OutputPreset {
@@ -35,10 +36,11 @@ export const DEFAULT_OUTPUT: ProjectOutput = {
   height: 1080,
   preset: "1080p",
   lyricSafe: { ...DEFAULT_LYRIC_SAFE },
+  safety: { ...DEFAULT_SAFETY },
 };
 
 export function defaultOutput(): ProjectOutput {
-  return { ...DEFAULT_OUTPUT, lyricSafe: { ...DEFAULT_LYRIC_SAFE } };
+  return { ...DEFAULT_OUTPUT, lyricSafe: { ...DEFAULT_LYRIC_SAFE }, safety: { ...DEFAULT_SAFETY } };
 }
 
 function finite(v: unknown): number | null {
@@ -80,29 +82,35 @@ export function normalizeOutput(raw: unknown, base: ProjectOutput = DEFAULT_OUTP
     bottom: safeFraction(safeRaw.bottom, base.lyricSafe.bottom),
     left: safeFraction(safeRaw.left, base.lyricSafe.left),
   };
+  // LED 安全模式: a file without it (older than phase 3) gets safe mode on with the LED 牆 preset
+  const safety = normalizeSafety(o.safety, base.safety ?? DEFAULT_SAFETY);
   const preset = typeof o.preset === "string" ? presetById(o.preset) : undefined;
-  if (preset) return { width: preset.width, height: preset.height, preset: preset.id, lyricSafe };
+  if (preset) return { width: preset.width, height: preset.height, preset: preset.id, lyricSafe, safety };
   const width = px(o.width, base.width);
   const height = px(o.height, base.height);
   // "custom" is kept when asked for explicitly (the operator is typing a size); otherwise derived
-  return { width, height, preset: o.preset === CUSTOM_PRESET ? CUSTOM_PRESET : presetFor(width, height), lyricSafe };
+  return { width, height, preset: o.preset === CUSTOM_PRESET ? CUSTOM_PRESET : presetFor(width, height), lyricSafe, safety };
 }
+
+export type OutputPatch = { width?: number; height?: number; preset?: string; lyricSafe?: Partial<LyricSafeArea>; safety?: SafetyPatch };
 
 /**
  * The next canvas after a partial edit: a preset id replaces the size, a size edit keeps the
  * "custom" mode (or re-derives the preset from the new size), and safe-area sides merge.
  */
-export function patchOutput(current: ProjectOutput, patch: { width?: number; height?: number; preset?: string; lyricSafe?: Partial<LyricSafeArea> }): ProjectOutput {
+export function patchOutput(current: ProjectOutput, patch: OutputPatch): ProjectOutput {
   const sizeGiven = patch.width !== undefined || patch.height !== undefined;
   const preset = patch.preset ?? (sizeGiven && current.preset !== CUSTOM_PRESET ? undefined : current.preset);
+  const base = current.safety ? current : { ...current, safety: normalizeSafety(undefined) };
   return normalizeOutput(
     {
       width: patch.width ?? current.width,
       height: patch.height ?? current.height,
       preset,
       lyricSafe: { ...current.lyricSafe, ...(patch.lyricSafe ?? {}) },
+      safety: patch.safety ? patchSafety(base.safety, patch.safety) : base.safety,
     },
-    current,
+    base,
   );
 }
 

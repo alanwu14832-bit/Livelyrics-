@@ -22,8 +22,9 @@ import { randomId } from "@/lib/console/link";
 import { DEFAULT_OUTPUT, fitCanvas, type Rect } from "@/lib/output";
 import { createStageStore, initialStageState, parseStageMessage, type StageMessage, type StageState, type StageTransition } from "@/lib/stage/protocol";
 import type { Project } from "@/lib/types";
+import { projectSafety } from "@/lib/stage/safety";
 import { useWakeLock } from "@/lib/use-wake-lock";
-import { StageView } from "./StageView";
+import { StageView, type StageStats } from "./StageView";
 import { ProjectWarmer, warmFonts } from "./warm";
 
 type LoadStatus = "loading" | "ready" | "missing";
@@ -103,6 +104,12 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   const pendingState = useRef<StageState | null>(null);
   const fadeRef = useRef<HTMLDivElement>(null);
   const warmer = useRef<ProjectWarmer | null>(null);
+  /** LED 安全模式: the stage's limiter state, reported to the console on every pong */
+  const limiterRef = useRef<StageStats["safety"]>(null);
+  const limiterProject = useRef<string | null>(null);
+  const onStats = useCallback((s: StageStats) => {
+    limiterRef.current = s.safety;
+  }, []);
 
   // ---- project swaps and takes --------------------------------------------
   const setFade = useCallback((opacity: 0 | 1, ms: number) => {
@@ -274,6 +281,12 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
           break;
         case "ping": {
           const dpr = window.devicePixelRatio || 1;
+          const lim = limiterRef.current;
+          if (limiterProject.current !== shownRef.current?.id) {
+            // a new item on stage: its count starts at 0 (the stage resets its limiter too)
+            limiterProject.current = shownRef.current?.id ?? null;
+            limiterRef.current = null;
+          }
           post({
             type: "pong",
             outputId,
@@ -281,6 +294,7 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
             width: Math.round(window.innerWidth * dpr),
             height: Math.round(window.innerHeight * dpr),
             fullscreen: isFullscreen(),
+            limiter: { on: projectSafety(shownRef.current).on, damping: !!lim?.damping, engaged: lim?.engaged ?? 0 },
           });
           // a show console that has nothing on air yet only pings: it is connected all the same
           if (!fixed) setConnected(true);
@@ -408,6 +422,7 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
           store={store}
           className="absolute"
           style={{ aspectRatio: "auto", left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
+          onStats={onStats}
         />
       )}
 

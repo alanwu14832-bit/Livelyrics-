@@ -27,7 +27,8 @@ import {
   type WritableStageStore,
 } from "@/lib/stage/protocol";
 import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
-import { patchOutput } from "@/lib/output";
+import { patchOutput, type OutputPatch } from "@/lib/output";
+import type { SafetyPatch } from "@/lib/stage/safety";
 import type { Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
 import { LiveClock } from "./live-clock";
@@ -1633,7 +1634,7 @@ export class ConsoleController {
   }
 
   /** Change the output canvas (size preset, custom size, lyric safe area); saved after a short pause. */
-  updateOutput(patch: Partial<Omit<ProjectOutput, "lyricSafe">> & { lyricSafe?: Partial<ProjectOutput["lyricSafe"]> }): void {
+  updateOutput(patch: OutputPatch): void {
     const project = this.snapshot.project;
     if (!project) return;
     const current = project.output;
@@ -1645,6 +1646,11 @@ export class ConsoleController {
     this.pendingOutput = next;
     if (this.outputTimer) clearTimeout(this.outputTimer);
     this.outputTimer = setTimeout(() => void this.flushOutput(), 400);
+  }
+
+  /** LED 安全模式 (phase 3): part of the output settings; the projection gets it at once. */
+  updateSafety(patch: SafetyPatch): void {
+    this.updateOutput({ safety: patch });
   }
 
   private async flushOutput(): Promise<void> {

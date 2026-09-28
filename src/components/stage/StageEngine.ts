@@ -9,7 +9,8 @@ import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
 import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
-import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { StageRenderer, type GridReadback, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { FlashLimiter, LYRIC_INK, SAFETY_OFF, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
 import { placementBox, writingModeFor } from "@/lib/stage/lyrics/layout";
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo, type MediaLayerState } from "@/lib/stage/media/model";
 import { isVideoAsset, mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media/draw";
@@ -18,7 +19,7 @@ import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { stageTime, type StageState, type StageStore } from "@/lib/stage/protocol";
 import { clamp, lyricLookAt, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
-import type { Asset, Project, ProjectOutput, SceneId } from "@/lib/types";
+import type { Asset, LyricStyleId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
 import { MediaSources } from "./MediaSources";
 import { buildGuides, buildTestPattern, type GuidesHandle, type TestPatternHandle } from "./overlays";
@@ -35,6 +36,25 @@ export interface StageStats {
   quality: number;
   scene: SceneId;
   sectionIndex: number | null;
+  /** LED 安全模式 (phase 3): what the limiter is doing; null when safe mode is off */
+  safety: SafetyStats | null;
+}
+
+export interface SafetyStats {
+  /** brightness cap (linear, 0.2..1) */
+  brightness: number;
+  flashLimit: boolean;
+  /** the flash limiter is damping right now */
+  damping: boolean;
+  /** damping episodes since this project went on stage */
+  engaged: number;
+  /** damping episodes per plan section index */
+  bySection: Record<number, number>;
+  /** displayed / source transitions in the last second (source = what the design asked for) */
+  transitions: number;
+  sourceTransitions: number;
+  /** the GL safety passes failed to compile: CSS brightness cap only, no flash limiting */
+  degraded: boolean;
 }
 
 export interface StageEngineOptions {
@@ -114,6 +134,19 @@ export class StageEngine {
   private textBox: [number, number, number, number] | null = null;
   private textBoxAt = 0;
   private output: ProjectOutput = DEFAULT_OUTPUT;
+  // LED 安全模式 (phase 3)
+  private safety: ActiveSafety = SAFETY_OFF;
+  private limiter: FlashLimiter | null = null;
+  /** α of every rendered frame whose grid has not been observed yet, by render serial */
+  private pendingAlpha = new Map<number, { t: number; alpha: number; lyric: LyricEstimate | null }>();
+  private gridBuf: Float32Array | null = null;
+  private engagedBySection: Record<number, number> = {};
+  private engagedTotal = 0;
+  private lastDamping = false;
+  private lastFps = 0;
+  private cssCapKey = "";
+  private lyricBoxAt = 0;
+  private lyricBox: [number, number, number, number] | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -201,6 +234,18 @@ export class StageEngine {
     this.lyricAmt = 0;
     this.textBox = null;
     this.audio = null;
+    this.resetLimiter();
+  }
+
+  /** A new project (or safe mode turned on): the limiter and the low-pass start from scratch. */
+  private resetLimiter() {
+    this.limiter?.reset();
+    this.pendingAlpha.clear();
+    this.renderer?.resetSafetyFeedback();
+    this.engagedBySection = {};
+    this.engagedTotal = 0;
+    this.lastDamping = false;
+    this.lyricBox = null;
   }
 
   /** Load the band media the plan uses (and keep the asset lookup current). */
@@ -307,6 +352,8 @@ export class StageEngine {
     this.prewarmKey = key;
     // the plan's scenes first, then the rest so operator overrides never stall
     this.renderer.prewarm([...new Set<SceneId>([...planScenes, "gradient", ...SCENE_IDS])]);
+    // LED 安全模式 is on by default: its passes go first (a safe frame needs them)
+    this.renderer.prewarmSafety();
   }
 
   private adapt(now: number, dt: number) {
@@ -353,19 +400,26 @@ export class StageEngine {
     return mediaLayerDraw(layer, t, beat, src, outputAspect(this.output), (hex) => this.color(hex));
   }
 
-  private mediaDraw(project: Project, state: StageState, t: number, look: StageLook, lyricLook: StageLook, audio: StageAudioFrame, now: number, dt: number): MediaDraw | null {
-    const frozen = !!state.overrides?.freeze;
-    if (frozen && this.frozenAt == null) this.frozenAt = t;
-    if (!frozen) this.frozenAt = null;
-    const mt = frozen && this.frozenAt != null ? this.frozenAt : t;
-    // lyric presence for mask-lyrics: a line on screen that is not hidden
+  private presence: { showing: boolean; style: LyricStyleId } = { showing: false, style: "hidden" };
+
+  /** Is a lyric line on screen (not hidden)? Updates the smoothed lyric amount. */
+  private updatePresence(project: Project, state: StageState, lyricLook: StageLook, dt: number) {
     const lines = project.lyrics?.lines ?? [];
     const idx = state.lineIndex;
     const line = typeof idx === "number" ? lines[idx] : undefined;
     const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, state.overrides?.lyricStyle).style : "hidden";
     const showing = !!line && !!line.text?.trim() && style !== "hidden" && state.overrides?.lyricsVisible !== false;
-    const target = showing ? 1 : 0;
-    this.lyricAmt += (target - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
+    this.lyricAmt += ((showing ? 1 : 0) - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
+    this.presence = { showing, style };
+  }
+
+  private mediaDraw(project: Project, state: StageState, t: number, look: StageLook, lyricLook: StageLook, audio: StageAudioFrame, now: number): MediaDraw | null {
+    const frozen = !!state.overrides?.freeze;
+    if (frozen && this.frozenAt == null) this.frozenAt = t;
+    if (!frozen) this.frozenAt = null;
+    const mt = frozen && this.frozenAt != null ? this.frozenAt : t;
+    // lyric presence for mask-lyrics (computed once per frame in frame())
+    const { showing, style } = this.presence;
 
     // cross-fade only while the song plays continuously through a boundary; a paused stage or a
     // jump (seek, cue, section click) shows the section's media at once
@@ -468,8 +522,25 @@ export class StageEngine {
     const frozen = !!ov?.freeze;
     if (!frozen) this.clock = (this.clock + dt) % 3600;
 
+    // LED 安全模式: settings come with the project (project.output.safety; missing = on)
+    const safety = projectSafety(project);
+    if (safety.on !== this.safety.on) {
+      this.resetLimiter();
+      if (safety.on) this.renderer?.prewarmSafety();
+    }
+    this.safety = safety;
+    const limiting = safety.on && (safety.flashLimit || safety.redProtect);
+    const grid = gridSize(outputAspect(this.output));
+    if (limiting) {
+      if (!this.limiter || this.limiter.cols !== grid.cols || this.limiter.rows !== grid.rows) {
+        this.limiter = new FlashLimiter({ ...grid, flashLimit: safety.flashLimit, redProtect: safety.redProtect, gain: safety.gain });
+        this.pendingAlpha.clear();
+      } else this.limiter.configure({ flashLimit: safety.flashLimit, redProtect: safety.redProtect, gain: safety.gain });
+    }
+    const limiter = limiting ? this.limiter : null;
+
     // a freeze is a true still frame: audio-reactive uniforms hold as well
-    if (!frozen || !this.audio) this.audio = { ...this.mixer.update(project.analysis, state, t, dt) };
+    if (!frozen || !this.audio) this.audio = { ...this.mixer.update(project.analysis, state, t, dt, { safe: safety.on, hold: !!limiter?.damping }) };
     const audio = this.audio;
     if (audio.beat < this.lastBeat - 0.5) this.beatN++;
     this.lastBeat = audio.beat;
@@ -499,6 +570,7 @@ export class StageEngine {
 
     // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
     const lyricLook = lyricLookAt(project, state, t, look);
+    this.updatePresence(project, state, lyricLook, dt);
 
     // scene + band media
     let backend: StageStats["backend"] = "fallback";
@@ -509,22 +581,29 @@ export class StageEngine {
       if (this.blackAmt < 1) {
         let media: MediaDraw | null = null;
         try {
-          media = this.mediaDraw(project, state, t, look, lyricLook, audio, now, dt);
+          media = this.mediaDraw(project, state, t, look, lyricLook, audio, now);
         } catch (e) {
           // a media problem never takes the scene down
           this.errors++;
           if (this.errors <= 3) console.error("[Livelyrics] 素材圖層錯誤：", e);
         }
+        const alpha = limiter ? limiter.alphaFor(dt) : 1;
         const ok = r.render({
           current: this.slotDraw(df.current, audio),
           previous: df.previous ? this.slotDraw(df.previous, audio) : null,
           transition: df.transition,
           clock: this.clock,
           media,
+          safety: safety.on ? { soften: safety.soften, gain: safety.gain, alpha, measure: limiter ? { ...grid, sync: false } : null } : null,
         });
         if (!ok) backend = "lost";
+        else if (limiter) {
+          this.pendingAlpha.set(r.frameSerial, { t: now / 1000, alpha, lyric: this.lyricEstimate(lyricLook, now) });
+          this.observeGrids(limiter, r.takeGrids(), look.sectionIndex);
+        }
       }
     } else if (r?.lost) backend = "lost";
+    this.applyCssCap(safety, r != null && !r.lost && safety.on && r.safetyState() === "failed");
     this.updateFallback(look, backend === "fallback" || backend === "lost");
     this.canvas.style.visibility = backend === "fallback" || backend === "lost" ? "hidden" : "visible";
 
@@ -540,6 +619,7 @@ export class StageEngine {
       visible: ov?.lyricsVisible !== false,
       aspect: outputAspect(this.output),
       safe: this.output.lyricSafe,
+      safety,
     });
 
     // overlays
@@ -560,20 +640,105 @@ export class StageEngine {
     // stats
     this.frames++;
     if (!this.statsAt) this.statsAt = now;
-    if (now - this.statsAt >= 1000) {
-      const fps = (this.frames * 1000) / (now - this.statsAt);
-      this.frames = 0;
-      this.statsAt = now;
+    const damping = !!limiter?.damping;
+    const dampingChanged = damping !== this.lastDamping;
+    this.lastDamping = damping;
+    if (now - this.statsAt >= 1000 || dampingChanged) {
+      if (now - this.statsAt >= 1000) {
+        this.lastFps = (this.frames * 1000) / (now - this.statsAt);
+        this.frames = 0;
+        this.statsAt = now;
+      }
       const [w, h] = r?.size ?? [0, 0];
       this.root.dataset.stageBackend = backend;
-      // diagnostics (e2e): how many media layers the last frame drew
+      // diagnostics (e2e): how many media layers the last frame drew, and the LED-safety state
       this.root.dataset.stageMedia = String(this.mediaLayers);
+      this.root.dataset.safety = safety.on ? String(Math.round(safety.brightness * 100)) : "off";
+      this.root.dataset.limiter = damping ? "damping" : limiter ? "idle" : "off";
+      this.root.dataset.limiterEngaged = String(this.engagedTotal);
+      const st = limiter?.status;
+      const safetyStats: SafetyStats | null = safety.on
+        ? {
+            brightness: safety.brightness,
+            flashLimit: safety.flashLimit,
+            damping,
+            engaged: this.engagedTotal,
+            bySection: { ...this.engagedBySection },
+            transitions: st?.transitions ?? 0,
+            sourceTransitions: st?.sourceTransitions ?? 0,
+            degraded: !!r && !r.lost && r.safetyState() === "failed",
+          }
+        : null;
       try {
-        this.onStats?.({ fps, backend, width: w, height: h, quality: this.quality, scene: look.scene, sectionIndex: look.sectionIndex });
+        this.onStats?.({ fps: this.lastFps, backend, width: w, height: h, quality: this.quality, scene: look.scene, sectionIndex: look.sectionIndex, safety: safetyStats });
       } catch {
         /* consumer errors must not break the stage */
       }
     }
+  }
+
+  /** The lyric layer's estimated share of the luminance grid (the text is DOM, not in the readback). */
+  private lyricEstimate(lyricLook: StageLook, now: number): LyricEstimate | null {
+    if (this.lyricAmt < 0.02) return null;
+    // the measured text box, 5 times a second (reads layout)
+    if (now - this.lyricBoxAt > 200) {
+      this.lyricBoxAt = now;
+      this.lyricBox = this.lyrics.textBounds();
+    }
+    if (!this.lyricBox) return null;
+    return { box: this.lyricBox, rgb: transformRgb(this.color(lyricLook.lyricColor), this.safety), amount: this.lyricAmt * LYRIC_INK };
+  }
+
+  /** Feed completed grid readbacks to the limiter (frames without a readback fold their α in). */
+  private observeGrids(limiter: FlashLimiter, grids: GridReadback[], sectionIndex: number | null) {
+    for (const g of grids) {
+      let keep = 1;
+      let meta: { t: number; alpha: number; lyric: LyricEstimate | null } | null = null;
+      for (const [serial, m] of this.pendingAlpha) {
+        if (serial > g.serial) break;
+        keep *= 1 - m.alpha;
+        meta = m;
+        this.pendingAlpha.delete(serial);
+      }
+      if (!meta || g.cols !== limiter.cols || g.rows !== limiter.rows) continue;
+      const n = g.cols * g.rows;
+      if (!this.gridBuf || this.gridBuf.length !== n * 3) this.gridBuf = new Float32Array(n * 3);
+      const buf = this.gridBuf;
+      // GL rows are bottom-up; the limiter wants the top row first
+      for (let y = 0; y < g.rows; y++) {
+        const src = (g.rows - 1 - y) * g.cols * 4;
+        const dst = y * g.cols * 3;
+        for (let x = 0; x < g.cols; x++) {
+          buf[dst + x * 3] = g.data[src + x * 4] / 255;
+          buf[dst + x * 3 + 1] = g.data[src + x * 4 + 1] / 255;
+          buf[dst + x * 3 + 2] = g.data[src + x * 4 + 2] / 255;
+        }
+      }
+      const step = limiter.observe(meta.t, buf, 1 - keep, meta.lyric);
+      if (step.engaged) {
+        this.engagedTotal++;
+        if (sectionIndex != null) this.engagedBySection[sectionIndex] = (this.engagedBySection[sectionIndex] ?? 0) + 1;
+      }
+    }
+    // readbacks that never came back (context trouble) must not pile up
+    if (this.pendingAlpha.size > 12) {
+      const drop = [...this.pendingAlpha.keys()].slice(0, this.pendingAlpha.size - 12);
+      for (const k of drop) this.pendingAlpha.delete(k);
+    }
+  }
+
+  /**
+   * Layers outside the GL pass: the CSS fallback background, the test pattern, and the scene canvas
+   * itself when the safety shaders failed to compile, get the brightness cap as a CSS filter.
+   */
+  private applyCssCap(safety: ActiveSafety, glFailed: boolean) {
+    const key = `${safety.on ? safety.gain.toFixed(4) : "off"}|${glFailed}`;
+    if (key === this.cssCapKey) return;
+    this.cssCapKey = key;
+    const f = safety.on && safety.gain < 0.999 ? `brightness(${safety.gain.toFixed(4)})` : "";
+    this.fallback.style.filter = f;
+    this.testPattern.root.style.filter = f;
+    this.canvas.style.filter = glFailed ? f : "";
   }
 
   destroy() {

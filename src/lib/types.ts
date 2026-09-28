@@ -186,6 +186,27 @@ export interface LyricSafeArea {
   left: number;
 }
 
+/** LED 安全模式 brightness presets (src/lib/stage/safety.ts SAFETY_PRESETS), or "custom". */
+export type SafetyPresetId = "indoor" | "led" | "outdoor" | "custom";
+
+/**
+ * LED 安全模式 (phase 3): the output limiter settings, stored with the canvas (per song, and per show
+ * for the venue). Old files without it are normalized to safe mode on with the LED 牆 preset.
+ */
+export interface OutputSafety {
+  /** master switch: off = no brightness cap, no flash limiter, no source-level softening */
+  enabled: boolean;
+  preset: SafetyPresetId;
+  /** maximum output luminance as a fraction of the display's full white (linear light), 0.2..1 */
+  brightness: number;
+  /** WCAG 2.3.1 general flash limiter (≤ 3 flashes in any second) */
+  flashLimit: boolean;
+  /** saturated-red flash protection (every red transition counts) */
+  redProtect: boolean;
+  /** 0..1 highlight / contrast softening (a shoulder on the brightest values) */
+  soften: number;
+}
+
 /** The pixel canvas the show is designed for (projector, LED wall, portrait screen). */
 export interface ProjectOutput {
   width: number;
@@ -193,6 +214,8 @@ export interface ProjectOutput {
   /** preset id from OUTPUT_PRESETS (src/lib/output.ts), or "custom" */
   preset: string;
   lyricSafe: LyricSafeArea;
+  /** LED 安全模式 (phase 3) */
+  safety: OutputSafety;
 }
 
 export interface Project {

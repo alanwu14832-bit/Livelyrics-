@@ -2,8 +2,9 @@
 // designer's operator cues, all relative to the first frame of the file) and a README text with
 // the delivery spec, so a festival's house VJ can line the clips up on their media server. Pure.
 
+import { safetySummary } from "../stage/safety";
 import { lineSpan } from "../timeline";
-import type { Project } from "../types";
+import type { OutputSafety, Project } from "../types";
 import { type FrameRate, frameAtOrAfter, frameCount, seconds3, timecode } from "./frames";
 import { type ExportRange, songDuration } from "./settings";
 
@@ -93,9 +94,11 @@ export const CUE_HEADER = ["type", "index", "start_s", "end_s", "duration_s", "t
  * The cue sheet as CSV (UTF-8 with BOM so spreadsheet apps read the Chinese text correctly,
  * CRLF line ends). Times are seconds from the first frame of the exported file.
  */
-export function buildCueSheet(project: Project, range: ExportRange, rate: FrameRate): string {
+export function buildCueSheet(project: Project, range: ExportRange, rate: FrameRate, safety?: OutputSafety | null): string {
   const rows = cueRows(project, range, rate);
   const lines = [CUE_HEADER.join(",")];
+  // LED 安全模式 (phase 3): the settings the clips were rendered with, as the first row
+  if (safety) lines.push(["note", 1, seconds3(0), "", "", timecode(0, rate), 0, seconds3(range.start), "LED 安全模式", safetySummary(safety), "safety"].map(csvField).join(","));
   for (const r of rows) {
     lines.push(
       [
@@ -138,6 +141,10 @@ export interface ReadmeInput {
   cueSheetName: string;
   /** ISO time */
   createdAt: string;
+  /** LED 安全模式 the clips were rendered with (phase 3) */
+  safety?: OutputSafety | null;
+  /** how often the flash limiter damped during the export */
+  limiterEngaged?: number;
 }
 
 /** A plain-text delivery note (Traditional Chinese, with an English summary for international crews). */
@@ -161,6 +168,13 @@ export function buildReadme(input: ReadmeInput): string {
   out.push(`- 長度：${seconds3(length)} 秒，共 ${frames} 格（${timecode(0, rate)} 到 ${lastTc}）`);
   out.push(`- 範圍：${whole ? "整首歌" : `歌曲時間 ${seconds3(range.start)} 到 ${seconds3(range.end)} 秒`}；影片第一格 = 歌曲時間 ${seconds3(range.start)} 秒`);
   out.push("- 色彩：Rec.709（sRGB 原色），8 位元 4:2:0，全幅畫面");
+  if (input.safety) {
+    out.push(`- ${safetySummary(input.safety)}`);
+    if (input.safety.enabled) {
+      out.push(`  完整與背景版本已套用亮度上限與閃爍限制${input.limiterEngaged ? `（本次匯出抑制閃爍 ${input.limiterEngaged} 次）` : ""}；歌詞層（黑底白字 matte）是鍵控訊號，不降亮度。`);
+      out.push("  這能降低風險並依 WCAG 2.3.1 門檻限制閃爍，但不是正式的光敏性癲癇（PSE）檢測；電視播出請另做 Harding 類分析。");
+    } else out.push("  注意：這份影片沒有亮度與閃爍保護，LED 牆播放前請確認不會對觀眾造成危險。");
+  }
   out.push("");
   out.push("檔案");
   for (const f of files) {
@@ -181,6 +195,12 @@ export function buildReadme(input: ReadmeInput): string {
   out.push(`- Frame 0 = song time ${seconds3(range.start)} s. All clips are frame-aligned; start them together.`);
   out.push(`- full = scene + band media + lyrics; bg = no lyrics; lyrics-matte = white text on black (use as luma matte or add/screen)${files.some((f) => f.alpha) ? "; lyrics-alpha = VP9 WebM with alpha" : ""}.`);
   out.push(`- Cue sheet: ${input.cueSheetName} (CSV, UTF-8, seconds from the first frame).`);
+  if (input.safety)
+    out.push(
+      input.safety.enabled
+        ? `- LED safe mode ON: peak brightness ${Math.round(input.safety.brightness * 100)} %, flash limiter ${input.safety.flashLimit ? "on (<= 3 flashes/s, WCAG 2.3.1)" : "off"}, red-flash protection ${input.safety.redProtect ? "on" : "off"}. Not a certified PSE test.`
+        : "- LED safe mode OFF: no brightness cap or flash limiting was applied.",
+    );
   out.push("");
   out.push(`輸出時間：${input.createdAt}`);
   return out.join("\r\n") + "\r\n";

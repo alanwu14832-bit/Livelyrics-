@@ -27,6 +27,7 @@ import { lineElapsed, prepareLine, type PreparedLine } from "@/lib/stage/lyrics/
 import { unitProgress } from "@/lib/stage/lyrics/timing";
 import type { StageState } from "@/lib/stage/protocol";
 import { resolveLineDesign, type StageLook } from "@/lib/stage/resolve";
+import { transformHex, type ActiveSafety } from "@/lib/stage/safety";
 import type { StageTypography } from "@/lib/stage/typography";
 import { sectionIndexForLine } from "@/lib/timeline";
 import styles from "./lyrics.module.css";
@@ -50,6 +51,12 @@ export interface LyricFrame {
   aspect: number;
   /** Project.output.lyricSafe */
   safe: LyricSafeArea;
+  /**
+   * LED 安全模式: every lyric colour (text, fill, accent, glow, shadow, scrim) goes through the
+   * safety transform (soften + brightness cap, the same as the GL pass), and impact chunks switch
+   * slower without the beat scale. Omitted = off.
+   */
+  safety?: ActiveSafety;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +244,8 @@ interface ViewFrame {
   t: number;
   nowEpoch: number;
   pulse: number;
+  /** LED 安全模式: soften large dark / bright flips */
+  safe: boolean;
 }
 
 const DURATIONS: Record<LyricStyleId, [number, number]> = {
@@ -519,16 +528,21 @@ class ImpactView extends LyricView {
     }
     const x = this.exit(f.now);
     const groupFade = 1 - easeInOut(x);
-    const beat = 1 + 0.03 * Math.min(1, f.pulse);
+    // LED 安全模式: huge words fill a large area, so a chunk swap is a slower cross-fade without the
+    // beat scale (never a hard dark / bright flip)
+    const beat = f.safe ? 1 : 1 + 0.03 * Math.min(1, f.pulse);
+    const showMs = f.safe ? 320 : 160;
+    const hideMs = f.safe ? 300 : 150;
+    const overshoot = f.safe ? 0.1 : 0.28;
     for (let i = 0; i < this.blocks.length; i++) {
       const b = this.blocks[i];
       if (i === this.active) {
-        const p = clamp01((f.now - this.shownAt[i]) / 160);
-        const s = (1.28 - 0.28 * easeOutCubic(p)) * beat;
-        css(b, "opacity", f3(clamp01(p * 2) * groupFade));
+        const p = clamp01((f.now - this.shownAt[i]) / showMs);
+        const s = (1 + overshoot - overshoot * easeOutCubic(p)) * beat;
+        css(b, "opacity", f3(clamp01(f.safe ? easeOutCubic(p) : p * 2) * groupFade));
         css(b, "transform", `scale(${f3(s + easeInOut(x) * 0.06)})`);
       } else if (this.hiddenAt[i] >= 0) {
-        const p = clamp01((f.now - this.hiddenAt[i]) / 150);
+        const p = clamp01((f.now - this.hiddenAt[i]) / hideMs);
         css(b, "opacity", f3((1 - p) * groupFade));
         css(b, "transform", `scale(${f3(1 - 0.1 * easeOutCubic(p))})`);
         if (p >= 1) this.hiddenAt[i] = -1;
@@ -711,6 +725,7 @@ export class LyricLayer {
   private familyKey = "";
   private cache = new Map<string, PreparedLine | null>();
   private failed = false;
+  private scrimBg = "#000000";
 
   constructor(host: HTMLElement) {
     this.root = el("div", styles.layer);
@@ -766,22 +781,28 @@ export class LyricLayer {
 
   private applyRootStyles(f: LyricFrame) {
     const { look, typography } = f;
-    const ck = `${look.lyricColor}|${look.accentColor}|${look.colorway[0]}|${look.scene}`;
+    const sf = f.safety;
+    const ck = `${look.lyricColor}|${look.accentColor}|${look.colorway[0]}|${look.scene}|${sf?.on ? `${sf.gain}|${sf.soften}` : "off"}`;
     if (ck !== this.colorKey) {
       this.colorKey = ck;
+      // LED 安全模式: the lyric layer gets the same soften + cap as the GL pass (exact per colour)
+      const T = (hex: string) => (sf?.on ? transformHex(hex, sf) : hex);
       const r = this.root.style;
       const darkText = lightness(look.lyricColor) < 0.45;
-      const shadowBase = darkText ? "#ffffff" : shade(look.colorway[0], 0.35);
-      r.setProperty("--ly-color", look.lyricColor);
-      r.setProperty("--ly-fill", look.lyricColor);
-      r.setProperty("--ly-accent", look.accentColor);
-      r.setProperty("--ly-dim", rgba(look.lyricColor, 0.5));
-      r.setProperty("--ly-accent-dim", rgba(look.accentColor, 0.55));
-      r.setProperty("--ly-glow", rgba(look.accentColor, 0.55));
+      const shadowBase = T(darkText ? "#ffffff" : shade(look.colorway[0], 0.35));
+      const text = T(look.lyricColor);
+      const accent = T(look.accentColor);
+      r.setProperty("--ly-color", text);
+      r.setProperty("--ly-fill", text);
+      r.setProperty("--ly-accent", accent);
+      r.setProperty("--ly-dim", rgba(text, 0.5));
+      r.setProperty("--ly-accent-dim", rgba(accent, 0.55));
+      r.setProperty("--ly-glow", rgba(accent, 0.55));
       r.setProperty("--ly-shadow", rgba(shadowBase, darkText ? 0.5 : 0.62));
       r.setProperty("--ly-shadow-soft", rgba(shadowBase, darkText ? 0.3 : 0.38));
-      this.current?.setScrim(look.colorway[0], look.scene);
-      for (const v of this.leaving) v.setScrim(look.colorway[0], look.scene);
+      this.scrimBg = T(look.colorway[0]);
+      this.current?.setScrim(this.scrimBg, look.scene);
+      for (const v of this.leaving) v.setScrim(this.scrimBg, look.scene);
     }
     const sk = f3(look.lyricScale);
     if (sk !== this.scaleKey) {
@@ -862,7 +883,7 @@ export class LyricLayer {
     }
     if (this.current instanceof StackView && valid != null) this.current.setIndex(valid);
 
-    const vf: ViewFrame = { now, t: f.t, nowEpoch: f.nowEpoch, pulse: f.pulse };
+    const vf: ViewFrame = { now, t: f.t, nowEpoch: f.nowEpoch, pulse: f.pulse, safe: f.safety?.on === true };
     for (let i = this.leaving.length - 1; i >= 0; i--) {
       const v = this.leaving[i];
       if (v.isDone(now)) {
@@ -922,7 +943,7 @@ export class LyricLayer {
         view = new LineView(key, spec, this.root, f.now, line, startedAt, next);
       }
     }
-    view.setScrim(look.colorway[0], look.scene);
+    view.setScrim(f.safety?.on ? this.scrimBg : look.colorway[0], look.scene);
     return view;
   }
 

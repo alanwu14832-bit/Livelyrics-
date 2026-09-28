@@ -15,6 +15,17 @@ import type { RGB } from "../color";
 import type { ActiveTransitionKind } from "../director";
 import { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS } from "../scenes/composite";
 import { MEDIA_FRAGMENT, MEDIA_UNIFORMS } from "../scenes/media";
+import {
+  DOWNSAMPLE_FACTOR,
+  SAFETY_DOWN1_FRAGMENT,
+  SAFETY_DOWN1_UNIFORMS,
+  SAFETY_DOWN2_FRAGMENT,
+  SAFETY_DOWN2_UNIFORMS,
+  SAFETY_LOWPASS_FRAGMENT,
+  SAFETY_LOWPASS_UNIFORMS,
+  SAFETY_PRESENT_FRAGMENT,
+  SAFETY_PRESENT_UNIFORMS,
+} from "../scenes/safety";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
 
@@ -82,6 +93,27 @@ export interface MediaDraw {
   lyricAmount: number;
 }
 
+/** LED 安全模式 (phase 3): the final safety pass of the frame (see src/lib/stage/scenes/safety.ts). */
+export interface SafetyDraw {
+  /** 0..1 highlight soften */
+  soften: number;
+  /** encoded brightness multiplier (the cap) */
+  gain: number;
+  /** temporal low-pass factor for this frame (1 = pass-through); null = decide after the readback (composeSafety) */
+  alpha: number | null;
+  /** read back the luminance grid of this frame (cols × rows) */
+  measure: { cols: number; rows: number; sync: boolean } | null;
+}
+
+/** A luminance grid read back from the GPU: RGBA8, bottom row first (GL order). */
+export interface GridReadback {
+  /** the render serial it belongs to */
+  serial: number;
+  cols: number;
+  rows: number;
+  data: Uint8Array;
+}
+
 export interface RenderRequest {
   current: SceneDraw;
   previous: SceneDraw | null;
@@ -89,7 +121,21 @@ export interface RenderRequest {
   clock: number;
   /** band media over the scene (null / no layers = scene only) */
   media?: MediaDraw | null;
+  /** LED 安全模式: soften, flash low-pass and brightness cap as a final pass (null = off) */
+  safety?: SafetyDraw | null;
 }
+
+interface PendingRead {
+  buf: WebGLBuffer;
+  sync: WebGLSync | null;
+  serial: number;
+  cols: number;
+  rows: number;
+  bytes: number;
+  busy: boolean;
+}
+
+const SAFETY_PROGRAMS = ["safety-lowpass", "safety-present", "safety-down1", "safety-down2"] as const;
 
 interface MediaTexture {
   tex: WebGLTexture;
@@ -141,7 +187,18 @@ export class StageRenderer {
   private quad: WebGLBuffer | null = null;
   private motifTex: WebGLTexture | null = null;
   private motifSource: TexImageSource | null = null;
-  private targets: [Target | null, Target | null, Target | null] = [null, null, null];
+  /** 0, 1: transition scenes; 2: scene under the media; 3: safety source S; 4, 5: safety low-pass ping-pong */
+  private targets: Array<Target | null> = [null, null, null, null, null, null];
+  /** safety grid targets (their own small sizes) */
+  private gridTargets: { mid: Target | null; grid: Target | null } = { mid: null, grid: null };
+  private feedbackIndex: 4 | 5 = 4;
+  private feedbackValid = false;
+  private serial = 0;
+  private reads: PendingRead[] = [];
+  private completed: GridReadback[] = [];
+  private pendingCompose: { soften: number; gain: number } | null = null;
+  /** the last synchronous grid readback (offline export) */
+  lastGrid: GridReadback | null = null;
   private mediaTex = new Map<string, MediaTexture>();
   private width = 1;
   private height = 1;
@@ -215,7 +272,11 @@ export class StageRenderer {
     e.preventDefault();
     this.lost = true;
     this.programs.clear();
-    this.targets = [null, null, null];
+    this.targets = [null, null, null, null, null, null];
+    this.gridTargets = { mid: null, grid: null };
+    this.reads = [];
+    this.completed = [];
+    this.feedbackValid = false;
     this.mediaTex.clear();
     this.quad = null;
     this.motifTex = null;
@@ -324,6 +385,65 @@ export class StageRenderer {
     return this.entryFor("media", () => this.compile("media", buildFragmentWithHeader(MEDIA_FRAGMENT, this.gl2), MEDIA_UNIFORMS));
   }
 
+  private safetyProgram(key: (typeof SAFETY_PROGRAMS)[number]): ProgramEntry | null {
+    const src: Record<(typeof SAFETY_PROGRAMS)[number], [string, readonly string[]]> = {
+      "safety-lowpass": [SAFETY_LOWPASS_FRAGMENT, SAFETY_LOWPASS_UNIFORMS],
+      "safety-present": [SAFETY_PRESENT_FRAGMENT, SAFETY_PRESENT_UNIFORMS],
+      "safety-down1": [SAFETY_DOWN1_FRAGMENT, SAFETY_DOWN1_UNIFORMS],
+      "safety-down2": [SAFETY_DOWN2_FRAGMENT, SAFETY_DOWN2_UNIFORMS],
+    };
+    const [frag, names] = src[key];
+    return this.entryFor(key, () => this.compile(key, buildFragmentWithHeader(frag, this.gl2), names));
+  }
+
+  /** Compile a queued program by key. */
+  private compileKey(key: string) {
+    if (key === "composite") this.compositeProgram();
+    else if (key === "media") this.mediaProgram();
+    else if ((SAFETY_PROGRAMS as readonly string[]).includes(key)) this.safetyProgram(key as (typeof SAFETY_PROGRAMS)[number]);
+    else this.sceneProgram(key.slice(6) as SceneId);
+  }
+
+  /** Queue the LED-safety passes ahead of everything (safe mode is on by default). */
+  prewarmSafety() {
+    for (const key of [...SAFETY_PROGRAMS].reverse()) {
+      this.warm.add(key);
+      if (!this.queue.includes(key) && !this.programs.has(key)) this.queue.unshift(key);
+    }
+  }
+
+  /**
+   * The safety passes: "ready", "pending" (still compiling: the frame must not go out unsafe) or
+   * "failed" (the caller falls back to a CSS brightness cap without flash limiting).
+   */
+  safetyState(): "ready" | "pending" | "failed" {
+    let pending = false;
+    for (const key of SAFETY_PROGRAMS) {
+      const e = this.programs.get(key);
+      if (e?.state === "failed") return "failed";
+      if (!e || e.state !== "ready") pending = true;
+    }
+    return pending ? "pending" : "ready";
+  }
+
+  /** Forget the low-pass history (another project, safe mode just turned on, a jump in the export). */
+  resetSafetyFeedback() {
+    this.feedbackValid = false;
+  }
+
+  /** Grid readbacks that completed since the last call (WebGL2 async path), oldest first. */
+  takeGrids(): GridReadback[] {
+    this.pollReads();
+    const out = this.completed;
+    this.completed = [];
+    return out;
+  }
+
+  /** Serial of the last rendered frame (matches GridReadback.serial). */
+  get frameSerial(): number {
+    return this.serial;
+  }
+
   /** Status of a scene program (for diagnostics / the stage lab). */
   sceneState(id: SceneId): "none" | "pending" | "ready" | "failed" {
     return this.programs.get(`scene:${id}`)?.state ?? "none";
@@ -356,17 +476,16 @@ export class StageRenderer {
         while (this.queue.length) {
           const key = this.queue.shift()!;
           if (this.programs.has(key)) continue;
-          if (key === "composite") this.compositeProgram();
-          else if (key === "media") this.mediaProgram();
-          else this.sceneProgram(key.slice(6) as SceneId);
+          this.compileKey(key);
         }
         for (const [key, entry] of this.programs) if (entry.state === "pending") this.finalize(key, entry);
       } else if (this.queue.length) {
         const key = this.queue.shift()!;
-        if (!this.programs.has(key)) {
-          if (key === "composite") this.compositeProgram();
-          else if (key === "media") this.mediaProgram();
-          else this.sceneProgram(key.slice(6) as SceneId);
+        if (!this.programs.has(key)) this.compileKey(key);
+        // the safety passes are tiny: compile them together so safe output starts sooner
+        while (this.queue.length && (SAFETY_PROGRAMS as readonly string[]).includes(this.queue[0]) && (SAFETY_PROGRAMS as readonly string[]).includes(key)) {
+          const k = this.queue.shift()!;
+          if (!this.programs.has(k)) this.compileKey(k);
         }
       }
     } catch (e) {
@@ -380,9 +499,10 @@ export class StageRenderer {
    * frame falls back to a plain background while a shader compiles. Resolves with the ids that
    * failed (they render the gradient scene, as live).
    */
-  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000): Promise<string[]> {
+  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000, safety = false): Promise<string[]> {
     this.prewarm(ids);
     if (media) this.prewarmMedia();
+    if (safety) this.prewarmSafety();
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (this.lost || this.disposed) return [...this.warm];
@@ -494,17 +614,24 @@ export class StageRenderer {
     return t;
   }
 
-  private target(i: 0 | 1 | 2): Target | null {
+  private target(i: 0 | 1 | 2 | 3 | 4 | 5): Target | null {
     const existing = this.targets[i];
     if (existing && existing.w === this.width && existing.h === this.height) return existing;
     if (existing) this.deleteTarget(existing);
+    if (i === 4 || i === 5) this.feedbackValid = false;
+    const t = this.makeTarget(this.width, this.height);
+    if (t) this.targets[i] = t;
+    return t;
+  }
+
+  private makeTarget(width: number, height: number): Target | null {
     const gl = this.gl;
     const tex = gl.createTexture();
     const fbo = gl.createFramebuffer();
     if (!tex || !fbo) return null;
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.width, this.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -514,13 +641,22 @@ export class StageRenderer {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const t: Target = { fbo, tex, w: this.width, h: this.height };
+    const t: Target = { fbo, tex, w: width, h: height };
     if (!ok) {
       this.deleteTarget(t);
       this.report("fbo", "無法建立轉場用的影格緩衝區，將改用直接切換。");
       return null;
     }
-    this.targets[i] = t;
+    return t;
+  }
+
+  /** The safety grid targets at their sizes (reallocated when the grid changes). */
+  private gridTarget(which: "mid" | "grid", w: number, h: number): Target | null {
+    const existing = this.gridTargets[which];
+    if (existing && existing.w === w && existing.h === h) return existing;
+    if (existing) this.deleteTarget(existing);
+    const t = this.makeTarget(w, h);
+    this.gridTargets[which] = t;
     return t;
   }
 
@@ -532,7 +668,8 @@ export class StageRenderer {
 
   private freeTargets() {
     for (const t of this.targets) if (t) this.deleteTarget(t);
-    this.targets = [null, null, null];
+    this.targets = [null, null, null, null, null, null];
+    this.feedbackValid = false;
   }
 
   // -------------------------------------------------------------------------
@@ -602,18 +739,235 @@ export class StageRenderer {
     const gl = this.gl;
     try {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
-      const layers = (req.media?.layers ?? []).filter((l) => l.weight > 0.001 && l.source).slice(0, 2);
-      const mediaProg = layers.length ? this.mediaProgram() : null;
-      const sceneTarget = mediaProg?.program ? this.target(2) : null;
-      // without the media pass (no layers, still compiling, no FBO) the scene goes straight to the screen
-      const out = sceneTarget;
-      this.drawSceneLayer(req, out);
-      if (out && mediaProg?.program) this.drawMedia(mediaProg, out, layers, req.media!);
+      this.serial++;
+      this.pendingCompose = null;
+      const safety = req.safety ?? null;
+      // LED 安全模式: everything renders into S first; until the safety passes are compiled the
+      // frame is black rather than unsafe
+      let dest: Target | null = null;
+      if (safety) {
+        const state = this.safetyState();
+        if (state === "pending") {
+          for (const key of SAFETY_PROGRAMS) this.safetyProgram(key);
+        }
+        if (this.safetyState() !== "ready") {
+          if (this.safetyState() === "failed") return this.renderLayers(req, null);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, this.width, this.height);
+          gl.clearColor(0, 0, 0, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          return true;
+        }
+        dest = this.target(3);
+        if (!dest) return this.renderLayers(req, null);
+      }
+      this.renderLayers(req, dest);
+      if (safety && dest) {
+        if (safety.measure) this.measureGrid(dest, safety.soften, safety.measure.cols, safety.measure.rows, safety.measure.sync);
+        if (safety.alpha == null) this.pendingCompose = { soften: safety.soften, gain: safety.gain };
+        else this.compose(dest, safety.alpha, safety.soften, safety.gain);
+      }
       return true;
     } catch (e) {
       this.report("render", `繪製失敗：${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
+  }
+
+  /** Scene (+ transition) and media into `dest` (null = the screen). */
+  private renderLayers(req: RenderRequest, dest: Target | null): boolean {
+    const layers = (req.media?.layers ?? []).filter((l) => l.weight > 0.001 && l.source).slice(0, 2);
+    const mediaProg = layers.length ? this.mediaProgram() : null;
+    const sceneTarget = mediaProg?.program ? this.target(2) : null;
+    // without the media pass (no layers, still compiling, no FBO) the scene goes straight to dest
+    if (sceneTarget && mediaProg?.program) {
+      this.drawSceneLayer(req, sceneTarget);
+      this.drawMedia(mediaProg, sceneTarget, layers, req.media!, dest);
+    } else this.drawSceneLayer(req, dest);
+    return true;
+  }
+
+  /**
+   * Finish a frame rendered with `safety.alpha = null` (the offline export: α is decided after the
+   * synchronous grid readback of the same frame).
+   */
+  composeSafety(alpha: number): boolean {
+    const p = this.pendingCompose;
+    const src = this.targets[3];
+    this.pendingCompose = null;
+    if (!p || !src || this.lost) return false;
+    try {
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quad);
+      this.compose(src, alpha, p.soften, p.gain);
+      return true;
+    } catch (e) {
+      this.report("render", `繪製失敗：${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  /** Low-pass S into the feedback target, then present it to the screen with the brightness cap. */
+  private compose(src: Target, alpha: number, soften: number, gain: number) {
+    const gl = this.gl;
+    const lowpass = this.safetyProgram("safety-lowpass");
+    const present = this.safetyProgram("safety-present");
+    if (!lowpass?.program || !present?.program) return;
+    const prevIndex = this.feedbackIndex;
+    const nextIndex: 4 | 5 = prevIndex === 4 ? 5 : 4;
+    const prev = this.target(prevIndex);
+    const next = this.target(nextIndex);
+    if (!prev || !next) return;
+    const first = !this.feedbackValid;
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, next.fbo);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(lowpass.program);
+    const L = lowpass.locations;
+    const set1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1f(l, v);
+    };
+    const res = L.get("uRes");
+    if (res) gl.uniform2f(res, this.width, this.height);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, prev.tex);
+    const us = L.get("uSrc");
+    if (us) gl.uniform1i(us, 1);
+    const up = L.get("uPrev");
+    if (up) gl.uniform1i(up, 2);
+    set1("uAlpha", Number.isFinite(alpha) ? alpha : 1);
+    set1("uSoften", soften);
+    set1("uFirst", first ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(present.program);
+    const P = present.locations;
+    const pr = P.get("uRes");
+    if (pr) gl.uniform2f(pr, this.width, this.height);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, next.tex);
+    const ut = P.get("uTex");
+    if (ut) gl.uniform1i(ut, 1);
+    const ug = P.get("uGain");
+    if (ug) gl.uniform1f(ug, gain);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    this.feedbackIndex = nextIndex;
+    this.feedbackValid = true;
+  }
+
+  /** Downsample S to the luminance grid and read it back (sync, or through a PBO + fence). */
+  private measureGrid(src: Target, soften: number, cols: number, rows: number, sync: boolean) {
+    const gl = this.gl;
+    const down1 = this.safetyProgram("safety-down1");
+    const down2 = this.safetyProgram("safety-down2");
+    if (!down1?.program || !down2?.program) return;
+    const mw = cols * DOWNSAMPLE_FACTOR;
+    const mh = rows * DOWNSAMPLE_FACTOR;
+    const mid = this.gridTarget("mid", mw, mh);
+    const grid = this.gridTarget("grid", cols, rows);
+    if (!mid || !grid) return;
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, mid.fbo);
+    gl.viewport(0, 0, mw, mh);
+    gl.useProgram(down1.program);
+    let L = down1.locations;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    let l = L.get("uSrc");
+    if (l) gl.uniform1i(l, 1);
+    l = L.get("uSrcRes");
+    if (l) gl.uniform2f(l, src.w, src.h);
+    l = L.get("uDst");
+    if (l) gl.uniform2f(l, mw, mh);
+    l = L.get("uSoften");
+    if (l) gl.uniform1f(l, soften);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, grid.fbo);
+    gl.viewport(0, 0, cols, rows);
+    gl.useProgram(down2.program);
+    L = down2.locations;
+    gl.bindTexture(gl.TEXTURE_2D, mid.tex);
+    l = L.get("uSrc");
+    if (l) gl.uniform1i(l, 1);
+    l = L.get("uSrcRes");
+    if (l) gl.uniform2f(l, mw, mh);
+    l = L.get("uDst");
+    if (l) gl.uniform2f(l, cols, rows);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+
+    const bytes = cols * rows * 4;
+    const gl2 = this.gl2 ? (gl as WebGL2RenderingContext) : null;
+    if (sync || !gl2) {
+      // WebGL1 / the offline export: a synchronous read of the tiny target (it waits for the GPU)
+      const data = new Uint8Array(bytes);
+      gl.readPixels(0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const g: GridReadback = { serial: this.serial, cols, rows, data };
+      this.lastGrid = g;
+      if (!sync) this.completed.push(g);
+      return;
+    }
+    // WebGL2: into a pixel-pack buffer, fenced; collected a frame or two later (no GPU stall)
+    let slot = this.reads.find((r) => !r.busy);
+    if (!slot) {
+      if (this.reads.length >= 3) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return; // all three in flight: skip this frame's measurement
+      }
+      const buf = gl2.createBuffer();
+      if (!buf) return;
+      slot = { buf, sync: null, serial: 0, cols, rows, bytes: 0, busy: false };
+      this.reads.push(slot);
+    }
+    gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, slot.buf);
+    if (slot.bytes !== bytes) {
+      gl2.bufferData(gl2.PIXEL_PACK_BUFFER, bytes, gl2.STREAM_READ);
+      slot.bytes = bytes;
+    }
+    gl2.readPixels(0, 0, cols, rows, gl2.RGBA, gl2.UNSIGNED_BYTE, 0);
+    gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    slot.sync = gl2.fenceSync(gl2.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    slot.serial = this.serial;
+    slot.cols = cols;
+    slot.rows = rows;
+    slot.busy = true;
+  }
+
+  private pollReads() {
+    if (!this.gl2 || this.lost || !this.reads.length) return;
+    const gl2 = this.gl as WebGL2RenderingContext;
+    const busy = this.reads.filter((r) => r.busy).sort((a, b) => a.serial - b.serial);
+    for (const r of busy) {
+      if (!r.sync) {
+        r.busy = false;
+        continue;
+      }
+      const status = gl2.getSyncParameter(r.sync, gl2.SYNC_STATUS);
+      if (status !== gl2.SIGNALED) break; // keep the order: later reads wait for this one
+      const data = new Uint8Array(r.cols * r.rows * 4);
+      gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, r.buf);
+      gl2.getBufferSubData(gl2.PIXEL_PACK_BUFFER, 0, data);
+      gl2.bindBuffer(gl2.PIXEL_PACK_BUFFER, null);
+      gl2.deleteSync(r.sync);
+      r.sync = null;
+      r.busy = false;
+      this.completed.push({ serial: r.serial, cols: r.cols, rows: r.rows, data });
+    }
+    if (this.completed.length > 8) this.completed.splice(0, this.completed.length - 8);
   }
 
   /** The scene (with its section transition) into `out` (null = the screen). */
@@ -662,11 +1016,11 @@ export class StageRenderer {
     gl.activeTexture(gl.TEXTURE0);
   }
 
-  private drawMedia(entry: ProgramEntry, scene: Target, layers: MediaLayerDraw[], media: MediaDraw) {
+  private drawMedia(entry: ProgramEntry, scene: Target, layers: MediaLayerDraw[], media: MediaDraw, dest: Target | null = null) {
     const gl = this.gl;
     const texA = layers[0] ? this.mediaTexture(layers[0], 4) : null;
     const texB = layers[1] ? this.mediaTexture(layers[1], 5) : null;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dest ? dest.fbo : null);
     gl.viewport(0, 0, this.width, this.height);
     gl.useProgram(entry.program);
     const L = entry.locations;
@@ -743,6 +1097,12 @@ export class StageRenderer {
           if (e.fs) gl.deleteShader(e.fs);
         }
         this.freeTargets();
+        for (const t of Object.values(this.gridTargets)) if (t) this.deleteTarget(t);
+        for (const r of this.reads) {
+          if (r.sync) (gl as WebGL2RenderingContext).deleteSync(r.sync);
+          gl.deleteBuffer(r.buf);
+        }
+        this.reads = [];
         for (const t of this.mediaTex.values()) gl.deleteTexture(t.tex);
         if (this.quad) gl.deleteBuffer(this.quad);
         if (this.motifTex) gl.deleteTexture(this.motifTex);

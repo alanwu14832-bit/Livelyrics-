@@ -5,6 +5,7 @@
 import { beatPhaseAt, envelopeAt } from "../timeline";
 import type { AudioAnalysis } from "../types";
 import type { StageState } from "./protocol";
+import { PulseGate } from "./safety";
 
 export interface StageAudioFrame {
   /** 0..1 loudness (analysis energy blended with live level) */
@@ -76,12 +77,23 @@ export function rawFeatures(analysis: AudioAnalysis | null, state: StageState, t
   };
 }
 
+export interface MixerOptions {
+  /**
+   * LED 安全模式: slower attacks (no instant spikes), the beat pulse capped at 1 and rate-limited to
+   * ≤ 3 rises a second (PulseGate).
+   */
+  safe?: boolean;
+  /** the flash limiter is damping: hold the pulse down */
+  hold?: boolean;
+}
+
 export class AudioFeatureMixer {
   private s: StageAudioFrame = { energy: 0.3, level: 0, bass: 0, onset: 0, brightness: 0.5, beat: 0, pulse: 0 };
   private playing = 0;
   private primed = false;
+  private gate = new PulseGate();
 
-  update(analysis: AudioAnalysis | null, state: StageState, t: number, dt: number): StageAudioFrame {
+  update(analysis: AudioAnalysis | null, state: StageState, t: number, dt: number, opts: MixerOptions = {}): StageAudioFrame {
     const raw = rawFeatures(analysis, state, t);
     if (!this.primed) {
       this.primed = true;
@@ -90,15 +102,20 @@ export class AudioFeatureMixer {
     // while paused keep a little of the moment's character but stop pumping
     this.playing = follow(this.playing, state.playing ? 1 : 0.3, dt, 0.08, 0.35);
     const s = this.s;
+    const safe = opts.safe === true;
     s.energy = follow(s.energy, raw.energy, dt, 0.12, 0.6);
-    s.level = follow(s.level, raw.level, dt, 0.03, 0.25);
-    s.bass = follow(s.bass, raw.bass, dt, 0.025, 0.22);
-    s.onset = follow(s.onset, raw.onset, dt, 0.01, 0.16);
+    s.level = follow(s.level, raw.level, dt, safe ? 0.08 : 0.03, 0.25);
+    s.bass = follow(s.bass, raw.bass, dt, safe ? 0.06 : 0.025, 0.22);
+    s.onset = follow(s.onset, raw.onset, dt, safe ? 0.05 : 0.01, 0.16);
     s.brightness = follow(s.brightness, raw.brightness, dt, 0.25, 0.6);
     s.beat = raw.beat;
     const punch = Math.pow(1 - raw.beat, 4);
     const target = (punch * (0.3 + 0.7 * s.energy) + s.onset * 0.45 + s.bass * 0.25) * this.playing;
-    s.pulse = follow(s.pulse, Math.min(1.5, target), dt, 0.012, 0.09);
+    if (safe) {
+      // a pulse, never a strobe: capped, softer edges, at most SAFE_PULSE_HZ rises a second
+      const gated = this.gate.gate(Math.min(1, target), s.pulse, dt, opts.hold === true);
+      s.pulse = follow(s.pulse, gated, dt, 0.04, 0.16);
+    } else s.pulse = follow(s.pulse, Math.min(1.5, target), dt, 0.012, 0.09);
     return s;
   }
 }

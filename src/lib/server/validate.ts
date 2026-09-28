@@ -247,11 +247,21 @@ export function parsePlanPatch(raw: unknown): DesignPlan {
 // ---------------------------------------------------------------------------
 
 const Fraction = z.number().min(0).max(SAFE_MAX);
+/** LED 安全模式 (phase 3); values are clamped by patchSafety */
+export const SafetyPatchSchema = z.object({
+  enabled: z.boolean().optional(),
+  preset: z.enum(["indoor", "led", "outdoor", "custom"]).optional(),
+  brightness: z.number().min(0).max(1).optional(),
+  flashLimit: z.boolean().optional(),
+  redProtect: z.boolean().optional(),
+  soften: z.number().min(0).max(1).optional(),
+});
 const OutputPatchSchema = z.object({
   width: z.number().int().min(OUTPUT_MIN_PX).max(OUTPUT_MAX_PX).optional(),
   height: z.number().int().min(OUTPUT_MIN_PX).max(OUTPUT_MAX_PX).optional(),
   preset: z.string().max(32).optional(),
   lyricSafe: z.object({ top: Fraction.optional(), right: Fraction.optional(), bottom: Fraction.optional(), left: Fraction.optional() }).optional(),
+  safety: SafetyPatchSchema.optional(),
 });
 
 /** Apply a PATCH `output` object on top of the current canvas. */

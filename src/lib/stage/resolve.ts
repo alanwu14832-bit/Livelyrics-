@@ -6,6 +6,7 @@ import { sectionIndexAt, sectionIndexForLine } from "../timeline";
 import type { DesignPlan, LyricPlacement, LyricStyleId, Project, SceneId, SectionDesign } from "../types";
 import { ensureContrast, isHex } from "./color";
 import type { StageOverrides, StageState } from "./protocol";
+import { projectSafety, safeReactivity, safeTransition } from "./safety";
 
 export type TransitionKind = SectionDesign["transitionIn"];
 
@@ -32,6 +33,8 @@ export interface StageLook {
   /** emphasis / highlight color, legible against the background */
   accentColor: string;
   transitionIn: TransitionKind;
+  /** LED 安全模式 is on: params and transition above are already the safe ones */
+  safe: boolean;
   /** identifies scene + colors + params; equal keys look identical */
   lookKey: string;
 }
@@ -91,12 +94,16 @@ export function resolveLook(project: Project | null, state: StageState, t: numbe
     reactivity: clamp(sp?.audioReactivity ?? 0.4, 0, 1, 0.4),
   };
   const colorway = resolveColorway(plan, section);
+  // LED 安全模式 (phase 3): the source asks for less — audio reactivity clamped (less for saturated
+  // red looks), flash / bloom transitions become fades
+  const safety = projectSafety(project);
+  params.reactivity = safeReactivity(params.reactivity, colorway, safety);
   const lyricColor = ensureContrast(isHex(section?.lyricColor) ? section.lyricColor : "#f5f3ef", colorway[0], 4.5);
   const accentColor = ensureContrast(colorway[2], colorway[0], 3);
   const lyricStyle: LyricStyleId = isLyricStyleId(section?.lyricStyle) ? section.lyricStyle : "line-fade";
   const placement: LyricPlacement = isPlacement(section?.lyricPlacement) ? section.lyricPlacement : "center";
   const lyricScale = clamp(section?.lyricScale ?? 1, 0.6, 1.8, 1) * clamp(overrides?.lyricScale ?? 1, 0.5, 2, 1);
-  const transitionIn: TransitionKind = section && TRANSITIONS.has(section.transitionIn) ? section.transitionIn : "fade";
+  const transitionIn: TransitionKind = safeTransition(section && TRANSITIONS.has(section.transitionIn) ? section.transitionIn : "fade", safety);
   const lookKey = [
     scene,
     colorway.join(","),
@@ -118,6 +125,7 @@ export function resolveLook(project: Project | null, state: StageState, t: numbe
     lyricColor,
     accentColor,
     transitionIn,
+    safe: safety.on,
     lookKey,
   };
 }

@@ -36,7 +36,14 @@ function project(): Project {
       section("s2", 24, 40, { scene: "tunnel", transitionIn: "cut" }),
     ]),
     assets: [],
-    output: { width: 1920, height: 1080, preset: "1080p", lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 } },
+    // the designed transitions (LED 安全模式 off; the safe-mode frames are tested below)
+    output: {
+      width: 1920,
+      height: 1080,
+      preset: "1080p",
+      lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      safety: { enabled: false, preset: "led", brightness: 0.7, flashLimit: true, redProtect: true, soften: 0.25 },
+    },
   } as unknown as Project;
 }
 
@@ -121,5 +128,19 @@ describe("offlineSceneFrame", () => {
 
   it("uses the analysis beat grid for the beat index", () => {
     expect(beatIndexAt(project(), 10.2)).toBe(20);
+  });
+});
+
+describe("offlineSceneFrame in LED 安全模式", () => {
+  it("turns the bloom into a fade and clamps reactivity, like the live stage", () => {
+    const p = project();
+    const safe = { ...p, output: { ...p.output, safety: { ...p.output.safety, enabled: true } } } as Project;
+    const c = buildSceneClock(safe);
+    const f = offlineSceneFrame(safe, 8 + TRANSITION_SECONDS.fade / 2, c);
+    expect(f.transition?.kind).toBe("fade");
+    expect(f.current.target.params.reactivity).toBeLessThanOrEqual(0.5);
+    // an old project file without the field is safe too
+    const legacy = { ...p, output: { width: 1920, height: 1080, preset: "1080p", lyricSafe: p.output.lyricSafe } } as unknown as Project;
+    expect(offlineSceneFrame(legacy, 8.3, buildSceneClock(legacy)).transition?.kind).toBe("fade");
   });
 });

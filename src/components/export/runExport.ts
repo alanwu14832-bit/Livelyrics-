@@ -214,7 +214,7 @@ export async function runExport(job: ExportJob): Promise<ExportResult> {
     const sideBase = writers[0] && !writers[0].name.startsWith(base) ? writers[0].name.replace(/_[^_]+\.(mp4|webm)$/, "") : base;
     const cueName = `${sideBase}_cues.csv`;
     const readmeName = `${sideBase}_README.txt`;
-    const cue = buildCueSheet(project, range, rate);
+    const cue = buildCueSheet(project, range, rate, project.output?.safety ?? null);
     const readmeFiles: ReadmeFile[] = writers.map((w) => ({
       name: w.name,
       variant: w.variant === "lyrics" ? (w.plan.alpha ? "歌詞層（透明）" : "歌詞層（黑底白字 luma matte）") : `${VARIANT_INFO[w.variant].label}（${VARIANT_INFO[w.variant].detail}）`,
@@ -224,7 +224,18 @@ export async function runExport(job: ExportJob): Promise<ExportResult> {
       audio: w.audio && audio ? (w.audio === "aac" ? "AAC 192 kbps" : "Opus 192 kbps") : null,
       alpha: w.plan.alpha,
     }));
-    const readme = buildReadme({ project, range, rate, width: stage.width, height: stage.height, files: readmeFiles, cueSheetName: cueName, createdAt: new Date().toLocaleString("zh-TW", { hour12: false }) });
+    const readme = buildReadme({
+      project,
+      range,
+      rate,
+      width: stage.width,
+      height: stage.height,
+      files: readmeFiles,
+      cueSheetName: cueName,
+      createdAt: new Date().toLocaleString("zh-TW", { hour12: false }),
+      safety: project.output?.safety ?? null,
+      limiterEngaged: stage.limiterEngaged,
+    });
     if (dir) {
       files.push({ name: await writeText(dir, cueName, cue, project.id), blob: null, kind: "text", label: "時間表", bytes: new Blob([cue]).size });
       files.push({ name: await writeText(dir, readmeName, readme, project.id), blob: null, kind: "text", label: "說明", bytes: new Blob([readme]).size });

@@ -4,7 +4,14 @@ import { adaptMetrics, placementBox, STYLE_METRICS } from "./stage/lyrics/layout
 
 describe("normalizeOutput / patchOutput", () => {
   it("defaults old projects to 1920 x 1080 with 5 % margins", () => {
-    expect(normalizeOutput(undefined)).toEqual({ width: 1920, height: 1080, preset: "1080p", lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 } });
+    expect(normalizeOutput(undefined)).toEqual({
+      width: 1920,
+      height: 1080,
+      preset: "1080p",
+      lyricSafe: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      // phase 3: files without LED safety settings come back with safe mode on
+      safety: { enabled: true, preset: "led", brightness: 0.7, flashLimit: true, redProtect: true, soften: 0.25 },
+    });
   });
 
   it("applies presets, derives the preset from a size, clamps margins", () => {

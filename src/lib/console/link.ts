@@ -7,7 +7,7 @@
 // the same window never count as another console: a take can briefly overlap two controllers of
 // the show console, a second show console tab (another id) is still reported.
 
-import { parseStageMessage, type StageMessage } from "@/lib/stage/protocol";
+import { parseStageMessage, type LimiterReport, type StageMessage } from "@/lib/stage/protocol";
 
 export interface OutputStatus {
   connected: boolean;
@@ -17,6 +17,8 @@ export interface OutputStatus {
   width: number;
   height: number;
   fullscreen: boolean;
+  /** LED 安全模式: the most recently heard output's flash limiter (absent from older outputs) */
+  limiter?: LimiterReport;
 }
 
 export const DISCONNECTED: OutputStatus = { connected: false, count: 0, width: 0, height: 0, fullscreen: false };
@@ -41,14 +43,19 @@ export function randomId(): string {
   }
 }
 
+function sameLimiter(a: LimiterReport | undefined, b: LimiterReport | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.on === b.on && a.damping === b.damping && a.engaged === b.engaged;
+}
+
 function sameStatus(a: OutputStatus, b: OutputStatus): boolean {
-  return a.connected === b.connected && a.count === b.count && a.width === b.width && a.height === b.height && a.fullscreen === b.fullscreen;
+  return a.connected === b.connected && a.count === b.count && a.width === b.width && a.height === b.height && a.fullscreen === b.fullscreen && sameLimiter(a.limiter, b.limiter);
 }
 
 export class ProjectionLink {
   private channel: BroadcastChannel | null = null;
   private channelName: string | null = null;
-  private readonly outputs = new Map<string, { at: number; width: number; height: number; fullscreen: boolean }>();
+  private readonly outputs = new Map<string, { at: number; width: number; height: number; fullscreen: boolean; limiter?: LimiterReport }>();
   private lastOtherAt = 0;
   private output: OutputStatus = DISCONNECTED;
   private other = false;
@@ -132,9 +139,9 @@ export class ProjectionLink {
         break;
       case "pong": {
         const known = this.outputs.has(msg.outputId);
-        this.outputs.set(msg.outputId, { at: Date.now(), width: msg.width, height: msg.height, fullscreen: msg.fullscreen });
+        this.outputs.set(msg.outputId, { at: Date.now(), width: msg.width, height: msg.height, fullscreen: msg.fullscreen, ...(msg.limiter ? { limiter: msg.limiter } : {}) });
         const o = this.output;
-        if (!known || !o.connected || o.width !== msg.width || o.height !== msg.height || o.fullscreen !== msg.fullscreen) this.refresh();
+        if (!known || !o.connected || o.width !== msg.width || o.height !== msg.height || o.fullscreen !== msg.fullscreen || !sameLimiter(o.limiter, msg.limiter)) this.refresh();
         break;
       }
       case "state":
@@ -151,13 +158,13 @@ export class ProjectionLink {
   }
 
   private refresh(now: number = Date.now()): void {
-    let latest: { at: number; width: number; height: number; fullscreen: boolean } | null = null;
+    let latest: { at: number; width: number; height: number; fullscreen: boolean; limiter?: LimiterReport } | null = null;
     for (const [id, o] of this.outputs) {
       if (now - o.at > OUTPUT_TIMEOUT_MS) this.outputs.delete(id);
       else if (!latest || o.at > latest.at) latest = o;
     }
     const next: OutputStatus = latest
-      ? { connected: true, count: this.outputs.size, width: latest.width, height: latest.height, fullscreen: latest.fullscreen }
+      ? { connected: true, count: this.outputs.size, width: latest.width, height: latest.height, fullscreen: latest.fullscreen, ...(latest.limiter ? { limiter: latest.limiter } : {}) }
       : DISCONNECTED;
     this.setStatus(next, now - this.lastOtherAt < OUTPUT_TIMEOUT_MS);
   }

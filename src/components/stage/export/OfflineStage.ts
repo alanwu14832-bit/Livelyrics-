@@ -22,6 +22,7 @@ import { parseHex, type RGB } from "@/lib/stage/color";
 import type { SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
 import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { FlashLimiter, LYRIC_INK, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
 import { mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media/draw";
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo } from "@/lib/stage/media/model";
 import { hashString, rasterizeMotif } from "@/lib/stage/motif";
@@ -38,6 +39,11 @@ import { LyricPainter } from "./LyricPainter";
 
 /** Seconds re-run before a jump so smoothing and lyric animations are settled. */
 export const PREROLL_SECONDS = 3;
+/**
+ * LED 安全模式: the last part of the pre-roll also renders the scene through the flash limiter, so
+ * its one-second history and the low-pass are settled (covers the detection window and the hold).
+ */
+export const LIMITER_PREROLL_SECONDS = 1.5;
 
 export interface OfflineFrameRequest {
   /** render scene + media into `sceneCanvas` */
@@ -110,6 +116,13 @@ export class OfflineStage {
   private destroyed = false;
   private rendererError: string | null = null;
   private cjkFamily: string | null = null;
+  /** LED 安全模式 of this export (the project's output settings; the export page may turn it off) */
+  readonly safety: ActiveSafety;
+  private limiter: FlashLimiter | null = null;
+  private grid: { cols: number; rows: number };
+  private gridBuf: Float32Array;
+  /** damping episodes during the export (for the operator note) */
+  limiterEngaged = 0;
 
   constructor(private readonly project: Project) {
     const out = project.output && project.output.width > 0 && project.output.height > 0 ? project.output : DEFAULT_OUTPUT;
@@ -163,6 +176,16 @@ export class OfflineStage {
       /* keep the default */
     }
     this.media = new ExactMedia(maxTex);
+    this.safety = projectSafety(project);
+    this.grid = gridSize(outputAspect(out));
+    this.gridBuf = new Float32Array(this.grid.cols * this.grid.rows * 3);
+    this.resetLimiter();
+  }
+
+  private resetLimiter() {
+    const s = this.safety;
+    this.limiter = s.on && (s.flashLimit || s.redProtect) ? new FlashLimiter({ ...this.grid, flashLimit: s.flashLimit, redProtect: s.redProtect, gain: s.gain }) : null;
+    this.renderer?.resetSafetyFeedback();
   }
 
   get webgl(): boolean {
@@ -217,7 +240,7 @@ export class OfflineStage {
     if (this.renderer) {
       const scenes = new Set<SceneId>(["gradient"]);
       for (const s of project.plan?.sections ?? []) if ((SCENE_IDS as readonly string[]).includes(s.scene)) scenes.add(s.scene);
-      const bad = await this.renderer.ensureReady([...scenes], used.size > 0);
+      const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on);
       if (bad.length) warnings.push(`有 ${bad.length} 個著色器無法編譯，該段會改用漸層場景。`);
     }
     return { warnings };
@@ -236,7 +259,7 @@ export class OfflineStage {
   private step(t: number, dt: number): { frame: OfflineSceneFrame; audio: StageAudioFrame } {
     const project = this.project;
     const frame = offlineSceneFrame(project, t, this.clock);
-    const audio = { ...this.mixer.update(project.analysis, frame.state, t, dt) };
+    const audio = { ...this.mixer.update(project.analysis, frame.state, t, dt, { safe: this.safety.on, hold: !!this.limiter?.damping }) };
     const { state, lyricLook } = frame;
     const lines = project.lyrics?.lines ?? [];
     const line = typeof state.lineIndex === "number" ? lines[state.lineIndex] : undefined;
@@ -256,13 +279,14 @@ export class OfflineStage {
       visible: true,
       aspect: outputAspect(this.output),
       safe: this.output.lyricSafe,
+      safety: this.safety,
     });
     this.lastT = t;
     return { frame, audio };
   }
 
   /** Reset the stateful parts and replay the PREROLL_SECONDS before t at the frame rate. */
-  private preroll(t: number, fps: number) {
+  private async preroll(t: number, fps: number) {
     this.mixer = new AudioFeatureMixer();
     this.painter = null;
     this.lyrics.destroy();
@@ -270,14 +294,69 @@ export class OfflineStage {
     this.painter = new LyricPainter(this.lyrics.root, this.cjkFamily);
     this.lyricAmt = 0;
     this.lastT = null;
+    this.resetLimiter();
     const dt = 1 / fps;
     const start = Math.max(0, t - PREROLL_SECONDS);
     const n = Math.floor((t - start) / dt + 1e-6);
+    const limiterFrames = this.limiter ? Math.round(LIMITER_PREROLL_SECONDS * fps) : 0;
     // same grid as the export (t − k·dt), so the first real frame steps exactly one frame on
     for (let k = n; k >= 1; k--) {
       const tk = t - k * dt;
-      this.step(tk, this.lastT == null ? 0 : tk - this.lastT);
+      const d = this.lastT == null ? 0 : tk - this.lastT;
+      const stepped = this.step(tk, d);
+      if (k <= limiterFrames && this.renderer && !this.renderer.lost) await this.renderScene(stepped.frame, stepped.audio, tk, d);
     }
+  }
+
+  /** Scene + media through the LED-safety pass (the zero-lag limiter: this frame's own grid). */
+  private async renderScene(frame: OfflineSceneFrame, audio: StageAudioFrame, t: number, dt: number) {
+    const r = this.renderer;
+    if (!r || r.lost) throw new Error(this.rendererError ?? "無法使用 WebGL");
+    let media: MediaDraw | null = null;
+    try {
+      media = await this.mediaDraw(frame, audio, t);
+    } catch (e) {
+      console.error("[Livelyrics] 素材圖層錯誤：", e);
+    }
+    const beatIndex = beatIndexAt(this.project, t);
+    const s = this.safety;
+    const limiter = this.limiter;
+    const ok = r.render({
+      current: this.slotDraw(frame.current, audio, t, beatIndex),
+      previous: frame.previous ? this.slotDraw(frame.previous, audio, t, beatIndex) : null,
+      transition: frame.transition,
+      clock: t % 3600,
+      media,
+      safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: true } : null } : null,
+    });
+    if (!ok) throw new Error(this.rendererError ?? "WebGL 繪製失敗");
+    if (limiter) {
+      const g = r.lastGrid;
+      let alpha = 1;
+      if (g && g.cols === this.grid.cols && g.rows === this.grid.rows) {
+        const buf = this.gridBuf;
+        for (let y = 0; y < g.rows; y++) {
+          const src = (g.rows - 1 - y) * g.cols * 4;
+          const dst = y * g.cols * 3;
+          for (let x = 0; x < g.cols; x++) {
+            buf[dst + x * 3] = g.data[src + x * 4] / 255;
+            buf[dst + x * 3 + 1] = g.data[src + x * 4 + 1] / 255;
+            buf[dst + x * 3 + 2] = g.data[src + x * 4 + 2] / 255;
+          }
+        }
+        const step = limiter.step(t, dt, buf, this.lyricEstimate(frame));
+        alpha = step.alpha;
+        if (step.engaged) this.limiterEngaged++;
+      }
+      r.composeSafety(alpha);
+    }
+  }
+
+  private lyricEstimate(frame: OfflineSceneFrame): LyricEstimate | null {
+    if (this.lyricAmt < 0.02) return null;
+    const box = this.lyrics.textBounds();
+    if (!box) return null;
+    return { box, rgb: transformRgb(this.color(frame.lyricLook.lyricColor), this.safety), amount: this.lyricAmt * LYRIC_INK };
   }
 
   private slotDraw(slot: SceneSlot, audio: StageAudioFrame, t: number, beatIndex: number): SceneDraw {
@@ -338,29 +417,11 @@ export class OfflineStage {
     if (this.destroyed) throw new Error("renderer destroyed");
     const dt = 1 / fps;
     const last = this.lastT;
-    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) this.preroll(t, fps);
-    const { frame, audio } = this.step(t, this.lastT == null ? 0 : t - this.lastT);
+    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps);
+    const d = this.lastT == null ? 0 : t - this.lastT;
+    const { frame, audio } = this.step(t, d);
 
-    if (req.scene) {
-      const r = this.renderer;
-      if (r && !r.lost) {
-        let media: MediaDraw | null = null;
-        try {
-          media = await this.mediaDraw(frame, audio, t);
-        } catch (e) {
-          console.error("[Livelyrics] 素材圖層錯誤：", e);
-        }
-        const beatIndex = beatIndexAt(this.project, t);
-        const ok = r.render({
-          current: this.slotDraw(frame.current, audio, t, beatIndex),
-          previous: frame.previous ? this.slotDraw(frame.previous, audio, t, beatIndex) : null,
-          transition: frame.transition,
-          clock: t % 3600,
-          media,
-        });
-        if (!ok) throw new Error(this.rendererError ?? "WebGL 繪製失敗");
-      } else throw new Error(this.rendererError ?? "無法使用 WebGL");
-    }
+    if (req.scene) await this.renderScene(frame, audio, t, d);
     if (req.lyrics) {
       const ctx = this.lyricCanvas.getContext("2d");
       if (ctx && this.painter) this.painter.paint(ctx, { t, matte: false });
