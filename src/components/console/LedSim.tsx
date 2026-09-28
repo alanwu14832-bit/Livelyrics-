@@ -176,7 +176,7 @@ export function LedSimControls({ settings, geometry, onChange, className }: { se
         LED 模擬
       </button>
       {settings.on && (
-        <div className="flex w-[400px] max-w-[calc(100cqw-16px)] flex-col gap-1.5 rounded-lg bg-black/75 p-1.5" data-led-sim-panel="">
+        <div className="flex w-[420px] max-w-[calc(100cqw-16px)] flex-col gap-1.5 rounded-lg bg-black/75 p-1.5" data-led-sim-panel="">
           <div className="flex min-w-0 items-center gap-1.5">
             <div className="min-w-0 flex-1">
               <SegmentedControl<string>
@@ -188,14 +188,14 @@ export function LedSimControls({ settings, geometry, onChange, className }: { se
                 options={LED_PITCHES.map((p) => ({ value: String(p), label: <span className="t-latin tabular">P{p}</span>, ariaLabel: `間距 P${p}` }))}
               />
             </div>
-            <div className="w-[132px] shrink-0">
+            <div className="w-[156px] shrink-0">
               <SegmentedControl<string>
                 label="放大"
                 blurOnPointer
                 value={String(settings.zoom)}
                 onChange={(v) => onChange({ zoom: Number(v) as LedSimSettings["zoom"] })}
                 fullWidth
-                options={ZOOMS.map((z) => ({ value: String(z), label: <span className="t-latin tabular">{z}×</span>, ariaLabel: `放大 ${z} 倍` }))}
+                options={ZOOMS.map((z) => ({ value: String(z), label: `${z}×`, ariaLabel: `放大 ${z} 倍` }))}
               />
             </div>
           </div>
