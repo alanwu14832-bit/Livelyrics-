@@ -7,6 +7,7 @@ import type {
   DesignDirection,
   DesignPlan,
   DirectionComment,
+  DirectionEngine,
   DirectionReference,
   DirectionSet,
   DirectionStatus,
@@ -66,6 +67,9 @@ function coerceReferences(v: unknown): DirectionReference[] {
     .slice(0, 12);
 }
 
+const ENGINES: readonly DirectionEngine[] = ["claude", "offline", "manual-claude"];
+const engineOf = (v: unknown): DirectionEngine => (ENGINES.includes(v as DirectionEngine) ? (v as DirectionEngine) : "offline");
+
 /** One stored direction, or null when its plan no longer validates. */
 export function coerceDirection(raw: unknown, index: number): DesignDirection | null {
   if (!isRecord(raw)) return null;
@@ -84,7 +88,7 @@ export function coerceDirection(raw: unknown, index: number): DesignDirection | 
     plan: checked.data,
     status: STATUSES.includes(raw.status as DirectionStatus) ? (raw.status as DirectionStatus) : "proposed",
     comments: coerceComments(raw.comments),
-    engine: raw.engine === "claude" ? "claude" : "offline",
+    engine: engineOf(raw.engine),
     createdAt: str(raw.createdAt, 40),
     updatedAt: str(raw.updatedAt, 40),
   };
@@ -107,7 +111,7 @@ export function coerceDirectionSet(raw: unknown): DirectionSet | undefined {
     if (seen) d.status = "proposed";
     seen = true;
   }
-  const set: DirectionSet = { engine: raw.engine === "claude" ? "claude" : "offline", createdAt: str(raw.createdAt, 40), directions };
+  const set: DirectionSet = { engine: engineOf(raw.engine), createdAt: str(raw.createdAt, 40), directions };
   if (typeof raw.model === "string" && raw.model) set.model = raw.model.slice(0, 80);
   return set;
 }
@@ -290,7 +294,7 @@ export interface ProposalSheet {
   band: string;
   /** YYYY-MM-DD of the proposal */
   date: string;
-  engine: "claude" | "offline" | null;
+  engine: DirectionEngine | null;
   directions: ProposalDirection[];
   /** every mood board image, numbered like the prompt (圖 1…) */
   references: Array<{ id: string; index: number; name: string; note: string; palette: string[]; scope: "band" | "project" }>;

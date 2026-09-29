@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { DesignPlanSchema, type DesignPlan } from "@/lib/schema";
 import {
+  clientOptions,
   createPlanProgress,
   designParams,
   FALLBACK_BETA,
@@ -331,5 +332,21 @@ describe("real SDK transport (fake fetch)", () => {
     expect(research.engine).toBe("claude");
     expect(research.brief).toContain("## 設計方向建議");
     expect(research.sources).toEqual([{ title: "Live", url: "https://band.example/live" }]);
+  });
+
+  it("names the workspace on every request only when ANTHROPIC_WORKSPACE_ID is set", async () => {
+    expect(clientOptions({})).toEqual({});
+    expect(clientOptions({ ANTHROPIC_WORKSPACE_ID: "  " })).toEqual({});
+    const sent: Array<string | null> = [];
+    const fakeFetch = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      sent.push(new Headers(init?.headers).get("anthropic-workspace-id"));
+      return new Response(sseBody(message([text("ok")], "end_turn")), { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+    const params = { model: "claude-opus-5", max_tokens: 16, messages: [{ role: "user" as const, content: "hi" }] };
+    for (const env of [{ ANTHROPIC_WORKSPACE_ID: " wrkspc_01test " }, {}]) {
+      const client = new Anthropic({ ...clientOptions(env), apiKey: "test-key", baseURL: "http://claude.test", fetch: fakeFetch, maxRetries: 0 });
+      await sdkTransport(client).stream(params, {});
+    }
+    expect(sent).toEqual(["wrkspc_01test", null]);
   });
 });

@@ -569,6 +569,11 @@ keeps every contract above and changes only where things are kept and how long w
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
   colors, past stage shows), song meaning/imagery, mood/energy arc, reference live moments; returns
   sources. Must not reproduce full copyrighted lyrics in the brief.
+- One shared SDK client (`clientOptions()` in `claude.ts`): the SDK reads `ANTHROPIC_API_KEY` /
+  `ANTHROPIC_AUTH_TOKEN`; when `ANTHROPIC_WORKSPACE_ID` is set every request also sends the
+  `anthropic-workspace-id` header, which an identity-linked key that isn't bound to one workspace needs
+  (without it the API answers 400; `describeError` turns that and the invalid / unknown workspace
+  errors into a Traditional-Chinese hint).
 - `designSong`: a second Claude call with structured outputs (`DesignPlanSchema`) using the research,
   lyrics (with line ids + times), audio analysis summary (bpm, energy curve, section guesses), the
   closed scene/lyric-style vocabularies with descriptions, typography rules and the principles above;

@@ -11,7 +11,7 @@ import * as designer from "@/lib/server/designer";
 import type { DesignerCallbacks, DesignerDeps, DesignRequest, VisionImage } from "@/lib/server/designer";
 import { isVisionMediaType, MAX_VISION_IMAGE_BYTES, MAX_VISION_TOTAL_BYTES } from "@/lib/server/designer/moodboard";
 import { DesignPlanSchema } from "@/lib/schema";
-import type { DesignDirection, DirectionSet, MoodImage, Project } from "@/lib/types";
+import type { DesignDirection, DirectionEngine, DirectionSet, MoodImage, Project } from "@/lib/types";
 import { bandAssetFileOf, getBand } from "./band-storage";
 import { HttpError } from "./http";
 import { assetFileOf, getProject, updateProject } from "./storage";
@@ -72,7 +72,7 @@ export async function designRequestFor(project: Project, opts: { vision: boolean
 
 export interface DirectionsResult {
   project: Project;
-  engine: "claude" | "offline";
+  engine: DirectionEngine;
   logs: string[];
 }
 

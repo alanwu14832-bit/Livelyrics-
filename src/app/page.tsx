@@ -27,7 +27,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const initialBandId = typeof band === "string" && /^[a-z0-9-]{1,64}$/.test(band) ? band : undefined;
   // on Vercel without Blob / Postgres the first paint is the setup notice (no library requests)
   const storage = resolveStorageConfig();
-  const setup = storage.mode === "unconfigured" ? storage.missing : null;
+  const setup = storage.mode === "unconfigured" ? { missing: storage.missing, blobStoreWithoutToken: storage.blobStoreWithoutToken } : null;
   return (
     <ViewTransition enter={PAGE_TRANSITION} exit={PAGE_TRANSITION} default="none">
       <HomeClient initialProjects={projects} serverNow={now} initialBandId={initialBandId} initialSetup={setup} />

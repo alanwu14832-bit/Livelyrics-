@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveStorageConfig, unconfiguredMessage } from "./mode";
+import { BLOB_TOKEN_HINT, resolveStorageConfig, unconfiguredMessage } from "./mode";
 
 const TOKEN = "vercel_blob_rw_abc123_secret";
 const DB = "postgresql://u:p@ep-x.neon.tech/neondb?sslmode=require";
@@ -44,5 +44,29 @@ describe("resolveStorageConfig", () => {
     expect(msg).toContain("重新部署");
     expect(msg).not.toMatch(/[–—]/);
     expect(unconfiguredMessage({ missing: ["DATABASE_URL"] })).not.toContain("BLOB_READ_WRITE_TOKEN");
+  });
+
+  it("gives the read-write token hint when the Blob store is connected through OIDC only", () => {
+    // newer Blob connections inject BLOB_STORE_ID (+ BLOB_WEBHOOK_PUBLIC_KEY), not the token
+    const oidc = { VERCEL: "1", BLOB_STORE_ID: "store_abc123", BLOB_WEBHOOK_PUBLIC_KEY: "pk", DATABASE_URL: DB };
+    const config = resolveStorageConfig(oidc);
+    expect(config).toMatchObject({ mode: "unconfigured", missing: ["BLOB_READ_WRITE_TOKEN"], blobStoreWithoutToken: true });
+    const msg = unconfiguredMessage(config);
+    expect(msg).toContain(BLOB_TOKEN_HINT);
+    expect(BLOB_TOKEN_HINT).toContain("Blob 已連接，但缺少讀寫金鑰");
+    expect(BLOB_TOKEN_HINT).toContain(".env.local");
+    expect(BLOB_TOKEN_HINT).toContain("BLOB_READ_WRITE_TOKEN");
+    expect(BLOB_TOKEN_HINT).toContain("Production、Preview");
+    expect(BLOB_TOKEN_HINT).toContain("Redeploy");
+    // not the generic "create a Blob store" advice: the store already exists
+    expect(msg).not.toContain("建立一個存取權限為 Public 的 Blob");
+    expect(msg).not.toMatch(/[–—]/);
+    // the database is named too when it is also missing
+    const both = unconfiguredMessage(resolveStorageConfig({ VERCEL: "1", BLOB_STORE_ID: "store_abc123" }));
+    expect(both).toContain(BLOB_TOKEN_HINT);
+    expect(both).toContain("DATABASE_URL");
+    // with the token the store id changes nothing
+    expect(resolveStorageConfig({ ...oidc, BLOB_READ_WRITE_TOKEN: TOKEN })).toMatchObject({ mode: "cloud", blobStoreWithoutToken: false });
+    expect(resolveStorageConfig({ VERCEL: "1" }).blobStoreWithoutToken).toBe(false);
   });
 });

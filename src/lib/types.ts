@@ -121,14 +121,100 @@ export interface ResearchSource {
   url: string;
 }
 
+/**
+ * Who wrote a research brief (or proposed directions, or made a plan):
+ *   claude         the Claude API (paid key): web search + structured outputs
+ *   offline        the heuristic designer (older briefs; audio and lyric structure only)
+ *   free           免費研究: public data (MusicBrainz, Wikipedia) + local lyric / audio analysis
+ *   manual-claude  用 claude.ai 研究: the operator pasted a reply from their own claude.ai account
+ */
+export type DesignEngine = "claude" | "offline" | "free" | "manual-claude";
+
 export interface Research {
   /** Markdown research brief written in Traditional Chinese */
   brief: string;
   sources: ResearchSource[];
   /** which engine produced it */
-  engine: "claude" | "offline";
+  engine: DesignEngine;
   model?: string;
   createdAt: string;
+  /**
+   * 免費研究: what the free public sources said about the song and the artist, cached so a re-run
+   * does not ask again (kept when a claude.ai reply replaces the brief). Absent for Claude briefs.
+   */
+  publicInfo?: PublicInfo;
+}
+
+// ---------------------------------------------------------------------------
+// Free research (免費研究): public facts from MusicBrainz and Wikipedia
+// ---------------------------------------------------------------------------
+
+/** ok = found; none = asked, nothing matched; failed = unreachable / error; skipped = not asked */
+export type SourceStatus = "ok" | "none" | "failed" | "skipped";
+
+export interface MbTag {
+  name: string;
+  count: number;
+}
+
+export interface MbRecordingInfo {
+  id: string;
+  title: string;
+  /** YYYY, YYYY-MM or YYYY-MM-DD */
+  firstReleaseDate?: string;
+  year?: number;
+  /** the album / single it first came out on */
+  releaseGroup?: { id: string; title: string; type?: string };
+  tags: MbTag[];
+  /** milliseconds */
+  length?: number;
+}
+
+export interface MbArtistInfo {
+  id: string;
+  name: string;
+  sortName?: string;
+  /** Group, Person, Orchestra, … */
+  type?: string;
+  /** ISO 3166-1 code, e.g. "TW" */
+  country?: string;
+  /** e.g. "Taipei" */
+  area?: string;
+  beginYear?: number;
+  disambiguation?: string;
+  /** curated genres (lookup) and folksonomy tags, most votes first */
+  genres: MbTag[];
+  tags: MbTag[];
+  /** official site, YouTube, Bandcamp, setlist.fm, … (url-rels) */
+  links: Array<{ type: string; url: string }>;
+}
+
+export interface WikiPage {
+  lang: "zh" | "en";
+  title: string;
+  description?: string;
+  /** the lead summary (zh pages in the zh-TW variant) */
+  extract: string;
+  url: string;
+}
+
+export interface PublicInfo {
+  version: 1;
+  /** what was looked up (the song info at the time) */
+  query: { title: string; artist: string };
+  fetchedAt: string;
+  musicbrainz: { recording: MbRecordingInfo | null; artist: MbArtistInfo | null } | null;
+  wikipedia: { artist: WikiPage | null; song: WikiPage | null } | null;
+  status: { musicbrainz: SourceStatus; wikipedia: SourceStatus };
+  /** what went wrong or was skipped (繁中), for the brief */
+  notes: string[];
+}
+
+/** Who made the current plan, when it is known (set by 用 claude.ai 研究 and 採用這個方向). */
+export interface PlanSource {
+  engine: DesignEngine;
+  model?: string;
+  at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,14 +338,17 @@ export interface DesignDirection {
   plan: DesignPlan;
   status: DirectionStatus;
   comments: DirectionComment[];
-  engine: "claude" | "offline";
+  engine: DirectionEngine;
   model?: string;
   createdAt: string;
   updatedAt: string;
 }
 
+/** Directions come from Claude (API), the offline designer, or a pasted claude.ai reply. */
+export type DirectionEngine = "claude" | "offline" | "manual-claude";
+
 export interface DirectionSet {
-  engine: "claude" | "offline";
+  engine: DirectionEngine;
   model?: string;
   createdAt: string;
   directions: DesignDirection[];
@@ -352,6 +441,8 @@ export interface Project {
   previousPlan?: PlanSnapshot;
   /** cloud mode: 提出設計方向 / 修改方向 in progress (or its last failure) */
   directionsJob?: JobState;
+  /** who made the current plan, when known (absent after a pipeline re-design) */
+  planSource?: PlanSource;
 }
 
 export type ProcessStepId = "lyrics" | "research" | "design";
@@ -377,6 +468,8 @@ export interface PipelineRecord {
   /** what the run was asked to do, so it can be continued or retried */
   instruction?: string;
   arc?: SongArcDirective;
+  /** the run does not call the Claude API (免費研究 + the offline designer) */
+  free?: boolean;
 }
 
 /** A long server job (a Claude call) recorded on its document in cloud mode. */

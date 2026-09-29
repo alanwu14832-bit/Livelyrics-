@@ -15,6 +15,8 @@ export interface PaletteSpec {
   saturation: number;
   /** 0..1, brighter songs get lighter accents */
   brightness: number;
+  /** accent and highlight hues instead of the scheme's (a genre's colours with a lyric image) */
+  hues?: [number, number];
 }
 
 function schemeHues(h: number, scheme: Scheme): [number, number] {
@@ -38,7 +40,7 @@ export function buildPalette(spec: PaletteSpec): PaletteEntry[] {
   const h = ((spec.hue % 360) + 360) % 360;
   const sat = Math.max(0, Math.min(1, spec.saturation));
   const lift = Math.max(0, Math.min(1, spec.brightness));
-  const [ha, hb] = schemeHues(h, spec.scheme);
+  const [ha, hb] = spec.hues ?? schemeHues(h, spec.scheme);
   const bg = hsl(h, 0.5 * sat, 0.055);
   const primary = hsl(h, 0.72 * sat, 0.48 + 0.08 * lift);
   const accent = hsl(ha, 0.88 * sat, 0.56 + 0.06 * lift);

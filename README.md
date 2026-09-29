@@ -26,6 +26,8 @@ npm run dev
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
+# 只有金鑰沒有綁定單一 workspace 時才需要（錯誤訊息會說「沒有綁定 workspace」）
+# ANTHROPIC_WORKSPACE_ID=wrkspc_...
 # 選用：換模型（預設 claude-opus-5）
 # LIVELYRICS_MODEL=claude-opus-5
 # 選用：資料存放位置（預設 ./data）
@@ -51,13 +53,15 @@ node scripts/seed-demo.mjs
 1. 在 Vercel 匯入這個 repo（Framework Preset：Next.js，其餘用預設值）並部署一次。
 2. 專案的 **Storage** 分頁：
    - 建立 **Blob** 儲存空間，存取權限選 **Public**（建立後不能更改，Private 不支援），連接到這個專案。會自動加入 `BLOB_READ_WRITE_TOKEN`。
+     較新的 Blob 連接只會加入 `BLOB_STORE_ID`（OIDC）與 `BLOB_WEBHOOK_PUBLIC_KEY`，沒有讀寫金鑰；上傳簽章仍需要它，所以首頁會顯示「Blob 已連接，但缺少讀寫金鑰」：到 **Storage ›** 這個 Blob store 的 **.env.local** 分頁（或 **Settings**）複製 `BLOB_READ_WRITE_TOKEN`，加到專案的 Environment Variables（Production、Preview）後重新部署。
    - 從 **Marketplace** 加入 **Neon**（Postgres），連接到這個專案。會自動加入 `DATABASE_URL`（也接受 `POSTGRES_URL`、`DATABASE_URL_UNPOOLED`、`POSTGRES_URL_NON_POOLING`）。資料表 `livelyrics_docs` 在第一次使用時自動建立。
 3. **Project Settings › Environment Variables** 加入：
 
    | 變數 | 說明 |
    |---|---|
    | `LIVELYRICS_PASSWORD` | 建議設定：整個網站需要先輸入這個密碼（登入後保持 30 天，改密碼會讓所有人登出）。沒設定時任何知道網址的人都能使用 |
-   | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用離線設計模式 |
+   | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用離線設計模式。建立金鑰時把它綁定到一個 workspace（例如 Default）最簡單 |
+   | `ANTHROPIC_WORKSPACE_ID` | 只有金鑰沒有綁定單一 workspace 時才需要：填 `wrkspc_` 開頭的 workspace ID（Claude Console 的 **Settings › Workspaces**）。沒填時 Claude 會回應 400「沒有綁定 workspace」 |
    | `LIVELYRICS_MODEL` | 選用：換模型（預設 claude-opus-5） |
    | `LIVELYRICS_BLOB_DELIVERY` | 選用：設成 `proxy` 時音檔與素材經由函式轉送，預設 `redirect` 直接從 Blob 讀取（見下方） |
    | `LIVELYRICS_STORAGE` | 選用：`cloud` 或 `local` 強制指定模式；一般不需要 |

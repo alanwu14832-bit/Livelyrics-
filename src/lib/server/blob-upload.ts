@@ -76,6 +76,6 @@ export function requireUploadToken(): string {
   const config = resolveStorageConfig();
   if (storageMode() === "unconfigured") throw new StorageError("unconfigured", unconfiguredMessage(config));
   if (storageMode() !== "cloud") throw new HttpError(400, "本機模式不使用雲端上傳，請直接上傳檔案。");
-  if (!config.blobToken) throw new StorageError("unconfigured", unconfiguredMessage({ missing: ["BLOB_READ_WRITE_TOKEN"] }));
+  if (!config.blobToken) throw new StorageError("unconfigured", unconfiguredMessage({ missing: ["BLOB_READ_WRITE_TOKEN"], blobStoreWithoutToken: config.blobStoreWithoutToken }));
   return config.blobToken;
 }

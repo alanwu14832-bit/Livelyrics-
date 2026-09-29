@@ -20,7 +20,7 @@ import { buildDirections, buildDirectionsPrompt, DirectionDraftSchema, DIRECTION
 import { visionContent } from "./moodboard";
 import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
-import { claudeDesign, claudeResearch, sdkTransport, type ClaudeTransport } from "./claude";
+import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
 import { describeError } from "./messages";
 import { normalizePlan } from "./normalize";
@@ -102,7 +102,7 @@ function isCancellation(err: unknown, signal?: AbortSignal): boolean {
 let sharedTransport: ClaudeTransport | null = null;
 function defaultTransport(): ClaudeTransport {
   // created lazily: the SDK reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the environment
-  sharedTransport ??= sdkTransport(new Anthropic());
+  sharedTransport ??= sdkTransport(new Anthropic(clientOptions()));
   return sharedTransport;
 }
 

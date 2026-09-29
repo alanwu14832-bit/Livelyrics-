@@ -282,12 +282,34 @@ function EnvName({ children }: { children: string }) {
   return <code className="font-mono text-[13px] whitespace-nowrap">{children}</code>;
 }
 
+/** What the home page's setup notice needs (from the server render, then /api/status). */
+export interface StorageSetup {
+  missing: string[];
+  /** a Blob store is connected through OIDC (BLOB_STORE_ID) but BLOB_READ_WRITE_TOKEN is not set */
+  blobStoreWithoutToken: boolean;
+}
+
 /**
  * On Vercel without Blob / Postgres (storage mode "unconfigured"): what to create in the dashboard,
- * in place of the upload flow. The API answers 503 with the same explanation meanwhile.
+ * in place of the upload flow. The API answers 503 with the same explanation meanwhile. A Blob store
+ * connected through OIDC only (newer connections inject BLOB_STORE_ID, not the read-write token the
+ * upload route signs with) gets the specific step: copy the token into the project's variables.
  */
-export function StorageSetupNotice({ missing, onRecheck, checking, className }: { missing: string[]; onRecheck: () => void; checking: boolean; className?: string }) {
+export function StorageSetupNotice({
+  missing,
+  blobStoreWithoutToken = false,
+  onRecheck,
+  checking,
+  className,
+}: {
+  missing: string[];
+  blobStoreWithoutToken?: boolean;
+  onRecheck: () => void;
+  checking: boolean;
+  className?: string;
+}) {
   const needBlob = missing.length === 0 || missing.includes("BLOB_READ_WRITE_TOKEN");
+  const tokenOnly = needBlob && blobStoreWithoutToken;
   const needDb = missing.length === 0 || missing.includes("DATABASE_URL");
   return (
     <section aria-labelledby="storage-setup-title" className={cx("mx-auto w-full max-w-[680px] rounded-2xl bg-surface p-6 text-left shadow-card max-sm:p-4", className)}>
@@ -303,10 +325,18 @@ export function StorageSetupNotice({ missing, onRecheck, checking, className }: 
       <ol className="mt-5 divide-y-hairline overflow-hidden rounded-lg bg-fill-4">
         <li className="flex gap-3 px-4 py-3">
           <StepNumber n={1} />
-          <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label">
-            <span className="font-semibold">Storage › Create › Blob</span>，存取權限選 <span className="font-semibold">Public</span>，連接到這個專案（會加入 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>）。
-            {!needBlob && <Done />}
-          </p>
+          {tokenOnly ? (
+            <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label" data-testid="blob-token-hint">
+              <span className="font-semibold">Blob 已連接，但缺少讀寫金鑰</span>：到 <span className="font-semibold">Vercel › Storage › 這個 Blob store</span> 的{" "}
+              <span className="font-semibold">.env.local</span> 分頁（或 <span className="font-semibold">Settings</span>）複製 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>，加到專案的{" "}
+              <span className="font-semibold">Environment Variables</span>（Production、Preview），再 Redeploy。
+            </p>
+          ) : (
+            <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label">
+              <span className="font-semibold">Storage › Create › Blob</span>，存取權限選 <span className="font-semibold">Public</span>，連接到這個專案（會加入 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>）。
+              {!needBlob && <Done />}
+            </p>
+          )}
         </li>
         <li className="flex gap-3 px-4 py-3">
           <StepNumber n={2} />

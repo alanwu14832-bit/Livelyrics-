@@ -2,7 +2,7 @@
 // request loop (pause_turn continuation, stop-reason handling, source collection,
 // progress streaming) can be unit-tested with an injected fake.
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
@@ -55,8 +55,17 @@ export interface ClaudeTransport {
   stream(params: BetaMessageStreamParams, handlers: StreamHandlers, signal?: AbortSignal): Promise<BetaMessage>;
 }
 
+/**
+ * SDK client options from the environment (the SDK reads the key itself). An identity-linked key that
+ * isn't bound to one workspace must name its workspace on every request: `ANTHROPIC_WORKSPACE_ID`.
+ */
+export function clientOptions(env: Record<string, string | undefined> = process.env): ClientOptions {
+  const workspace = env.ANTHROPIC_WORKSPACE_ID?.trim();
+  return workspace ? { defaultHeaders: { "anthropic-workspace-id": workspace } } : {};
+}
+
 /** Transport backed by the official SDK (`client.beta.messages.stream` + `finalMessage`). */
-export function sdkTransport(client: Anthropic = new Anthropic()): ClaudeTransport {
+export function sdkTransport(client: Anthropic = new Anthropic(clientOptions())): ClaudeTransport {
   return {
     async stream(params, handlers, signal) {
       const stream = client.beta.messages.stream(params, signal ? { signal } : undefined);
