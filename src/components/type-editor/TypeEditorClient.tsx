@@ -555,7 +555,7 @@ function TypeEditor({ initialProject }: { initialProject: Project }) {
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col gap-3 lg:overflow-y-auto" aria-label="預覽與這一句">
-          <div className="sticky top-[52px] z-10 -mx-(--page-gutter) flex flex-col gap-2 bg-bg px-(--page-gutter) pt-1 pb-2 lg:static lg:mx-0 lg:bg-transparent lg:px-0">
+          <div className="sticky top-[52px] z-10 -mx-(--page-gutter) flex flex-col gap-2 bg-bg px-(--page-gutter) pt-1 pb-2 lg:top-0 lg:mx-0 lg:px-0">
             <TypePreview
               project={previewProject}
               lineIndex={selected}

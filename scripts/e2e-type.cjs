@@ -250,6 +250,11 @@ const notBlank = (page, selector) =>
     await shot(editor, "type-06-editor-after-regenerate");
 
     // ------------------------------------------------------------------ export: not blank, deterministic
+    // The export renders offline frames on the (software) GPU; the console, projection and editor
+    // pages would keep their own WebGL loops running beside it and starve it, so close them first.
+    await popup.close().catch(() => {});
+    await editor.close().catch(() => {});
+    await consolePage.close().catch(() => {});
     const exp = await context.newPage();
     watch(exp, "export");
     await exp.goto(`${BASE}/p/${id}/export`, { waitUntil: "networkidle" });
