@@ -151,7 +151,9 @@ vec2 toP(vec2 q) { return (q * uRes - 0.5 * uRes) / min(uRes.x, uRes.y); }
 vec2 focalUv() {
   vec2 z = zoneCenter();
   if (aspect() < 0.8) return vec2(0.5, z.y > 0.5 ? 0.3 : 0.68);
-  return vec2(z.x < 0.5 ? K_FX : 1.0 - K_FX, K_FY + 0.18);
+  // at least a fifth of the frame away from the words' block
+  float fx = z.x < 0.5 ? max(K_FX, uZone.z + 0.2) : min(1.0 - K_FX, uZone.x - 0.2);
+  return vec2(clamp(fx, 0.18, 0.82), K_FY + 0.18);
 }
 float horizonY() {
   if (aspect() < 0.8) return zoneCenter().y > 0.5 ? 0.26 : 0.56;
@@ -297,11 +299,11 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   for (int i = 0; i < 3; i++) {
     float fi = float(i);
     if (fi >= K_N) break;
-    float off = (fi - (K_N - 1.0) * 0.5) * K_W * 3.2;
+    float off = (fi - (K_N - 1.0) * 0.5) * K_W * 3.2 * (aspect() < 0.8 ? 0.7 : 1.0);
     float spread = step(2.5, uMode) * (fi - (K_N - 1.0) * 0.5) * 0.05 * (0.5 + uSectionProgress);
     float hh = h * (1.0 - 0.18 * fi * step(1.5, K_N));
     vec2 c = base + vec2(off + spread, hh * 0.5);
-    float d = sdBox(p - c, vec2(K_W, hh * 0.5));
+    float d = sdBox(p - c, vec2(K_W * (aspect() < 0.8 ? 0.65 : 1.0), hh * 0.5));
     front = max(front, fill(d));
     rim = max(rim, exp(-abs(d) * (150.0 - 90.0 * uParams.x)));
   }
@@ -381,7 +383,10 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float hz = horizonY() + 0.12;
   vec3 col = mix(mix(uBg, uPri, 0.18 + 0.3 * light), uBg * 0.55, sat((uv.y - hz) / (1.0 - hz)));
   vec2 fu = focalUv();
-  vec2 c = toP(vec2(fu.x, hz + 0.06 + 0.12 * uParams.x)) + mo();
+  float dy = hz + 0.06 + 0.12 * uParams.x;
+  // a tall frame: the disc stays clear of the words' band above it
+  if (aspect() < 0.8 && zoneCenter().y > 0.5) dy = min(dy, uZone.y - 0.1);
+  vec2 c = toP(vec2(fu.x, dy)) + mo();
   float dr = 0.07 * K_SCALE * br();
   if (K_DISC > 0.5) {
     float d = length(p - c);
@@ -512,14 +517,14 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float x = uv.x * aspect();
     float yc = cy + sin(x * K_F + ph + T() * 0.15) * amp + sin(x * K_F * 2.3 - T() * 0.1) * amp * 0.3;
     float slope = cos(x * K_F + ph + T() * 0.15) * amp * K_F;
-    float wd = (0.012 + 0.03 * (0.5 + 0.5 * sin(x * 1.3 + ph))) * K_SCALE * br();
+    float wd = (0.022 + 0.05 * (0.5 + 0.5 * sin(x * 1.3 + ph))) * K_SCALE * br();
     float d = abs(uv.y - yc);
     float band = 1.0 - smoothstep(wd * 0.8, wd, d);
     float fold = 0.5 + 0.5 * sin(x * K_F * 2.0 + ph * 2.0 + slope * 3.0);
     vec3 rc = mix(mix(uPri, uAcc, fi / max(1.0, K_N)), mix(uAcc, vec3(1.0), 0.3), pow(fold, 3.0) * (0.3 + 0.6 * light));
     float fade = smoothstep(0.0, 0.25, abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0)));
     float away = 1.0 - zoneMask(uv, 0.08) * 0.97;
-    col = mix(col, rc * (0.55 + 0.4 * fold), band * fade * away * (0.75 + 0.2 * uParams.y));
+    col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y));
     col += rc * exp(-d / max(wd, 1e-3) * 1.5) * 0.06 * light * fade * away;
   }
   return col;
