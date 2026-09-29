@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
-import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
+import { ExportIcon, MoonIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
@@ -189,6 +189,9 @@ export function TopBar({
   const ov = useStageValue(controller.store, selectOverrides);
   const capsules = capsuleItems(ov, snap);
   const palette = (project?.plan?.keyVisual.palette ?? []).map((p) => p.hex);
+  // on air (a projection window answers): the preparation tools step back to icons so the top bar
+  // is about the show — mode, transport, clock, safety, output and 黑場
+  const prep = compact || snap.output.connected;
 
   const status = snap.timecode.following
     ? live
@@ -296,8 +299,21 @@ export function TopBar({
         <SyncCapsule engine={controller.sync} />
         <SafetyCapsule project={project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
-        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : compact ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
-          {compact ? (
+        {/* the panic button of a show: always one click away, red while the stage is black */}
+        <Tooltip content={ov.blackout ? "黑場中：再按一次恢復畫面" : "一鍵淡出為全黑"} shortcut="B" placement="bottom-end">
+          <Button
+            variant={ov.blackout ? "destructive-filled" : "gray"}
+            icon={MoonIcon}
+            aria-pressed={ov.blackout}
+            onClick={() => controller.toggleBlackout()}
+            data-testid="topbar-blackout"
+          >
+            黑場
+          </Button>
+        </Tooltip>
+        <span aria-hidden className="mx-1 h-5 w-px bg-separator" />
+        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : prep ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
+          {prep ? (
             <Button variant="quiet" size="icon" aria-label="重新設計" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign} />
           ) : (
             <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
@@ -307,16 +323,24 @@ export function TopBar({
         </Tooltip>
         {!compact && project?.plan && (
           <Tooltip content="字體藝術：逐句調整歌詞的構圖（在新分頁開啟，修改會即時出現在投影）" placement="bottom-end">
-            <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor">
-              排版
-            </Button>
+            {prep ? (
+              <Button variant="quiet" size="icon" aria-label="排版" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor" />
+            ) : (
+              <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor">
+                排版
+              </Button>
+            )}
           </Tooltip>
         )}
         {!compact && (
           <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
-            <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
-              匯出
-            </Button>
+            {prep ? (
+              <Button variant="quiet" size="icon" aria-label="匯出" icon={ExportIcon} onClick={() => controller.openExport()} />
+            ) : (
+              <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
+                匯出
+              </Button>
+            )}
           </Tooltip>
         )}
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
