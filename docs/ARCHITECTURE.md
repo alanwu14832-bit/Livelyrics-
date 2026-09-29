@@ -910,8 +910,10 @@ uniform（全部由系統提供，不能自己宣告）：
   mask).
 - **Fallback and budget** (`StageEngine`). A program that fails to link is switched off on that stage
   (the section's built-in scene; `console.warn`); a program still over `PROGRAM_SLOW_DT` (1/18 s) per
-  frame for `PROGRAM_SLOW_SECONDS` (5 s) after the adaptive resolution has reached its floor is
-  switched off too. `StageStats.program` (`pending | ready | failed | slow | override`, the title, the
+  frame for `PROGRAM_SLOW_SECONDS` (5 s) after the adaptive resolution has reached its floor gets a
+  probe: the built-in scene draws for `PROGRAM_PROBE_MS` (2.5 s); only when that is clearly faster
+  (< 0.66 × the program's frame time) is the program switched off, otherwise the machine itself is
+  slow, the program comes back and no probe runs for 30 s. `StageStats.program` (`pending | ready | failed | slow | override`, the title, the
   compiler's log) and `data-scene-program` on the stage root report it; the console preview shows
   「專屬畫面無法編譯／太耗效能，已改用內建場景」 (`[data-program-notice]`). The export and the key still
   report `OfflineStage.program`.

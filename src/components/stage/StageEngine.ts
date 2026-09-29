@@ -61,6 +61,11 @@ export interface ProgramStatus {
 /** A program is switched off after this long with frames over PROGRAM_SLOW_DT at the lowest render quality. */
 export const PROGRAM_SLOW_SECONDS = 5;
 export const PROGRAM_SLOW_DT = 1 / 18;
+/** …then the built-in scene draws for this long; the program is switched off only if that is clearly faster */
+export const PROGRAM_PROBE_MS = 2500;
+export const PROGRAM_SLOW_GAIN = 0.66;
+/** a probe that cleared the program waits this long before the next one */
+export const PROGRAM_PROBE_COOLDOWN_MS = 30_000;
 
 export interface SafetyStats {
   /** brightness cap (linear, 0.2..1) */
@@ -179,6 +184,11 @@ export class StageEngine {
   private programStatus: ProgramStatus | null = null;
   private programStatusKey = "";
   private slowFor = 0;
+  /** smoothed frame time while the program draws */
+  private programDt = 1 / 60;
+  /** the built-in scene stands in for a moment to see whether the program is the slow part */
+  private probe: { key: string; until: number; sum: number; n: number; programDt: number } | null = null;
+  private probeAfter = 0;
   private statsDirty = false;
 
   constructor(
@@ -572,6 +582,34 @@ export class StageEngine {
       this.setProgramStatus({ state: "failed", title: program.title, ...(st.log ? { log: st.log } : {}) });
       return;
     }
+    const now = performance.now();
+    // a probe runs: the built-in scene for a moment, to see whether the program is what is slow
+    const probe = this.probe;
+    if (probe && probe.key === code.key) {
+      if (dt > 0 && dt < 0.25) {
+        probe.sum += dt;
+        probe.n++;
+      }
+      if (now >= probe.until && probe.n >= 10) {
+        this.probe = null;
+        const builtIn = probe.sum / probe.n;
+        if (builtIn < probe.programDt * PROGRAM_SLOW_GAIN) {
+          // the built-in scene is clearly faster: the program is over budget here
+          this.programOff.set(code.key, { state: "slow" });
+          console.warn(`[Livelyrics] 專屬畫面「${program.title}」太耗效能，已改用內建場景。`);
+          this.quality = 1;
+          this.sizeDirty = true;
+          this.setProgramStatus({ state: "slow", title: program.title });
+          return;
+        }
+        // the whole machine is slow, not the program: back to it, and no new probe for a while
+        this.programOffKeys.delete(code.key);
+        this.probeAfter = now + PROGRAM_PROBE_COOLDOWN_MS;
+        this.slowFor = 0;
+      }
+      this.setProgramStatus({ state: "ready", title: program.title });
+      return;
+    }
     if (!pd) {
       // the operator forced a built-in scene (or a blackout scene): the program waits
       this.slowFor = 0;
@@ -579,16 +617,14 @@ export class StageEngine {
       return;
     }
     // the frame budget: already at the lowest adaptive quality and still slow for a sustained period
+    // then a short probe with the built-in scene decides whether the program is the cause
     if (st.state === "ready" && this.adaptive && this.quality <= 0.51 && dt > 0 && dt < 0.25) {
+      this.programDt += (dt - this.programDt) * 0.05;
       this.slowFor = dt > PROGRAM_SLOW_DT ? this.slowFor + dt : Math.max(0, this.slowFor - dt * 0.5);
-      if (this.slowFor > PROGRAM_SLOW_SECONDS) {
-        this.programOff.set(code.key, { state: "slow" });
+      if (this.slowFor > PROGRAM_SLOW_SECONDS && now >= this.probeAfter) {
+        this.probe = { key: code.key, until: now + PROGRAM_PROBE_MS, sum: 0, n: 0, programDt: this.programDt };
         this.programOffKeys.add(code.key);
-        console.warn(`[Livelyrics] 專屬畫面「${program.title}」太耗效能，已改用內建場景。`);
-        this.quality = 1;
-        this.sizeDirty = true;
-        this.setProgramStatus({ state: "slow", title: program.title });
-        return;
+        this.slowFor = 0;
       }
     } else this.slowFor = Math.max(0, this.slowFor - dt);
     this.setProgramStatus({ state: st.state === "ready" ? "ready" : "pending", title: program.title });
