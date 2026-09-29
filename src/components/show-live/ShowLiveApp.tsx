@@ -5,19 +5,26 @@
 // /p/[id], driven by the show's controller for that song) or the look console — or, before the
 // first GO, the pre-show view. The ShowLiveController owns every item controller; this component
 // only binds to it. The console tab keeps the screen awake, and a reload of the tab comes back to
-// the item that was on air.
+// the item that was on air. The show's sync layer (phase 5a: MIDI controllers, MIDI clock, MTC,
+// LTC) belongs to the ShowLiveController; every view answers MIDI with its own keys' actions.
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppHeader, Button, EmptyState, Kbd, Skeleton, SkeletonGroup, Tooltip } from "@/components/ui";
-import { ProjectorScreenIcon, QuestionIcon, TicketIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { PlugsConnectedIcon, ProjectorScreenIcon, QuestionIcon, TicketIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { SongConsole, type ShowSlots } from "@/components/console/ConsoleApp";
 import { HelpOverlay } from "@/components/console/HelpOverlay";
 import { SharedStageView, useSharedStage } from "@/components/console/SharedStage";
 import { OutputControl } from "@/components/console/TopBar";
 import { SafetyCapsule } from "@/components/console/SafetyControls";
+import { manualHud } from "@/components/console/feedback";
+import { useMidiCommands } from "@/components/console/sync/hooks";
+import { SyncSheets, type SyncSheetView } from "@/components/console/sync/SyncSheet";
+import { SyncCapsule } from "@/components/console/sync/SyncStatus";
 import { Pane } from "@/components/console/ui";
 import { useConsoleHotkeys } from "@/components/console/useConsoleHotkeys";
-import { HOTKEY_HELP, SHOW_HOTKEY_HELP, hotkeyAction, type HotkeyAction } from "@/lib/console/hotkeys";
+import { HOTKEY_HELP, SHOW_HOTKEY_HELP, SYNC_HOTKEY_HELP, hotkeyAction, type ConsoleAction, type HotkeyAction } from "@/lib/console/hotkeys";
+import { commandAction } from "@/lib/midi/actions";
+import type { MidiCommand } from "@/lib/midi/mapping";
 import { ShowLiveController, type ItemControl, type ShowLiveSnapshot } from "@/lib/console/show-controller";
 import type { StageStore } from "@/lib/stage/protocol";
 import type { Project } from "@/lib/types";
@@ -27,7 +34,7 @@ import { useWakeLock } from "@/lib/use-wake-lock";
 import { LookConsole } from "./LookConsole";
 import { SetlistRail, itemLength, lookMeta } from "./SetlistRail";
 
-const PRESHOW_HELP = HOTKEY_HELP.filter((g) => g.title === "畫面控制");
+const PRESHOW_HELP = [...HOTKEY_HELP.filter((g) => g.title === "畫面控制"), SYNC_HOTKEY_HELP];
 
 function nextRow(snap: ShowLiveSnapshot): RailItem | null {
   const id = snap.live.armed;
@@ -49,7 +56,9 @@ function describeItem(item: RailItem): string {
 /** Nothing on air yet: open the projection, check the setlist, GO. */
 function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: ShowLiveSnapshot; onShowAction: (a: HotkeyAction) => boolean }) {
   const [helpOpen, setHelpOpen] = useState(false);
+  const [syncView, setSyncView] = useState<SyncSheetView>(null);
   const [blocked, setBlocked] = useState(false);
+  const [manualNote, setManualNote] = useState<string | null>(null);
   const openOutput = useCallback(() => setBlocked(!ctl.openOutput()), [ctl]);
   const armed = nextRow(snap);
   // the rail rows carry each song's readiness already
@@ -57,7 +66,7 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
   const total = snap.rail.reduce((n, r) => n + (r.seconds ?? 0), 0);
 
   const dispatch = useCallback(
-    (action: HotkeyAction): boolean => {
+    (action: ConsoleAction): boolean => {
       switch (action.type) {
         case "go":
         case "standby":
@@ -68,13 +77,29 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
         case "help":
           setHelpOpen((v) => !v);
           return true;
+        case "manual": {
+          const was = ctl.sync.source;
+          const changed = was !== "manual";
+          if (changed) ctl.sync.setSource("manual");
+          const hud = manualHud(was, changed);
+          setManualNote(`${String(hud.label)}：${String(hud.value)}`);
+          return true;
+        }
         default:
           return false;
       }
     },
-    [openOutput, onShowAction],
+    [ctl, openOutput, onShowAction],
   );
-  useConsoleHotkeys({ active: true, paused: helpOpen, onAction: dispatch });
+  useConsoleHotkeys({ active: true, paused: helpOpen || syncView != null, onAction: dispatch });
+  // MIDI GO / standby before the show starts
+  const onMidi = useCallback((cmd: MidiCommand) => void dispatch(commandAction(cmd)), [dispatch]);
+  useMidiCommands(ctl.sync, onMidi);
+  useEffect(() => {
+    if (!manualNote) return;
+    const t = setTimeout(() => setManualNote(null), 2500);
+    return () => clearTimeout(t);
+  }, [manualNote]);
   // the help sheet only explains: ? closes it, S (the panic key) still works through it
   const helpKey = useCallback(
     (e: ReactKeyboardEvent) => {
@@ -100,8 +125,12 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
           <p className="truncate text-c-footnote text-label-2">{[snap.band?.name, `${snap.rail.length} 個項目`, total > 0 ? `約 ${formatRunningTime(total)}` : ""].filter(Boolean).join("・")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <SyncCapsule engine={ctl.sync} />
           {snap.show && <SafetyCapsule project={{ id: `show-${snap.show.id}`, output: snap.show.output }} output={snap.output} />}
           <OutputControl output={snap.output} onOpen={openOutput} />
+          <Tooltip content="同步與 MIDI 控制器" placement="bottom-end">
+            <Button variant="quiet" size="icon" aria-label="同步與控制器" icon={PlugsConnectedIcon} onClick={() => setSyncView("sync")} data-open-sync="" />
+          </Tooltip>
           <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
             <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={() => setHelpOpen(true)} />
           </Tooltip>
@@ -127,6 +156,11 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
               </p>
             )}
             {armed && <p className="mt-4 text-c-footnote text-label-2">{snap.live.current == null ? "第一個" : "待命"}：{describeItem(armed)}</p>}
+            {manualNote && (
+              <p role="status" className="mt-2 text-c-footnote font-medium text-label">
+                {manualNote}
+              </p>
+            )}
             {issues.length > 0 && (
               <div className="mt-6 w-full rounded-md bg-surface-2 px-4 py-3 text-left">
                 <p className="flex items-center gap-1.5 text-c-body font-semibold text-label">
@@ -155,6 +189,7 @@ function PreShow({ ctl, snap, onShowAction }: { ctl: ShowLiveController; snap: S
         groups={PRESHOW_HELP}
         footer={<p>GO 之後，這裡會換成播出中項目的控制台：歌曲是完整的歌曲控制台，進場、串場、待機與散場是畫面控制台。</p>}
       />
+      <SyncSheets engine={ctl.sync} view={syncView} onView={setSyncView} />
     </div>
   );
 }
@@ -260,7 +295,7 @@ export function ShowLiveApp({ id, initialName }: { id: string; initialName?: str
         {onAir?.kind === "song" ? (
           <SongConsole key={onAir.seq} controller={onAir.controller} show={slots} />
         ) : onAir?.kind === "look" ? (
-          <LookConsole key={onAir.seq} controller={onAir.controller} item={onAir.item} next={nextRow(snap)} onShowAction={onShowAction} shared={shared} />
+          <LookConsole key={onAir.seq} controller={onAir.controller} item={onAir.item} next={nextRow(snap)} onShowAction={onShowAction} shared={shared} sync={ctl.sync} />
         ) : (
           <PreShow ctl={ctl} snap={snap} onShowAction={onShowAction} />
         )}

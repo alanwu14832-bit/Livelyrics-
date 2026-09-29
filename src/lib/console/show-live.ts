@@ -4,6 +4,7 @@
 // back to the same item. Pure; the ShowLiveController (show-controller.ts) drives it.
 
 import { ARC_ROLE_INFO, LOOK_KIND_INFO, defaultLook, itemSeconds, songStatus, type SongStatus } from "@/lib/show";
+import { DEFAULT_SYNC_SETTINGS, parseSyncSettings, type SyncSettings } from "@/lib/sync/settings";
 import type { ArcRole, Band, LookItemKind, ProjectSummary, SetItem, SetItemKind, Show } from "@/lib/types";
 
 type LookItem = Extract<SetItem, { kind: LookItemKind }>;
@@ -170,11 +171,15 @@ export interface ShowLivePrefs {
   transition: TakeTransition;
   /** 「GO 後自動播放」: a song taken in TRACK starts playing at once */
   autoPlay: boolean;
+  /** 同步 (phase 5a): the show's sync source, LTC input and freewheel time */
+  sync: SyncSettings;
+  /** 「跟隨時間碼換歌」: when the timecode enters a song's hour, that song is taken */
+  followTimecode: boolean;
 }
 
-export const DEFAULT_PREFS: ShowLivePrefs = { transition: "fade", autoPlay: false };
+export const DEFAULT_PREFS: ShowLivePrefs = { transition: "fade", autoPlay: false, sync: DEFAULT_SYNC_SETTINGS, followTimecode: false };
 
-export interface ShowLiveSession extends LiveState, ShowLivePrefs {}
+export interface ShowLiveSession extends LiveState, Pick<ShowLivePrefs, "transition" | "autoPlay"> {}
 
 export const showLiveKey = (showId: string) => `livelyrics:show-live:${showId}`;
 export const showPrefsKey = (showId: string) => `livelyrics:show-live-prefs:${showId}`;
@@ -190,6 +195,8 @@ export function parsePrefs(raw: unknown, fallback: ShowLivePrefs = DEFAULT_PREFS
   return {
     transition: d.transition === "cut" || d.transition === "fade" ? d.transition : fallback.transition,
     autoPlay: typeof d.autoPlay === "boolean" ? d.autoPlay : fallback.autoPlay,
+    sync: d.sync !== undefined ? parseSyncSettings(d.sync) : { ...fallback.sync },
+    followTimecode: typeof d.followTimecode === "boolean" ? d.followTimecode : fallback.followTimecode,
   };
 }
 
@@ -205,7 +212,8 @@ export function parseShowLiveSession(raw: string | null | undefined): ShowLiveSe
   if (!isRecord(d)) return null;
   const current = itemId(d.current);
   const takenAt = typeof d.takenAt === "number" && Number.isFinite(d.takenAt) && d.takenAt > 0 ? d.takenAt : null;
-  return { current, armed: itemId(d.armed), takenAt: current ? takenAt : null, ...parsePrefs(d) };
+  const { transition, autoPlay } = parsePrefs(d);
+  return { current, armed: itemId(d.armed), takenAt: current ? takenAt : null, transition, autoPlay };
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;

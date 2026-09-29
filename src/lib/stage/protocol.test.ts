@@ -50,6 +50,11 @@ describe("sanitizeStageState", () => {
     expect(s.audio).toEqual({ level: 1, bass: 0, onset: 0, beatPhase: 0 });
   });
 
+  it("keeps the MIDI clock flag of the beat only when it is exactly true (phase 5a)", () => {
+    expect(sanitizeStageState({ projectId: "p1", audio: { beatPhase: 0.4, clock: true } })!.audio).toEqual({ level: 0, bass: 0, onset: 0, beatPhase: 0.4, clock: true });
+    expect(sanitizeStageState({ projectId: "p1", audio: { beatPhase: 0.4, clock: "yes" } })!.audio.clock).toBeUndefined();
+  });
+
   it("only marks a hold when it is exactly true (older consoles never send it)", () => {
     expect(sanitizeStageState({ projectId: "p1" })!.sectionHeld).toBeUndefined();
     expect(sanitizeStageState({ projectId: "p1", sectionHeld: "true" })!.sectionHeld).toBeUndefined();
@@ -116,5 +121,17 @@ describe("LED 安全模式 on the wire", () => {
     expect(pong).toMatchObject({ limiter: { on: true, damping: true, engaged: 2 } });
     const oldPong = parseStageMessage({ type: "pong", outputId: "o", at: 1, width: 1, height: 1, fullscreen: false });
     expect(oldPong && "limiter" in oldPong).toBe(false);
+  });
+});
+
+describe("the 排版 editor's plan message (字體藝術)", () => {
+  const plan = { version: 1, keyVisual: { title: "t" }, sections: [], lines: [], cues: [], designerNotes: "" };
+  it("carries the project id and the plan, stamped by its sender", () => {
+    expect(parseStageMessage({ type: "plan", projectId: "p1", plan, sender: "ed1" })).toEqual({ type: "plan", projectId: "p1", plan, sender: "ed1" });
+  });
+  it("drops a plan message without a usable plan or project id", () => {
+    expect(parseStageMessage({ type: "plan", projectId: "p1" })).toBeNull();
+    expect(parseStageMessage({ type: "plan", projectId: "", plan })).toBeNull();
+    expect(parseStageMessage({ type: "plan", projectId: "p1", plan: { sections: "x" } })).toBeNull();
   });
 });

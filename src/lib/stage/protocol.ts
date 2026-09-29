@@ -11,11 +11,15 @@
 // output performs itself) and the next item is announced ahead with `preload`. Every addition is
 // optional, so older windows and consoles keep working with newer ones.
 //
+// 字體藝術 (phase 6): the 排版 editor (/p/[id]/type) posts `plan` on the song's channel after an
+// edit; a console adopts its type system and re-broadcasts the project, and a per-song output
+// without a console shows it directly.
+//
 // Both the console's preview and the projection window render through the same
 // <StageView project store /> component, so the preview is exactly the output.
 
 import { normalizeOutput } from "../output";
-import type { LyricStyleId, Project, SceneId } from "../types";
+import type { DesignPlan, LyricStyleId, Project, SceneId } from "../types";
 
 export type PlaybackMode = "track" | "live";
 
@@ -56,6 +60,11 @@ export interface LiveAudioFeatures {
   onset: number;
   /** 0..1 position inside the current beat (0 = on the beat) */
   beatPhase: number;
+  /**
+   * 節拍模式 (phase 5a): beatPhase comes from the band's MIDI clock, so the renderer follows it even
+   * in TRACK mode instead of the analysis beat grid. Optional (older consoles never send it).
+   */
+  clock?: boolean;
 }
 
 export interface StageState {
@@ -147,7 +156,12 @@ export type StageMessage =
   /** console -> output: ask the output window to toggle fullscreen (needs a user gesture there; best effort) */
   | { type: "fullscreen" }
   /** console -> output: ask the output window to close */
-  | { type: "close" };
+  | { type: "close" }
+  /**
+   * 排版 editor -> consoles and the per-song output: the plan after a 字體藝術 edit (the editor saves
+   * it). A console adopts its type system and re-broadcasts; an output without a console shows it.
+   */
+  | { type: "plan"; projectId: string; plan: DesignPlan; sender?: string };
 
 /**
  * LED 安全模式 (phase 3): what the projection window's flash limiter is doing, reported on every
@@ -228,7 +242,7 @@ export function sanitizeStageState(raw: unknown, projectId?: string, now: number
     lineStartedAt: finite(raw.lineStartedAt) ? raw.lineStartedAt : now,
     sectionIndex: index(raw.sectionIndex),
     overrides: sanitizeOverrides(raw.overrides),
-    audio: { level: unit(audio.level, 0), bass: unit(audio.bass, 0), onset: unit(audio.onset, 0), beatPhase: unit(audio.beatPhase, 0) },
+    audio: { level: unit(audio.level, 0), bass: unit(audio.bass, 0), onset: unit(audio.onset, 0), beatPhase: unit(audio.beatPhase, 0), ...(audio.clock === true ? { clock: true } : {}) },
   };
   if (raw.sectionHeld === true) state.sectionHeld = true;
   return state;
@@ -292,6 +306,12 @@ export function parseStageMessage(raw: unknown): StageMessage | null {
       return { type: "fullscreen" };
     case "close":
       return { type: "close" };
+    case "plan": {
+      // the renderer repairs the rest (resolve.ts, the type engine's resolver) and never throws
+      const plan = raw.plan;
+      if (typeof raw.projectId !== "string" || !raw.projectId || !isRecord(plan) || !Array.isArray(plan.sections) || !isRecord(plan.keyVisual)) return null;
+      return { type: "plan", projectId: raw.projectId, plan: plan as unknown as DesignPlan, ...sender };
+    }
     default:
       return null;
   }

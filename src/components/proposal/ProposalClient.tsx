@@ -19,6 +19,7 @@ import { proposalSheet, type ProposalDirection } from "@/lib/directions";
 import { FONTS, fontStack } from "@/lib/fonts";
 import { mergedMoodboard } from "@/lib/moodboard";
 import type { DesignDirection, Project } from "@/lib/types";
+import { VOICES } from "@/lib/type/vocab";
 
 type Load = { kind: "loading" } | { kind: "ok"; project: Project; bandName?: string } | { kind: "error"; message: string };
 
@@ -29,7 +30,10 @@ function DirectionColumn({ project, direction, view, onReady }: { project: Proje
   const list = frames.frames ?? [];
   const hero = list.find((f) => f.label === "第一次副歌") ?? list[1] ?? list[0];
   const rest = list.filter((f) => f !== hero).slice(0, 3);
-  const t = direction.plan.keyVisual.typography;
+  const kvt = direction.plan.keyVisual.typography;
+  // 字體藝術: the lyrics are set in the type system's fonts
+  const ts = direction.plan.typeSystem;
+  const t = ts ? { cjkFont: ts.fonts.cjk, latinFont: ts.fonts.latin, weight: ts.weight, letterSpacing: kvt.letterSpacing } : kvt;
   const bg = direction.plan.keyVisual.palette[0]?.hex ?? "#000";
   const fg = direction.plan.sections.find((s) => s.kind === "chorus")?.lyricColor ?? direction.plan.sections[0]?.lyricColor ?? "#fff";
   const selected = view.status === "selected";
@@ -87,7 +91,7 @@ function DirectionColumn({ project, direction, view, onReady }: { project: Proje
         <dt className="font-semibold text-[#6e6e73]">場景</dt>
         <dd className="line-clamp-1 min-w-0">{view.sceneTendency}</dd>
         <dt className="font-semibold text-[#6e6e73]">歌詞</dt>
-        <dd className="line-clamp-1 min-w-0">{view.lyricTreatment}</dd>
+        <dd className="line-clamp-1 min-w-0">{view.typeVoice ? `${view.typeVoice}｜` : ""}{view.lyricTreatment}</dd>
         {view.references.length > 0 && (
           <>
             <dt className="font-semibold text-[#6e6e73]">參考</dt>
@@ -130,7 +134,7 @@ export function ProposalClient({ id }: { id: string }) {
   const project = load.kind === "ok" ? load.project : null;
   const moodboard = useMemo(() => (project ? mergedMoodboard(project) : []), [project]);
   const sheet = useMemo(
-    () => (project ? proposalSheet(project, { bandName: load.kind === "ok" ? load.bandName : undefined, moodboard, fontLabel: (f) => FONTS[f as keyof typeof FONTS]?.label ?? f }) : null),
+    () => (project ? proposalSheet(project, { bandName: load.kind === "ok" ? load.bandName : undefined, moodboard, fontLabel: (f) => FONTS[f as keyof typeof FONTS]?.label ?? f, voiceLabel: (v) => VOICES[v as keyof typeof VOICES]?.label ?? v }) : null),
     [project, load, moodboard],
   );
   const onReady = useMemo(() => (dir: string, r: boolean) => setReady((m) => (m[dir] === r ? m : { ...m, [dir]: r })), []);

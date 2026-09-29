@@ -141,6 +141,24 @@ describe("show file and edits", () => {
     expect(applyShowPatch(show, { name: "  " }, ctx).ok).toBe(false);
     expect(applyShowPatch(show, { date: "tomorrow" }, ctx).ok).toBe(false);
   });
+
+  it("keeps a song's start timecode, validated (phase 5a)", () => {
+    const show = coerceShow({ bandId: "b1", name: "巡演" }, "s1", "");
+    const ctx = { projectIds: new Set(["p1", "p2", "p3"]), assetIds: new Set<string>() };
+    const r = applyShowPatch(
+      show,
+      { items: [{ id: "a", kind: "song", projectId: "p1", timecode: "03:00:00:00" }, { id: "b", kind: "song", projectId: "p2", timecode: "3" }, { id: "c", kind: "song", projectId: "p3", timecode: "02:00:00;10" }] },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const tcs = r.show.items.map((i) => (i.kind === "song" ? (i.timecode ?? null) : null));
+    // an invalid value is dropped (the song falls back to its position's hour)
+    expect(tcs).toEqual(["03:00:00:00", null, "02:00:00:10"]);
+    // stored files are read the same way
+    const again = coerceShow({ bandId: "b1", name: "x", items: [{ id: "z", kind: "song", projectId: "p1", timecode: "25:00:00:00" }, { id: "y", kind: "song", projectId: "p2", timecode: "04:00:00:00" }] }, "s1", "");
+    expect(again.items.map((i) => (i.kind === "song" ? i.timecode : undefined))).toEqual([undefined, "04:00:00:00"]);
+  });
 });
 
 describe("arc directives", () => {

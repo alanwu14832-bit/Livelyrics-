@@ -1,6 +1,7 @@
 // Keyboard feedback for the console (UI-AUDIT UI-18, UI-19, §3.5): what the HUD says after a
-// hotkey and which status capsules the top bar shows. Both are console chrome only: nothing here
-// is ever sent to the projection window.
+// hotkey (or a MIDI controller, phase 5a: the same actions, plus faders) and which status capsules
+// the top bar shows. Both are console chrome only: nothing here is ever sent to the projection
+// window.
 
 import type { CapsuleItem, HudContent } from "@/components/ui";
 import {
@@ -8,26 +9,35 @@ import {
   EyeSlashIcon,
   FilmSlateIcon,
   HandPalmIcon,
+  HandTapIcon,
   ListNumbersIcon,
+  LockSimpleIcon,
   MetronomeIcon,
   MoonIcon,
   ProjectorScreenIcon,
   PushPinSimpleIcon,
   RecordIcon,
   RepeatIcon,
+  ShieldCheckIcon,
+  ShieldWarningIcon,
   SnowflakeIcon,
+  SquareHalfIcon,
   SpeakerSlashIcon,
   SubtitlesIcon,
   SubtitlesSlashIcon,
+  SunIcon,
+  TextAaIcon,
   TimerIcon,
   WaveformIcon,
 } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { formatBpm, formatOffsetSeconds } from "@/lib/console/format";
-import type { HotkeyAction } from "@/lib/console/hotkeys";
+import { MANUAL_KEY, type ConsoleAction } from "@/lib/console/hotkeys";
 import { LYRIC_STYLE_LABELS, SCENE_LABELS, SECTION_KIND_LABELS } from "@/lib/console/labels";
 import { sceneBank } from "@/lib/console/plan-edit";
+import { intensityFromControl, lyricScaleFromControl } from "@/lib/midi/controls";
 import type { StageOverrides } from "@/lib/stage/protocol";
+import type { SyncSource } from "@/lib/sync/settings";
 import type { Project, SectionDesign } from "@/lib/types";
 
 /** A section's name for the HUD and capsules (「副歌 2」, or its kind when it has no label). */
@@ -40,7 +50,7 @@ export function sectionTitle(section: Pick<SectionDesign, "label" | "kind"> | nu
  * HUD content for a hotkey that was just handled (read the new state from the controller), or
  * null for keys that need no HUD (transport and selection keys move visible things already).
  */
-export function hudForAction(action: HotkeyAction, controller: ConsoleController): HudContent | null {
+export function hudForAction(action: ConsoleAction, controller: ConsoleController): HudContent | null {
   const ov = controller.getOverrides();
   const snap = controller.getSnapshot();
   switch (action.type) {
@@ -79,8 +89,86 @@ export function hudForAction(action: HotkeyAction, controller: ConsoleController
       const section = index != null ? snap.project?.plan?.sections[index] : null;
       return section ? { icon: ListNumbersIcon, label: `段落 ${index! + 1}`, value: sectionTitle(section) } : null;
     }
+    case "jumpSection": {
+      const section = snap.project?.plan?.sections[action.index];
+      return { icon: ListNumbersIcon, label: `段落 ${action.index + 1}`, value: section ? sectionTitle(section) : "沒有這一段" };
+    }
+    case "cueLine":
+      // the line itself shows in the preview; only a note past the lyrics needs words
+      return (snap.project?.lyrics?.lines.length ?? 0) > action.index ? null : { icon: SubtitlesIcon, label: `第 ${action.index + 1} 句`, value: "沒有這一句" };
+    case "testPattern":
+      return { icon: SquareHalfIcon, label: "測試圖", value: ov.testPattern ? "開" : "關" };
     default:
       return null;
+  }
+}
+
+/**
+ * A manual key the timecode holds right now (it waits for 回到手動: the controller refuses it and
+ * posts a notice): the HUD says so instead of the key's own feedback. Null when the key runs.
+ */
+export function heldHud(action: ConsoleAction, controller: ConsoleController): HudContent | null {
+  if (!controller.isFollowingTimecode()) return null;
+  const snap = controller.getSnapshot();
+  const live = snap.mode === "live";
+  let kind: "line" | "time" | null = null;
+  switch (action.type) {
+    case "next":
+    case "prev":
+    case "cueSelected":
+    case "cueLine":
+      kind = "line";
+      break;
+    case "togglePlay":
+      kind = live ? "line" : "time";
+      break;
+    case "escape":
+      kind = live && controller.store.get().lineIndex != null ? "line" : null;
+      break;
+    case "section":
+    case "jumpSection":
+      kind = "time";
+      break;
+    case "loop":
+      kind = snap.sectionLoop == null ? "time" : null;
+      break;
+    default:
+      break;
+  }
+  if (!kind || !controller.timecodeHolds(kind)) return null;
+  return { icon: LockSimpleIcon, label: "跟隨時間碼中", value: `按 ${MANUAL_KEY} 回到手動` };
+}
+
+/** 回到手動 (X): what it did. */
+export function manualHud(was: SyncSource, changed: boolean): HudContent {
+  if (!changed) return { icon: HandTapIcon, label: "手動", value: "沒有使用同步訊號" };
+  return { icon: HandTapIcon, label: "回到手動", value: was === "clock" ? "不再跟隨 MIDI clock" : "不再跟隨時間碼" };
+}
+
+/** What a MIDI fader can move (the song console and the show's look console alike). */
+export interface ControlTarget {
+  getOverrides(): StageOverrides;
+  setOverrides(patch: Partial<StageOverrides>): void;
+  setLedCapFromController(value: number): number | null;
+}
+
+/** Apply a continuous controller value (0..1) and return its HUD. */
+export function applyControl(target: ControlTarget, control: "intensity" | "lyricScale" | "ledCap", value: number, noun = "歌詞"): HudContent {
+  switch (control) {
+    case "intensity": {
+      const intensity = intensityFromControl(value);
+      if (Math.abs(intensity - target.getOverrides().intensity) > 0.001) target.setOverrides({ intensity });
+      return { icon: SunIcon, label: "畫面強度", value: `${Math.round(intensity * 100)}%` };
+    }
+    case "lyricScale": {
+      const lyricScale = lyricScaleFromControl(value);
+      if (Math.abs(lyricScale - target.getOverrides().lyricScale) > 0.001) target.setOverrides({ lyricScale });
+      return { icon: TextAaIcon, label: `${noun}字級`, value: `×${lyricScale.toFixed(2)}` };
+    }
+    case "ledCap": {
+      const b = target.setLedCapFromController(value);
+      return b == null ? { icon: ShieldWarningIcon, label: "最高亮度", value: "LED 安全模式未開啟" } : { icon: ShieldCheckIcon, label: "最高亮度", value: `${Math.round(b * 100)}%` };
+    }
   }
 }
 

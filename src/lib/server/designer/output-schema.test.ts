@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
+import { AUTO_LYRIC_STYLE_IDS, SCENE_IDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "@/lib/schema";
 import { designPlanJsonSchema, designPlanOutputFormat } from "./output-schema";
 
 type Node = Record<string, unknown>;
@@ -35,13 +35,30 @@ describe("DesignPlan output schema", () => {
   it("keeps the closed vocabularies as real enums", () => {
     const section = ((props.sections as Node).items as Node).properties as Record<string, Node>;
     expect(section.scene.enum).toEqual([...SCENE_IDS]);
-    expect(section.lyricStyle.enum).toEqual([...LYRIC_STYLE_IDS]);
+    // karaoke and subtitle are not offered to the designer (字體藝術)
+    expect(section.lyricStyle.enum).toEqual([...AUTO_LYRIC_STYLE_IDS]);
+    expect(section.lyricStyle.enum).not.toContain("karaoke");
+    expect(section.lyricStyle.enum).not.toContain("subtitle");
     expect(section.transitionIn.enum).toEqual(["cut", "fade", "flash", "wipe", "bloom"]);
     expect(props.version.enum).toEqual([1]);
     const line = ((props.lines as Node).items as Node).properties as Record<string, Node>;
     const variants = line.styleOverride.anyOf as Node[];
     expect(variants.map((v) => v.type)).toEqual(["string", "null"]);
-    expect(variants[0].enum).toEqual([...LYRIC_STYLE_IDS]);
+    expect(variants[0].enum).toEqual([...AUTO_LYRIC_STYLE_IDS]);
+  });
+
+  it("asks for the type system with a composition per line (字體藝術)", () => {
+    const ts = props.typeSystem as Node;
+    expect(ts.type).toBe("object");
+    const tp = ts.properties as Record<string, Node>;
+    expect(tp.voice.enum).toEqual([...TYPE_VOICE_IDS]);
+    const line = (tp.lines.items as Node).properties as Record<string, Node>;
+    expect(Object.keys(line).sort()).toEqual(["emphasis", "energy", "lineId", "motionWord", "orientation", "recipe", "seed"]);
+    expect(line.recipe.enum).toEqual([...TYPE_RECIPE_IDS]);
+    expect(line.orientation.enum).toEqual(["h", "v", "mixed"]);
+    // the editor-only fields are not part of what a designer writes
+    expect(line.locked).toBeUndefined();
+    expect(tp.sections).toBeUndefined();
   });
 
   it("keeps descriptions as guidance", () => {

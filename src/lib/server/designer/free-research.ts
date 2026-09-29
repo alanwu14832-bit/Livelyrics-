@@ -13,9 +13,11 @@ import type { FetchLike } from "@/lib/server/research/http";
 import type { PublicInfo, Research, ResearchSource } from "@/lib/types";
 import { activeBible } from "./bible-style";
 import { LYRIC_POLICY_INFO } from "@/lib/band";
-import { LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
+import { SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { analyzeFindings, type Findings } from "./findings";
 import { RESEARCH_HEADINGS } from "./prompts";
+import { chooseVoice } from "./type-design";
+import { VOICES } from "@/lib/type/vocab";
 import { analyzeStructure, type SongStructure } from "./structure";
 import type { DesignerCallbacks, DesignerInput } from "./types";
 
@@ -186,7 +188,7 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
     } else song.push("- 歌詞中沒有抓到明顯的具象意象：畫面以音樂能量與色彩為主。");
     const e = f.lyrics.emotion;
     const words = [...e.positive.slice(0, 3), ...e.negative.slice(0, 3)];
-    song.push(`- 情緒：**${e.label}**（正負 ${e.valence.toFixed(2)}、激昂 ${e.arousal.toFixed(2)}${words.length ? `；情緒詞：${words.join("、")}` : ""}${e.confidence === "low" ? "；情緒詞很少，僅供參考" : ""}）${e.hook ? `，副歌的 hook ${e.hook.arousal >= 0.6 ? "特別激昂" : e.hook.valence > e.valence + 0.2 ? "比主歌更明亮" : "延續整首的情緒"}` : ""}。`);
+    song.push(`- 情緒：**${e.label}**（正向程度 ${e.valence.toFixed(2)}、激昂程度 ${e.arousal.toFixed(2)}${words.length ? `；情緒詞：${words.join("、")}` : ""}${e.confidence === "low" ? "；情緒詞很少，僅供參考" : ""}）${e.hook ? `，副歌的 hook ${e.hook.arousal >= 0.6 ? "特別激昂" : e.hook.valence > e.valence + 0.2 ? "比主歌更明亮" : "延續整首的情緒"}` : ""}。`);
     song.push(`- 人稱：${f.lyrics.pov.label}——${f.lyrics.pov.note}`);
   } else {
     song.push("- 這首歌目前沒有歌詞：以音訊能量" + (g ? "與曲風" : "") + "為主，之後加入歌詞再重新研究，會得到意象與情緒的分析。");
@@ -214,10 +216,8 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
 
   // ## 設計方向建議
   const h = f.hints;
-  const kindTreat = (k: "verse" | "chorus") => {
-    const style = k === "verse" ? h.verseStyle : h.chorusStyle;
-    return style ? LYRIC_STYLES[style].label : k === "verse" ? "整行淡入或小字幕" : "卡拉 OK 填色或巨字";
-  };
+  // 字體藝術: every line is a composition in the song's typographic voice
+  const voice = chooseVoice(f, st.cjk);
   const plan: string[] = [
     `- 世界觀：${h.world}`,
     `- 配色：${bible?.palette.length ? "沿用樂團視覺聖經的色盤；" : ""}${g ? `${g.palette.note}` : "由歌詞意象決定"}${f.imagery[0] ? `，點綴取自歌詞的「${f.imagery[0].family.name}」（${f.imagery[0].family.colors}）` : ""}；歌詞色與背景對比 4.5:1 以上。`,
@@ -227,9 +227,10 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
       .map((x) => SCENES[x].label)
       .join("、")}${h.avoidScenes.length ? `；避免${h.avoidScenes.map((x) => SCENES[x].label).join("、")}` : ""}。`,
     sung
-      ? `- 段落角色：前奏與間奏讓畫面主導；${SECTION_KIND_LABELS.verse}歌詞「${kindTreat("verse")}」、退到上方；${SECTION_KIND_LABELS.chorus}「${kindTreat("chorus")}」，一次比一次亮。${h.lyricDensity === "sparse" ? "這個曲風的歌詞要少：只留最關鍵的幾句。" : h.lyricDensity === "dense" ? "主歌字很密：不要逐字動畫。" : ""}`
+      ? `- 段落角色：前奏與間奏讓畫面主導；每一句歌詞都是一張排好的構圖，不是字幕：${SECTION_KIND_LABELS.verse}小而安靜、避開 IMAG，${SECTION_KIND_LABELS.chorus}放大成畫面的主角，一次比一次亮。${h.lyricDensity === "sparse" ? "這個曲風的歌詞份量要輕：主歌的字很小，只讓最關鍵的幾句放大。" : h.lyricDensity === "dense" ? "主歌字很密：用安靜的小字構圖，不要逐字動畫。" : ""}`
       : "- 段落角色：全程由畫面與燈光敘事，安靜段落退後、能量高的段落跟著節拍爆開。",
-    `- 字體：${h.typography ? `${h.typography.note}，字重 ${Math.max(600, h.typography.weight)}` : "粗黑體或宋體，字重 700 以上"}；每次最多兩行，避開主唱 IMAG 與畫面下緣。`,
+    `- 字體：${h.typography ? `${h.typography.note}，字重 ${Math.max(600, h.typography.weight)}` : "粗黑體或宋體，字重 700 以上"}；避開主唱 IMAG 與畫面下緣。`,
+    ...(sung ? [`- 字體語言：${VOICES[voice.voice].label}——${voice.why}`] : []),
     `- 轉場：${h.motion === "soft" ? "柔和（光暈、淡入），不要硬切" : h.motion === "punchy" ? "跟著重拍硬切，爆點用閃白（LED 安全模式會改成淡入）" : "推進用擦除、爆點用閃白（LED 安全模式會改成淡入）、回落用淡出"}。`,
   ];
 

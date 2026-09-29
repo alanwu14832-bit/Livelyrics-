@@ -150,7 +150,8 @@ export async function runExport(job: ExportJob): Promise<ExportResult> {
       if (piece) for (const w of writers) if (w.audio) await w.writer.addAudio(piece);
     };
 
-    const wantsScene = settings.variants.some((v) => v === "full" || v === "background");
+    const wantsFull = settings.variants.includes("full");
+    const wantsBg = settings.variants.includes("background");
     const wantsColor = writers.some((w) => w.variant === "full" || (w.variant === "lyrics" && w.plan.alpha));
     const wantsMatte = writers.some((w) => w.variant === "lyrics" && !w.plan.alpha);
 
@@ -159,14 +160,13 @@ export async function runExport(job: ExportJob): Promise<ExportResult> {
     for (let i = 0; i < total; i++) {
       check();
       const t = frameTime(range.start, i, rate);
-      await stage.renderFrame(t, fps, { scene: wantsScene, lyrics: wantsColor, matte: wantsMatte });
+      await stage.renderFrame(t, fps, { scene: wantsFull, background: wantsBg, lyrics: wantsColor, matte: wantsMatte });
       for (const w of writers) {
         const ctx = w.writer.ctx;
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
         if (w.variant === "full") {
-          ctx.drawImage(stage.sceneCanvas, 0, 0);
-          ctx.drawImage(stage.lyricCanvas, 0, 0);
+          stage.drawFull(ctx);
         } else if (w.variant === "background") {
           ctx.drawImage(stage.sceneCanvas, 0, 0);
         } else if (w.plan.alpha) {
@@ -258,14 +258,15 @@ export async function renderPreview(project: Project, t: number, fps: number): P
   const stage = new OfflineStage(project);
   try {
     const { warnings } = await stage.prepare();
-    await stage.renderFrame(t, fps, { scene: true, lyrics: true, matte: true });
+    await stage.renderFrame(t, fps, { scene: true, background: true, lyrics: true, matte: true });
     const out = document.createElement("canvas");
     out.width = stage.width;
     out.height = stage.height;
     const ctx = out.getContext("2d")!;
     ctx.drawImage(stage.sceneCanvas, 0, 0);
     const background = out.toDataURL("image/png");
-    ctx.drawImage(stage.lyricCanvas, 0, 0);
+    ctx.clearRect(0, 0, out.width, out.height);
+    stage.drawFull(ctx);
     const full = out.toDataURL("image/png");
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, out.width, out.height);
@@ -284,7 +285,7 @@ export async function renderPreview(project: Project, t: number, fps: number): P
 export async function debugStage(project: Project, t: number, fps: number) {
   const stage = new OfflineStage(project);
   const { warnings } = await stage.prepare();
-  await stage.renderFrame(t, fps, { scene: true, lyrics: true, matte: true });
+  await stage.renderFrame(t, fps, { scene: true, background: true, lyrics: true, matte: true });
   const png = (draw: (ctx: CanvasRenderingContext2D) => void) => {
     const c = document.createElement("canvas");
     c.width = stage.width;
@@ -298,13 +299,9 @@ export async function debugStage(project: Project, t: number, fps: number) {
     width: stage.width,
     height: stage.height,
     /** advance to another time (one frame on = continuous, anything else pre-rolls) */
-    render: (at: number) => stage.renderFrame(at, fps, { scene: true, lyrics: true, matte: true }),
+    render: (at: number) => stage.renderFrame(at, fps, { scene: true, background: true, lyrics: true, matte: true }),
     scene: () => png((ctx) => ctx.drawImage(stage.sceneCanvas, 0, 0)),
-    full: () =>
-      png((ctx) => {
-        ctx.drawImage(stage.sceneCanvas, 0, 0);
-        ctx.drawImage(stage.lyricCanvas, 0, 0);
-      }),
+    full: () => png((ctx) => stage.drawFull(ctx)),
     lyricsOnBlack: () =>
       png((ctx) => {
         ctx.fillStyle = "#000";

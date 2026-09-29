@@ -2,8 +2,10 @@
 // instructions ("副歌更熱血一點", "主歌不要歌詞", "整體藍一點", "歌詞放上面") when Claude
 // is unavailable. Each clause of the instruction is parsed separately; the result is
 // applied on top of the previous plan so a Claude-made plan is kept, not replaced.
+// A plan with a type system (字體藝術) gets the same intent on its compositions: the font, the
+// size and a recipe or orientation per section (the 排版 page's section overrides).
 
-import type { DesignPlan, FontId, LyricPlacement, LyricStyleId, SceneId, SectionKind } from "@/lib/types";
+import type { DesignPlan, FontId, LyricPlacement, LyricStyleId, SceneId, SectionKind, TypeSection } from "@/lib/types";
 import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { colorName, hexToHsl, hsl, normalizeHex } from "./color";
 import { normalizePlan } from "./normalize";
@@ -178,6 +180,27 @@ function rotateHex(hex: string, targetHue: number | null, deltaHue: number, mono
   return hsl(h + deltaHue, s, l);
 }
 
+/** What a legacy lyric style asks of a composition (a section override); null = nothing to change. */
+const TYPE_FOR_STYLE: Partial<Record<LyricStyleId, Omit<TypeSection, "sectionId">>> = {
+  vertical: { orientation: "v" },
+  impact: { recipe: "giant-word" },
+  stack: { recipe: "poster" },
+  typewriter: { recipe: "title-card" },
+  "word-pop": { recipe: "scatter" },
+};
+
+/** Merge a section override into the plan's type system (no-op without one). */
+function typeOverride(plan: DesignPlan, sectionId: string, patch: Omit<TypeSection, "sectionId">) {
+  const ts = plan.typeSystem;
+  if (!ts) return;
+  const list = [...(ts.sections ?? [])];
+  const i = list.findIndex((x) => x.sectionId === sectionId);
+  const merged: TypeSection = { ...(i >= 0 ? list[i] : { sectionId }), ...patch };
+  if (i >= 0) list[i] = merged;
+  else list.push(merged);
+  ts.sections = list;
+}
+
 function describeTargets(t: SectionKind[] | null): string {
   return t ? t.map((k) => SECTION_KIND_LABELS[k]).join("／") : "全曲";
 }
@@ -227,10 +250,17 @@ export function applyInstruction(plan: DesignPlan, instruction: string, input: D
       changes.push(`${where}隱藏歌詞`);
     } else if (it.lyrics === "less") {
       const pool = it.targets ? secs : secs.filter((s) => s.kind !== "chorus");
-      for (const s of pool) if (s.lyricStyle !== "hidden") s.lyricStyle = s.kind === "verse" ? "subtitle" : "hidden";
+      for (const s of pool) {
+        if (s.lyricStyle === "hidden") continue;
+        // verses stay, as quiet small type (a whisper); other sections drop their lyrics
+        if (s.kind === "verse") {
+          s.lyricStyle = "line-fade";
+          typeOverride(next, s.id, { recipe: "whisper" });
+        } else s.lyricStyle = "hidden";
+      }
       changes.push(`${it.targets ? where : "副歌以外的段落"}減少歌詞`);
     } else if (it.lyrics === "show") {
-      for (const s of secs) if (s.lyricStyle === "hidden") s.lyricStyle = s.kind === "chorus" ? "karaoke" : "line-fade";
+      for (const s of secs) if (s.lyricStyle === "hidden") s.lyricStyle = s.kind === "chorus" ? "word-pop" : "line-fade";
       changes.push(`${where}顯示歌詞`);
     }
     if (it.style) {
@@ -238,8 +268,11 @@ export function applyInstruction(plan: DesignPlan, instruction: string, input: D
         s.lyricStyle = it.style;
         if (it.style === "vertical") s.lyricPlacement = "vertical-right";
         else if (s.lyricPlacement.startsWith("vertical")) s.lyricPlacement = "center";
+        const t = TYPE_FOR_STYLE[it.style];
+        if (t) typeOverride(next, s.id, t);
       }
       changes.push(`${where}歌詞改為「${LYRIC_STYLES[it.style].label}」`);
+      if (next.typeSystem && !TYPE_FOR_STYLE[it.style]) changes.push("（每一句仍依字體藝術的構圖排版；這個樣式只用在舊版歌詞）");
     }
     if (it.placement) {
       for (const s of secs) {
@@ -249,7 +282,11 @@ export function applyInstruction(plan: DesignPlan, instruction: string, input: D
       changes.push(`${where}歌詞位置調整`);
     }
     if (it.lyricScale) {
-      for (const s of secs) s.lyricScale = clamp(s.lyricScale + it.lyricScale, 0.6, 1.8);
+      for (const s of secs) {
+        s.lyricScale = clamp(s.lyricScale + it.lyricScale, 0.6, 1.8);
+        const cur = next.typeSystem?.sections?.find((x) => x.sectionId === s.id)?.scale ?? 1;
+        typeOverride(next, s.id, { scale: Math.round(clamp(cur + it.lyricScale, 0.6, 1.6) * 100) / 100 });
+      }
       changes.push(`${where}歌詞${it.lyricScale > 0 ? "放大" : "縮小"}`);
     }
     if (it.hue != null || it.mono) {
@@ -270,8 +307,9 @@ export function applyInstruction(plan: DesignPlan, instruction: string, input: D
     if (it.font) {
       next.keyVisual.typography.cjkFont = it.font;
       next.keyVisual.typography.latinFont = FONT_CATALOG[it.font].generic === "serif" ? "playfair-display" : "space-grotesk";
+      if (next.typeSystem) next.typeSystem.fonts = { cjk: it.font, latin: next.keyVisual.typography.latinFont };
       changes.push(`字體改為${FONT_CATALOG[it.font].label}`);
     }
   }
-  return { plan: normalizePlan(next, input), changes };
+  return { plan: normalizePlan(next, input, { typeSystem: "keep" }), changes };
 }

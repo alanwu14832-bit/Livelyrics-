@@ -26,6 +26,7 @@ import {
   SAFETY_PRESENT_FRAGMENT,
   SAFETY_PRESENT_UNIFORMS,
 } from "../scenes/safety";
+import { TYPE_FRAGMENT, TYPE_UNIFORMS } from "../scenes/type";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
 
@@ -103,6 +104,11 @@ export interface SafetyDraw {
   alpha: number | null;
   /** read back the luminance grid of this frame (cols × rows) */
   measure: { cols: number; rows: number; sync: boolean } | null;
+  /**
+   * The low-pass feedback chain (0 = the output; 1 = a second, independent picture: the export's
+   * background-only variant of a frame whose full version carries the type).
+   */
+  chain?: 0 | 1;
 }
 
 /** A luminance grid read back from the GPU: RGBA8, bottom row first (GL order). */
@@ -114,6 +120,40 @@ export interface GridReadback {
   data: Uint8Array;
 }
 
+/** 字體藝術 (phase 6): the type layer over scene + media (see src/lib/stage/scenes/type.ts). */
+export interface TypeDraw {
+  /** TypePainter's plates canvas */
+  source: TexImageSource;
+  /** re-upload when this changes */
+  version: number;
+  width: number;
+  height: number;
+  ink: RGB;
+  accent: RGB;
+  spot: RGB;
+  /** the background tone (knockout fill, halo) */
+  fill: RGB;
+  /** 0..1 the lyrics-visible ramp */
+  alpha: number;
+  glitch: number;
+  bleed: number;
+  dry: number;
+  wobble: number;
+  rgb: number;
+  grain: number;
+  eat: number;
+  windowFill: number;
+  glow: number;
+  seal: number;
+  overprint: number;
+  seed: number;
+  vertical: number;
+  halo: number;
+  /** canvas px per output px */
+  px: number;
+  time: number;
+}
+
 export interface RenderRequest {
   current: SceneDraw;
   previous: SceneDraw | null;
@@ -123,6 +163,8 @@ export interface RenderRequest {
   media?: MediaDraw | null;
   /** LED 安全模式: soften, flash low-pass and brightness cap as a final pass (null = off) */
   safety?: SafetyDraw | null;
+  /** the type layer (字體藝術), composited before the safety pass; null = none */
+  type?: TypeDraw | null;
 }
 
 interface PendingRead {
@@ -187,16 +229,22 @@ export class StageRenderer {
   private quad: WebGLBuffer | null = null;
   private motifTex: WebGLTexture | null = null;
   private motifSource: TexImageSource | null = null;
-  /** 0, 1: transition scenes; 2: scene under the media; 3: safety source S; 4, 5: safety low-pass ping-pong */
-  private targets: Array<Target | null> = [null, null, null, null, null, null];
+  /**
+   * 0, 1: transition scenes; 2: scene under the media; 3: safety source S; 4, 5: safety low-pass
+   * ping-pong; 6: scene + media under the type; 7: the type layer alone (export)
+   */
+  private targets: Array<Target | null> = [null, null, null, null, null, null, null, null, null, null];
+  private typeTex: WebGLTexture | null = null;
+  private typeTexState: { source: TexImageSource | null; version: number; w: number; h: number } = { source: null, version: Number.NaN, w: 0, h: 0 };
   /** safety grid targets (their own small sizes) */
   private gridTargets: { mid: Target | null; grid: Target | null } = { mid: null, grid: null };
-  private feedbackIndex: 4 | 5 = 4;
-  private feedbackValid = false;
+  /** per safety chain: the ping-pong target that holds F_prev, and whether it is valid */
+  private feedbackIndex: [4 | 5, 8 | 9] = [4, 8];
+  private feedbackValid: [boolean, boolean] = [false, false];
   private serial = 0;
   private reads: PendingRead[] = [];
   private completed: GridReadback[] = [];
-  private pendingCompose: { soften: number; gain: number } | null = null;
+  private pendingCompose: { soften: number; gain: number; chain: 0 | 1 } | null = null;
   /** the last synchronous grid readback (offline export) */
   lastGrid: GridReadback | null = null;
   private mediaTex = new Map<string, MediaTexture>();
@@ -272,11 +320,13 @@ export class StageRenderer {
     e.preventDefault();
     this.lost = true;
     this.programs.clear();
-    this.targets = [null, null, null, null, null, null];
+    this.targets = [null, null, null, null, null, null, null, null, null, null];
+    this.typeTex = null;
+    this.typeTexState = { source: null, version: Number.NaN, w: 0, h: 0 };
     this.gridTargets = { mid: null, grid: null };
     this.reads = [];
     this.completed = [];
-    this.feedbackValid = false;
+    this.feedbackValid = [false, false];
     this.mediaTex.clear();
     this.quad = null;
     this.motifTex = null;
@@ -385,6 +435,10 @@ export class StageRenderer {
     return this.entryFor("media", () => this.compile("media", buildFragmentWithHeader(MEDIA_FRAGMENT, this.gl2), MEDIA_UNIFORMS));
   }
 
+  private typeProgram(): ProgramEntry | null {
+    return this.entryFor("type", () => this.compile("type", buildFragmentWithHeader(TYPE_FRAGMENT, this.gl2), TYPE_UNIFORMS));
+  }
+
   private safetyProgram(key: (typeof SAFETY_PROGRAMS)[number]): ProgramEntry | null {
     const src: Record<(typeof SAFETY_PROGRAMS)[number], [string, readonly string[]]> = {
       "safety-lowpass": [SAFETY_LOWPASS_FRAGMENT, SAFETY_LOWPASS_UNIFORMS],
@@ -400,6 +454,7 @@ export class StageRenderer {
   private compileKey(key: string) {
     if (key === "composite") this.compositeProgram();
     else if (key === "media") this.mediaProgram();
+    else if (key === "type") this.typeProgram();
     else if ((SAFETY_PROGRAMS as readonly string[]).includes(key)) this.safetyProgram(key as (typeof SAFETY_PROGRAMS)[number]);
     else this.sceneProgram(key.slice(6) as SceneId);
   }
@@ -428,7 +483,7 @@ export class StageRenderer {
 
   /** Forget the low-pass history (another project, safe mode just turned on, a jump in the export). */
   resetSafetyFeedback() {
-    this.feedbackValid = false;
+    this.feedbackValid = [false, false];
   }
 
   /** Grid readbacks that completed since the last call (WebGL2 async path), oldest first. */
@@ -459,6 +514,17 @@ export class StageRenderer {
     }
     this.warm.add("composite");
     if (!this.queue.includes("composite") && !this.programs.has("composite")) this.queue.push("composite");
+  }
+
+  /** Queue the type pass (a plan with a type system): ahead of the scenes, lyrics show at once. */
+  prewarmType() {
+    this.warm.add("type");
+    if (!this.queue.includes("type") && !this.programs.has("type")) this.queue.unshift("type");
+  }
+
+  /** The type pass: "ready", "pending", "failed" or "none" (never asked for). */
+  typeState(): "none" | "pending" | "ready" | "failed" {
+    return this.programs.get("type")?.state ?? "none";
   }
 
   /** Queue the media compositor (called once a project has band material). */
@@ -499,10 +565,11 @@ export class StageRenderer {
    * frame falls back to a plain background while a shader compiles. Resolves with the ids that
    * failed (they render the gradient scene, as live).
    */
-  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000, safety = false): Promise<string[]> {
+  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000, safety = false, type = false): Promise<string[]> {
     this.prewarm(ids);
     if (media) this.prewarmMedia();
     if (safety) this.prewarmSafety();
+    if (type) this.prewarmType();
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (this.lost || this.disposed) return [...this.warm];
@@ -614,11 +681,12 @@ export class StageRenderer {
     return t;
   }
 
-  private target(i: 0 | 1 | 2 | 3 | 4 | 5): Target | null {
+  private target(i: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9): Target | null {
     const existing = this.targets[i];
     if (existing && existing.w === this.width && existing.h === this.height) return existing;
     if (existing) this.deleteTarget(existing);
-    if (i === 4 || i === 5) this.feedbackValid = false;
+    if (i === 4 || i === 5) this.feedbackValid[0] = false;
+    if (i === 8 || i === 9) this.feedbackValid[1] = false;
     const t = this.makeTarget(this.width, this.height);
     if (t) this.targets[i] = t;
     return t;
@@ -668,8 +736,8 @@ export class StageRenderer {
 
   private freeTargets() {
     for (const t of this.targets) if (t) this.deleteTarget(t);
-    this.targets = [null, null, null, null, null, null];
-    this.feedbackValid = false;
+    this.targets = [null, null, null, null, null, null, null, null, null, null];
+    this.feedbackValid = [false, false];
   }
 
   // -------------------------------------------------------------------------
@@ -764,8 +832,9 @@ export class StageRenderer {
       this.renderLayers(req, dest);
       if (safety && dest) {
         if (safety.measure) this.measureGrid(dest, safety.soften, safety.measure.cols, safety.measure.rows, safety.measure.sync);
-        if (safety.alpha == null) this.pendingCompose = { soften: safety.soften, gain: safety.gain };
-        else this.compose(dest, safety.alpha, safety.soften, safety.gain);
+        const chain = safety.chain === 1 ? 1 : 0;
+        if (safety.alpha == null) this.pendingCompose = { soften: safety.soften, gain: safety.gain, chain };
+        else this.compose(dest, safety.alpha, safety.soften, safety.gain, chain);
       }
       return true;
     } catch (e) {
@@ -774,18 +843,177 @@ export class StageRenderer {
     }
   }
 
-  /** Scene (+ transition) and media into `dest` (null = the screen). */
+  /** Scene (+ transition), media and the type layer into `dest` (null = the screen). */
   private renderLayers(req: RenderRequest, dest: Target | null): boolean {
     const layers = (req.media?.layers ?? []).filter((l) => l.weight > 0.001 && l.source).slice(0, 2);
     const mediaProg = layers.length ? this.mediaProgram() : null;
+    const type = req.type && req.type.alpha > 0.001 ? req.type : null;
+    const typeProg = type ? this.typeProgram() : null;
+    const under = typeProg?.program ? this.target(6) : null;
+    const out = under ?? dest;
     const sceneTarget = mediaProg?.program ? this.target(2) : null;
-    // without the media pass (no layers, still compiling, no FBO) the scene goes straight to dest
+    // without the media pass (no layers, still compiling, no FBO) the scene goes straight on
     if (sceneTarget && mediaProg?.program) {
       this.drawSceneLayer(req, sceneTarget);
-      this.drawMedia(mediaProg, sceneTarget, layers, req.media!, dest);
-    } else this.drawSceneLayer(req, dest);
+      this.drawMedia(mediaProg, sceneTarget, layers, req.media!, out);
+    } else this.drawSceneLayer(req, out);
+    if (under && typeProg && type) this.drawType(typeProg, under, type, dest, false);
     return true;
   }
+
+  /** Upload (or refresh) the type texture on unit 6. */
+  private typeTexture(t: TypeDraw): boolean {
+    const gl = this.gl;
+    if (!this.typeTex) this.typeTex = gl.createTexture();
+    if (!this.typeTex) return false;
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, this.typeTex);
+    const st = this.typeTexState;
+    if (st.source === t.source && st.version === t.version && st.w === t.width && st.h === t.height) return true;
+    try {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      // the painter's plates are coverage values: take the canvas' premultiplied bytes as they are
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      if (st.w === t.width && st.h === t.height && st.source === t.source) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, t.source);
+      else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, t.source);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+    } catch (e) {
+      this.report("type-upload", `歌詞排版貼圖上傳失敗：${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    } finally {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    }
+    this.typeTexState = { source: t.source, version: t.version, w: t.width, h: t.height };
+    return true;
+  }
+
+  /** The type pass: `scene` (+ media) and the type texture into `dest` (null = the screen). */
+  private drawType(entry: ProgramEntry, scene: Target, t: TypeDraw, dest: Target | null, layer: boolean, soften = 0, gain = 1) {
+    const gl = this.gl;
+    if (!this.typeTexture(t)) {
+      // no type texture: pass the scene through
+      this.blitScene(scene, dest);
+      return;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dest ? dest.fbo : null);
+    gl.viewport(0, 0, this.width, this.height);
+    if (layer) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.useProgram(entry.program);
+    const L = entry.locations;
+    const f1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1f(l, Number.isFinite(v) ? v : 0);
+    };
+    const f3 = (n: string, v: RGB) => {
+      const l = L.get(n);
+      if (l) gl.uniform3f(l, v[0], v[1], v[2]);
+    };
+    const res = L.get("uRes");
+    if (res) gl.uniform2f(res, this.width, this.height);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+    const us = L.get("uScene");
+    if (us) gl.uniform1i(us, 3);
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, this.typeTex);
+    const ut = L.get("uType");
+    if (ut) gl.uniform1i(ut, 6);
+    f3("uInk", t.ink);
+    f3("uAccent", t.accent);
+    f3("uSpot", t.spot);
+    f3("uFill", t.fill);
+    f1("uAlpha", t.alpha);
+    f1("uLayer", layer ? 1 : 0);
+    f1("uTime", t.time);
+    f1("uSeed", t.seed % 997);
+    f1("uGlitch", t.glitch);
+    f1("uBleed", t.bleed);
+    f1("uDry", t.dry);
+    f1("uWobble", t.wobble);
+    f1("uRgb", t.rgb);
+    f1("uGrain", t.grain);
+    f1("uEat", t.eat);
+    f1("uWindow", t.windowFill);
+    f1("uGlow", t.glow);
+    f1("uSeal", t.seal);
+    f1("uOverprint", t.overprint);
+    f1("uVertical", t.vertical);
+    f1("uHalo", t.halo);
+    f1("uPx", t.px);
+    f1("uSoften", soften);
+    f1("uGain", gain);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    for (const unit of [3, 6]) {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** Copy a target to `dest` (the type texture failed: the frame goes out without type). */
+  private blitScene(src: Target, dest: Target | null) {
+    const gl = this.gl;
+    if (this.gl2) {
+      const gl2 = gl as WebGL2RenderingContext;
+      gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, src.fbo);
+      gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, dest ? dest.fbo : null);
+      gl2.blitFramebuffer(0, 0, this.width, this.height, 0, 0, this.width, this.height, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
+      gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return;
+    }
+    const present = this.safetyProgram("safety-present");
+    if (!present?.program) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dest ? dest.fbo : null);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(present.program);
+    const P = present.locations;
+    const pr = P.get("uRes");
+    if (pr) gl.uniform2f(pr, this.width, this.height);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    const ut = P.get("uTex");
+    if (ut) gl.uniform1i(ut, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /**
+   * The export's lyric layer: the type alone over transparent (premultiplied RGBA, bottom row
+   * first), with the safety soften and cap applied to its colours. Null when the pass is not ready.
+   */
+  renderTypeLayer(t: TypeDraw, soften: number, gain: number): Uint8Array | null {
+    if (this.lost || this.disposed) return null;
+    const entry = this.typeProgram();
+    if (!entry?.program) return null;
+    const gl = this.gl;
+    try {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+      const out = this.target(7);
+      const scene = this.target(6);
+      if (!out || !scene) return null;
+      this.drawType(entry, scene, t, out, true, soften, gain);
+      const data = new Uint8Array(this.width * this.height * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
+      gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return data;
+    } catch (e) {
+      this.report("type-layer", `歌詞層算圖失敗：${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
 
   /**
    * Finish a frame rendered with `safety.alpha = null` (the offline export: α is decided after the
@@ -798,7 +1026,7 @@ export class StageRenderer {
     if (!p || !src || this.lost) return false;
     try {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quad);
-      this.compose(src, alpha, p.soften, p.gain);
+      this.compose(src, alpha, p.soften, p.gain, p.chain);
       return true;
     } catch (e) {
       this.report("render", `繪製失敗：${e instanceof Error ? e.message : String(e)}`);
@@ -807,17 +1035,17 @@ export class StageRenderer {
   }
 
   /** Low-pass S into the feedback target, then present it to the screen with the brightness cap. */
-  private compose(src: Target, alpha: number, soften: number, gain: number) {
+  private compose(src: Target, alpha: number, soften: number, gain: number, chain: 0 | 1 = 0) {
     const gl = this.gl;
     const lowpass = this.safetyProgram("safety-lowpass");
     const present = this.safetyProgram("safety-present");
     if (!lowpass?.program || !present?.program) return;
-    const prevIndex = this.feedbackIndex;
-    const nextIndex: 4 | 5 = prevIndex === 4 ? 5 : 4;
+    const prevIndex = this.feedbackIndex[chain];
+    const nextIndex = (chain === 0 ? (prevIndex === 4 ? 5 : 4) : prevIndex === 8 ? 9 : 8) as 4 | 5 | 8 | 9;
     const prev = this.target(prevIndex);
     const next = this.target(nextIndex);
     if (!prev || !next) return;
-    const first = !this.feedbackValid;
+    const first = !this.feedbackValid[chain];
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, next.fbo);
     gl.viewport(0, 0, this.width, this.height);
@@ -870,8 +1098,9 @@ export class StageRenderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.activeTexture(gl.TEXTURE0);
-    this.feedbackIndex = nextIndex;
-    this.feedbackValid = true;
+    if (chain === 0) this.feedbackIndex[0] = nextIndex as 4 | 5;
+    else this.feedbackIndex[1] = nextIndex as 8 | 9;
+    this.feedbackValid[chain] = true;
   }
 
   /** Downsample S to the luminance grid and read it back (sync, or through a PBO + fence). */
@@ -1113,6 +1342,7 @@ export class StageRenderer {
         }
         this.reads = [];
         for (const t of this.mediaTex.values()) gl.deleteTexture(t.tex);
+        if (this.typeTex) gl.deleteTexture(this.typeTex);
         if (this.quad) gl.deleteBuffer(this.quad);
         if (this.motifTex) gl.deleteTexture(this.motifTex);
       }

@@ -81,6 +81,22 @@ describe("targetOwnsKey", () => {
   });
 });
 
+describe("phase 5a keys", () => {
+  it("X is 回到手動, by physical key, never repeated", () => {
+    expect(hotkeyAction(key("KeyX", { key: "x" }))).toEqual({ type: "manual" });
+    // 注音 ㄌ on X: the physical key still counts
+    expect(hotkeyAction(key("KeyX", { key: "Process" }))).toEqual({ type: "manual" });
+    expect(hotkeyAction(key("KeyX", { repeat: true }))).toBeNull();
+    expect(hotkeyAction(key("KeyX", { shiftKey: true }))).toBeNull();
+    expect(hotkeyAction(key("KeyX", { metaKey: true }))).toBeNull(); // ⌘X cut
+  });
+
+  it("does not collide with any other key", () => {
+    const codes = ["Space", "ArrowRight", "ArrowLeft", "Enter", "KeyM", "KeyB", "KeyL", "KeyF", "Digit1", "Digit0", "BracketLeft", "BracketRight", "KeyT", "KeyO", "KeyH", "KeyR", "KeyG", "KeyS", "PageDown", "PageUp", "Period", "Comma", "Escape"];
+    for (const c of codes) expect(hotkeyAction(key(c))?.type).not.toBe("manual");
+  });
+});
+
 describe("phase 2b keys", () => {
   it("maps sections, hold, loop, GO and standby by physical key", () => {
     expect(hotkeyAction(key("PageDown"))).toEqual({ type: "section", delta: 1 });

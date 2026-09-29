@@ -3,7 +3,21 @@
 // band's dedicated stage-visual director, and every user-facing field is 繁中.
 
 import { formatBytes, formatDuration } from "@/lib/assets";
-import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_BLENDS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
+import {
+  AUTO_LYRIC_STYLE_IDS,
+  FONT_IDS,
+  LYRIC_PLACEMENTS,
+  MEDIA_BLENDS,
+  MEDIA_TREATMENTS,
+  SCENE_IDS,
+  SECTION_KINDS,
+  TYPE_COLOR_TREATMENTS,
+  TYPE_ORNAMENT_IDS,
+  TYPE_RECIPE_IDS,
+  TYPE_VOICE_IDS,
+} from "@/lib/schema";
+import { COLOR_TREATMENTS, ORNAMENTS, PARAM_INFO, RECIPES, VOICES } from "@/lib/type/vocab";
+import { textKey } from "@/lib/type/sequence";
 import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
 import { ARC_ROLE_INFO, PALETTE_EMPHASIS_INFO } from "@/lib/show";
 import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta } from "@/lib/types";
@@ -226,7 +240,8 @@ export function buildResearchPrompt(input: DesignerInput, st: SongStructure): st
 
 export function catalogBlock(): string {
   const scenes = SCENE_IDS.map((id) => `- ${id}（${SCENES[id].label}，適合能量 ${SCENES[id].energy[0]}–${SCENES[id].energy[1]}）：${SCENES[id].description}`);
-  const styles = LYRIC_STYLE_IDS.map((id) => `- ${id}（${LYRIC_STYLES[id].label}）：${LYRIC_STYLES[id].description}`);
+  // karaoke and subtitle stay valid for old plans but no designer chooses them (字體藝術)
+  const styles = AUTO_LYRIC_STYLE_IDS.map((id) => `- ${id}（${LYRIC_STYLES[id].label}）：${LYRIC_STYLES[id].description}`);
   const placements = LYRIC_PLACEMENTS.map((id) => `- ${id}：${LYRIC_PLACEMENTS_INFO[id]}`);
   const transitions = (Object.keys(TRANSITIONS) as Array<keyof typeof TRANSITIONS>).map((id) => `- ${id}：${TRANSITIONS[id]}`);
   const fonts = FONT_IDS.map((id) => `- ${id}（${FONT_CATALOG[id].label}，${FONT_CATALOG[id].cjk ? "CJK 中文字體" : "拉丁字體"}）：${FONT_CATALOG[id].description}`);
@@ -237,7 +252,7 @@ export function catalogBlock(): string {
     "# 場景 scene（背景 GLSL 動畫，會吃 colorway 三色與 sceneParams）",
     ...scenes,
     "",
-    "# 歌詞樣式 lyricStyle",
+    "# 歌詞樣式 lyricStyle（舊版渲染器的後備樣式；有 typeSystem 時每一句都依它的構圖排版）",
     ...styles,
     "",
     "# 歌詞位置 lyricPlacement（畫面有約 90% 的安全區）",
@@ -259,18 +274,41 @@ export function catalogBlock(): string {
   ].join("\n");
 }
 
-export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，要為一首歌設計音樂祭／演唱會 LED 大螢幕的完整視覺方案（DesignPlan）。方案會被即時渲染器逐段播放：底層是 GLSL 場景動畫，上層是文字引擎排版的歌詞；現場的視覺操作員會依照你寫的 cue 操作。
+/** 字體藝術: the type system's vocabularies for the design prompt. */
+export function typeCatalogBlock(): string {
+  const voices = TYPE_VOICE_IDS.map((id) => `- ${id}（${VOICES[id].label}）：${VOICES[id].description}常用構圖：${Object.keys(VOICES[id].recipes).join("、")}。`);
+  const recipes = TYPE_RECIPE_IDS.map((id) => `- ${id}（${RECIPES[id].label}，能量 ${RECIPES[id].energy[0]}–${RECIPES[id].energy[1]}${RECIPES[id].cjkOnly ? "，只用於中文" : ""}）：${RECIPES[id].description}`);
+  const params = (Object.keys(PARAM_INFO) as Array<keyof typeof PARAM_INFO>).map((k) => `${k}＝${PARAM_INFO[k].label}（${PARAM_INFO[k].low}→${PARAM_INFO[k].high}）`).join("、");
+  const colors = TYPE_COLOR_TREATMENTS.map((id) => `${id}＝${COLOR_TREATMENTS[id].label}（${COLOR_TREATMENTS[id].description}）`).join("、");
+  const ornaments = TYPE_ORNAMENT_IDS.map((id) => `${id}＝${ORNAMENTS[id]}`).join("、");
+  return [
+    "# 字體語言 typeSystem.voice",
+    ...voices,
+    "",
+    "# 構圖 recipe（每一句歌詞一個；同一個 recipe 換 seed 就是另一種構圖）",
+    ...recipes,
+    "",
+    `# 字體參數 typeSystem.params（0–1，gridColumns 是 2–12 的整數）：${params}`,
+    `# 配色處理 typeSystem.color：${colors}`,
+    `# 裝飾 typeSystem.ornaments：${ornaments}`,
+    "# motionWord 的意象：風／吹＝飄動、雨／淚＝落下、火／燃燒＝閃爍、心跳＝隨拍脈動、海／浪＝波浪、夜＝從暗處浮起、光＝綻開、碎／破＝碎裂、奔跑／衝＝衝刺、轉＝旋轉。",
+  ].join("\n");
+}
+
+export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，要為一首歌設計音樂祭／演唱會 LED 大螢幕的完整視覺方案（DesignPlan）。方案會被即時渲染器逐段播放：底層是 GLSL 場景動畫，上層是字體引擎依你的構圖排好的歌詞；現場的視覺操作員會依照你寫的 cue 操作。
 
 # 設計原則
 1. 視覺是配角、托起樂團。螢幕是樂團背後的一道牆，不和主唱搶戲。每一段先決定螢幕的角色：傳達意象、顯示歌詞，還是像燈光一樣堆疊能量。
 2. 先有世界觀。先訂主視覺概念（這首歌在舞台上是一個什麼樣的世界、為什麼），再由它推出配色與母題，最後才是逐段畫面。配色與母題優先取自研究到的樂團識別（專輯封面、MV、招牌色、符號），其次才是歌詞意象。整首歌要像同一個世界，而不是 12 種特效的拼貼。
-3. 歌詞是作品的一部分，而且要節制——不是整首卡拉 OK 字幕：
-   - 畫面主導的主歌：subtitle 或 hidden；敘事歌的主歌可用 line-fade／stack 讓歌詞本身成為視覺。
-   - 大合唱副歌：karaoke（整行提前出現，觀眾才能跟唱）或 impact（口號、hook，一次幾個字的巨字）；快歌副歌也可用 word-pop。
-   - 詩意的中文短句（橋段、安靜段）：vertical 直排最有海報感。拉丁文字不要直排。
-   - 前奏、間奏、solo、純器樂：hidden。
-   - 字很密的段落（每秒超過約 5 個字，例如饒舌、快歌主歌）：不要逐字動畫，改 subtitle 或 hidden，把歌詞留給副歌。
-4. 大螢幕可讀性：字重 600 以上（建議 700–900）；歌詞色與該段背景 colorway[0] 的對比至少 4.5:1（建議 7:1 以上）；同時最多 2 行、每行約 16 個中文字內。避開主唱 IMAG（畫面中央偏下、主唱臉的位置）與畫面最下緣（會被觀眾的頭、旗子與手機擋住）：重要的句子放 center 或 upper-third，lower-third 只給安靜的字幕。
+3. 歌詞的排版是視覺藝術（字體藝術）——不是卡拉 OK，也不是字幕。唱到的每一句都會出現，而且每一句都是一張設計過的構圖，像日系 MV 的字卡、電影片頭、書法或實驗海報：
+   - typeSystem：先為整首歌選一個字體語言 voice，訂出字級對比、留白、直排比例、網格、動態與質地（params）、字體配對、配色處理與裝飾。整首歌是同一套系統；字體要和主視覺的 typography 一致（有樂團視覺聖經時用聖經字體）。
+   - typeSystem.lines：每一行有字的歌詞一筆構圖（依歌詞順序，lineId 用提供的 id）。完全相同的重複句只寫第一次就好，系統會沿用同一個構圖讓全場認得，最後一次副歌會自動放大。
+   - 相鄰的句子換構圖（recipe）與位置（seed 不同）；主歌安靜、字小（whisper、vertical-column、title-card、cross、grid-poem、brush-write），副歌大（giant-word、poster、bleed、window、echo、split），橋段要和前面形成對比，安靜的句子用 whisper。
+   - emphasis 選 0–2 個逐字相同的關鍵字（意象、hook、口號），它們會被放大或換成點綴色；motionWord 選一個會動的意象詞（逐字相同），它決定這一句怎麼動；沒有就空字串。
+   - orientation：中文詩句可以直排（v）或直橫交錯（mixed）；拉丁文字只能 h。energy 0–1：安靜約 0.2、主歌 0.3–0.45、副歌 0.65 以上。
+   - 字很密的段落（每秒超過約 5 個字，例如饒舌、快歌主歌）：用安靜、字小的構圖（whisper、title-card），不要逐字動畫。
+   - 段落的 lyricStyle 只是舊版渲染器的後備：前奏、間奏、solo 這類沒有歌詞的段落用 hidden，有歌詞的段落選一個符合氣質的樣式；不要用 karaoke 或 subtitle。
+4. 大螢幕可讀性：字重 600 以上（建議 700–900）；歌詞色與該段背景 colorway[0] 的對比至少 4.5:1（建議 7:1 以上）。構圖引擎會守住最小字級、閱讀順序與中文排版的禁則，並避開主唱 IMAG（畫面中央偏下、主唱臉的位置）與畫面最下緣（會被觀眾的頭、旗子與手機擋住）；後備的 lyricPlacement 用 center 或 upper-third。
 5. 能量對應：場景、速度、密度、亮度與音訊反應跟著音訊能量走；副歌一次比一次強，最後一次副歌是全曲最高點；安靜段真的要安靜（低 intensity、慢、少元素）。轉場配合能量：爆點用 flash 或 cut，推進用 wipe，進入抒情用 bloom，回落用 fade。相鄰段落避免用同一個場景（刻意延續除外）。
 6. 樂團自己的素材是最強的識別。有提供素材時，像專業 VJ 一樣使用它們，讓畫面一看就是「這個樂團」而不是通用特效：
    - 專輯封面就是這首歌的世界：開場、橋段或最後一次副歌用 slow-drift 或 duotone 把封面鋪成整個畫面，配色與母題也從封面取。
@@ -280,10 +318,12 @@ export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，�
    - 永遠不和歌詞搶：該段有歌詞時用 mask-lyrics、blur-glow，或把 opacity 降到 0.35–0.6；hidden 的器樂段才讓素材滿版 0.8–1。
    - 不是每段都要放素材：留一些段落只用場景，讓素材出現時有份量。素材的 note 與 tags 是操作員的說明（例如哪張是專輯封面），請依此選用。
    - 沒有提供素材時，每段的 media 一律是 null。
-7. 樂團視覺聖經：如果提供了「樂團視覺聖經」，它是這個樂團所有歌共用的世界觀，屬於硬性規範：配色取自聖經色盤、字體用聖經字體、避免的場景不用、遵守歌詞政策與禁忌。偏離時要在 rationale 寫出理由。如果提供了「整場弧線中的位置」，依它調整這首歌的整體強度與配色重心。
+7. 樂團視覺聖經：如果提供了「樂團視覺聖經」，它是這個樂團所有歌共用的世界觀，屬於硬性規範：配色取自聖經色盤、字體用聖經字體、避免的場景不用、遵守歌詞政策與禁忌。歌詞政策決定字的份量（例如「副歌才放大」＝主歌用安靜的小字構圖），唱到的每一句仍然要出現。偏離時要在 rationale 寫出理由。如果提供了「整場弧線中的位置」，依它調整這首歌的整體強度與配色重心。
 8. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
 
 ${catalogBlock()}
+
+${typeCatalogBlock()}
 
 # 輸出規則
 - 所有給人看的文字都用繁體中文。
@@ -291,6 +331,7 @@ ${catalogBlock()}
 - palette 4–6 色、色碼一律小寫 6 碼 #rrggbb；第一色是最深的背景色，並至少包含一個給歌詞用的高對比亮色。每段的 colorway 恰好 3 色、取自 palette：[背景, 主色, 點綴]。
 - sceneParams 與 energy 是 0–1；lyricScale 是 0.6–1.8（1 是預設可讀大小）；typography.letterSpacing 以 em 為單位，約 -0.02 到 0.2。
 - lines 只放需要特別處理的歌詞行（hook 的強調字、改成 impact 的口號、關鍵意象字）。lineId 必須是提供的歌詞 id；emphasis 必須是該行歌詞中逐字相同的片段。
+- typeSystem.lines 要涵蓋每一行有字的歌詞（完全相同的重複句可以省略）；seed 是 0–999 的整數；typeSystem.fonts.cjk 必須是 CJK 字體、fonts.latin 必須是拉丁字體；weight 600–900；seal 是 1–4 個字（書法與水墨的印章，例如樂團名的一兩個字），不用就空字串。保持精簡：rationale 一兩句就好。
 - cues 3–12 個、依時間排序，time 以秒為單位。
 - motifSvg：一個簡潔的主視覺符號（viewBox="0 0 100 100"），只能用 svg、g、path、circle、rect、polygon、polyline、line、ellipse；fill／stroke 用 currentColor；不要文字、腳本、style、外部連結或漸層；2500 字元內。它會被平鋪、環繞與脈動，所以要是清楚、可辨識的剪影，並呼應主視覺母題。
 - designerNotes：150–400 字的 Markdown，說明敘事弧線、歌詞與動畫怎麼搭配、現場注意事項。
@@ -325,6 +366,24 @@ export function trimBrief(research: Research | null): string {
   return clipped;
 }
 
+/** How many typeSystem.lines to write (unique sung lines; the repeats reuse the first composition). */
+export function typeReminder(input: DesignerInput): string {
+  const lines = (input.lyrics?.lines ?? []).filter((l) => typeof l.text === "string" && l.text.trim());
+  if (!lines.length) return "- 沒有歌詞：typeSystem 仍要填（字體語言與參數），typeSystem.lines 是空陣列。";
+  const keys = new Set(lines.map((l) => textKey(l.text)));
+  const first = new Map<string, string>();
+  const repeats: string[] = [];
+  for (const l of lines) {
+    const k = textKey(l.text);
+    if (first.has(k)) repeats.push(`${l.id}=${first.get(k)}`);
+    else first.set(k, l.id);
+  }
+  const rows = [`- 有字的歌詞 ${lines.length} 行、不同的句子 ${keys.size} 句：typeSystem.lines 至少為這 ${keys.size} 句各寫一筆構圖（依歌詞順序）。`];
+  if (repeats.length) rows.push(`- 完全相同的重複句（可以省略，會沿用第一次的構圖）：${repeats.slice(0, 40).join("、")}${repeats.length > 40 ? "…" : ""}`);
+  if (keys.size > 150) rows.push("- 歌詞很長：構圖欄位保持最短（emphasis 最多 1 個），輸出才不會被截斷。");
+  return rows.join("\n");
+}
+
 function previousBlock(previous: DesignPlan): string {
   let json = JSON.stringify(previous);
   if (json.length > MAX_PREVIOUS_CHARS) json = JSON.stringify({ ...previous, designerNotes: "", keyVisual: { ...previous.keyVisual, motifSvg: "" } });
@@ -348,6 +407,9 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
     "",
     "# 歌詞（id [開始–結束 秒] 文字）",
     lyricsBlock(req, st),
+    "",
+    "# 字體藝術",
+    typeReminder(req),
     "",
     "# 研究簡報",
     trimBrief(req.research),

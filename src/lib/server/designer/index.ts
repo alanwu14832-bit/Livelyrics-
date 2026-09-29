@@ -190,7 +190,7 @@ function offlinePath(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolea
 
 function offlinePlan(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolean): DesignPlan {
   const instruction = req.instruction?.trim();
-  const previous = req.previous ? normalizePlan(req.previous, req) : null;
+  const previous = req.previous ? normalizePlan(req.previous, req, { typeSystem: "keep" }) : null;
 
   if (previous && (instruction || (claudeFailed && !req.arc))) {
     if (instruction) {

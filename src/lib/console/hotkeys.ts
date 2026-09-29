@@ -2,7 +2,7 @@
 // keyboard-event-like object to an action. Physical key codes are used for letters and
 // digits so the shortcuts keep working while a Chinese IME (注音/倉頡) is active.
 // GO and standby only do something in the show console (/s/[id]/live); the per-song console
-// ignores them.
+// ignores them. X (回到手動, phase 5a) drops the timecode / MIDI clock sync back to manual.
 
 export type HotkeyAction =
   | { type: "togglePlay" }
@@ -30,7 +30,20 @@ export type HotkeyAction =
   /** G: take the armed item (show console) */
   | { type: "go" }
   /** S: take the standby look (show console) */
-  | { type: "standby" };
+  | { type: "standby" }
+  /** X: 回到手動 — stop following the timecode / MIDI clock (phase 5a) */
+  | { type: "manual" };
+
+/**
+ * Everything a console view runs: its hotkeys, plus what only a controller can send (phase 5a):
+ * the test pattern, a lyric line or a section by number (the MIDI presets), and a continuous value.
+ */
+export type ConsoleAction =
+  | HotkeyAction
+  | { type: "testPattern" }
+  | { type: "cueLine"; index: number }
+  | { type: "jumpSection"; index: number }
+  | { type: "control"; target: "intensity" | "lyricScale" | "ledCap"; value: number };
 
 export interface KeyLike {
   key: string;
@@ -41,6 +54,9 @@ export interface KeyLike {
   altKey: boolean;
   repeat?: boolean;
 }
+
+/** 回到手動 (phase 5a): the key named in notices and the help sheet */
+export const MANUAL_KEY = "X";
 
 export const OFFSET_STEP = 0.05;
 export const OFFSET_FINE_STEP = 0.01;
@@ -107,6 +123,8 @@ export function hotkeyAction(e: KeyLike): HotkeyAction | null {
       return { type: "go" };
     case "KeyS":
       return { type: "standby" };
+    case "KeyX":
+      return { type: "manual" };
     case "PageDown":
     case "Period":
       return { type: "section", delta: 1 };
@@ -205,10 +223,17 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
       { keys: ["["], label: "偏移 −0.05 秒（Shift：−0.01）" },
       { keys: ["]"], label: "偏移 +0.05 秒（Shift：+0.01）" },
       { keys: ["T"], label: "Tap tempo（跟著拍子連按）" },
+      { keys: ["X"], label: "回到手動：停止跟隨時間碼或 MIDI clock" },
       { keys: ["?"], label: "顯示／隱藏快捷鍵說明" },
     ],
   },
 ];
+
+/** 回到手動 alone (the show console's look and pre-show views, which have no transport). */
+export const SYNC_HOTKEY_HELP: HotkeyHelpGroup = {
+  title: "同步",
+  entries: [{ keys: [MANUAL_KEY], label: "回到手動：停止跟隨時間碼或 MIDI clock" }],
+};
 
 /** The show console's own keys (演出控制台), shown first in its help sheet. */
 export const SHOW_HOTKEY_HELP: HotkeyHelpGroup = {

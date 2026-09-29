@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SongMeta } from "@/lib/types";
 import { HttpError } from "./http";
-import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, sanitizeAnalysis } from "./validate";
+import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, parseTimecodePatch, sanitizeAnalysis } from "./validate";
 
 const file = { fileName: "告五人 - 愛人錯過.mp3", mimeType: "audio/mpeg" };
 
@@ -101,5 +101,20 @@ describe("parseProcessRequest", () => {
     expect(parseProcessRequest({ steps: ["research"], free: true })).toEqual({ steps: ["research"], free: true });
     expect(parseProcessRequest({ free: false })).toEqual({});
     expect(() => parseProcessRequest({ free: "yes" })).toThrow(HttpError);
+  });
+});
+
+describe("parseTimecodePatch (phase 5a)", () => {
+  it("accepts a start timecode or null (the default)", () => {
+    expect(parseTimecodePatch({ start: "02:00:00:00" })).toEqual({ start: "02:00:00:00" });
+    // a drop-frame label is stored with ":" (the incoming timecode says whether it drops)
+    expect(parseTimecodePatch({ start: "01:00:10;05" })).toEqual({ start: "01:00:10:05" });
+    expect(parseTimecodePatch(null)).toBeNull();
+  });
+
+  it("rejects anything that is not HH:MM:SS:FF", () => {
+    for (const bad of [{ start: "2" }, { start: "24:00:00:00" }, { start: "01:00:00:30" }, { start: 5 }, "01:00:00:00", { start: "01:00:00:00", extra: 1 }, {}]) {
+      expect(() => parseTimecodePatch(bad), JSON.stringify(bad)).toThrow(HttpError);
+    }
   });
 });

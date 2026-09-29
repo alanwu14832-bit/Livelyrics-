@@ -6,6 +6,8 @@ import { defaultBible } from "@/lib/band";
 import { defaultOutput } from "@/lib/output";
 import { showChannelName, type StageMessage } from "@/lib/stage/protocol";
 import type { Band, Project, ProjectSummary, Show } from "@/lib/types";
+import { quarterFrames } from "@/lib/midi/mtc";
+import { framesToTc, tcToFrames } from "@/lib/sync/timecode";
 import { ShowLiveController } from "./show-controller";
 import { AUTO_STANDBY_ID, loadShowLiveSession } from "./show-live";
 import { FakeAudio, flush, stubBrowser } from "./test-env";
@@ -306,6 +308,88 @@ describe("ShowLiveController", () => {
     ctl.attach();
     await flush(60);
     expect(ctl.getSnapshot().load.status).toBe("not-found");
+    ctl.detach();
+  });
+});
+
+// ---------------------------------------------------------------- phase 5a: 跟隨時間碼換歌
+
+/** A running MTC transport (25 fps) from `start` on the show's engine, a sequence every 80 ms. */
+function runMtc(ctl: ShowLiveController, start: { hours: number; minutes: number; seconds: number; frames: number }) {
+  const t0 = Date.now();
+  const first = tcToFrames(start, 25);
+  const send = () => {
+    const frame = first + Math.max(0, Math.floor((((Date.now() - t0) / 1000) * 25 - 1.75) / 2) * 2);
+    const now = Date.now();
+    quarterFrames(framesToTc(frame, 25), 25).forEach((b, k) => ctl.sync.handle({ type: "mtcQuarterFrame", piece: b >> 4, value: b & 0x0f }, now - (7 - k) * 10));
+  };
+  send();
+  const timer = setInterval(send, 80);
+  return () => clearInterval(timer);
+}
+
+describe("ShowLiveController × timecode (phase 5a)", () => {
+  it("跟隨時間碼換歌 takes the song whose hour the timecode enters, and leaves looks to the operator", async () => {
+    const ctl = await started();
+    ctl.sync.setSource("mtc");
+    ctl.setFollowTimecode(true);
+    expect(ctl.getSnapshot().followTimecode).toBe(true);
+    // song 2 is the setlist's second song: hour 2
+    let stop = runMtc(ctl, { hours: 2, minutes: 0, seconds: 5, frames: 0 });
+    await flush(400);
+    let snap = ctl.getSnapshot();
+    expect(snap.live.current).toBe("song2");
+    expect(snap.onAir).toMatchObject({ kind: "song", itemId: "song2" });
+    // the taken song follows the timecode from its own hour
+    if (snap.onAir?.kind !== "song") throw new Error("song expected");
+    await flush(100);
+    expect(snap.onAir.controller.getSnapshot().timecode).toMatchObject({ start: "02:00:00:00", from: "setlist", following: true });
+    expect(snap.onAir.controller.songTime()).toBeGreaterThan(5);
+    expect(of("project").some((m) => m.project.id === "p2" && m.transition?.kind === "fade")).toBe(true);
+    // the operator takes the interlude: the timecode is still in song 2's hour, nothing is re-taken
+    ctl.arm("mc");
+    expect(ctl.go(Date.now() + 1000)).toBe(true);
+    await flush(300);
+    expect(ctl.getSnapshot().live.current).toBe("mc");
+    stop();
+    // the rig moves on to song 1's hour: taken
+    stop = runMtc(ctl, { hours: 1, minutes: 0, seconds: 2, frames: 0 });
+    await flush(400);
+    snap = ctl.getSnapshot();
+    expect(snap.live.current).toBe("song1");
+    stop();
+    ctl.detach();
+  });
+
+  it("stays manual with the toggle off, and between songs", async () => {
+    const ctl = await started();
+    ctl.sync.setSource("mtc");
+    let stop = runMtc(ctl, { hours: 2, minutes: 0, seconds: 5, frames: 0 });
+    await flush(300);
+    expect(ctl.getSnapshot().live.current).toBeNull();
+    stop();
+    // (turned on while the timecode is inside a song's hour it would take that song at once)
+    ctl.sync.setSource("manual");
+    ctl.sync.setSource("mtc");
+    ctl.setFollowTimecode(true);
+    // 00:30:00:00: before the first song's hour
+    stop = runMtc(ctl, { hours: 0, minutes: 30, seconds: 0, frames: 0 });
+    await flush(300);
+    expect(ctl.getSnapshot().live.current).toBeNull();
+    stop();
+    ctl.detach();
+  });
+
+  it("an item's own start timecode decides its range", async () => {
+    show = makeShow();
+    show.items = show.items.map((it) => (it.id === "song1" ? { ...it, timecode: "05:00:00:00" } : it));
+    const ctl = await started();
+    ctl.sync.setSource("mtc");
+    ctl.setFollowTimecode(true);
+    const stop = runMtc(ctl, { hours: 5, minutes: 0, seconds: 1, frames: 0 });
+    await flush(400);
+    expect(ctl.getSnapshot().live.current).toBe("song1");
+    stop();
     ctl.detach();
   });
 });

@@ -8,22 +8,27 @@
 // the specs in one structured-output call (cheap: no per-section plans); the offline designer
 // writes three deterministic ones on the warm / cool / monochrome axes. Both respect the band's
 // visual bible as a hard constraint (its palette, fonts, avoided scenes and lyric policy).
+// 字體藝術: every direction speaks its own typographic voice (日系 MV 字卡, 電影片頭／動態海報, 書法與
+// 水墨, 實驗／故障感 — never two alike), and its plan carries the type system with a composition for
+// every sung line, so the style frames and the proposal show compositions, not subtitles.
 
 import { z } from "zod";
 import { paletteRoles } from "@/lib/show";
 import { moodSummary, type MoodSummary } from "@/lib/moodboard";
 import {
+  AUTO_LYRIC_STYLE_IDS,
+  AutoLyricStyleIdSchema,
   FontIdSchema,
   LYRIC_PLACEMENTS,
-  LYRIC_STYLE_IDS,
   LyricPlacementSchema,
-  LyricStyleIdSchema,
   MEDIA_TREATMENTS,
   MediaTreatmentSchema,
   SCENE_IDS,
   SECTION_KINDS,
   SceneIdSchema,
   SectionKindSchema,
+  TYPE_VOICE_IDS,
+  TypeVoiceIdSchema,
 } from "@/lib/schema";
 import type {
   DesignDirection,
@@ -38,6 +43,8 @@ import type {
   SceneId,
   SectionDesign,
   SectionKind,
+  TypeParams,
+  TypeVoiceId,
 } from "@/lib/types";
 import { DIRECTION_LETTERS, MAX_DIRECTIONS, MIN_DIRECTIONS } from "@/lib/directions";
 import { formatTimeShort } from "@/lib/timeline";
@@ -52,7 +59,9 @@ import { buildPalette, type PaletteEntry } from "./palette";
 import { analysisSummary, bibleBlock, catalogBlock, lyricExcerpt, songBlock, trimBrief } from "./prompts";
 import { analyzeStructure, clamp } from "./structure";
 import { EMBLEM_STYLES, generateMotifSvg, hashString, type EmblemStyle } from "./svg";
+import { chooseVoice, designTypeSystem, topRecipes } from "./type-design";
 import type { DesignRequest } from "./types";
+import { RECIPES, VOICES } from "@/lib/type/vocab";
 
 // ---------------------------------------------------------------------------
 // the compact spec
@@ -75,6 +84,8 @@ export interface DirectionSpec {
   sceneTendency: string;
   lyrics: Partial<Record<SectionKind, { style: LyricStyleId; placement: LyricPlacement }>>;
   lyricTreatment: string;
+  /** 字體藝術: the direction's typographic voice (each direction a different one) */
+  typeVoice: TypeVoiceId;
   /** preferred treatments for band media */
   treatments: MediaTreatment[];
   /** 0..1 overall intensity of the look */
@@ -90,6 +101,8 @@ const KINDS = SECTION_KINDS;
 
 interface Archetype {
   key: "film" | "collage" | "minimal";
+  /** typographic voices that suit the look, the most fitting first */
+  voices: TypeVoiceId[];
   scenes: Record<SectionKind, SceneId[]>;
   lyrics: Record<SectionKind, { style: LyricStyleId; placement: LyricPlacement }>;
   typography: Omit<KeyVisual["typography"], "rationale">;
@@ -101,6 +114,7 @@ interface Archetype {
 
 const FILM: Archetype = {
   key: "film",
+  voices: ["mv-card", "title-sequence", "ink", "glitch"],
   scenes: {
     intro: ["bokeh", "nebula"],
     verse: ["rain", "waves", "nebula"],
@@ -112,16 +126,17 @@ const FILM: Archetype = {
     outro: ["bokeh", "gradient"],
     interlude: ["nebula", "rain"],
   },
+  // the legacy fallback styles (字體藝術 composes every line); only sections with lyrics use them
   lyrics: {
-    intro: { style: "hidden", placement: "center" },
+    intro: { style: "line-fade", placement: "upper-third" },
     verse: { style: "line-fade", placement: "upper-third" },
     "pre-chorus": { style: "typewriter", placement: "center" },
-    chorus: { style: "karaoke", placement: "center" },
+    chorus: { style: "line-fade", placement: "center" },
     bridge: { style: "vertical", placement: "vertical-right" },
-    solo: { style: "hidden", placement: "center" },
+    solo: { style: "line-fade", placement: "upper-third" },
     breakdown: { style: "line-fade", placement: "center" },
     outro: { style: "line-fade", placement: "center" },
-    interlude: { style: "hidden", placement: "center" },
+    interlude: { style: "line-fade", placement: "upper-third" },
   },
   typography: { cjkFont: "noto-serif-tc", latinFont: "playfair-display", weight: 700, letterSpacing: 0.08 },
   treatments: ["grain-film", "slow-drift", "blur-glow"],
@@ -132,6 +147,7 @@ const FILM: Archetype = {
 
 const COLLAGE: Archetype = {
   key: "collage",
+  voices: ["title-sequence", "glitch", "mv-card", "ink"],
   scenes: {
     intro: ["motif", "shards"],
     verse: ["shards", "grid", "particles"],
@@ -144,15 +160,15 @@ const COLLAGE: Archetype = {
     interlude: ["grid", "motif"],
   },
   lyrics: {
-    intro: { style: "hidden", placement: "center" },
+    intro: { style: "word-pop", placement: "center" },
     verse: { style: "word-pop", placement: "left" },
     "pre-chorus": { style: "word-pop", placement: "center" },
     chorus: { style: "impact", placement: "center" },
     bridge: { style: "stack", placement: "left" },
-    solo: { style: "hidden", placement: "center" },
+    solo: { style: "word-pop", placement: "center" },
     breakdown: { style: "impact", placement: "center" },
     outro: { style: "impact", placement: "center" },
-    interlude: { style: "hidden", placement: "center" },
+    interlude: { style: "word-pop", placement: "center" },
   },
   typography: { cjkFont: "chiron-hei-hk", latinFont: "anton", weight: 900, letterSpacing: 0.02 },
   treatments: ["halftone", "beat-cut", "duotone"],
@@ -163,6 +179,7 @@ const COLLAGE: Archetype = {
 
 const MINIMAL: Archetype = {
   key: "minimal",
+  voices: ["ink", "mv-card", "title-sequence", "glitch"],
   scenes: {
     intro: ["gradient", "motif"],
     verse: ["gradient", "ink"],
@@ -175,15 +192,15 @@ const MINIMAL: Archetype = {
     interlude: ["ink", "gradient"],
   },
   lyrics: {
-    intro: { style: "hidden", placement: "center" },
-    verse: { style: "subtitle", placement: "lower-third" },
+    intro: { style: "typewriter", placement: "center" },
+    verse: { style: "line-fade", placement: "upper-third" },
     "pre-chorus": { style: "typewriter", placement: "center" },
     chorus: { style: "stack", placement: "center" },
     bridge: { style: "vertical", placement: "vertical-left" },
-    solo: { style: "hidden", placement: "center" },
+    solo: { style: "typewriter", placement: "center" },
     breakdown: { style: "typewriter", placement: "center" },
     outro: { style: "typewriter", placement: "center" },
-    interlude: { style: "hidden", placement: "center" },
+    interlude: { style: "typewriter", placement: "center" },
   },
   typography: { cjkFont: "noto-sans-tc", latinFont: "space-grotesk", weight: 800, letterSpacing: 0.12 },
   treatments: ["duotone", "mask-lyrics"],
@@ -191,6 +208,45 @@ const MINIMAL: Archetype = {
   motion: "soft",
   emblem: "crystal",
 };
+
+const AXES = [FILM, COLLAGE, MINIMAL] as const;
+
+/**
+ * One typographic voice per direction, never two alike: the song's own voice goes to the look that
+ * suits it best (MV 字卡 → film, 片頭海報 or 故障 → collage, 水墨 → minimal); the other looks take the
+ * first voice of their own preference that is still free (no brush calligraphy for Latin lyrics).
+ */
+export function directionVoices(native: TypeVoiceId, cjk: boolean): [TypeVoiceId, TypeVoiceId, TypeVoiceId] {
+  const own: TypeVoiceId = !cjk && native === "ink" ? "mv-card" : native;
+  let home = 0;
+  AXES.forEach((a, i) => {
+    if (a.voices.indexOf(own) < AXES[home].voices.indexOf(own)) home = i;
+  });
+  const out: Array<TypeVoiceId | null> = [null, null, null];
+  out[home] = own;
+  const used = new Set<TypeVoiceId>([own]);
+  AXES.forEach((a, i) => {
+    if (out[i]) return;
+    const pick = a.voices.find((v) => !used.has(v) && (cjk || v !== "ink")) ?? a.voices.find((v) => !used.has(v)) ?? a.voices[0];
+    out[i] = pick;
+    used.add(pick);
+  });
+  return out as [TypeVoiceId, TypeVoiceId, TypeVoiceId];
+}
+
+/** How a direction sets its lyrics, in its voice (繁中, one or two sentences). */
+function voiceTreatment(voice: TypeVoiceId, phrase: string | null): string {
+  switch (voice) {
+    case "mv-card":
+      return `日系 MV 字卡：每一句都是一張排好的字卡，巨字與小字的極端對比、直橫混排與大量留白，在拍點上硬切${phrase ? `；「${phrase}」放到最大` : ""}。`;
+    case "title-sequence":
+      return `電影片頭／動態海報：字就是形狀——出血的巨字、網格、細線與編號，遮罩擦出${phrase ? `；「${phrase}」撐滿畫面` : ""}。`;
+    case "ink":
+      return `書法與水墨：楷書依筆順一個字一個字寫出來，直排為主，暈染與飛白，一方紅印${phrase ? `；「${phrase}」寫得最大` : ""}。`;
+    case "glitch":
+      return `實驗／故障感：切片、錯位、RGB 分離與殘影，字被畫面吃掉一部分，拍點上抖動（在 LED 安全的閃爍限制內）${phrase ? `；「${phrase}」撕開再重組` : ""}。`;
+  }
+}
 
 function entriesOf(roles: Array<[string, string]>): PaletteEntry[] {
   const seen = new Set<string>();
@@ -339,6 +395,9 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   const phrase = f.hints.singalong.find((p) => !p.chant)?.text ?? f.hints.singalong[0]?.text ?? null;
   const sung = (req.lyrics?.lines ?? []).some((l) => l.text.trim());
   const genreLyrics = (axis: "film" | "collage" | "minimal") => (genre && axis === nativeAxis && sung ? `${genre.label}：${genre.lyrics.note}。` : "");
+  // 字體藝術: three different typographic voices, the song's own on the look that suits it
+  const cjk = analyzeStructure(req).cjk;
+  const [filmVoice, collageVoice, minimalVoice] = directionVoices(chooseVoice(f, cjk).voice, cjk);
   const native = (axis: "film" | "collage" | "minimal") => {
     if (!genre) return "";
     const soft = genre.motion === "soft";
@@ -394,7 +453,8 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       scenes: scenesOf(FILM, FILM_SCENES, true),
       sceneTendency: `星雲、雨絲、波形與光斑${names.length ? `，${names[0]}的畫面放在主歌` : ""}：柔和、慢速、低飽和，副歌只把粒子密度拉高，不換成激烈的幾何。`,
       lyrics: FILM.lyrics,
-      lyricTreatment: `主歌上方淡入、導歌打字機、副歌整行 karaoke，${phrase ? `讓觀眾跟唱「${phrase}」` : "讓觀眾跟唱"}，橋段直排；前奏與間奏留白。${genreLyrics("film")}`,
+      lyricTreatment: `${voiceTreatment(filmVoice, phrase)}${genreLyrics("film")}`,
+      typeVoice: filmVoice,
       treatments: bible?.treatments.length ? bible.treatments : FILM.treatments,
       energy: FILM.energy,
       motion: FILM.motion,
@@ -428,7 +488,8 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       scenes: scenesOf(COLLAGE, COLLAGE_SCENES, false),
       sceneTendency: "碎片、網格、粒子到隧道：高飽和、快切、跟拍點反應，最後一次副歌衝進隧道。",
       lyrics: COLLAGE.lyrics,
-      lyricTreatment: `主歌逐字跳出、副歌 impact 巨字口號${phrase ? `（「${phrase}」）` : ""}，橋段堆疊成詩句；器樂段不放歌詞。${genreLyrics("collage")}`,
+      lyricTreatment: `${voiceTreatment(collageVoice, phrase)}${genreLyrics("collage")}`,
+      typeVoice: collageVoice,
       treatments: bible?.treatments.length ? bible.treatments : COLLAGE.treatments,
       energy: COLLAGE.energy,
       motion: COLLAGE.motion,
@@ -466,7 +527,8 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       scenes: scenesOf(MINIMAL, MINIMAL_SCENES, false),
       sceneTendency: "漸層、水墨與主視覺符號：黑白為主、動得很少，breakdown 可以全黑。",
       lyrics: MINIMAL.lyrics,
-      lyricTreatment: `主歌下方小字幕、副歌詩句堆疊${phrase ? `，「${phrase}」放大` : ""}、橋段直排、尾奏打字機；字就是畫面。${genreLyrics("minimal")}`,
+      lyricTreatment: `${voiceTreatment(minimalVoice, phrase)}字就是畫面。${genreLyrics("minimal")}`,
+      typeVoice: minimalVoice,
       treatments: bible?.treatments.length ? bible.treatments : MINIMAL.treatments,
       energy: MINIMAL.energy,
       motion: MINIMAL.motion,
@@ -534,9 +596,10 @@ function pickScene(list: readonly SceneId[], kind: SectionKind, ordinal: number,
   return pick;
 }
 
-function planNotes(spec: DirectionSpec, letter: string, sections: readonly SectionDesign[]): string {
+function planNotes(spec: DirectionSpec, letter: string, sections: readonly SectionDesign[], typeSystem?: DesignPlan["typeSystem"]): string {
   const choruses = sections.filter((s) => s.kind === "chorus");
   const hidden = sections.filter((s) => s.lyricStyle === "hidden").map((s) => s.label);
+  const recipes = typeSystem?.lines.length ? topRecipes(typeSystem).map((id) => `「${RECIPES[id].label}」`).join("、") : "";
   return [
     `## 方向 ${letter}：${spec.name}`,
     spec.pitch,
@@ -547,7 +610,10 @@ function planNotes(spec: DirectionSpec, letter: string, sections: readonly Secti
     "## 場景與歌詞",
     `- 場景傾向：${spec.sceneTendency}`,
     `- 歌詞處理：${spec.lyricTreatment}`,
-    choruses.length ? `- 副歌：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}／${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}` : "- 沒有偵測到副歌，能量最高的段落是這個方向的高點。",
+    ...(typeSystem && recipes ? [`- 字體語言：${VOICES[typeSystem.voice].label}，主要構圖${recipes}；每一句都是排好的構圖，不是字幕。`] : []),
+    choruses.length
+      ? `- 副歌：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}${typeSystem ? "" : `／${LYRIC_STYLES[c.lyricStyle].label}`}」`).join("、")}`
+      : "- 沒有偵測到副歌，能量最高的段落是這個方向的高點。",
     hidden.length ? `- 不放歌詞：${hidden.join("、")}` : "- 每段都有歌詞，畫面要保持節制。",
     "",
     "## 現場注意",
@@ -589,9 +655,10 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
     prev = scene;
     const hasLines = sectionHasLines(req, s.start, s.end);
     let lyric = hasLines ? (spec.lyrics[s.kind] ?? { style: s.lyricStyle, placement: s.lyricPlacement }) : { style: "hidden" as LyricStyleId, placement: s.lyricPlacement };
-    // dense sections (rap, fast verses) never get per-word animation; Latin text is never vertical
-    const dense = s.lyricStyle === "subtitle" && s.kind === "verse";
-    if (hasLines && dense && lyric.style !== "hidden") lyric = { style: "subtitle", placement: "lower-third" };
+    // every sung line appears (字體藝術), never as karaoke / subtitle; Latin text is never vertical
+    if (hasLines && lyric.style === "hidden") lyric = { style: "line-fade", placement: "upper-third" };
+    if (lyric.style === "karaoke") lyric = { style: "word-pop", placement: lyric.placement };
+    if (lyric.style === "subtitle") lyric = { style: "line-fade", placement: lyric.placement === "lower-third" ? "upper-third" : lyric.placement };
     if (lyric.style === "vertical" && !cjk) lyric = { style: "stack", placement: "left" };
     if (lyric.style !== "vertical" && (lyric.placement === "vertical-left" || lyric.placement === "vertical-right")) lyric = { ...lyric, placement: "center" };
     if (lyric.style === "vertical" && lyric.placement !== "vertical-left" && lyric.placement !== "vertical-right") lyric = { ...lyric, placement: "vertical-right" };
@@ -601,14 +668,14 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
       { bible, isLastChorus: s.kind === "chorus" && ordinal === total - 1, isLoudest: i === loudest, hasChorus: chorusCount > 0 },
     );
     const colorway = colorwayOf(s.kind, ordinal, total, roles, spec.motion);
-    const scale = policed.style === "impact" ? Math.max(policed.scale, 1.15) : policed.style === "subtitle" ? Math.min(policed.scale, 0.95) : policed.scale;
+    const scale = policed.style === "impact" ? Math.max(policed.scale, 1.15) : policed.scale;
     let media = s.media;
     if (media && spec.treatments.length && !spec.treatments.includes(media.treatment) && media.blend !== "screen") {
       const options = spec.treatments.filter((t) => (t === "beat-cut" ? s.energy >= 0.55 : true) && !(t === "mask-lyrics" && policed.style === "hidden"));
       if (options.length) media = { ...media, treatment: options[treatTurn++ % options.length] };
     }
     const sceneLabel = SCENES[scene].label;
-    const styleLabel = LYRIC_STYLES[policed.style].label;
+    const styleLabel = `${VOICES[spec.typeVoice].short}構圖`;
     return {
       ...s,
       scene,
@@ -628,8 +695,25 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
       rationale:
         policed.style === "hidden"
           ? `方向 ${letter}「${spec.name}」：${SECTION_KIND_LABELS[s.kind]}用「${sceneLabel}」，不放歌詞，讓畫面${spec.motion === "punchy" ? "跟著節拍衝" : "安靜地呼吸"}。`
-          : `方向 ${letter}「${spec.name}」：${SECTION_KIND_LABELS[s.kind]}用「${sceneLabel}」，歌詞「${styleLabel}」。`,
+          : `方向 ${letter}「${spec.name}」：${SECTION_KIND_LABELS[s.kind]}用「${sceneLabel}」，每一句歌詞都是「${styleLabel}」。`,
     };
+  });
+  // 字體藝術: the direction's voice, its fonts (the bible's when there is one) and a composition per line
+  const lineDesigns = base.lines.map((l) => (l.styleOverride === "impact" && spec.motion === "soft" ? { ...l, styleOverride: null, note: l.note === "口號句：巨字帶動全場" ? "" : l.note } : l));
+  const typeParams: Partial<TypeParams> = spec.motion === "soft" ? { motionSpeed: Math.min(VOICES[spec.typeVoice].params.motionSpeed, 0.4) } : { motionIntensity: Math.max(VOICES[spec.typeVoice].params.motionIntensity, 0.55) };
+  const { system: typeSystem } = designTypeSystem({
+    lines: (req.lyrics?.lines ?? []).filter((l) => l && typeof l.id === "string" && typeof l.text === "string"),
+    sections,
+    duration: base.sections.at(-1)?.end ?? 0,
+    findings: analyzeFindings(req),
+    cjk,
+    bible,
+    planFonts: { cjk: spec.typography.cjkFont, latin: spec.typography.latinFont },
+    voice: spec.typeVoice,
+    params: typeParams,
+    lineDesigns,
+    bandName: req.bandName,
+    title: req.meta?.title,
   });
   const plan: DesignPlan = {
     version: 1,
@@ -644,9 +728,10 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
     },
     sections,
     // impact overrides only fit the looks that shout
-    lines: base.lines.map((l) => (l.styleOverride === "impact" && spec.motion === "soft" ? { ...l, styleOverride: null, note: l.note === "口號句：巨字帶動全場" ? "" : l.note } : l)),
+    lines: lineDesigns,
     cues: base.cues,
-    designerNotes: planNotes(spec, letter, sections),
+    designerNotes: planNotes(spec, letter, sections, typeSystem.lines.length ? typeSystem : undefined),
+    typeSystem,
   };
   return normalizePlan(plan, req);
 }
@@ -684,8 +769,9 @@ export const DirectionDraftSchema = z.object({
           .array(z.object({ kind: SectionKindSchema, scenes: z.array(SceneIdSchema).describe("1–3 個場景，最典型的在前；副歌依序往後推進") }))
           .describe("每種段落的場景家族（至少涵蓋 intro、verse、chorus、bridge、outro）"),
         sceneTendency: z.string().describe("場景傾向（繁體中文，1–2 句）"),
-        lyrics: z.array(z.object({ kind: SectionKindSchema, style: LyricStyleIdSchema, placement: LyricPlacementSchema })).describe("每種段落的歌詞樣式與位置"),
-        lyricTreatment: z.string().describe("歌詞怎麼處理（繁體中文，1–2 句）"),
+        lyrics: z.array(z.object({ kind: SectionKindSchema, style: AutoLyricStyleIdSchema, placement: LyricPlacementSchema })).describe("每種段落的後備歌詞樣式與位置（舊版渲染器用；實際每一句都依字體語言構圖）"),
+        typeVoice: TypeVoiceIdSchema.describe("字體語言：mv-card 日系 MV 字卡、title-sequence 電影片頭／動態海報、ink 書法與水墨、glitch 實驗／故障感；每個方向用不同的一個"),
+        lyricTreatment: z.string().describe("歌詞怎麼排版（繁體中文，1–2 句）：這個字體語言怎麼把每一句排成構圖"),
         treatments: z.array(MediaTreatmentSchema).describe("樂團素材偏好的處理（0–3 個）"),
         energy: z.number().describe("0–1 這個方向整體的強度"),
         motion: z.enum(["soft", "punchy"]).describe("soft = 柔和的轉場與慢速；punchy = 快切、跟拍點"),
@@ -697,9 +783,10 @@ export const DirectionDraftSchema = z.object({
 export const DIRECTIONS_SYSTEM = `你是這個樂團的專職舞台視覺總監。專業的設計師不會只交一個方案：在製作之前，你會先向樂團提出 2 到 3 個彼此明顯不同的「設計方向」（例如 A 冷調膠片感、B 飽和拼貼、C 黑白極簡），每個方向都有名字、一句話提案、理由與關鍵的視覺決定，讓樂團選一個或給意見，之後才進入製作。
 
 # 方向要真的不同
-- 至少在這些軸上拉開：色溫與飽和度（冷／暖、低彩／高彩／黑白）、材質（顆粒、網點、筆觸、乾淨）、場景家族（柔和的星雲雨絲 vs. 碎片網格隧道 vs. 漸層水墨）、歌詞處理（整行 karaoke、巨字口號、直排詩句、小字幕）、節奏（柔和 vs. 快切）。
+- 至少在這些軸上拉開：色溫與飽和度（冷／暖、低彩／高彩／黑白）、材質（顆粒、網點、筆觸、乾淨）、場景家族（柔和的星雲雨絲 vs. 碎片網格隧道 vs. 漸層水墨）、字體語言（typeVoice，每個方向不同）、節奏（柔和 vs. 快切）。
+- 歌詞是視覺藝術：每一句歌詞都會排成一張設計過的構圖（字體藝術），不是卡拉 OK 或字幕。四種字體語言——mv-card 日系 MV 字卡（極端字級對比、直橫混排、大留白、拍點硬切、「」當圖形）、title-sequence 電影片頭／動態海報（字就是形狀、出血、瑞士網格、細線與編號、遮罩擦出）、ink 書法與水墨（楷書依筆順寫出、直排、暈染飛白、紅色印章）、glitch 實驗／故障感（切片錯位、RGB 分離、殘影、疊印與顆粒）——三個方向各選一個不同的。
 - 三個方向都必須成立：適合這首歌、這個樂團，都能在 LED 大螢幕上讀得清楚；不要做一個明顯是湊數的方向。
-- 視覺是配角、托起樂團：歌詞要節制，器樂段不放歌詞；歌詞色與背景對比至少 4.5:1；字重 600 以上。
+- 視覺是配角、托起樂團：唱到的每一句都會出現，但主歌小而安靜、副歌才大；歌詞色與背景對比至少 4.5:1；字重 600 以上。
 
 # 理由要有根據
 - 引用研究簡報裡的具體發現（專輯封面、MV、招牌色、現場習慣），不要空泛的形容詞。
@@ -808,7 +895,8 @@ export function normalizeDirectionDrafts(raw: unknown, req: DesignRequest, offli
     const lyrics: DirectionSpec["lyrics"] = { ...fb.lyrics };
     for (const row of Array.isArray(d.lyrics) ? d.lyrics : []) {
       if (!isObj(row) || !(SECTION_KINDS as readonly string[]).includes(row.kind as string)) continue;
-      if (!(LYRIC_STYLE_IDS as readonly string[]).includes(row.style as string) || !(LYRIC_PLACEMENTS as readonly string[]).includes(row.placement as string)) continue;
+      // karaoke and subtitle are never chosen automatically (字體藝術): the fallback keeps its style
+      if (!(AUTO_LYRIC_STYLE_IDS as readonly string[]).includes(row.style as string) || !(LYRIC_PLACEMENTS as readonly string[]).includes(row.placement as string)) continue;
       lyrics[row.kind as SectionKind] = { style: row.style as LyricStyleId, placement: row.placement as LyricPlacement };
     }
     const references: DirectionReference[] = [];
@@ -833,6 +921,7 @@ export function normalizeDirectionDrafts(raw: unknown, req: DesignRequest, offli
       sceneTendency: text(d.sceneTendency, 200) || fb.sceneTendency,
       lyrics,
       lyricTreatment: text(d.lyricTreatment, 200) || fb.lyricTreatment,
+      typeVoice: (TYPE_VOICE_IDS as readonly string[]).includes(d.typeVoice as string) ? (d.typeVoice as TypeVoiceId) : fb.typeVoice,
       treatments: bible?.treatments.length ? bible.treatments : treatments.length ? treatments : fb.treatments,
       energy: typeof d.energy === "number" && Number.isFinite(d.energy) ? clamp(d.energy, 0, 1) : fb.energy,
       motion: d.motion === "punchy" ? "punchy" : d.motion === "soft" ? "soft" : fb.motion,
@@ -852,6 +941,22 @@ export function normalizeDirectionDrafts(raw: unknown, req: DesignRequest, offli
   return distinct.slice(0, MAX_DIRECTIONS);
 }
 
+/**
+ * Every direction speaks its own typographic voice: a repeated one (two Claude directions on the
+ * same voice, or a Claude one meeting an offline top-up) moves to the next free voice, with the
+ * lyric treatment rewritten for it. No brush calligraphy for Latin lyrics.
+ */
+export function distinctVoices(specs: readonly DirectionSpec[], cjk: boolean): DirectionSpec[] {
+  const order: TypeVoiceId[] = (["mv-card", "title-sequence", "ink", "glitch"] as TypeVoiceId[]).filter((v) => cjk || v !== "ink");
+  const used = new Set<TypeVoiceId>();
+  return specs.map((spec) => {
+    let voice: TypeVoiceId = !cjk && spec.typeVoice === "ink" ? "mv-card" : spec.typeVoice;
+    if (used.has(voice)) voice = order.find((v) => !used.has(v)) ?? voice;
+    used.add(voice);
+    return voice === spec.typeVoice ? spec : { ...spec, typeVoice: voice, lyricTreatment: voiceTreatment(voice, null) };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // specs -> stored directions
 // ---------------------------------------------------------------------------
@@ -863,7 +968,7 @@ export function directionId(seed: string): string {
 /** Stored directions from specs (letters A, B, C; ids unique within the set). */
 export function buildDirections(specs: readonly DirectionSpec[], req: DesignRequest, meta: { engine: DirectionEngine; model?: string; now: string }): DesignDirection[] {
   const used = new Set<string>();
-  return specs.slice(0, MAX_DIRECTIONS).map((spec, i) => {
+  return distinctVoices(specs.slice(0, MAX_DIRECTIONS), analyzeStructure(req).cjk).map((spec, i) => {
     const letter = DIRECTION_LETTERS[i];
     let id = directionId(`${meta.now}|${letter}|${spec.name}`);
     for (let k = 1; used.has(id); k++) id = directionId(`${meta.now}|${letter}|${spec.name}|${k}`);
@@ -894,7 +999,8 @@ export function directionsSummary(directions: readonly DesignDirection[]): strin
   return directions
     .map((d) => {
       const chorus = d.plan.sections.find((s) => s.kind === "chorus");
-      return `### 方向 ${d.letter}「${d.name}」\n${d.pitch}${chorus ? `\n- ${formatTimeShort(chorus.start)} 副歌：${SCENES[chorus.scene].label}／${LYRIC_STYLES[chorus.lyricStyle].label}` : ""}`;
+      const voice = d.plan.typeSystem ? VOICES[d.plan.typeSystem.voice]?.label : null;
+      return `### 方向 ${d.letter}「${d.name}」\n${d.pitch}${voice ? `\n- 字體語言：${voice}` : ""}${chorus ? `\n- ${formatTimeShort(chorus.start)} 副歌：${SCENES[chorus.scene].label}${voice ? "" : `／${LYRIC_STYLES[chorus.lyricStyle].label}`}` : ""}`;
     })
     .join("\n\n");
 }

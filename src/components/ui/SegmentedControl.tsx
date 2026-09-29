@@ -45,12 +45,15 @@ export function SegmentedControl<T extends string>({
   getPanelId,
   className,
   disabled = false,
+  touch = false,
 }: {
   value: T;
   options: readonly SegmentOption<T>[];
   onChange: (value: T) => void;
   /** accessible name of the group */
   label: string;
+  /** 44 px segments below the lg breakpoint (touch editors on a phone); the regular 28 px from lg up */
+  touch?: boolean;
   kind?: "radio" | "tabs";
   fullWidth?: boolean;
   blurOnPointer?: boolean;
@@ -122,7 +125,7 @@ export function SegmentedControl<T extends string>({
         aria-describedby={caption ? captionId : undefined}
         aria-disabled={disabled || undefined}
         onKeyDown={onKeyDown}
-        className={cx("relative grid h-7 min-w-0 rounded-sm bg-fill-3 p-0.5 select-none", fullWidth ? "w-full" : "w-max max-w-full", disabled && "pointer-events-none opacity-35")}
+        className={cx("relative grid min-w-0 rounded-sm bg-fill-3 p-0.5 select-none", touch ? "h-12 lg:h-7" : "h-7", fullWidth ? "w-full" : "w-max max-w-full", disabled && "pointer-events-none opacity-35")}
         style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}
       >
         {shown >= 0 && (
@@ -139,7 +142,7 @@ export function SegmentedControl<T extends string>({
             <span
               key={`sep-${o.value}`}
               aria-hidden="true"
-              className={cx("pointer-events-none absolute top-[7px] bottom-[7px] w-(--hairline) bg-separator transition-opacity duration-(--dur-fast) ease-[ease]", hidden && "opacity-0")}
+              className={cx("pointer-events-none absolute w-(--hairline) bg-separator transition-opacity duration-(--dur-fast) ease-[ease]", touch ? "top-[14px] bottom-[14px] lg:top-[7px] lg:bottom-[7px]" : "top-[7px] bottom-[7px]", hidden && "opacity-0")}
               style={{ left: `calc(2px + (100% - 4px) * ${i} / ${n})` }}
             />
           );
@@ -174,8 +177,9 @@ export function SegmentedControl<T extends string>({
                 if (blurOnPointer && e.detail > 0) e.currentTarget.blur();
               }}
               className={cx(
-                "relative z-[1] flex h-6 min-w-0 items-center justify-center gap-1 rounded-xs px-3 text-[13px] leading-none whitespace-nowrap text-label focus-inset",
-                // the hit area covers the control's 2 px padding: 28 px tall
+                "relative z-[1] flex min-w-0 items-center justify-center gap-1 rounded-xs leading-none whitespace-nowrap text-label focus-inset",
+                touch ? "h-11 px-2 text-[15px] lg:h-6 lg:px-3 lg:text-[13px]" : "h-6 px-3 text-[13px]",
+                // the hit area covers the control's 2 px padding: 28 px tall (44 px with touch)
                 "before:absolute before:inset-x-0 before:-inset-y-0.5 before:content-['']",
                 "transition-opacity duration-(--dur-release) ease-out disabled:opacity-35",
                 i === shown ? "font-semibold" : "font-medium",

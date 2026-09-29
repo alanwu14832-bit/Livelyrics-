@@ -2,6 +2,7 @@
 // windows / blocked storage just fall back to defaults).
 
 import type { PlaybackMode } from "@/lib/stage/protocol";
+import { DEFAULT_SYNC_SETTINGS, parseSyncSettings, type SyncSettings } from "@/lib/sync/settings";
 
 export interface ConsoleSettings {
   mode: PlaybackMode;
@@ -13,13 +14,15 @@ export interface ConsoleSettings {
   muted: boolean;
   /** preferred microphone / line-in for live mode ("" = default device) */
   micDeviceId: string;
+  /** 同步 (phase 5a): the sync source, the LTC input and the freewheel time for this song */
+  sync: SyncSettings;
 }
 
 export const OFFSET_LIMIT = 10;
 export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25] as const;
 
 export function defaultSettings(mode: PlaybackMode = "track"): ConsoleSettings {
-  return { mode, offset: 0, playbackRate: 1, volume: 1, muted: false, micDeviceId: "" };
+  return { mode, offset: 0, playbackRate: 1, volume: 1, muted: false, micDeviceId: "", sync: { ...DEFAULT_SYNC_SETTINGS } };
 }
 
 export function settingsKey(projectId: string): string {
@@ -55,6 +58,7 @@ export function parseSettings(raw: string | null | undefined, defaults: ConsoleS
     volume: num(d.volume, 0, 1, defaults.volume),
     muted: typeof d.muted === "boolean" ? d.muted : defaults.muted,
     micDeviceId: typeof d.micDeviceId === "string" && d.micDeviceId.length < 512 ? d.micDeviceId : defaults.micDeviceId,
+    sync: d.sync !== undefined ? parseSyncSettings(d.sync) : { ...defaults.sync },
   };
 }
 

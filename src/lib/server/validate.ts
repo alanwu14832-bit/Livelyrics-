@@ -6,7 +6,8 @@ import type { ProcessRequest } from "@/lib/api-client";
 import { DesignPlanSchema } from "@/lib/schema";
 import { MAX_NAME, MAX_NOTE, MAX_TAGS, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags } from "@/lib/assets";
 import { OUTPUT_MAX_PX, OUTPUT_MIN_PX, SAFE_MAX, patchOutput } from "@/lib/output";
-import type { Asset, AudioAnalysis, AudioSectionGuess, DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
+import { TimecodeStringSchema, coerceTcString } from "@/lib/sync/timecode";
+import type { Asset, AudioAnalysis, AudioSectionGuess, DesignPlan, Lyrics, ProjectOutput, SongMeta, SongTimecode } from "@/lib/types";
 import { HttpError } from "./http";
 
 const MAX_TEXT = 300;
@@ -269,6 +270,22 @@ export function applyOutputPatch(current: ProjectOutput, raw: unknown): ProjectO
   const parsed = OutputPatchSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(400, `輸出設定格式錯誤：${issuesText(parsed.error)}`);
   return patchOutput(current, parsed.data);
+}
+
+// ---------------------------------------------------------------------------
+// timecode (phase 5a): where the song starts on the playback rig's timecode
+// ---------------------------------------------------------------------------
+
+const TimecodePatchSchema = z.object({ start: TimecodeStringSchema }).strict().nullable();
+
+/**
+ * A PATCH `timecode` value: `{ start: "HH:MM:SS:FF" }`, or null for the default (01:00:00:00).
+ * Stored with ":" before the frames (the incoming timecode says whether it is drop-frame).
+ */
+export function parseTimecodePatch(raw: unknown): SongTimecode | null {
+  const parsed = TimecodePatchSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(400, `時間碼格式錯誤：${issuesText(parsed.error)}`);
+  return parsed.data ? { start: coerceTcString(parsed.data.start)! } : null;
 }
 
 // ---------------------------------------------------------------------------

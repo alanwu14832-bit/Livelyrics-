@@ -41,9 +41,19 @@ describe("offline design with a band bible", () => {
     expect(plan.keyVisual.typography.weight).toBe(800);
     expect(plan.sections.some((s) => s.scene === "tunnel" || s.scene === "grid")).toBe(false);
     expect(plan.sections.some((s) => s.scene === "ink" || s.scene === "rain")).toBe(true);
-    // chorus-only: every non-chorus section hides lyrics
-    for (const s of plan.sections) if (s.kind !== "chorus") expect(s.lyricStyle).toBe("hidden");
+    // chorus-only (字體藝術): every sung line still appears; the verses are quiet, the choruses loud
+    const sung = (s: (typeof plan.sections)[number]) => demoInput().lyrics.lines.some((l) => l.start != null && l.start >= s.start && l.start < s.end && l.text.trim());
+    for (const s of plan.sections) if (sung(s)) expect(s.lyricStyle, s.label).not.toBe("hidden");
     expect(plan.sections.some((s) => s.kind === "chorus" && s.lyricStyle !== "hidden")).toBe(true);
+    const ts = plan.typeSystem!;
+    expect(ts.fonts).toEqual({ cjk: "noto-serif-tc", latin: "playfair-display" });
+    const energyIn = (kind: string) => {
+      const secs = plan.sections.filter((s) => s.kind === kind);
+      const ids = new Set(demoInput().lyrics.lines.filter((l) => l.start != null && secs.some((s) => l.start! >= s.start && l.start! < s.end)).map((l) => l.id));
+      return ts.lines.filter((l) => ids.has(l.lineId)).map((l) => l.energy);
+    };
+    expect(Math.max(...energyIn("verse"))).toBeLessThanOrEqual(0.34);
+    expect(Math.min(...energyIn("chorus"))).toBeGreaterThan(0.5);
     expect(plan.keyVisual.motifs.slice(0, 2)).toEqual(["燈塔", "潮汐"]);
   });
 
@@ -51,14 +61,19 @@ describe("offline design with a band bible", () => {
     expect(offlineDesign(demoInput({ bible: defaultBible() }))).toEqual(offlineDesign(demoInput()));
   });
 
-  it("lyric policy full shows every vocal section; minimal keeps only the hook", () => {
+  it("lyric policy: every vocal section shows its lines; full keeps each style, minimal makes only the hook loud", () => {
     const pick = { style: "hidden" as const, placement: "center" as const, scale: 1 };
     const full = { ...bible, lyricPolicy: { mode: "full" as const, note: "" } };
-    expect(applyLyricPolicy(pick, { kind: "verse", energy: 0.4, hasLines: true }, { bible: full, isLastChorus: false, isLoudest: false, hasChorus: true }).style).toBe("subtitle");
+    // never a subtitle any more: the quiet style
+    expect(applyLyricPolicy(pick, { kind: "verse", energy: 0.4, hasLines: true }, { bible: full, isLastChorus: false, isLoudest: false, hasChorus: true }).style).toBe("line-fade");
     const minimal = { ...bible, lyricPolicy: { mode: "minimal" as const, note: "" } };
-    const karaoke = { style: "karaoke" as const, placement: "center" as const, scale: 1.1 };
-    expect(applyLyricPolicy(karaoke, { kind: "chorus", energy: 0.9, hasLines: true }, { bible: minimal, isLastChorus: false, isLoudest: false, hasChorus: true }).style).toBe("hidden");
-    expect(applyLyricPolicy(karaoke, { kind: "chorus", energy: 0.9, hasLines: true }, { bible: minimal, isLastChorus: true, isLoudest: true, hasChorus: true }).style).toBe("impact");
+    const loud = { style: "word-pop" as const, placement: "center" as const, scale: 1.1 };
+    const quiet = applyLyricPolicy(loud, { kind: "chorus", energy: 0.9, hasLines: true }, { bible: minimal, isLastChorus: false, isLoudest: false, hasChorus: true });
+    expect(quiet.style).toBe("line-fade");
+    expect(quiet.scale).toBeLessThan(1);
+    expect(applyLyricPolicy(loud, { kind: "chorus", energy: 0.9, hasLines: true }, { bible: minimal, isLastChorus: true, isLoudest: true, hasChorus: true }).style).toBe("impact");
+    // a section without lines keeps what it had (hidden)
+    expect(applyLyricPolicy(pick, { kind: "intro", energy: 0.2, hasLines: false }, { bible: full, isLastChorus: false, isLoudest: false, hasChorus: true }).style).toBe("hidden");
     expect(biasScenes(["particles", "ink", "tunnel"], bible)).toEqual(["ink", "particles"]);
   });
 

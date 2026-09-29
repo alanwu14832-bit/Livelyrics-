@@ -48,3 +48,31 @@ describe("remapLineDesigns", () => {
     expect(remapLineDesigns([design("l9")], l, l)).toMatchObject({ lines: [], dropped: 1 });
   });
 });
+
+describe("remapPlanLines with a type system (字體藝術)", () => {
+  it("the composition hints follow their lines like the line designs", async () => {
+    const { remapPlanLines } = await import("./remap");
+    const before = lyrics([["夜色落下", 8], ["燈火亮起", 12]]);
+    const after = lyrics([["前奏的一句", 4], ["夜色落下", 8], ["燈火亮起", 12]]);
+    const hint = (lineId: string, seed: number) => ({ lineId, recipe: "giant-word" as const, emphasis: [], orientation: "h" as const, energy: 0.5, motionWord: "", seed });
+    const plan = {
+      version: 1 as const,
+      keyVisual: {} as never,
+      sections: [],
+      lines: [design("l1", "燈")],
+      cues: [],
+      designerNotes: "",
+      typeSystem: { voice: "mv-card" as const, params: {} as never, color: "solid" as const, fonts: { cjk: "noto-serif-tc" as const, latin: "playfair-display" as const }, weight: 800, ornaments: [], seal: "", rationale: "", lines: [hint("l0", 1), { ...hint("l1", 2), locked: true, edit: { dx: 0.1 } }] },
+    };
+    const next = remapPlanLines(plan, before, after);
+    expect(next.lines.map((l) => l.lineId)).toEqual(["l2"]);
+    expect(next.typeSystem!.lines.map((l) => [l.lineId, l.seed])).toEqual([
+      ["l1", 1],
+      ["l2", 2],
+    ]);
+    expect(next.typeSystem!.lines[1].locked).toBe(true);
+    expect(next.typeSystem!.lines[1].edit).toEqual({ dx: 0.1 });
+    // nothing moved: the same plan object
+    expect(remapPlanLines(plan, before, before)).toBe(plan);
+  });
+});

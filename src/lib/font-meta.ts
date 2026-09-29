@@ -11,21 +11,34 @@ export interface FontInfo {
   cssVar: string;
   cjk: boolean;
   generic: "sans-serif" | "serif" | "cursive";
+  /**
+   * The weights the loaded face really has (a variable face: its range in steps of 100). A canvas
+   * asked for another weight synthesizes a smeared faux bold, so the type painter snaps to these.
+   */
+  weights: readonly number[];
 }
 
 export const FONTS: Record<FontId, FontInfo> = {
-  "noto-sans-tc": { id: "noto-sans-tc", label: "思源黑體", cssVar: "--font-noto-sans-tc", cjk: true, generic: "sans-serif" },
-  "noto-serif-tc": { id: "noto-serif-tc", label: "思源宋體", cssVar: "--font-noto-serif-tc", cjk: true, generic: "serif" },
-  "lxgw-wenkai-tc": { id: "lxgw-wenkai-tc", label: "霞鶩文楷", cssVar: "--font-lxgw-wenkai-tc", cjk: true, generic: "serif" },
-  huninn: { id: "huninn", label: "粉圓", cssVar: "--font-huninn", cjk: true, generic: "sans-serif" },
-  "chiron-hei-hk": { id: "chiron-hei-hk", label: "昭源黑體", cssVar: "--font-chiron-hei-hk", cjk: true, generic: "sans-serif" },
-  iansui: { id: "iansui", label: "芫荽", cssVar: "--font-iansui", cjk: true, generic: "cursive" },
-  "cactus-classical-serif": { id: "cactus-classical-serif", label: "仙人掌明體", cssVar: "--font-cactus-classical-serif", cjk: true, generic: "serif" },
-  "bebas-neue": { id: "bebas-neue", label: "Bebas Neue", cssVar: "--font-bebas-neue", cjk: false, generic: "sans-serif" },
-  anton: { id: "anton", label: "Anton", cssVar: "--font-anton", cjk: false, generic: "sans-serif" },
-  "space-grotesk": { id: "space-grotesk", label: "Space Grotesk", cssVar: "--font-space-grotesk", cjk: false, generic: "sans-serif" },
-  "playfair-display": { id: "playfair-display", label: "Playfair Display", cssVar: "--font-playfair-display", cjk: false, generic: "serif" },
+  "noto-sans-tc": { id: "noto-sans-tc", label: "思源黑體", cssVar: "--font-noto-sans-tc", cjk: true, generic: "sans-serif", weights: [100, 200, 300, 400, 500, 600, 700, 800, 900] },
+  "noto-serif-tc": { id: "noto-serif-tc", label: "思源宋體", cssVar: "--font-noto-serif-tc", cjk: true, generic: "serif", weights: [200, 300, 400, 500, 600, 700, 800, 900] },
+  "lxgw-wenkai-tc": { id: "lxgw-wenkai-tc", label: "霞鶩文楷", cssVar: "--font-lxgw-wenkai-tc", cjk: true, generic: "serif", weights: [300, 400, 700] },
+  huninn: { id: "huninn", label: "粉圓", cssVar: "--font-huninn", cjk: true, generic: "sans-serif", weights: [400] },
+  "chiron-hei-hk": { id: "chiron-hei-hk", label: "昭源黑體", cssVar: "--font-chiron-hei-hk", cjk: true, generic: "sans-serif", weights: [200, 300, 400, 500, 600, 700, 800, 900] },
+  iansui: { id: "iansui", label: "芫荽", cssVar: "--font-iansui", cjk: true, generic: "cursive", weights: [400] },
+  "cactus-classical-serif": { id: "cactus-classical-serif", label: "仙人掌明體", cssVar: "--font-cactus-classical-serif", cjk: true, generic: "serif", weights: [400] },
+  "bebas-neue": { id: "bebas-neue", label: "Bebas Neue", cssVar: "--font-bebas-neue", cjk: false, generic: "sans-serif", weights: [400] },
+  anton: { id: "anton", label: "Anton", cssVar: "--font-anton", cjk: false, generic: "sans-serif", weights: [400] },
+  "space-grotesk": { id: "space-grotesk", label: "Space Grotesk", cssVar: "--font-space-grotesk", cjk: false, generic: "sans-serif", weights: [300, 400, 500, 600, 700] },
+  "playfair-display": { id: "playfair-display", label: "Playfair Display", cssVar: "--font-playfair-display", cjk: false, generic: "serif", weights: [400, 500, 600, 700, 800, 900] },
 };
+
+/** The weight a face really draws for `wanted` (the nearest it has; ties go heavier). */
+export function snapWeight(font: FontId, wanted: number): number {
+  const list = FONTS[font]?.weights ?? [400];
+  let best = list[0] ?? 400;
+  for (const w of list) if (Math.abs(w - wanted) < Math.abs(best - wanted) || (Math.abs(w - wanted) === Math.abs(best - wanted) && w > best)) best = w;
+  return best;
+}
 
 /**
  * CSS font-family for lyric text: Latin font first (it has no CJK glyphs, so the

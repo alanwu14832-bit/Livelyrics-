@@ -165,7 +165,10 @@ describe("normalizePlan", () => {
     expect(s0.sceneParams.speed).toBe(0);
     expect(s0.sceneParams.density).toBe(0.5);
     expect(s0.sceneParams.audioReactivity).toBe(1);
-    expect(s0.lyricStyle).toBe("karaoke");
+    // a design output never keeps karaoke (字體藝術: every line is a composition) …
+    expect(s0.lyricStyle).toBe("word-pop");
+    // … a stored plan that is only shifted keeps its (coerced) legacy style
+    expect(normalizePlan(raw, input, { typeSystem: "keep" }).sections[0].lyricStyle).toBe("karaoke");
     expect(s0.kind).toBe("chorus");
     expect(["cut", "fade", "flash", "wipe", "bloom"]).toContain(s0.transitionIn);
   });

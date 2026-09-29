@@ -278,6 +278,15 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
         case "preload":
           if (!fixed) warmer.current?.warm(msg.project);
           break;
+        case "plan": {
+          // 字體藝術: the 排版 editor's edit (a console, when open, re-broadcasts the same project)
+          const shownProject = shownRef.current;
+          if (!fixed || msg.projectId !== projectId || !shownProject || shownProject.id !== msg.projectId) break;
+          const next = { ...shownProject, plan: msg.plan };
+          shownRef.current = next;
+          setProject(next);
+          break;
+        }
         case "ping": {
           const dpr = window.devicePixelRatio || 1;
           // the stage resets its limiter (and its counts) whenever another project goes on stage

@@ -7,13 +7,17 @@
 // song. Everything the app knows goes in: song meta, the lyrics marked by section, the audio
 // summary, the free research findings as a head start, the band bible, the mood board (the user
 // attaches the images in claude.ai), the band's material, the output canvas and LED 安全模式.
+// 字體藝術: the plan asks for the type system (the song's typographic voice) and a composition hint
+// for every distinct sung line, like the API path; no template shows karaoke or subtitle.
 // 精簡版 (compact) abbreviates the lyrics, the findings and the catalogue for the free tier.
 // Pure and deterministic; the reply comes back through manual-reply.ts.
 
 import { formatTimeShort } from "@/lib/timeline";
 import { aspectLabel, DEFAULT_OUTPUT } from "@/lib/output";
 import { activeSafety, SAFE_MAX_REACTIVITY, SAFE_PULSE_HZ, SAFE_RED_REACTIVITY, safetySummary } from "@/lib/stage/safety";
-import { FONT_IDS, LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS } from "@/lib/schema";
+import { AUTO_LYRIC_STYLE_IDS, FONT_IDS, LYRIC_PLACEMENTS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "@/lib/schema";
+import { RECIPES, VOICES } from "@/lib/type/vocab";
+import { findMotionWord } from "@/lib/type/motion-words";
 import type { MoodImage, ProjectOutput } from "@/lib/types";
 import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { DirectionDraftSchema, DIRECTIONS_SYSTEM } from "./directions";
@@ -32,6 +36,8 @@ import {
   RESEARCH_HEADINGS,
   songBlock,
   trimBrief,
+  typeCatalogBlock,
+  typeReminder,
 } from "./prompts";
 import { analyzeStructure, type SongStructure } from "./structure";
 import type { DesignRequest } from "./types";
@@ -99,7 +105,7 @@ function sectionLabels(st: SongStructure): string[] {
 /** 【a1 主歌一 0:08–0:24｜能量 0.45】 headers with the section's lines (id [start–end] text). */
 export function sectionedLyrics(req: DesignRequest, st: SongStructure, compact: boolean): string {
   const lines = Array.isArray(req.lyrics?.lines) ? req.lyrics.lines : [];
-  if (!lines.length) return "（沒有歌詞：可能是器樂曲，或歌詞尚未匯入。整首以畫面為主，每段的 lyricStyle 用 hidden，lines 用空陣列。）";
+  if (!lines.length) return "（沒有歌詞：可能是器樂曲，或歌詞尚未匯入。整首以畫面為主，每段的 lyricStyle 用 hidden，lines 與 typeSystem.lines 用空陣列。）";
   const info = new Map(st.lines.map((l) => [l.id, l]));
   const byId = new Map(lines.map((l) => [l.id, l]));
   const fmt = (t: number | null | undefined) => (typeof t === "number" && Number.isFinite(t) ? t.toFixed(2) : "?");
@@ -228,13 +234,22 @@ export function outputBlock(output: ProjectOutput | null | undefined): string {
 export function compactCatalogBlock(): string {
   return [
     `# 場景 scene：${SCENE_IDS.map((id) => `${id}（${SCENES[id].label}，能量 ${SCENES[id].energy[0]}–${SCENES[id].energy[1]}）`).join("、")}`,
-    `# 歌詞樣式 lyricStyle：${LYRIC_STYLE_IDS.map((id) => `${id}（${LYRIC_STYLES[id].label}）`).join("、")}`,
+    `# 歌詞樣式 lyricStyle（後備樣式；每一句實際依 typeSystem 構圖）：${AUTO_LYRIC_STYLE_IDS.map((id) => `${id}（${LYRIC_STYLES[id].label}）`).join("、")}`,
     `# 歌詞位置 lyricPlacement：${LYRIC_PLACEMENTS.join("、")}`,
     `# 轉場 transitionIn：${(Object.keys(TRANSITIONS) as Array<keyof typeof TRANSITIONS>).join("、")}`,
     `# 中文字體 cjkFont：${FONT_IDS.filter((id) => FONT_CATALOG[id].cjk).map((id) => `${id}（${FONT_CATALOG[id].label}）`).join("、")}`,
     `# 拉丁字體 latinFont：${FONT_IDS.filter((id) => !FONT_CATALOG[id].cjk).map((id) => `${id}（${FONT_CATALOG[id].label}）`).join("、")}`,
     `# 段落種類 kind：${SECTION_KINDS.map((k) => `${k}（${SECTION_KIND_LABELS[k]}）`).join("、")}`,
     `# 素材處理 media.treatment：${MEDIA_TREATMENTS.join("、")}`,
+  ].join("\n");
+}
+
+/** The type system's vocabularies in one line each (精簡版 in place of the described ones). */
+export function compactTypeCatalogBlock(): string {
+  return [
+    `# 字體語言 typeSystem.voice：${TYPE_VOICE_IDS.map((id) => `${id}（${VOICES[id].label}）`).join("、")}`,
+    `# 構圖 recipe：${TYPE_RECIPE_IDS.map((id) => `${id}（${RECIPES[id].label}）`).join("、")}`,
+    "# motionWord：風＝飄動、雨＝落下、火＝閃爍、心跳＝隨拍脈動、海／浪＝波浪、夜＝從暗處浮起、光＝綻開",
   ].join("\n");
 }
 
@@ -350,7 +365,7 @@ function templateSection(st: SongStructure, i: number, label: string): Json {
     scene: quiet ? "gradient" : "particles",
     sceneParams: { speed: quiet ? 0.3 : 0.6, density: quiet ? 0.3 : 0.6, intensity: quiet ? 0.35 : 0.7, audioReactivity: quiet ? 0.25 : 0.45 },
     colorway: [TEMPLATE_PALETTE[0].hex, TEMPLATE_PALETTE[1].hex, TEMPLATE_PALETTE[2].hex],
-    lyricStyle: sung ? (s.kind === "chorus" ? "karaoke" : "line-fade") : "hidden",
+    lyricStyle: sung ? (s.kind === "chorus" ? "word-pop" : "line-fade") : "hidden",
     lyricPlacement: s.kind === "chorus" ? "center" : "upper-third",
     lyricScale: 1,
     lyricColor: TEMPLATE_PALETTE[3].hex,
@@ -382,8 +397,41 @@ export function planTemplate(req: DesignRequest, st: SongStructure, compact: boo
     lines: hook ? [{ lineId: hook.id, emphasis: ["（這一行裡逐字相同的幾個字）"], styleOverride: null, note: "" }] : [],
     cues: [{ time: r2(st.sections[Math.min(1, n - 1)]?.start ?? 0), title: "（提示標題）", detail: "（什麼時候、做什麼，例如：最後一拍後按 B 全黑）", kind: "transition" }],
     designerNotes: compact ? "（100–200 字的 Markdown：敘事弧線、現場注意事項）" : "（150–400 字的 Markdown：敘事弧線、歌詞與動畫怎麼搭配、現場注意事項）",
+    typeSystem: typeTemplate(req, st, compact),
   };
   return { json: compactJson(plan), shown: plan.sections.length };
+}
+
+/** The type-system part of the plan template: the first sung lines as examples of the per-line hints. */
+function typeTemplate(req: DesignRequest, st: SongStructure, compact: boolean): Json {
+  const v = VOICES["mv-card"];
+  const sung = st.lines.filter((l) => l.text.trim());
+  const quiet = new Set(st.sections.filter((x) => x.kind !== "chorus").flatMap((x) => x.lineIds));
+  const examples = sung.slice(0, compact ? 2 : 3).map((l, i) => {
+    const calm = quiet.has(l.id);
+    const recipe = calm ? (i % 2 ? "vertical-column" : "whisper") : "giant-word";
+    const cjk = /[\p{Script=Han}]/u.test(l.text);
+    return {
+      lineId: l.id,
+      recipe: !cjk && recipe === "vertical-column" ? "title-card" : recipe,
+      emphasis: ["（這一行裡逐字相同的一兩個字）"],
+      orientation: cjk && recipe === "vertical-column" ? "v" : "h",
+      energy: calm ? 0.3 : 0.7,
+      motionWord: findMotionWord(l.text),
+      seed: (i * 137 + 41) % 1000,
+    };
+  });
+  return {
+    voice: "mv-card",
+    params: { ...v.params },
+    color: v.color,
+    fonts: { cjk: v.fonts.cjk, latin: v.fonts.latin },
+    weight: v.weight,
+    ornaments: [...v.ornaments],
+    seal: "",
+    rationale: "（為什麼是這個字體語言，1–2 句）",
+    lines: examples,
+  };
 }
 
 /** The directions template: one direction; the reply has 2–3. */
@@ -411,9 +459,10 @@ export function directionsTemplate(req: DesignRequest): string {
         sceneTendency: "（場景傾向，1–2 句）",
         lyrics: [
           { kind: "verse", style: "line-fade", placement: "upper-third" },
-          { kind: "chorus", style: "karaoke", placement: "center" },
+          { kind: "chorus", style: "impact", placement: "center" },
         ],
-        lyricTreatment: "（歌詞怎麼處理，1–2 句）",
+        typeVoice: "mv-card",
+        lyricTreatment: "（這個字體語言怎麼把每一句排成構圖，1–2 句）",
         treatments: ["grain-film"],
         energy: 0.5,
         motion: "soft",
@@ -444,6 +493,7 @@ function checks(target: ManualTarget, st: SongStructure, lyrics: boolean): strin
       "- 只有一個 ```json 區塊，裡面是合法、完整的 JSON，最外層是 { \"directions\": [...] }。",
       "- 2 到 3 個方向，名字與配色彼此明顯不同；每個方向的 palette 4–6 色、第一色是最深的背景色。",
       "- scenes、lyrics 的 kind 與各個 id 都用上面清單裡的值；cjkFont 是中文字體、latinFont 是拉丁字體。",
+      "- 每個方向的 typeVoice（字體語言）都不同；lyrics 的 style 不用 karaoke 或 subtitle。",
       "- 所有給人看的文字都是繁體中文，把範本中（…）的內容全部換成你的設計。",
     ];
   }
@@ -452,7 +502,13 @@ function checks(target: ManualTarget, st: SongStructure, lyrics: boolean): strin
     `- sections 涵蓋所有段落：從 0 開始、到 ${st.duration.toFixed(2)} 秒結束，前一段的 end 等於下一段的 start；id 依序 s0、s1…`,
     "- 每段 colorway 恰好 3 色、都取自 palette；lyricColor 與 colorway[0] 的對比至少 4.5:1。",
     "- scene、lyricStyle、lyricPlacement、transitionIn、kind 與字體都用上面清單裡的 id；cjkFont 是中文字體、latinFont 是拉丁字體。",
-    ...(lyrics ? ["- lines 的 lineId 是上面歌詞的 id（l0、l1…），emphasis 是該行歌詞中逐字相同的片段。"] : ["- 沒有歌詞：每段 lyricStyle 用 hidden，lines 用 []。"]),
+    ...(lyrics
+      ? [
+          "- lines 的 lineId 是上面歌詞的 id（l0、l1…），emphasis 是該行歌詞中逐字相同的片段。",
+          "- typeSystem.lines 為每一句不同的歌詞各寫一筆構圖（完全相同的重複句可以省略）；recipe、orientation、voice 用上面清單裡的 id，emphasis 與 motionWord 是該行歌詞中逐字相同的字。",
+          "- 每一句都是一張排好的構圖：不要用 karaoke 或 subtitle。",
+        ]
+      : ["- 沒有歌詞：每段 lyricStyle 用 hidden，lines 與 typeSystem.lines 用 []。"]),
     "- motifSvg 只用 svg、g、path、circle、rect、polygon、polyline、line、ellipse，fill／stroke 用 currentColor，沒有文字與漸層。",
     "- 所有給人看的文字都是繁體中文，把範本中（…）的內容全部換成你的設計。",
   ];
@@ -510,6 +566,7 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
   parts.push("", "# 音訊分析（瀏覽器自動分析，可能有誤差）", analysisSummary(req, st));
   if (!compact) parts.push("", "## 能量曲線（每 2 秒一個值，0–1）", energyCurveBlock(req, st), "", "## 歌詞重複（副歌線索）", repetitionBlock(st));
   parts.push("", `# 歌詞（依段落；${compact ? "精簡版只列每段的開頭" : "id [開始–結束 秒] 文字"}）`, sectionedLyrics(req, st, compact));
+  if (target === "plan") parts.push("", "## 字體藝術（typeSystem.lines）", typeReminder(req));
   parts.push("", "# 免費研究的發現（Livelyrics 已先查好的起點：請上網查證、補充或推翻）", findingsBlock(req, findings, st, compact));
   const research = req.research;
   if (!compact && research?.brief?.trim() && (research.engine === "claude" || research.engine === "manual-claude")) {
@@ -531,7 +588,7 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
   // the same rules as the API path; 精簡版 lists the vocabularies without their descriptions, and
   // without the band's material the rules about using it are left out
   let system = target === "plan" ? DESIGN_SYSTEM : DIRECTIONS_SYSTEM;
-  if (compact) system = system.replace(catalogBlock(), () => compactCatalogBlock());
+  if (compact) system = system.replace(catalogBlock(), () => compactCatalogBlock()).replace(typeCatalogBlock(), () => compactTypeCatalogBlock());
   if (!(req.assets ?? []).length) system = withoutMediaRules(system);
   parts.push("", "# 設計規範（和 Livelyrics 呼叫 Claude API 時的規範相同）", system);
 

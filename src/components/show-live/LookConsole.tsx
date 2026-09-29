@@ -4,7 +4,9 @@
 // (exactly what the projection shows), how long it has been up and — when the look has a planned
 // length — a countdown against it (a look never ends on its own: it loops until the next GO), the
 // text on screen, what GO takes next, and the song console's safety controls (blackout, text on /
-// off, freeze, intensity, scene and style overrides) driving the look's own controller.
+// off, freeze, intensity, scene and style overrides) driving the look's own controller. MIDI
+// controllers (phase 5a) run the same keys and faders here; the 同步 sheet shows the show's sync
+// source (a look itself never follows the timecode) and the 控制器 sheet.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Button, StatusCapsules, ToastStack, Tooltip, cx, type HudContent, type HudHandle, type ToastItem } from "@/components/ui";
@@ -12,15 +14,17 @@ import {
   ArrowCounterClockwiseIcon,
   FilmSlateIcon,
   MoonIcon,
+  PlugsConnectedIcon,
   ProjectorScreenIcon,
   QuestionIcon,
   SnowflakeIcon,
+  SquareHalfIcon,
   SubtitlesIcon,
   SubtitlesSlashIcon,
   type UiIcon,
 } from "@/components/ui/Icon";
 import { ControlTab } from "@/components/console/ControlTab";
-import { capsuleItems } from "@/components/console/feedback";
+import { applyControl, capsuleItems, manualHud } from "@/components/console/feedback";
 import { HelpOverlay } from "@/components/console/HelpOverlay";
 import { PanelBoundary } from "@/components/console/PanelBoundary";
 import { PreviewPanel } from "@/components/console/Preview";
@@ -30,8 +34,11 @@ import { SafetyCapsule } from "@/components/console/SafetyControls";
 import { Pane, PaneHeader } from "@/components/console/ui";
 import { useConsoleHotkeys } from "@/components/console/useConsoleHotkeys";
 import { useRafLoop } from "@/components/console/useRaf";
+import { useMidiCommands } from "@/components/console/sync/hooks";
+import { SyncSheets, type SyncSheetView } from "@/components/console/sync/SyncSheet";
+import { SyncCapsule } from "@/components/console/sync/SyncStatus";
 import { LookThumb } from "@/components/show/SetlistRow";
-import { hotkeyAction, HOTKEY_HELP, SHOW_HOTKEY_HELP, type HotkeyAction } from "@/lib/console/hotkeys";
+import { hotkeyAction, HOTKEY_HELP, SHOW_HOTKEY_HELP, SYNC_HOTKEY_HELP, type ConsoleAction, type HotkeyAction } from "@/lib/console/hotkeys";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { countdownText, formatElapsed } from "@/lib/console/format";
 import { SCENE_LABELS } from "@/lib/console/labels";
@@ -39,16 +46,19 @@ import type { LookController } from "@/lib/console/look-controller";
 import { sceneBank } from "@/lib/console/plan-edit";
 import { AUTO_STANDBY_ID, type RailItem } from "@/lib/console/show-live";
 import { LOOK_KIND_INFO, formatRunningTime } from "@/lib/show";
+import { commandAction } from "@/lib/midi/actions";
+import type { MidiCommand } from "@/lib/midi/mapping";
+import type { SyncEngine } from "@/lib/sync/engine";
 import type { LookItemKind, SetItem } from "@/lib/types";
 import { KIND_ICONS, itemFacts } from "./SetlistRail";
 
 type LookItem = Extract<SetItem, { kind: LookItemKind }>;
 
 /** The keys a look answers (the song-only ones do nothing here). */
-const LOOK_HELP = HOTKEY_HELP.filter((g) => g.title === "畫面控制");
-const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "standby"]);
+const LOOK_HELP = [...HOTKEY_HELP.filter((g) => g.title === "畫面控制"), SYNC_HOTKEY_HELP];
+const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "standby", "manual"]);
 
-function lookHud(action: HotkeyAction, controller: LookController): HudContent | null {
+function lookHud(action: ConsoleAction, controller: LookController): HudContent | null {
   const ov = controller.getOverrides();
   switch (action.type) {
     case "blackout":
@@ -65,6 +75,8 @@ function lookHud(action: HotkeyAction, controller: LookController): HudContent |
       return { icon: ArrowCounterClockwiseIcon, label: "回到設計的場景" };
     case "openOutput":
       return { icon: ProjectorScreenIcon, label: controller.getSnapshot().output.connected ? "已聚焦投影視窗" : "已開啟投影視窗" };
+    case "testPattern":
+      return { icon: SquareHalfIcon, label: "測試圖", value: ov.testPattern ? "開" : "關" };
     default:
       return null;
   }
@@ -132,7 +144,7 @@ function LookClock({ controller, big = false }: { controller: LookController; bi
   );
 }
 
-function LookTopBar({ controller, item, onHelp }: { controller: LookController; item: LookItem; onHelp: () => void }) {
+function LookTopBar({ controller, item, sync, onHelp, onSync }: { controller: LookController; item: LookItem; sync: SyncEngine; onHelp: () => void; onSync: () => void }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const ov = useStageValue(controller.store, selectOverrides);
   const capsules = capsuleItems(ov, { mode: "track", liveHeld: false, muted: false, offset: 0, project: snap.project });
@@ -157,8 +169,12 @@ function LookTopBar({ controller, item, onHelp }: { controller: LookController; 
         <LookClock controller={controller} />
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
+        <SyncCapsule engine={sync} />
         <SafetyCapsule project={snap.project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
+        <Tooltip content="同步與 MIDI 控制器" placement="bottom-end">
+          <Button variant="quiet" size="icon" aria-label="同步與控制器" icon={PlugsConnectedIcon} onClick={onSync} data-open-sync="" />
+        </Tooltip>
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">
           <Button variant="quiet" size="icon" aria-label="快捷鍵說明" icon={QuestionIcon} onClick={onHelp} />
         </Tooltip>
@@ -224,6 +240,7 @@ export function LookConsole({
   next,
   onShowAction,
   shared,
+  sync,
 }: {
   controller: LookController;
   item: LookItem;
@@ -232,9 +249,12 @@ export function LookConsole({
   onShowAction: (action: HotkeyAction) => boolean;
   /** the show console's one preview stage */
   shared?: SharedStage | null;
+  /** the show's sync layer (MIDI controllers, the sync source) */
+  sync: SyncEngine;
 }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [syncView, setSyncView] = useState<SyncSheetView>(null);
   const hud = useRef<HudHandle>(null);
 
   useEffect(() => {
@@ -245,8 +265,21 @@ export function LookConsole({
   const dismissToast = useCallback((toastId: string) => controller.dismissNotice(Number(toastId)), [controller]);
 
   const dispatch = useCallback(
-    (action: HotkeyAction): boolean => {
+    (action: ConsoleAction): boolean => {
       switch (action.type) {
+        case "manual": {
+          const was = sync.source;
+          const changed = was !== "manual";
+          if (changed) sync.setSource("manual");
+          hud.current?.show(manualHud(was, changed));
+          return true;
+        }
+        case "testPattern":
+          controller.toggleTestPattern();
+          break;
+        case "control":
+          hud.current?.show(applyControl(controller, action.target, action.value, "文字"));
+          return true;
         case "blackout":
           controller.toggleBlackout();
           break;
@@ -279,9 +312,13 @@ export function LookConsole({
       if (content) hud.current?.show(content);
       return true;
     },
-    [controller, onShowAction],
+    [controller, onShowAction, sync],
   );
-  useConsoleHotkeys({ active: true, paused: helpOpen, onAction: dispatch });
+  useConsoleHotkeys({ active: true, paused: helpOpen || syncView != null, onAction: dispatch });
+  // MIDI controllers: the look answers the same actions as its keys (the song-only ones do nothing)
+  const onMidi = useCallback((cmd: MidiCommand) => void dispatch(commandAction(cmd)), [dispatch]);
+  useMidiCommands(sync, onMidi);
+  const blackoutFromSheet = useCallback(() => void dispatch({ type: "blackout" }), [dispatch]);
 
   const helpKey = useCallback(
     (e: ReactKeyboardEvent) => {
@@ -301,7 +338,7 @@ export function LookConsole({
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-label">
-      <LookTopBar controller={controller} item={item} onHelp={() => setHelpOpen(true)} />
+      <LookTopBar controller={controller} item={item} sync={sync} onHelp={() => setHelpOpen(true)} onSync={() => setSyncView("sync")} />
       <main className="grid min-h-0 flex-1 gap-1.5 p-1.5" style={{ gridTemplateColumns: "minmax(0, 1fr) clamp(340px, 24vw, 400px)" }}>
         <PanelBoundary area="center" label="預覽">
           <div className="flex min-h-0 min-w-0 flex-col gap-1.5">
@@ -331,6 +368,7 @@ export function LookConsole({
           </>
         }
       />
+      <SyncSheets engine={sync} view={syncView} onView={setSyncView} onBlackout={blackoutFromSheet} />
       <ToastStack toasts={toasts} onDismiss={dismissToast} className="top-[70px]! right-[calc(clamp(340px,24vw,400px)+24px)]! w-[340px]!" />
     </div>
   );

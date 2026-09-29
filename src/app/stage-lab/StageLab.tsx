@@ -10,7 +10,11 @@ import { DEFAULT_OVERRIDES, createStageStore, initialStageState, type StageOverr
 import { isLyricStyleId, isPlacement, isSceneId } from "@/lib/stage/resolve";
 import { SCENE_LABELS } from "@/lib/stage/scenes";
 import { formatTime, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
-import type { LyricPlacement, LyricStyleId, Project, SceneId } from "@/lib/types";
+import { api } from "@/lib/api-client";
+import { TYPE_VOICE_IDS } from "@/lib/schema";
+import { normalizeTypeSystem } from "@/lib/type/normalize";
+import { VOICES } from "@/lib/type/vocab";
+import type { LyricPlacement, LyricStyleId, Project, SceneId, TypeVoiceId } from "@/lib/types";
 
 export interface StageLabInitial {
   scene?: string;
@@ -32,6 +36,32 @@ export interface StageLabInitial {
   slowmo?: string;
   /** LED 安全模式 (default on, like every projection); safe=0 shows the designed flash / bloom */
   safe?: string;
+  /** 字體藝術: a stored project instead of the demo song */
+  project?: string;
+  /** 字體藝術: set every line in this voice (mv-card, title-sequence, ink, glitch; plan = as designed) */
+  voice?: string;
+  /** output canvas aspect: 16:9, 32:9 (ultra-wide LED) or 9:16 (tall) */
+  aspect?: string;
+  /** 「重新生成全部構圖」: another draw of the voice's rules */
+  gen?: string;
+}
+
+const ASPECTS: Record<string, [number, number]> = { "16:9": [1920, 1080], "32:9": [3840, 1080], "9:16": [1080, 1920], "21:9": [2520, 1080], "4:3": [1440, 1080] };
+
+/** 字體藝術 for the lab: the project in another voice (its own compositions redrawn by the rules). */
+function withVoice(p: Project, voice: TypeVoiceId | null, gen: number): Project {
+  if (!p.plan || !voice) return p;
+  const { system } = normalizeTypeSystem(
+    { voice, params: VOICES[voice].params, fonts: VOICES[voice].fonts, weight: VOICES[voice].weight, ornaments: VOICES[voice].ornaments, color: VOICES[voice].color, seal: voice === "ink" ? "樂團" : "", rationale: "", lines: [] },
+    { lines: p.lyrics.lines, sections: p.plan.sections, duration: p.meta.duration, voice },
+  );
+  return { ...p, plan: { ...p.plan, typeSystem: gen ? { ...system, generation: gen } : system } };
+}
+
+function withAspect(p: Project, aspect: string | undefined): Project {
+  const size = aspect ? ASPECTS[aspect] : undefined;
+  if (!size) return p;
+  return { ...p, output: { ...p.output, width: size[0], height: size[1] } };
 }
 
 const STYLE_LABELS: Record<LyricStyleId, string> = {
@@ -78,7 +108,25 @@ function applyDesignOverrides(base: Project, placement: LyricPlacement | null, c
 }
 
 export function StageLab({ initial }: { initial: StageLabInitial }) {
-  const baseProject = useMemo(() => createDemoProject(), []);
+  const demo = useMemo(() => createDemoProject(), []);
+  // 字體藝術: a stored project (?project=), a voice (?voice=) and a canvas aspect (?aspect=)
+  const [remote, setRemote] = useState<Project | null>(null);
+  useEffect(() => {
+    if (!initial.project) return;
+    let live = true;
+    api
+      .getProject(initial.project)
+      .then((p) => {
+        if (live) setRemote(p);
+      })
+      .catch((err: unknown) => console.warn("[Livelyrics] 舞台實驗室讀不到專案：", err));
+    return () => {
+      live = false;
+    };
+  }, [initial.project]);
+  const voice = (TYPE_VOICE_IDS as readonly string[]).includes(initial.voice ?? "") ? (initial.voice as TypeVoiceId) : null;
+  const gen = num(initial.gen, 0, 0, 1e6);
+  const baseProject = useMemo(() => withVoice(withAspect(remote ?? demo, initial.aspect), voice, gen), [remote, demo, initial.aspect, voice, gen]);
   const duration = baseProject.meta.duration;
 
   const [scene, setScene] = useState<SceneId | null>(isSceneId(initial.scene) ? initial.scene : null);
@@ -141,6 +189,7 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
     const prev = store.get();
     const next: StageState = {
       ...prev,
+      projectId: p.id,
       t,
       playing: c.playing,
       sentAt: now,

@@ -42,6 +42,7 @@ export function Slider({
   bigStepMultiplier = 10,
   id,
   className,
+  touch = false,
 }: {
   label: string;
   value: number;
@@ -61,6 +62,8 @@ export function Slider({
   bigStepMultiplier?: number;
   id?: string;
   className?: string;
+  /** a 44 px 「重設」 below the lg breakpoint (touch editors on a phone) */
+  touch?: boolean;
 }) {
   const autoId = useId();
   const inputId = id ?? autoId;
@@ -142,7 +145,7 @@ export function Slider({
               onClick={reset}
               disabled={!changed || disabled}
               aria-label={`重設${label}`}
-              className="press-fade h-7 rounded-xs px-1.5 text-[12px] leading-4 text-tint-text hover:bg-fill-4 disabled:invisible"
+              className={cx("press-fade rounded-xs leading-4 text-tint-text hover:bg-fill-4 disabled:invisible", touch ? "h-11 px-3 text-[15px] lg:h-7 lg:px-1.5 lg:text-[12px]" : "h-7 px-1.5 text-[12px]")}
             >
               重設
             </button>

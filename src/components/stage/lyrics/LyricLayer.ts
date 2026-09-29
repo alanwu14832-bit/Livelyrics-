@@ -730,12 +730,21 @@ export class LyricLayer {
   constructor(host: HTMLElement) {
     this.root = el("div", styles.layer);
     this.root.setAttribute("aria-hidden", "true");
+    this.root.setAttribute("data-lyric-layer", "");
     host.append(this.root);
   }
 
   invalidateFit() {
     this.current?.invalidateFit();
     for (const v of this.leaving) v.invalidateFit();
+  }
+
+  /** Remove every view at once (the type engine took over the lyrics). */
+  clear() {
+    this.current?.destroy();
+    for (const v of this.leaving) v.destroy();
+    this.current = null;
+    this.leaving = [];
   }
 
   /**

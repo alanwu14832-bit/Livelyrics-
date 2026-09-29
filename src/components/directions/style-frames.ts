@@ -84,11 +84,10 @@ async function render(project: Project, direction: DesignDirection): Promise<Sty
     const ctx = canvas.getContext("2d")!;
     const frames: StyleFrame[] = [];
     for (const m of moments) {
-      await stage.renderFrame(m.t, FPS, { scene: true, lyrics: true, matte: false });
+      await stage.renderFrame(m.t, FPS, { scene: true, background: false, lyrics: true, matte: false });
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(stage.sceneCanvas, 0, 0);
-      ctx.drawImage(stage.lyricCanvas, 0, 0);
+      stage.drawFull(ctx);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
       if (!blob) throw new Error("無法輸出畫面");
       frames.push({ ...m, url: URL.createObjectURL(blob), width, height });

@@ -13,6 +13,7 @@ import path from "node:path";
 import { ASSET_FILE_RE, coerceAssets, coerceBlobRef, isAssetId } from "@/lib/assets";
 import { coerceDirectionSet, coercePlanSnapshot, coercePlanSource } from "@/lib/directions";
 import { coerceMoodboard } from "@/lib/moodboard";
+import { coerceTcString } from "@/lib/sync/timecode";
 import { normalizeOutput } from "@/lib/output";
 import { coerceJob } from "@/lib/band";
 import type {
@@ -226,6 +227,9 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   if (job) project.directionsJob = job;
   const planSource = project.plan ? coercePlanSource(raw.planSource) : undefined;
   if (planSource) project.planSource = planSource;
+  // phase 5a: the start timecode (old files have none: 01:00:00:00)
+  const tcStart = isRecord(raw.timecode) ? coerceTcString(raw.timecode.start) : null;
+  if (tcStart) project.timecode = { start: tcStart };
   return project;
 }
 

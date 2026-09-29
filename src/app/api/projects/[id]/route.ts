@@ -5,8 +5,8 @@ import { isValidBandId } from "@/lib/band";
 import { getBand, withBandAssets } from "@/lib/server/band-storage";
 import { withLiveProjectJob } from "@/lib/server/jobs";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
-import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
-import type { DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
+import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch, parseTimecodePatch } from "@/lib/server/validate";
+import type { DesignPlan, Lyrics, ProjectOutput, SongMeta, SongTimecode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const body = await readJson(req, MAX_PATCH_BYTES);
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output? }");
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output?, timecode? }");
   const patch = body as Record<string, unknown>;
 
   // validate everything before touching the file
@@ -39,6 +39,9 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.output !== undefined && (typeof patch.output !== "object" || patch.output === null || Array.isArray(patch.output))) {
     throw new HttpError(400, "output 必須是物件");
   }
+  // phase 5a: the song's start timecode (null = the default 01:00:00:00)
+  let timecode: SongTimecode | null | undefined;
+  if (patch.timecode !== undefined) timecode = parseTimecodePatch(patch.timecode);
   let bandId: string | null | undefined;
   if (patch.bandId !== undefined) {
     if (patch.bandId === null || patch.bandId === "") bandId = null;
@@ -52,7 +55,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.meta !== undefined) meta = applyMetaPatch(existing.meta, patch.meta);
   let output: ProjectOutput | undefined;
   if (patch.output !== undefined) output = applyOutputPatch(existing.output, patch.output);
-  if (!meta && !lyrics && !plan && !output && bandId === undefined) return json(withLiveStatus(await withBandAssets(existing)));
+  if (!meta && !lyrics && !plan && !output && bandId === undefined && timecode === undefined) return json(withLiveStatus(await withBandAssets(existing)));
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
@@ -63,6 +66,10 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     }
     if (plan) p.plan = plan;
     if (output) p.output = applyOutputPatch(p.output, patch.output);
+    if (timecode !== undefined) {
+      if (timecode) p.timecode = timecode;
+      else delete p.timecode;
+    }
     if (bandId !== undefined && bandId !== (p.bandId ?? null)) {
       // leaving a band: sections that showed the old band's material fall back to the scene
       const own = new Set(p.assets.map((a) => a.id));

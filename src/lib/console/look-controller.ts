@@ -7,6 +7,7 @@
 // Framework-agnostic (subscribe / getSnapshot for React, `store` for the preview's StageView).
 
 import { sceneBank } from "@/lib/console/plan-edit";
+import { LedCapFader } from "@/lib/midi/controls";
 import {
   DEFAULT_OVERRIDES,
   createStageStore,
@@ -83,6 +84,7 @@ export class LookController {
   private noticeSeq = 0;
   private readonly noticeTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private noticeAutoDismiss = true;
+  private readonly ledFader = new LedCapFader();
 
   constructor(project: Project, opts: LookControllerOptions = {}) {
     this.id = project.id;
@@ -293,6 +295,19 @@ export class LookController {
 
   /** LED 安全模式 of the look (the show's venue setting): the projection gets it at once. */
   updateSafety(patch: SafetyPatch): void {
+    this.ledFader.reset();
+    this.applySafety(patch);
+  }
+
+  /** A MIDI fader on 最高亮度 (0..1), never above the venue's preset (see LedCapFader). */
+  setLedCapFromController(value: number): number | null {
+    const brightness = this.ledFader.brightnessFor(this.snapshot.project.output?.safety, value);
+    if (brightness == null) return null;
+    this.applySafety({ brightness });
+    return brightness;
+  }
+
+  private applySafety(patch: SafetyPatch): void {
     const project = this.snapshot.project;
     const output = patchOutput(project.output, { safety: patch });
     if (JSON.stringify(output.safety) === JSON.stringify(project.output?.safety)) return;

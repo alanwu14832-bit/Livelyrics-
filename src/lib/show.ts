@@ -9,6 +9,7 @@ import { generateMotifSvg, hashString } from "./server/designer/svg";
 import { coerceJob, defaultBible, normalizeBibleHex } from "./band";
 import { isAssetId } from "./assets";
 import { normalizeOutput, patchOutput } from "./output";
+import { TimecodeStringSchema, coerceTcString } from "./sync/timecode";
 import { MEDIA_BLENDS, MEDIA_FITS, MEDIA_TREATMENTS, SCENE_IDS, type SceneId } from "./schema";
 import type {
   ArcRole,
@@ -404,7 +405,9 @@ export function coerceSetItems(raw: unknown, assetIds?: ReadonlySet<string>): Se
     const note = oneLine(x.note, 200);
     if (x.kind === "song") {
       if (typeof x.projectId !== "string" || !SHOW_ID_RE.test(x.projectId)) continue;
-      out.push({ id, kind: "song", projectId: x.projectId, ...(note ? { note } : {}) });
+      // phase 5a: the song's start timecode (absent = its position among the songs)
+      const timecode = TimecodeStringSchema.safeParse(x.timecode).success ? coerceTcString(x.timecode) : null;
+      out.push({ id, kind: "song", projectId: x.projectId, ...(note ? { note } : {}), ...(timecode ? { timecode } : {}) });
     } else if ((LOOK_KINDS as readonly unknown[]).includes(x.kind)) {
       const kind = x.kind as LookItemKind;
       out.push({ id, kind, title: oneLine(x.title, 40) || LOOK_KIND_INFO[kind].defaultTitle, look: coerceLook(x.look, assetIds), ...(note ? { note } : {}) });
