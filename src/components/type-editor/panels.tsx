@@ -273,6 +273,12 @@ export interface LineActions {
   reset: () => void;
 }
 
+/** What 「自動」 orientation gives this line on the output canvas (a tall canvas stands a display word up). */
+function autoOrientationNote(h: LineResolution["hint"], cjk: boolean, project: Project): string {
+  const eff = effectiveOrientation(h, cjk, (project.output?.width || 1920) / (project.output?.height || 1080));
+  return `自動：${ORIENT_LABEL[eff]}${eff !== h.orientation ? "（直式畫面把巨字立起來）" : ""}`;
+}
+
 /** Motion word candidates of a line: every table word it contains (longest first), the emphasis words. */
 function motionCandidates(text: string, emphasis: readonly string[]): string[] {
   const out: string[] = [];
@@ -361,13 +367,13 @@ export function LinePanel({
         </div>
       </Group>
 
-      <Group title="排列">
+      <Group title="排列" footer={own?.edit?.orientation ? undefined : autoOrientationNote(h, cjk, project)}>
         <SegmentedControl
           label="排列"
           value={own?.edit?.orientation ?? "auto"}
           onChange={(v) => actions.orientation(v === "auto" ? null : (v as TypeOrientation))}
           options={[
-            { value: "auto", label: `自動（${ORIENT_LABEL[effectiveOrientation(h, cjk, (project.output?.width || 1920) / (project.output?.height || 1080))]}）` },
+            { value: "auto", label: "自動" },
             ...(["h", "v", "mixed"] as const).map((o) => ({ value: o, label: ORIENT_LABEL[o], disabled: !cjk && o !== "h" })),
           ]}
           fullWidth

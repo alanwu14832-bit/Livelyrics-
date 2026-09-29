@@ -189,7 +189,7 @@ export const COLOR_ROLES: Record<TypeColorRole | "auto", { label: string; descri
 
 export const COLOR_TREATMENTS: Record<TypeColorTreatment, { label: string; description: string }> = {
   solid: { label: "實色", description: "字是實心的顏色" },
-  knockout: { label: "鏤空", description: "巨字變成窗，在字裡看見場景" },
+  knockout: { label: "鏤空", description: "強的句子（副歌）巨字變成窗，在字裡看見場景" },
   overprint: { label: "疊印", description: "點綴色錯版疊印，像網版印刷" },
 };
 

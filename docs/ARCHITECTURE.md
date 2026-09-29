@@ -529,7 +529,8 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   substrings), `orientation` h / v / mixed, `energy`, `motionWord` (an exact word of the line), `seed`
   — plus the editor's fields: `locked`, `edit` (`TypeLineEdit`: recipe, emphasis, orientation,
   motionWord, seed, `dx` / `dy` fractions of the canvas, `scale` 0.5–2, `rotate` ±30°, `enter`, `exit`,
-  `color` ink / accent / invert / window). `typeSystem.sections` (the editor's per-section recipe /
+  `color` ink / accent / invert / window; no colour = 自動, what the song's colour treatment gives
+  the line). `typeSystem.sections` (the editor's per-section recipe /
   orientation / scale / motion overrides) and `generation` (the salt of 「重新生成全部構圖」).
   `DesignPlanDraftSchema` is what an automatic designer writes: the same plan with the type system
   required, no editor fields, and `AUTO_LYRIC_STYLE_IDS` (no `karaoke`, no `subtitle`) for the legacy
@@ -540,14 +541,33 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   labels), `motion-words.ts` (風 drifts, 雨 falls, 火 flickers, 心跳 pulses on the beat, 海 / 浪 wave,
   夜 rises from the dark, 光 blooms, 碎 shatters, 奔跑 rushes, 轉 spins; stop compounds such as 開心),
   `text.ts` (the line as units with 禁則 atoms, vertical forms: brackets, dashes and Latin rotated,
-  1–2 digit numbers upright, the row breaker that avoids orphans), `frame.ts` (the canvas in output
-  pixels: the lyric safe area minus a bottom band (10 % of the height, at most 20 % of the safe
-  height), the column grid, the minimum readable size = `STYLE_METRICS.subtitle.size` % of the short
-  side, ≥ 22 px), `set.ts` (rows and columns of glyph boxes), `recipes.ts` (the recipes), `compose.ts`
-  (`composeLine`: sizes from scale contrast, density and energy, the last chorus ×1.08; the editor's
-  scale, rotation and nudge applied after the layout and fitted back into the canvas; entrance / exit
-  timing), `animate.ts` (per-glyph and per-piece frames: entrances, exits, the motion word's motion,
-  the glitch stutter on beats — at most 3 a second with LED 安全模式 on — and the type-pass uniforms),
+  1–2 digit numbers upright; the row breaker balances rows, avoids orphans, never opens a row with a
+  soft mark or a particle (的了著…), breaks at the word timing's words or, without it, never inside a
+  small lexicon of lyric words (城市, 方向, 交給…) and willingly before 這 / 那 / 每; the featured
+  word of a display recipe: an emphasis run, the motion word, else the best pair of the line (a
+  lexicon word, a phrase-final noun) or one strong character when every pair leans on a function
+  word (跟著我「唱」)), `frame.ts` (the canvas in output pixels: the lyric safe area minus a bottom
+  band (10 % of the height, at most 20 % of the safe height), the column grid, the minimum readable
+  size = `STYLE_METRICS.subtitle.size` % of the short side, ≥ 22 px; the size reference is the
+  height of a 16:9 canvas of the width, leaning towards the width on a tall canvas so 9:16 type is
+  set for its width, not for a letterbox), `set.ts` (rows and columns of glyph boxes), `recipes.ts`
+  (the recipes; a tall canvas stands a composition around its optical centre), `compose.ts`
+  (`composeLine`: sizes from scale contrast, density and energy, the last chorus ×1.08;
+  `effectiveOrientation`: on a tall canvas an automatic orientation stands a display word up (巨字 a
+  column beside horizontal small text, 出血 and 鏤空窗 vertical; an orientation set in the editor
+  stays); an ultra-wide canvas (> 2.4 : 1, a 32:9 LED wall) composes each line in a 16:9-and-a-bit
+  view that slides to the side its seed leans to (a bled word's view on the edge it bleeds from); the
+  colour roles: 反白 cuts the display text out of blocks of the ink colour, 鏤空 makes it a window
+  that fills the frame, 自動 under the knockout treatment opens the display word of strong lines
+  (energy ≥ 0.6) with the frame only partly filled (0.52–0.84, the stage stays half seen);
+  `placeTranslation`: the translation never sits on the composition (a seal, an echo trail, the small
+  text): the recipe's place when free, else under the block, beside its foot, under everything, over
+  it, re-set in two balanced rows for the measure, then the block moves up, then it shrinks (never
+  below the minimum); the editor's scale, rotation and nudge (fractions of the whole canvas) applied
+  after the layout and fitted back into the canvas; entrance / exit timing), `animate.ts`
+  (per-glyph and per-piece frames: entrances, exits, the motion word's motion, the glitch stutter on
+  beats — at most 3 a second with LED 安全模式 on, a shake while the line holds (the entrance and
+  the exit may tear it apart), a torn row of 撕裂 keeps its tear — and the type-pass uniforms),
   `resolve.ts` (`resolveLine`: the line's hint, a repeat's first occurrence (base and edit) unless it
   was edited itself, the section override, the editor's edit, the last chorus's escalation;
   `autoHint` for lines added after the design), `sequence.ts` (`sequenceTypeLines`: one coherent
@@ -568,7 +588,9 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   repainting a static frame, and hands a `TypeDraw` to the renderer. `src/lib/stage/scenes/type.ts` is
   the type pass: scene (+ media) and the plates → ink wobble, glitch slices, RGB split, ink bleed (blur
   and a noisy threshold), dry-brush 飛白, characters eaten by bright scene areas, grain, the halo,
-  glow, knockout (the frame filled, the scene seen through the glyphs), overprint (a misregistered
+  glow, knockout (the frame filled, the scene seen through the glyphs; where the picture is as dark
+  as the fill the ink colour comes through the letters so they keep their contrast), the halo
+  stronger over a bright picture, overprint (a misregistered
   screened accent plate). In `StageRenderer` it runs after the media pass and before the LED safety
   pass, so the brightness cap, the soften shoulder and the flash limiter measure the type too
   (`renderTypeLayer` renders it alone over transparent for the export's lyric layer). Without WebGL the
