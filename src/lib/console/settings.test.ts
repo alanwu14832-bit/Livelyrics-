@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampOffset, defaultSettings, hasStoredSettings, loadSettings, parseSettings, saveSettings, settingsKey } from "./settings";
+import { clampOffset, defaultSettings, hasStoredSettings, loadPreferredMode, loadSettings, parseSettings, PREFERRED_MODE_KEY, savePreferredMode, saveSettings, settingsKey } from "./settings";
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -61,5 +61,17 @@ describe("console settings", () => {
     expect(() => saveSettings("p", defaultSettings(), broken)).not.toThrow();
     expect(hasStoredSettings("p", broken)).toBe(false);
     expect(loadSettings("p", defaultSettings(), null)).toEqual(defaultSettings());
+  });
+});
+
+describe("preferred mode (手動切換 across songs)", () => {
+  it("remembers the last mode chosen by hand and ignores junk", () => {
+    const store = memoryStorage();
+    expect(loadPreferredMode(store)).toBeNull();
+    savePreferredMode("live", store);
+    expect(loadPreferredMode(store)).toBe("live");
+    store.setItem(PREFERRED_MODE_KEY, "karaoke");
+    expect(loadPreferredMode(store)).toBeNull();
+    expect(loadPreferredMode(null)).toBeNull();
   });
 });

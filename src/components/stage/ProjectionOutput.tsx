@@ -224,6 +224,8 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   );
 
   // ---- console link -------------------------------------------------------
+  /** send on the console link (null while it is closed): the key forwarding below uses it */
+  const postRef = useRef<((msg: StageMessage) => void) | null>(null);
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
     const ch = new BroadcastChannel(channel);
@@ -234,6 +236,7 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
         /* channel closed */
       }
     };
+    postRef.current = post;
     let gotProject = false;
     let gotState = false;
     let lastHeard = 0;
@@ -316,6 +319,7 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
     };
     return () => {
       window.clearInterval(retry);
+      if (postRef.current === post) postRef.current = null;
       ch.onmessage = null;
       ch.close();
     };
@@ -394,11 +398,20 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   useEffect(() => {
     wake();
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
       if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         void toggleFullscreen();
+        return;
       }
+      // everything else goes to the console, which maps it with its own hotkeys: a presentation
+      // clicker (PageDown / PageUp, arrows, B) aimed at the projector cues lines from here too.
+      // Esc stays the browser's (it leaves fullscreen); Tab stays focus navigation.
+      if (e.key === "Escape" || e.key === "Tab" || e.key === "Shift") return;
+      const post = postRef.current;
+      if (!post) return;
+      e.preventDefault();
+      post({ type: "key", outputId, id: randomId(), key: { key: e.key, code: e.code, shiftKey: e.shiftKey, repeat: e.repeat } });
     };
     window.addEventListener("mousemove", wake, { passive: true });
     window.addEventListener("pointerdown", wake, { passive: true });
@@ -409,7 +422,7 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
       window.removeEventListener("keydown", onKey);
       if (hideTimer.current != null) window.clearTimeout(hideTimer.current);
     };
-  }, [wake]);
+  }, [outputId, wake]);
 
   // ---- keep the projector awake --------------------------------------------
   useWakeLock();

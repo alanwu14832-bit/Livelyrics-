@@ -1008,10 +1008,21 @@ keeps every contract above and changes only where things are kept and how long w
   current/next line, bottom timeline (waveform, section blocks, lyric ticks, cue markers, playhead,
   click/drag seek), right tabbed panel (設計 key visual & section rationale & quick per-section edits /
   研究 brief & sources / 控制 overrides / 同步 sync source, lock and MIDI (phase 5a), offset, BPM, tap, mic).
+- Modes in the UI (phase 7): TRACK is labelled 「跟音檔」, LIVE 「手動切換」 (the wire values stay
+  `track` / `live`). The mode the operator picks by hand (`chooseMode`: the switch, M) is also stored as
+  `livelyrics:console:preferred-mode` and is the starting mode of any song opened without its own
+  settings (untimed lyrics still start in LIVE).
+- Remote keys (phase 7): the projection window forwards every key except F (its fullscreen), Esc, Tab and
+  modifier chords as `{ type: "key", outputId, id, key: { key, code, shiftKey, repeat } }` (output ->
+  console). `ProjectionLink` hands it once per console window (`id` de-duplicated) to
+  `ConsoleController.onRemoteKey` listeners; the console view maps it with the same `hotkeyAction`
+  table (minus help, open output and Esc). So a clicker aimed at the projector, or the projecting
+  computer's keyboard while the output is fullscreen, cues lines too.
 - Hotkeys (shown in a `?` overlay): Space play/pause (live: next line), →/↓ next line, ←/↑ previous line,
   Enter cue selected, B blackout, L lyrics on/off, F freeze, 1–9 scene override, 0 follow plan,
-  [ / ] offset −/+ 0.05 s, T tap tempo, O open output, M mode switch, ? help; PageDown or . / PageUp or ,
-  next / previous section, H 保持段落, R 循環段落 (phase 2b), X 回到手動 (phase 5a: stop following the
+  [ / ] offset −/+ 0.05 s, T tap tempo, O open output, M mode switch, ? help; . / , next / previous
+  section; PageDown / PageUp (what a presentation clicker sends) next / previous line in LIVE, section in
+  TRACK; H 保持段落, R 循環段落 (phase 2b), X 回到手動 (phase 5a: stop following the
   timecode / MIDI clock; also in the show's look and pre-show views). The show console adds G (GO) and S
   (standby); the per-song console ignores them. Physical key codes (`KeyH`, `Period`, `KeyX`…), so an active
   IME does not change them; every toggle and jump ignores key repeat. MIDI controllers run the same actions

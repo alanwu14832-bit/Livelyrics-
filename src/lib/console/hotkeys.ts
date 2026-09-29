@@ -21,8 +21,13 @@ export type HotkeyAction =
   | { type: "mode" }
   | { type: "help" }
   | { type: "escape" }
-  /** PageDown / PageUp, . / , : the next / previous plan section */
+  /** . / , : the next / previous plan section */
   | { type: "section"; delta: 1 | -1 }
+  /**
+   * PageDown / PageUp — what a presentation clicker sends: the next / previous lyric line in LIVE
+   * (手動切換), the next / previous section in TRACK.
+   */
+  | { type: "page"; delta: 1 | -1 }
   /** H: 保持段落 */
   | { type: "hold" }
   /** R: 循環段落 */
@@ -126,9 +131,11 @@ export function hotkeyAction(e: KeyLike): HotkeyAction | null {
     case "KeyX":
       return { type: "manual" };
     case "PageDown":
+      return { type: "page", delta: 1 };
+    case "PageUp":
+      return { type: "page", delta: -1 };
     case "Period":
       return { type: "section", delta: 1 };
-    case "PageUp":
     case "Comma":
       return { type: "section", delta: -1 };
     default:
@@ -188,22 +195,23 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
   {
     title: "播放與提詞",
     entries: [
-      { keys: ["Space"], label: "播放／暫停（LIVE 模式：下一句）" },
+      { keys: ["Space"], label: "播放／暫停（手動模式：下一句）" },
       { keys: ["→", "↓"], label: "下一句" },
       { keys: ["←", "↑"], label: "上一句" },
       { keys: ["Shift", "↑↓"], label: "移動待命選取（不跳轉）" },
       { keys: ["Enter"], label: "送出待命的歌詞，並前進到下一行" },
-      { keys: ["M"], label: "切換 TRACK／LIVE 模式" },
-      { keys: ["Esc"], label: "關閉視窗；LIVE 模式下清除目前歌詞" },
+      { keys: ["PgDn", "PgUp"], label: "簡報遙控器：手動模式切下一句／上一句，跟音檔模式切段落" },
+      { keys: ["M"], label: "切換跟音檔／手動模式" },
+      { keys: ["Esc"], label: "關閉視窗；手動模式下清除目前歌詞" },
     ],
   },
   {
     title: "段落",
     entries: [
-      { keys: ["PgDn", "."], label: "下一段" },
-      { keys: ["PgUp", ","], label: "上一段" },
+      { keys: ["."], label: "下一段" },
+      { keys: [","], label: "上一段" },
       { keys: ["H"], label: "保持段落：畫面停在這一段，歌詞照常前進" },
-      { keys: ["R"], label: "循環段落：TRACK 回到段落開頭，LIVE 從最後一句接回第一句" },
+      { keys: ["R"], label: "循環段落：跟音檔時回到段落開頭，手動時從最後一句接回第一句" },
     ],
   },
   {

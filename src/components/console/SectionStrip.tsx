@@ -192,7 +192,7 @@ function SectionStripImpl({ controller, project, hold, loop }: { controller: Con
           <StripToggle
             label={loopName ? "循環中" : "循環"}
             name="循環段落"
-            hint={loopName ? `循環段落：「${loopName}」；再按一次或跳到別段就結束` : "循環段落：TRACK 播到段落結尾回到開頭；LIVE 最後一句之後接回第一句"}
+            hint={loopName ? `循環段落：「${loopName}」；再按一次或跳到別段就結束` : "循環段落：跟音檔時播到段落結尾回到開頭；手動時最後一句之後接回第一句"}
             hotkey="R"
             icon={RepeatIcon}
             active={loop != null}

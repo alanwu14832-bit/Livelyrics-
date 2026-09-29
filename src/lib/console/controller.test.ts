@@ -233,6 +233,44 @@ describe("ConsoleController", () => {
     c.detach();
   });
 
+  it("手動切換: the operator's choice becomes the starting mode of songs opened later", async () => {
+    const c = await ready();
+    expect(c.getSnapshot().mode).toBe("track");
+    c.chooseMode("live");
+    expect(c.getSnapshot().mode).toBe("live");
+    c.detach();
+    // another song opened for the first time (no per-song settings yet) starts by hand
+    window.localStorage.removeItem("livelyrics:console:ctrltest");
+    const d = await ready();
+    expect(d.getSnapshot().mode).toBe("live");
+    d.chooseMode("track");
+    d.detach();
+    window.localStorage.removeItem("livelyrics:console:ctrltest");
+    const e = await ready();
+    expect(e.getSnapshot().mode).toBe("track");
+    e.detach();
+  });
+
+  it("hands keys pressed in the projection window (a presentation clicker) to the console view, once each", async () => {
+    const c = await ready();
+    const keys: string[] = [];
+    const off = c.onRemoteKey((k) => keys.push(k.code));
+    const output = new BroadcastChannel(channelName("ctrltest"));
+    const key = { key: "PageDown", code: "PageDown", shiftKey: false, repeat: false };
+    output.postMessage({ type: "key", outputId: "out1", id: "k1", key });
+    output.postMessage({ type: "key", outputId: "out1", id: "k1", key }); // the same press twice
+    output.postMessage({ type: "key", outputId: "out1", id: "k2", key: { ...key, code: "ArrowLeft", key: "ArrowLeft" } });
+    output.postMessage({ type: "key", outputId: "out1", id: "k3", key: { key: 5 } }); // malformed: dropped
+    await flush();
+    expect(keys).toEqual(["PageDown", "ArrowLeft"]);
+    off();
+    output.postMessage({ type: "key", outputId: "out1", id: "k4", key });
+    await flush();
+    expect(keys).toHaveLength(2);
+    output.close();
+    c.detach();
+  });
+
   it("overrides are broadcast immediately and survive a re-attach", async () => {
     const c = await ready();
     c.toggleBlackout();

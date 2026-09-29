@@ -7,7 +7,7 @@
 // the same window never count as another console: a take can briefly overlap two controllers of
 // the show console, a second show console tab (another id) is still reported.
 
-import { parseStageMessage, type LimiterReport, type StageMessage } from "@/lib/stage/protocol";
+import { parseStageMessage, type LimiterReport, type RemoteKey, type StageMessage } from "@/lib/stage/protocol";
 import type { DesignPlan } from "@/lib/types";
 
 export interface OutputStatus {
@@ -35,6 +35,20 @@ export interface LinkHandlers {
   onStatus: (output: OutputStatus, otherConsole: boolean) => void;
   /** 字體藝術: the 排版 editor (another window) changed and saved this song's plan */
   onPlan?: (projectId: string, plan: DesignPlan) => void;
+  /** a key pressed in a projection window (a presentation clicker), once per press per console window */
+  onRemoteKey?: (key: RemoteKey) => void;
+}
+
+/**
+ * Remote keys already handled by this console window: every controller of the show console shares
+ * the window, and a take can briefly overlap two of them on the show channel.
+ */
+const seenRemoteKeys: string[] = [];
+function firstSight(id: string): boolean {
+  if (seenRemoteKeys.includes(id)) return false;
+  seenRemoteKeys.push(id);
+  if (seenRemoteKeys.length > 64) seenRemoteKeys.shift();
+  return true;
 }
 
 /** A short random id for a console window or an output window. */
@@ -161,6 +175,14 @@ export class ProjectionLink {
           this.handlers.onPlan?.(msg.projectId, msg.plan);
         } catch (err) {
           console.error("[Livelyrics] 套用排版的修改失敗：", err);
+        }
+        break;
+      case "key":
+        if (!this.handlers.onRemoteKey || !firstSight(`${msg.outputId}:${msg.id}`)) return;
+        try {
+          this.handlers.onRemoteKey(msg.key);
+        } catch (err) {
+          console.error("[Livelyrics] 投影視窗的按鍵處理失敗：", err);
         }
         break;
       default:

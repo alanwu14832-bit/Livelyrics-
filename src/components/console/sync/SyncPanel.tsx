@@ -309,8 +309,8 @@ export function SyncSourceSection({
       {timecode && (
         <Footnote className="leading-5">
           {song?.snap.mode === "live"
-            ? "LIVE 模式：時間碼直接帶動時間與有時間碼的歌詞，不播放音檔。"
-            : "TRACK 模式：控制台的音檔跟著時間碼走（誤差超過 0.08 秒就重新對齊），歌詞偏移照常套用。"}{" "}
+            ? "手動模式：時間碼直接帶動時間與有時間碼的歌詞，不播放音檔。"
+            : "跟音檔模式：控制台的音檔跟著時間碼走（誤差超過 0.08 秒就重新對齊），歌詞偏移照常套用。"}{" "}
           跟隨時間碼時，手動換句要先按 <Kbd className="align-middle">{MANUAL_KEY}</Kbd> 回到手動。
         </Footnote>
       )}

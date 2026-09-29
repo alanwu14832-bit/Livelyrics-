@@ -318,7 +318,7 @@ function SetlistRailImpl({ ctl, snap }: { ctl: ShowLiveController; snap: ShowLiv
         />
         <label className="flex min-h-8 cursor-default items-center justify-between gap-2 px-1">
           <span className="text-c-body text-label">GO 後自動播放</span>
-          <Switch checked={snap.autoPlay} onChange={(v) => ctl.setAutoPlay(v)} aria-label="GO 後自動播放（TRACK 模式的歌曲）" />
+          <Switch checked={snap.autoPlay} onChange={(v) => ctl.setAutoPlay(v)} aria-label="GO 後自動播放（跟音檔模式的歌曲）" />
         </label>
         <FollowTimecodeRow ctl={ctl} snap={snap} />
       </section>

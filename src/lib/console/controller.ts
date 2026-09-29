@@ -31,6 +31,7 @@ import {
   stageTime,
   type LiveAudioFeatures,
   type PlaybackMode,
+  type RemoteKey,
   type StageMessage,
   type StageOverrides,
   type StageState,
@@ -61,7 +62,7 @@ import {
 import { computeWaveformPeaks } from "./peaks";
 import { patchSection, sceneBank, type SectionPatch } from "./plan-edit";
 import { loadSession, saveSession } from "./session";
-import { clampOffset, defaultSettings, hasStoredSettings, loadSettings, PLAYBACK_RATES, saveSettings, type ConsoleSettings } from "./settings";
+import { clampOffset, defaultSettings, hasStoredSettings, loadPreferredMode, loadSettings, PLAYBACK_RATES, savePreferredMode, saveSettings, type ConsoleSettings } from "./settings";
 import { TapClock } from "./tap";
 
 // ---------------------------------------------------------------------------
@@ -253,6 +254,8 @@ export class ConsoleController {
 
   private snapshot: ConsoleSnapshot;
   private readonly listeners = new Set<() => void>();
+  /** keys pressed in the projection window (a presentation clicker), for the console view to run */
+  private readonly remoteKeyListeners = new Set<(key: RemoteKey) => void>();
   private settings: ConsoleSettings;
   private settingsFromStorage = false;
 
@@ -357,6 +360,9 @@ export class ConsoleController {
       },
       onStatus: (output, otherConsole) => this.set({ output, otherConsole }),
       onPlan: (projectId, plan) => this.adoptTypeSystem(projectId, plan),
+      onRemoteKey: (key) => {
+        for (const l of this.remoteKeyListeners) l(key);
+      },
     });
     this.snapshot = {
       load: { status: "loading" },
@@ -625,8 +631,10 @@ export class ConsoleController {
   private onProjectReady(project: Project): void {
     if (!this.attached) return;
     if (!this.settingsFromStorage) {
-      // lyrics without timing are cued by hand: start in LIVE mode
-      const mode: PlaybackMode = project.lyrics && timedRatio(project.lyrics) < 0.5 && project.lyrics.lines.length > 0 ? "live" : "track";
+      // lyrics without timing are cued by hand: start in LIVE mode; else the mode the operator last
+      // chose by hand on any song (手動切換 once → every new song starts that way)
+      const untimed = !!project.lyrics && timedRatio(project.lyrics) < 0.5 && project.lyrics.lines.length > 0;
+      const mode: PlaybackMode = untimed ? "live" : (loadPreferredMode() ?? "track");
       this.settings = { ...this.settings, mode };
       this.set({ mode });
     }
@@ -1224,7 +1232,7 @@ export class ConsoleController {
       return;
     }
     if (line.start == null) {
-      this.notify("這一行還沒有時間碼：請切到 LIVE 模式手動送出，或到歌詞編輯器對時。", "warn");
+      this.notify("這一行還沒有時間碼：請切到手動模式送出，或到歌詞編輯器對時。", "warn");
       return;
     }
     this.seek(line.start + 0.001);
@@ -1532,11 +1540,17 @@ export class ConsoleController {
     this.updateSettings({ mode });
     this.set({ mode, liveHeld: false });
     this.afterClockChange();
-    if (announce) this.notify(mode === "live" ? "LIVE 模式：按 Space 或 → 送出下一句" : "TRACK 模式：歌詞跟著音檔自動播放", "info");
+    if (announce) this.notify(mode === "live" ? "手動切換：按 Space、→ 或簡報遙控器送出下一句，點清單可跳到任一句" : "跟著音檔：歌詞依音檔時間自動換句", "info");
   }
 
   toggleMode(opts?: { announce?: boolean }): void {
     this.setMode(this.settings.mode === "live" ? "track" : "live", opts);
+  }
+
+  /** The operator's own choice (the mode switch, M): also the starting mode of songs opened later. */
+  chooseMode(mode: PlaybackMode, opts?: { announce?: boolean }): void {
+    savePreferredMode(mode);
+    this.setMode(mode, opts);
   }
 
   // -------------------------------------------------------------------------
@@ -1952,6 +1966,16 @@ export class ConsoleController {
    * console takes the type system (keeping its own section edits, saved or not) and shows it on the
    * projection at once; it does not save it again (the editor did).
    */
+  /**
+   * Keys pressed in this console's projection window (a presentation clicker aimed at the projector,
+   * or the projecting computer's keyboard while the output is fullscreen). The console view maps them
+   * with the same hotkey table as its own keyboard. Returns the unsubscribe function.
+   */
+  onRemoteKey(listener: (key: RemoteKey) => void): () => void {
+    this.remoteKeyListeners.add(listener);
+    return () => this.remoteKeyListeners.delete(listener);
+  }
+
   adoptTypeSystem(projectId: string, plan: DesignPlan): void {
     const project = this.snapshot.project;
     if (!project?.plan || project.id !== projectId || this.snapshot.redesign.running) return;
