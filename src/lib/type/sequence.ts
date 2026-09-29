@@ -280,11 +280,24 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
   return out;
 }
 
-/** 「重新生成全部構圖」: every unlocked line drawn again (its edit dropped), locked lines kept as they are. */
+/**
+ * 「重新生成全部構圖」 (and a voice switch): every unlocked line drawn again, locked lines kept as
+ * they are. An unlocked line keeps what its edit says about the words (emphasis, the motion word,
+ * the colour role, the entrance and exit); the layout part of the edit (recipe, seed, orientation,
+ * position, size, angle) goes with the old composition.
+ */
 export function regenerateLines(input: Omit<SequenceInput, "keep" | "salt">, current: readonly TypeLine[], generation: number): TypeLine[] {
   const keep = new Map<string, TypeLine>();
-  for (const l of current) if (l.locked) keep.set(l.lineId, l);
-  return sequenceTypeLines({ ...input, keep, salt: generation });
+  const words = new Map<string, NonNullable<TypeLine["edit"]>>();
+  for (const l of current) {
+    if (l.locked) keep.set(l.lineId, l);
+    else if (l.edit) {
+      const { emphasis, motionWord, color, enter, exit } = l.edit;
+      const kept = Object.fromEntries(Object.entries({ emphasis, motionWord, color, enter, exit }).filter(([, v]) => v !== undefined));
+      if (Object.keys(kept).length) words.set(l.lineId, kept);
+    }
+  }
+  return sequenceTypeLines({ ...input, keep, salt: generation }).map((l) => (words.has(l.lineId) && !l.locked ? { ...l, edit: words.get(l.lineId) } : l));
 }
 
 /** A stable seed from text (for callers that need one without a generator). */

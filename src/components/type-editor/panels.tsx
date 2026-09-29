@@ -114,6 +114,7 @@ export function SongPanel({ system, actions }: { system: TypeSystem; actions: So
           const int = info.integer;
           return (
             <Slider
+              touch
               key={k}
               label={info.label}
               value={system.params[k]}
@@ -152,6 +153,7 @@ export function SongPanel({ system, actions }: { system: TypeSystem; actions: So
           </Select>
         </label>
         <SegmentedControl
+          touch
           label="字重"
           value={String(system.weight)}
           onChange={(v) => actions.weight(Number(v))}
@@ -162,6 +164,7 @@ export function SongPanel({ system, actions }: { system: TypeSystem; actions: So
 
       <Group title="配色處理" footer={COLOR_TREATMENTS[system.color].description}>
         <SegmentedControl<TypeColorTreatment>
+          touch
           label="配色處理"
           value={system.color}
           onChange={actions.color}
@@ -233,19 +236,20 @@ export function SectionPanel({
             </Select>
           </label>
           <SegmentedControl
+            touch
             label="段落排列"
             value={override?.orientation ?? "auto"}
             onChange={(v) => onChange({ orientation: v === "auto" ? null : (v as TypeOrientation) }, true)}
             options={[{ value: "auto", label: "依每一句" }, ...(["h", "v", "mixed"] as const).map((o) => ({ value: o, label: ORIENT_LABEL[o] }))]}
             fullWidth
           />
-          <Slider label="大小" value={override?.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => onChange({ scale: v }, false)} format={(v) => `${Math.round(v * 100)}%`} resetValue={1} onReset={() => onChange({ scale: null }, true)} />
+          <Slider touch label="大小" value={override?.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => onChange({ scale: v }, false)} format={(v) => `${Math.round(v * 100)}%`} resetValue={1} onReset={() => onChange({ scale: null }, true)} />
           <label className="flex items-center justify-between gap-3 text-[15px] leading-5 lg:text-[13px]" htmlFor="section-motion-own">
             <span className="text-label">自訂這一段的動態幅度</span>
             <Switch id="section-motion-own" checked={override?.motion != null} onChange={(on) => onChange({ motion: on ? 0.5 : null }, true)} />
           </label>
           {override?.motion != null && (
-            <Slider label="動態幅度" value={override.motion} min={0} max={1} step={0.01} onChange={(v) => onChange({ motion: v }, false)} format={(v) => `${Math.round(v * 100)}`} resetValue={0.5} />
+            <Slider touch label="動態幅度" value={override.motion} min={0} max={1} step={0.01} onChange={(v) => onChange({ motion: v }, false)} format={(v) => `${Math.round(v * 100)}`} resetValue={0.5} />
           )}
         </Group>
       )}
@@ -369,6 +373,7 @@ export function LinePanel({
 
       <Group title="排列" footer={own?.edit?.orientation ? undefined : autoOrientationNote(h, cjk, project)}>
         <SegmentedControl
+          touch
           label="排列"
           value={own?.edit?.orientation ?? "auto"}
           onChange={(v) => actions.orientation(v === "auto" ? null : (v as TypeOrientation))}
@@ -440,12 +445,13 @@ export function LinePanel({
             {Math.round(h.dy * 100)}%
           </p>
         </div>
-        <Slider label="大小" value={h.scale} min={0.5} max={2} step={0.01} onChange={(v) => actions.scale(v, false)} format={(v) => `${Math.round(v * 100)}%`} resetValue={1} onReset={() => actions.scale(1, true)} />
-        <Slider label="角度" value={h.rotate} min={-30} max={30} step={0.5} onChange={(v) => actions.rotate(v, false)} format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`} resetValue={0} onReset={() => actions.rotate(0, true)} />
+        <Slider touch label="大小" value={h.scale} min={0.5} max={2} step={0.01} onChange={(v) => actions.scale(v, false)} format={(v) => `${Math.round(v * 100)}%`} resetValue={1} onReset={() => actions.scale(1, true)} />
+        <Slider touch label="角度" value={h.rotate} min={-30} max={30} step={0.5} onChange={(v) => actions.rotate(v, false)} format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`} resetValue={0} onReset={() => actions.rotate(0, true)} />
       </Group>
 
       <Group title="顏色" footer={COLOR_ROLES[h.color].description}>
         <SegmentedControl<TypeColorRole | "auto">
+          touch
           label="顏色"
           value={h.color}
           onChange={actions.color}

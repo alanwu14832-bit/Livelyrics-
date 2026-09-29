@@ -559,7 +559,10 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   view that slides to the side its seed leans to (a bled word's view on the edge it bleeds from); the
   colour roles: 反白 cuts the display text out of blocks of the ink colour, 鏤空 makes it a window
   that fills the frame, 自動 under the knockout treatment opens the display word of strong lines
-  (energy ≥ 0.6) with the frame only partly filled (0.52–0.84, the stage stays half seen);
+  (energy ≥ 0.6) with the frame only partly filled (0.52–0.84, the stage stays half seen); the
+  ornaments: numbers, the section label and a rule once per section, the song title on the first and
+  last line, 「」 hung outside an MV card's block (the block steps in from the frame edge to make
+  room), the seal at the end of the text;
   `placeTranslation`: the translation never sits on the composition (a seal, an echo trail, the small
   text): the recipe's place when free, else under the block, beside its foot, under everything, over
   it, re-set in two balanced rows for the measure, then the block moves up, then it shrinks (never

@@ -32,11 +32,11 @@ function hint(recipe: TypeRecipeId, over: Partial<ResolvedHint> = {}): ResolvedH
   return { recipe, emphasis: [], orientation: "h", energy: 0.6, motionWord: "", seed: 7, dx: 0, dy: 0, scale: 1, rotate: 0, enter: "auto", exit: "auto", color: "ink", escalate: false, motion: null, ...over };
 }
 
-function compose(text: string, recipe: TypeRecipeId, canvas: CanvasSpec, over: Partial<ResolvedHint> = {}, voice: (typeof TYPE_VOICE_IDS)[number] = "mv-card", translation?: string): Composition {
+function compose(text: string, recipe: TypeRecipeId, canvas: CanvasSpec, over: Partial<ResolvedHint> = {}, voice: (typeof TYPE_VOICE_IDS)[number] = "mv-card", translation?: string, sys: Partial<TypeSystem> = {}): Composition {
   const lines: LyricLine[] = [{ id: "l0", text, start: 10, end: 14, ...(translation ? { translation } : {}) }];
   const h = hint(recipe, over);
   const lt = prepareLineText(lines, 0, h.emphasis, 60)!;
-  const { system } = normalizeTypeSystem({ voice }, { lines, sections: [], duration: 60, voice });
+  const { system } = normalizeTypeSystem({ voice, ...sys }, { lines, sections: [], duration: 60, voice });
   return composeLine({ lt, lineId: "l0", hint: h, system: resolveSystem(system), canvas, ctx: { lineIndex: 0, lineCount: 1, sectionIndex: null, sectionKind: "chorus", sectionLabel: "", songTitle: "示範之歌", first: true }, measure: approxMeasure });
 }
 
@@ -201,6 +201,25 @@ describe("type engine: line breaks, key words, the translation", () => {
         }
       }
     }
+  });
+});
+
+describe("type engine: ornaments", () => {
+  it("MV cards hang 「」 around many of their compositions, inside the safe area", () => {
+    const frame = makeFrame(CANVASES["16:9"], VOICES["mv-card"].params);
+    let hung = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const c = compose(TEXTS[1], seed % 2 ? "giant-word" : "title-card", CANVASES["16:9"], { seed, energy: 0.7 }, "mv-card", undefined, { ornaments: VOICES["mv-card"].ornaments, params: VOICES["mv-card"].params });
+      const brackets = c.pieces.filter((p) => p.role === "bracket");
+      if (!brackets.length) continue;
+      hung++;
+      for (const p of brackets) {
+        const bx = pieceBox(p);
+        expect(bx.x).toBeGreaterThanOrEqual(frame.safe.x - 1.5);
+        expect(bx.x + bx.w).toBeLessThanOrEqual(frame.safe.x + frame.safe.w + 1.5);
+      }
+    }
+    expect(hung).toBeGreaterThan(8);
   });
 });
 
