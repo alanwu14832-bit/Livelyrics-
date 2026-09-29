@@ -29,6 +29,7 @@ import {
 import { TYPE_FRAGMENT, TYPE_UNIFORMS } from "../scenes/type";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
+import { PROGRAM_UNIFORMS, buildProgramFragment, tidyCompileLog } from "../program/contract";
 
 type GL = WebGL2RenderingContext | WebGLRenderingContext;
 
@@ -52,10 +53,41 @@ export interface SceneUniformValues {
   seed: number;
 }
 
+/**
+ * 專屬畫面 (phase 7): the song's scene program for this slot (see src/lib/stage/program/contract.ts).
+ * Drawn instead of `scene` once compiled; while it compiles, or when it failed, `scene` is drawn.
+ */
+export interface ProgramDraw {
+  /** cache key of the validated code */
+  key: string;
+  /** validated program body */
+  code: string;
+  songTime: number;
+  songProgress: number;
+  bar: number;
+  tempo: number;
+  master: number;
+  section: number;
+  sectionKind: number;
+  sectionEnergy: number;
+  sectionProgress: number;
+  mode: number;
+  params: [number, number, number, number];
+  ink: RGB;
+  palette: [RGB, RGB, RGB, RGB, RGB, RGB];
+  /** text zone in uv (x0, y0, x1, y1; y up) */
+  zone: [number, number, number, number];
+  relation: number;
+  /** the lyric's bounds in uv (x0, y0, x1, y1; y up), zeros when none */
+  typeBox: [number, number, number, number];
+  typeAmt: number;
+}
+
 export interface SceneDraw {
   scene: SceneId;
   lookKey: string;
   uniforms: SceneUniformValues;
+  program?: ProgramDraw | null;
 }
 
 /** One band-media layer (see src/lib/stage/scenes/media.ts). */
@@ -152,6 +184,8 @@ export interface TypeDraw {
   /** canvas px per output px */
   px: number;
   time: number;
+  /** 專屬畫面: how the words meet the image (0 plain, 1 knockout, 2 behind, 3 lit) */
+  relation?: number;
 }
 
 export interface RenderRequest {
@@ -195,6 +229,8 @@ interface ProgramEntry {
   state: "pending" | "ready" | "failed";
   names: readonly string[];
   locations: Map<string, WebGLUniformLocation | null>;
+  /** the compiler's log when it failed */
+  log?: string;
 }
 
 interface Target {
@@ -235,6 +271,12 @@ export class StageRenderer {
    */
   private targets: Array<Target | null> = [null, null, null, null, null, null, null, null, null, null];
   private typeTex: WebGLTexture | null = null;
+  /** 1 × 1 transparent texture bound as a program's type mask when no lyric is on screen */
+  private emptyTex: WebGLTexture | null = null;
+  /** scene programs by key (their code, for compiling after a context restore) */
+  private programSources = new Map<string, string>();
+  /** the type texture of this frame is uploaded (a program may read it as its mask) */
+  private typeReady = false;
   private typeTexState: { source: TexImageSource | null; version: number; w: number; h: number } = { source: null, version: Number.NaN, w: 0, h: 0 };
   /** safety grid targets (their own small sizes) */
   private gridTargets: { mid: Target | null; grid: Target | null } = { mid: null, grid: null };
@@ -322,6 +364,7 @@ export class StageRenderer {
     this.programs.clear();
     this.targets = [null, null, null, null, null, null, null, null, null, null];
     this.typeTex = null;
+    this.emptyTex = null;
     this.typeTexState = { source: null, version: Number.NaN, w: 0, h: 0 };
     this.gridTargets = { mid: null, grid: null };
     this.reads = [];
@@ -393,6 +436,7 @@ export class StageRenderer {
         const log = gl.getShaderInfoLog(fs) || gl.getShaderInfoLog(vs) || gl.getProgramInfoLog(program) || "unknown";
         this.report(`compile:${key}`, `場景著色器「${key}」編譯失敗：${log}`);
         entry.state = "failed";
+        entry.log = tidyCompileLog(log);
       }
       gl.deleteProgram(program);
       entry.program = null;
@@ -450,9 +494,30 @@ export class StageRenderer {
     return this.entryFor(key, () => this.compile(key, buildFragmentWithHeader(frag, this.gl2), names));
   }
 
+  private programEntry(key: string): ProgramEntry | null {
+    const code = this.programSources.get(key);
+    if (code == null) return null;
+    return this.entryFor(`program:${key}`, () => this.compile(`program:${key}`, buildProgramFragment(code, this.gl2), PROGRAM_UNIFORMS));
+  }
+
+  /** Queue a scene program (專屬畫面) to compile ahead of the built-in scenes. */
+  prewarmProgram(key: string, code: string) {
+    this.programSources.set(key, code);
+    const k = `program:${key}`;
+    this.warm.add(k);
+    if (!this.programs.has(k) && !this.queue.includes(k)) this.queue.unshift(k);
+  }
+
+  /** A scene program's state and, when it failed, the compiler's log. */
+  programState(key: string): { state: "none" | "pending" | "ready" | "failed"; log?: string } {
+    const e = this.programs.get(`program:${key}`);
+    return e ? { state: e.state, ...(e.log ? { log: e.log } : {}) } : { state: "none" };
+  }
+
   /** Compile a queued program by key. */
   private compileKey(key: string) {
-    if (key === "composite") this.compositeProgram();
+    if (key.startsWith("program:")) this.programEntry(key.slice(8));
+    else if (key === "composite") this.compositeProgram();
     else if (key === "media") this.mediaProgram();
     else if (key === "type") this.typeProgram();
     else if ((SAFETY_PROGRAMS as readonly string[]).includes(key)) this.safetyProgram(key as (typeof SAFETY_PROGRAMS)[number]);
@@ -565,8 +630,9 @@ export class StageRenderer {
    * frame falls back to a plain background while a shader compiles. Resolves with the ids that
    * failed (they render the gradient scene, as live).
    */
-  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000, safety = false, type = false): Promise<string[]> {
+  async ensureReady(ids: readonly SceneId[], media: boolean, timeoutMs = 20000, safety = false, type = false, program: { key: string; code: string } | null = null): Promise<string[]> {
     this.prewarm(ids);
+    if (program) this.prewarmProgram(program.key, program.code);
     if (media) this.prewarmMedia();
     if (safety) this.prewarmSafety();
     if (type) this.prewarmType();
@@ -777,10 +843,80 @@ export class StageRenderer {
     if (motif) gl.uniform1i(motif, 0);
   }
 
+  /** The empty type mask (a 1 × 1 transparent texture). */
+  private emptyTexture(): WebGLTexture | null {
+    const gl = this.gl;
+    if (this.emptyTex) return this.emptyTex;
+    const t = gl.createTexture();
+    if (!t) return null;
+    gl.activeTexture(gl.TEXTURE7);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    this.emptyTex = t;
+    return t;
+  }
+
+  /** 專屬畫面: draw the scene program; false when it is not ready (the built-in scene is drawn instead). */
+  private drawProgram(draw: SceneDraw, pd: ProgramDraw): boolean {
+    if (!this.programSources.has(pd.key)) this.programSources.set(pd.key, pd.code);
+    const entry = this.programEntry(pd.key);
+    if (!entry?.program) return false;
+    const gl = this.gl;
+    gl.useProgram(entry.program);
+    this.setSceneUniforms(entry, draw.uniforms);
+    const L = entry.locations;
+    const f1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1f(l, Number.isFinite(v) ? v : 0);
+    };
+    const f3 = (n: string, v: RGB) => {
+      const l = L.get(n);
+      if (l) gl.uniform3f(l, v[0], v[1], v[2]);
+    };
+    const f4 = (n: string, v: readonly number[]) => {
+      const l = L.get(n);
+      if (l) gl.uniform4f(l, v[0] || 0, v[1] || 0, v[2] || 0, v[3] || 0);
+    };
+    const typeReady = this.typeReady && !!this.typeTex;
+    f1("uSongTime", pd.songTime);
+    f1("uSongProgress", pd.songProgress);
+    f1("uBar", pd.bar);
+    f1("uTempo", pd.tempo);
+    f1("uMaster", pd.master);
+    f1("uSection", pd.section);
+    f1("uSectionKind", pd.sectionKind);
+    f1("uSectionEnergy", pd.sectionEnergy);
+    f1("uSectionProgress", pd.sectionProgress);
+    f1("uMode", pd.mode);
+    f4("uParams", pd.params);
+    f3("uInk", pd.ink);
+    pd.palette.forEach((c, i) => f3(`uPal${i}`, c));
+    f4("uZone", pd.zone);
+    f1("uRelation", pd.relation);
+    f4("uTypeBox", pd.typeBox);
+    f1("uTypeAmt", typeReady ? pd.typeAmt : 0);
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, typeReady ? this.typeTex : this.emptyTexture());
+    const ut = L.get("uType");
+    if (ut) gl.uniform1i(ut, 6);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.motifTex);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    return true;
+  }
+
   private drawScene(draw: SceneDraw, target: Target | null) {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : null);
     gl.viewport(0, 0, this.width, this.height);
+    if (draw.program && draw.scene !== "blackout" && this.drawProgram(draw, draw.program)) return;
     if (draw.scene === "blackout") {
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -851,6 +987,9 @@ export class StageRenderer {
     const typeProg = type ? this.typeProgram() : null;
     const under = typeProg?.program ? this.target(6) : null;
     const out = under ?? dest;
+    // a scene program reads the lyric's type mask: upload this frame's plates before the scene
+    this.typeReady = false;
+    if (req.type && (req.current.program || req.previous?.program)) this.typeReady = this.typeTexture(req.type);
     const sceneTarget = mediaProg?.program ? this.target(2) : null;
     // without the media pass (no layers, still compiling, no FBO) the scene goes straight on
     if (sceneTarget && mediaProg?.program) {
@@ -951,6 +1090,7 @@ export class StageRenderer {
     f1("uPx", t.px);
     f1("uSoften", soften);
     f1("uGain", gain);
+    f1("uRelation", t.relation ?? 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     for (const unit of [3, 6]) {
       gl.activeTexture(gl.TEXTURE0 + unit);

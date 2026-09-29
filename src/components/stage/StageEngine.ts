@@ -20,6 +20,9 @@ import { stageTime, type StageState, type StageStore } from "@/lib/stage/protoco
 import { clamp, lyricLookAt, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
 import { hasTypeSystem, typeModeActive } from "@/lib/type/resolve";
+import { activeProgram, programCode } from "@/lib/stage/program/model";
+import { programFrame, programLookKey } from "@/lib/stage/program/runtime";
+import type { ProgramDraw } from "@/lib/stage/gl/renderer";
 import type { Asset, LyricStyleId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
 import { TypeLayer } from "./type/TypeLayer";
@@ -40,7 +43,24 @@ export interface StageStats {
   sectionIndex: number | null;
   /** LED 安全模式 (phase 3): what the limiter is doing; null when safe mode is off */
   safety: SafetyStats | null;
+  /** 專屬畫面 (phase 7): the song's scene program on this stage; null when the plan has none */
+  program: ProgramStatus | null;
 }
+
+/**
+ * 專屬畫面 on a stage: compiling, drawing, or switched off with the reason (the section's built-in
+ * scene is drawn instead: a compile failure, or frames over budget for a sustained period).
+ */
+export interface ProgramStatus {
+  state: "pending" | "ready" | "failed" | "slow" | "override";
+  title: string;
+  /** the compiler's log (failed) */
+  log?: string;
+}
+
+/** A program is switched off after this long with frames over PROGRAM_SLOW_DT at the lowest render quality. */
+export const PROGRAM_SLOW_SECONDS = 5;
+export const PROGRAM_SLOW_DT = 1 / 18;
 
 export interface SafetyStats {
   /** brightness cap (linear, 0.2..1) */
@@ -152,6 +172,14 @@ export class StageEngine {
   private cssCapKey = "";
   private lyricBoxAt = 0;
   private lyricBox: [number, number, number, number] | null = null;
+  // 專屬畫面 (phase 7)
+  /** program keys switched off on this stage, with why */
+  private programOff = new Map<string, { state: "failed" | "slow"; log?: string }>();
+  private programOffKeys = new Set<string>();
+  private programStatus: ProgramStatus | null = null;
+  private programStatusKey = "";
+  private slowFor = 0;
+  private statsDirty = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -243,6 +271,7 @@ export class StageEngine {
     this.textBox = null;
     this.audio = null;
     this.resetLimiter();
+    this.slowFor = 0;
   }
 
   /** A new project (or safe mode turned on): the limiter and the low-pass start from scratch. */
@@ -357,10 +386,14 @@ export class StageEngine {
   private prewarm(project: Project | null) {
     if (!this.renderer) return;
     const planScenes = (project?.plan?.sections ?? []).map((s) => s.scene);
-    const key = `${planScenes.join(",")}|${hasTypeSystem(project?.plan) ? "type" : ""}`;
+    const program = activeProgram(project?.plan);
+    const code = program ? programCode(program) : null;
+    const key = `${planScenes.join(",")}|${hasTypeSystem(project?.plan) ? "type" : ""}|${code?.key ?? ""}`;
     if (key === this.prewarmKey) return;
     this.prewarmKey = key;
     if (hasTypeSystem(project?.plan)) this.renderer.prewarmType();
+    // 專屬畫面: the song's own program compiles first (the built-in scenes cover it until then)
+    if (code) this.renderer.prewarmProgram(code.key, code.code);
     // the plan's scenes first, then the rest so operator overrides never stall
     this.renderer.prewarm([...new Set<SceneId>([...planScenes, "gradient", ...SCENE_IDS])]);
     // LED 安全模式 is on by default: its passes go first (a safe frame needs them)
@@ -492,7 +525,83 @@ export class StageEngine {
         pulse: audio.pulse,
         seed: this.seed,
       },
+      program: (t.program as ProgramDraw | null | undefined) ?? null,
     };
+  }
+
+  /** 專屬畫面: this frame's program values (null = the built-in scene). */
+  private programDraw(project: Project, look: StageLook, t: number, audio: StageAudioFrame): ProgramDraw | null {
+    if (!activeProgram(project.plan)) return null;
+    return programFrame({
+      project,
+      look,
+      t,
+      beat: audio.beat,
+      beatIndex: this.beatN,
+      master: this.masterIntensity,
+      typeBox: this.typeMode ? this.type.textBounds(this.output) : null,
+      typeAmt: this.typeMode ? this.lyricAmt : 0,
+      disabled: this.programOffKeys,
+      color: (hex) => this.color(hex),
+    });
+  }
+
+  /** After a render: a program that failed to compile, or runs over budget, is switched off here. */
+  private checkProgram(project: Project, look: StageLook, pd: ProgramDraw | null, dt: number) {
+    const r = this.renderer;
+    const program = activeProgram(project.plan);
+    if (!program || !r) {
+      this.setProgramStatus(null);
+      return;
+    }
+    const code = programCode(program);
+    const off = code ? this.programOff.get(code.key) : undefined;
+    if (!code) {
+      this.setProgramStatus({ state: "failed", title: program.title, log: "程式沒有通過檢查" });
+      return;
+    }
+    if (off) {
+      this.setProgramStatus({ state: off.state, title: program.title, ...(off.log ? { log: off.log } : {}) });
+      return;
+    }
+    const st = r.programState(code.key);
+    if (st.state === "failed") {
+      this.programOff.set(code.key, { state: "failed", log: st.log });
+      this.programOffKeys.add(code.key);
+      console.warn(`[Livelyrics] 專屬畫面「${program.title}」無法編譯，已改用內建場景。`);
+      this.setProgramStatus({ state: "failed", title: program.title, ...(st.log ? { log: st.log } : {}) });
+      return;
+    }
+    if (!pd) {
+      // the operator forced a built-in scene (or a blackout scene): the program waits
+      this.slowFor = 0;
+      this.setProgramStatus({ state: look.scene === "blackout" ? "ready" : "override", title: program.title });
+      return;
+    }
+    // the frame budget: already at the lowest adaptive quality and still slow for a sustained period
+    if (st.state === "ready" && this.adaptive && this.quality <= 0.51 && dt > 0 && dt < 0.25) {
+      this.slowFor = dt > PROGRAM_SLOW_DT ? this.slowFor + dt : Math.max(0, this.slowFor - dt * 0.5);
+      if (this.slowFor > PROGRAM_SLOW_SECONDS) {
+        this.programOff.set(code.key, { state: "slow" });
+        this.programOffKeys.add(code.key);
+        console.warn(`[Livelyrics] 專屬畫面「${program.title}」太耗效能，已改用內建場景。`);
+        this.quality = 1;
+        this.sizeDirty = true;
+        this.setProgramStatus({ state: "slow", title: program.title });
+        return;
+      }
+    } else this.slowFor = Math.max(0, this.slowFor - dt);
+    this.setProgramStatus({ state: st.state === "ready" ? "ready" : "pending", title: program.title });
+  }
+
+  private setProgramStatus(s: ProgramStatus | null) {
+    const key = s ? `${s.state}|${s.title}|${s.log ?? ""}` : "";
+    if (key === this.programStatusKey) return;
+    this.programStatusKey = key;
+    this.programStatus = s;
+    this.statsDirty = true;
+    if (s) this.root.dataset.sceneProgram = s.state;
+    else delete this.root.dataset.sceneProgram;
   }
 
   private updateFallback(look: StageLook, visible: boolean) {
@@ -559,8 +668,10 @@ export class StageEngine {
     this.masterIntensity += (targetIntensity - this.masterIntensity) * (1 - Math.exp(-dt / 0.15));
     if (dt === 0) this.masterIntensity = targetIntensity;
 
+    // 專屬畫面: the song's program for this frame (null = the section's built-in scene)
+    const pd = this.renderer && !this.renderer.lost ? this.programDraw(project, look, t, audio) : null;
     const df = this.director.update({
-      target: { scene: look.scene, params: look.params, colorway: look.colorway, lookKey: look.lookKey },
+      target: { scene: look.scene, params: look.params, colorway: look.colorway, lookKey: programLookKey(look.lookKey, pd), program: pd },
       sectionKey: look.sectionIndex == null ? null : String(look.sectionIndex),
       transitionIn: look.transitionIn,
       now,
@@ -569,6 +680,8 @@ export class StageEngine {
       energy: audio.energy,
       durationScale: this.transitionScale,
     });
+    // the current slot always carries this frame's program values (an outgoing slot keeps its last)
+    df.current.target.program = pd;
 
     // blackout ramp (smooth ~0.4 s, eased), timed by the wall clock: even a struggling GPU
     // at a few fps reaches full black 0.4 s after B is pressed
@@ -634,8 +747,9 @@ export class StageEngine {
           clock: this.clock,
           media,
           safety: safety.on ? { soften: safety.soften, gain: safety.gain, alpha, measure: limiter ? { ...grid, sync: false } : null } : null,
-          type: typeDraw,
+          type: typeDraw ? { ...typeDraw, relation: pd ? pd.relation : 0 } : null,
         });
+        this.checkProgram(project, look, pd, dt);
         if (!ok) backend = "lost";
         else if (limiter) {
           this.pendingAlpha.set(r.frameSerial, { t: now / 1000, alpha, lyric: this.lyricEstimate(lyricLook, now) });
@@ -684,7 +798,8 @@ export class StageEngine {
     const damping = !!limiter?.damping;
     const dampingChanged = damping !== this.lastDamping;
     this.lastDamping = damping;
-    if (now - this.statsAt >= 1000 || dampingChanged) {
+    if (now - this.statsAt >= 1000 || dampingChanged || this.statsDirty) {
+      this.statsDirty = false;
       if (now - this.statsAt >= 1000) {
         this.lastFps = (this.frames * 1000) / (now - this.statsAt);
         this.frames = 0;
@@ -711,7 +826,7 @@ export class StageEngine {
           }
         : null;
       try {
-        this.onStats?.({ fps: this.lastFps, backend, width: w, height: h, quality: this.quality, scene: look.scene, sectionIndex: look.sectionIndex, safety: safetyStats });
+        this.onStats?.({ fps: this.lastFps, backend, width: w, height: h, quality: this.quality, scene: look.scene, sectionIndex: look.sectionIndex, safety: safetyStats, program: this.programStatus });
       } catch {
         /* consumer errors must not break the stage */
       }

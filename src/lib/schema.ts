@@ -308,6 +308,8 @@ export const TypeLineEditSchema = z.object({
   enter: TypeEnterIdSchema.optional(),
   exit: TypeExitIdSchema.optional(),
   color: TypeColorRoleSchema.optional(),
+  /** 重點句 (phase 7): true = one of the few lines set large, false = never; absent = the song's choice */
+  key: z.boolean().optional(),
 });
 export type TypeLineEdit = z.infer<typeof TypeLineEditSchema>;
 
@@ -358,6 +360,64 @@ export const TypeSystemSchema = TypeSystemDraftSchema.extend({
 });
 export type TypeSystem = z.infer<typeof TypeSystemSchema>;
 
+// ---------------------------------------------------------------------------
+// 專屬畫面 (phase 7): one generative GLSL program per song, written for this song (Claude, or the
+// offline composer), with per-section modes and the composition the typography is set into.
+// The program is untrusted text: src/lib/stage/program/validate.ts checks it on the server and
+// again in the browser, and the renderer wraps it in its own prelude (the uniform contract).
+// ---------------------------------------------------------------------------
+
+/** How the words meet the image in a section. */
+export const TYPE_RELATIONS = [
+  "plain", // the type sits in the negative space, nothing more
+  "knockout", // the words cut the image: over its bright shapes they turn to the background tone
+  "behind", // the words pass behind a foreground shape the program draws (gFront)
+  "lit", // the image lights the words: the letters take the scene's light
+] as const;
+export const TypeRelationSchema = z.enum(TYPE_RELATIONS);
+export type TypeRelation = z.infer<typeof TypeRelationSchema>;
+
+/** A rectangle as fractions of the canvas (x, y from the top-left; y down). */
+export const ZoneSchema = z.object({
+  x: z.number().describe("0–1 left edge (fraction of the canvas width)"),
+  y: z.number().describe("0–1 top edge (fraction of the canvas height, from the top)"),
+  w: z.number().describe("0–1 width"),
+  h: z.number().describe("0–1 height"),
+});
+export type Zone = z.infer<typeof ZoneSchema>;
+
+export const SceneProgramSectionSchema = z.object({
+  sectionId: z.string().describe("the plan section id (s0, s1, …)"),
+  mode: z.number().describe("integer 0–3: which state of the world this section shows (uMode)"),
+  params: z.array(z.number()).describe("exactly 4 numbers 0–1 (uParams.xyzw): the section's own parameters"),
+  zone: ZoneSchema.describe("where the lyrics sit in this section (the image's negative space)"),
+  relation: TypeRelationSchema,
+  note: z.string().describe("這一段畫面怎麼變、字放在哪裡（繁體中文，一句）"),
+});
+export type SceneProgramSection = z.infer<typeof SceneProgramSectionSchema>;
+
+export const SCENE_PROGRAM_ENGINES = ["claude", "offline", "example", "manual"] as const;
+
+export const SceneProgramSchema = z.object({
+  version: z.literal(1),
+  engine: z.enum(SCENE_PROGRAM_ENGINES),
+  model: z.string().optional(),
+  title: z.string(),
+  concept: z.string(),
+  /** the GLSL function body (helpers + `vec3 scene(vec2 fc)`), wrapped in the renderer's prelude */
+  source: z.string(),
+  sections: z.array(SceneProgramSectionSchema),
+  /** song time of the key still (主視覺), seconds; null = the first chorus */
+  keyMoment: z.number().nullable().optional(),
+  /** false = the operator switched back to the built-in scenes (the program is kept) */
+  enabled: z.boolean(),
+  createdAt: z.string().optional(),
+  instruction: z.string().optional(),
+  /** the offline composer's choices (form × texture × composition × motion), for the UI */
+  recipe: z.string().optional(),
+});
+export type SceneProgram = z.infer<typeof SceneProgramSchema>;
+
 export const DesignPlanSchema = z.object({
   version: z.literal(1),
   keyVisual: KeyVisualSchema,
@@ -369,6 +429,8 @@ export const DesignPlanSchema = z.object({
     .describe("整體設計說明：敘事弧線、歌詞與動畫如何搭配、現場注意事項（繁體中文 Markdown，150–400 字）"),
   /** 字體藝術 (phase 6); absent / null on older plans (they keep the legacy lyric styles) */
   typeSystem: TypeSystemSchema.nullable().optional(),
+  /** 專屬畫面 (phase 7); absent / null = the built-in scenes of each section */
+  sceneProgram: SceneProgramSchema.nullable().optional(),
 });
 export type DesignPlan = z.infer<typeof DesignPlanSchema>;
 
@@ -385,7 +447,7 @@ export const AUTO_LYRIC_STYLE_IDS = LYRIC_STYLE_IDS.filter((id) => id !== "karao
 export const AutoLyricStyleIdSchema = z.enum(AUTO_LYRIC_STYLE_IDS as [Exclude<LyricStyleId, "karaoke" | "subtitle">, ...Exclude<LyricStyleId, "karaoke" | "subtitle">[]]);
 
 /** The DesignPlan Claude writes: the type system for every line, no karaoke / subtitle styles. */
-export const DesignPlanDraftSchema = DesignPlanSchema.extend({
+export const DesignPlanDraftSchema = DesignPlanSchema.omit({ sceneProgram: true }).extend({
   sections: z
     .array(SectionDesignSchema.extend({ lyricStyle: AutoLyricStyleIdSchema.describe("舊版渲染器的後備樣式；有 typeSystem 時每一行都依它的構圖排版") }))
     .describe("cover the whole song from 0 to duration without gaps, in time order"),

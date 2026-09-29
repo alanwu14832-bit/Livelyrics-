@@ -107,6 +107,7 @@ function normalizeEdit(raw: unknown, text: string): TypeLineEdit | null {
   if (exit && exit !== "auto") e.exit = exit;
   const color = oneOf(o.color, TYPE_COLOR_ROLES);
   if (color && color !== "ink") e.color = color;
+  if (typeof o.key === "boolean") e.key = o.key;
   return Object.keys(e).length ? e : null;
 }
 

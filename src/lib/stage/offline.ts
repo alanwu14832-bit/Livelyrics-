@@ -17,6 +17,7 @@ import { DEFAULT_OVERRIDES, type StageState } from "./protocol";
 import { clamp, lyricLookAt, resolveLook, type StageLook } from "./resolve";
 import { lineIndexAt, sectionIndexAt } from "../timeline";
 import type { Project } from "../types";
+import { programModeKey } from "./program/model";
 
 /** The console's published state while TRACK playback passes song time t. */
 export function trackStateAt(project: Project, t: number): StageState {
@@ -102,6 +103,8 @@ export interface OfflineSceneFrame extends DirectorFrame {
   state: StageState;
   look: StageLook;
   lyricLook: StageLook;
+  /** the outgoing section's look while a transition runs (專屬畫面: its program state) */
+  previousLook?: StageLook | null;
 }
 
 function targetOf(look: StageLook): SceneTarget {
@@ -121,6 +124,7 @@ export function offlineSceneFrame(project: Project, t: number, clock: SceneClock
   const current: SceneSlot = { target: targetOf(look), clock: clock.at(t) };
   let previous: SceneSlot | null = null;
   let transition: DirectorFrame["transition"] = null;
+  let previousLook: StageLook | null = null;
   const idx = look.sectionIndex;
   const sections = project.plan?.sections ?? [];
   const kind = look.transitionIn;
@@ -130,14 +134,16 @@ export function offlineSceneFrame(project: Project, t: number, clock: SceneClock
     const elapsed = t - start;
     if (elapsed >= 0 && elapsed < duration) {
       const prevLook = resolveLook(project, { ...state, sectionIndex: idx - 1 }, t);
-      if (prevLook.lookKey !== look.lookKey || kind === "flash") {
+      const programChanged = programModeKey(project.plan, prevLook.section, prevLook.sectionIndex) !== programModeKey(project.plan, look.section, look.sectionIndex);
+      if (prevLook.lookKey !== look.lookKey || programChanged || kind === "flash") {
         const prevClock = clock.raw(start) + elapsed * clockRate(prevLook.params.speed, clock.energyAt(t));
         previous = { target: targetOf(prevLook), clock: ((prevClock % CLOCK_WRAP) + CLOCK_WRAP) % CLOCK_WRAP };
+        previousLook = prevLook;
         transition = { kind, progress: elapsed / duration };
       }
     }
   }
-  return { state, look, lyricLook, current, previous, transition };
+  return { state, look, lyricLook, current, previous, transition, previousLook };
 }
 
 /** Beat index for the shaders' uBeatN: the analysis grid (live counts beats since the page opened). */

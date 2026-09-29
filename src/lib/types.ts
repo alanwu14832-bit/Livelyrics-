@@ -32,6 +32,10 @@ export type {
   TypeSection,
   TypeSystemDraft,
   TypeSystem,
+  TypeRelation,
+  Zone,
+  SceneProgram,
+  SceneProgramSection,
 } from "./schema";
 
 // ---------------------------------------------------------------------------

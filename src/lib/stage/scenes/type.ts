@@ -41,6 +41,7 @@ export const TYPE_UNIFORMS = [
   "uPx",
   "uSoften",
   "uGain",
+  "uRelation",
 ] as const;
 
 export const TYPE_FRAGMENT = /* glsl */ `
@@ -71,6 +72,7 @@ uniform float uHalo;
 uniform float uPx;        // canvas px per output px (effect radii follow the design)
 uniform float uSoften;    // layer mode: the safety pass' soften and cap
 uniform float uGain;
+uniform float uRelation;  // 專屬畫面: 0 plain, 1 knockout, 2 behind, 3 lit (how the words meet the image)
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
@@ -150,7 +152,18 @@ void main() {
     inkR *= keep;
     inkB *= keep;
   }
-  vec3 scene = TEX(uScene, uv).rgb;
+  vec4 sceneA = TEX(uScene, uv);
+  vec3 scene = sceneA.rgb;
+  // behind: the scene program's foreground shape (1 - alpha) covers the words
+  if (uRelation > 1.5 && uRelation < 2.5) {
+    float keepF = 1.0 - smoothstep(0.1, 0.9, 1.0 - sceneA.a);
+    ink *= keepF;
+    inkR *= keepF;
+    inkB *= keepF;
+    acc *= keepF;
+    spot *= keepF;
+    halo *= keepF;
+  }
   // characters eaten by the scene: blocks of the glyphs give way where the picture is bright
   if (uEat > 0.001) {
     float blk = hash12(floor(fc / (16.0 * s)) + vec2(uSeed * 3.1, uSeed));
@@ -194,12 +207,29 @@ void main() {
   }
 
   vec3 col = scene;
+  float sl = luma(scene);
+  vec3 inkC = uInk;
+  float haloScale = 1.0;
+  if (uRelation > 0.5 && uRelation < 1.5) {
+    // knockout: where the words cross the image's bright shapes they are cut out of it (the
+    // background tone); over the dark they stay the lyric colour, so they always read
+    float cut = smoothstep(0.34, 0.58, sl);
+    inkC = mix(uInk, uFill * 0.9 + 0.02, cut);
+    haloScale = 1.0 - cut * 0.85;
+  } else if (uRelation > 2.5) {
+    // lit: the image lights the words (the letters take the hue and light of what is behind them)
+    float m = max(max(scene.r, scene.g), max(scene.b, 0.04));
+    vec3 hueC = scene / m;
+    float lightK = smoothstep(0.04, 0.45, sl);
+    inkC = mix(uInk, mix(uInk, hueC, 0.55) * (0.82 + 0.3 * lightK), 0.35 + 0.45 * lightK);
+    inkC = mix(inkC, vec3(1.0), 0.12 * lightK);
+  }
   // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
   // where the picture is bright (light type on a light scene still reads from the back of the hall)
-  float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, luma(scene))), 0.0, 0.96);
+  float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, sl)), 0.0, 0.96) * haloScale;
   col = mix(col, uFill * 0.55 + col * 0.12, halo * haloK * (1.0 - uGlow));
-  // glow: the halo turned into light (bloom entrances, 光)
-  col += uInk * halo * uGlow * 0.55;
+  // glow: the halo turned into light (bloom entrances, 光; a lit relation glows a little)
+  col += inkC * halo * (uGlow * 0.55 + (uRelation > 2.5 ? 0.16 : 0.0));
   // knockout: the frame fills with the background, the scene is seen only through the glyphs
   if (win > 0.001) {
     vec3 fill = mix(scene * 0.16, uFill, 0.9);
@@ -221,7 +251,7 @@ void main() {
   }
   col = mix(col, uAccent, acc);
   vec3 inkM = vec3(inkR, ink, inkB);
-  col = col * (1.0 - inkM) + uInk * inkM;
+  col = col * (1.0 - inkM) + inkC * inkM;
   col = mix(col, uSpot, seal);
   col += grain * max(ink, acc);
   FRAG = vec4(clamp(col, 0.0, 1.0), 1.0);

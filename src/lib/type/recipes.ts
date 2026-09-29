@@ -47,6 +47,8 @@ export interface RecipeCtx {
   body: number;
   small: number;
   giant: number;
+  /** the largest a display size may get (restrained lines: a step above the body; key lines: no cap) */
+  cap: number;
   weight: number;
   /** plate and window flag of display type (the giant / bled word) */
   displayPlate: PlateId;
@@ -471,7 +473,7 @@ function gridPoem(r: RecipeCtx): Piece[] | null {
   const across = vertical ? rows : cols;
   const down = vertical ? cols : rows;
   // a tall frame's grid is set larger (the poem is the picture there)
-  const cell = Math.max(f.minRead / 0.72, Math.min((rd.w * (f.aspect < 1 ? 0.92 : 0.66)) / across, (rd.h * 0.8) / down, r.body * lerp(1.15, 1.45, r.e) * (f.aspect < 0.8 ? 1.35 : 1)));
+  const cell = Math.max(f.minRead / 0.72, Math.min((rd.w * (f.aspect < 1 ? 0.92 : 0.66)) / across, (rd.h * 0.8) / down, r.body * lerp(1.15, 1.45, r.e) * (f.aspect < 0.8 ? 1.35 : 1), r.cap / 0.72));
   const gw = across * cell;
   const gh = down * cell;
   const x0 = sideX(r, gw);
@@ -686,7 +688,7 @@ function poster(r: RecipeCtx): Piece[] | null {
   const gap = 0.06;
   let sizes: number[] = [];
   for (let guard = 0; guard < 30; guard++) {
-    sizes = rows.map((row) => clamp(blockW / Math.max(0.5, width(row)), f.minRead * 1.1, rd.h * 0.34));
+    sizes = rows.map((row) => clamp(blockW / Math.max(0.5, width(row)), f.minRead * 1.1, Math.max(f.minRead * 1.1, Math.min(rd.h * 0.34, r.cap))));
     const h = sizes.reduce((a, s) => a + s * (1 + gap), 0);
     if (h <= rd.h * 0.8 || blockW < rd.w * 0.25) break;
     blockW *= 0.92;
@@ -810,7 +812,7 @@ function split(r: RecipeCtx): Piece[] | null {
   let blockW = rd.w * (f.aspect < 1 ? 0.9 : f.aspect > 2.4 ? 0.4 : lerp(0.46, 0.62, r.e));
   let sizes: number[] = [];
   for (let guard = 0; guard < 30; guard++) {
-    sizes = rows.map((row) => clamp(blockW / Math.max(0.5, width(row)), f.minRead * 1.1, rd.h * 0.3));
+    sizes = rows.map((row) => clamp(blockW / Math.max(0.5, width(row)), f.minRead * 1.1, Math.max(f.minRead * 1.1, Math.min(rd.h * 0.3, r.cap))));
     const h = sizes.reduce((a, sz) => a + sz * 1.04, 0);
     if (h <= rd.h * 0.74 || blockW < rd.w * 0.25) break;
     blockW *= 0.92;

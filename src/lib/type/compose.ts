@@ -11,6 +11,7 @@ import { EMPTY_BOX, glyphBox, pieceBox, unionBox, type Box, type CanvasSpec, typ
 import { motionKindOf } from "./motion-words";
 import { RECIPE_FALLBACK, RECIPE_FNS, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
 import { createRng, hash32 } from "./rng";
+import { canvasZone } from "../stage/program/model";
 import type { LineText } from "./text";
 import { VOICES, type MotionKind } from "./vocab";
 
@@ -64,6 +65,10 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   // whole song of filled frames would hide the stage); 主字色 / 點綴色 / 反白 never do
   const displayWindow = role === "window" || (role === "auto" && sys.color === "knockout" && e >= KNOCK_ENERGY);
   const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" || (role === "auto" && sys.color === "overprint") ? "accent" : "ink";
+  // restraint: most lines are small-to-medium; the few key lines keep the full display scale
+  const restrained = hint.key === false;
+  const body = Math.max(frame.minRead, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc);
+  const giantFull = ref * lerp(0.34, 0.66, c) * lerp(0.86, 1.06, e) * esc;
   return {
     lt: input.lt,
     hint,
@@ -76,9 +81,11 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
     e,
     c,
     d,
-    body: Math.max(frame.minRead, ref * lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d) * esc),
-    small: Math.max(frame.minRead, ref * lerp(0.05, 0.064, e) * esc),
-    giant: ref * lerp(0.34, 0.66, c) * lerp(0.86, 1.06, e) * esc,
+    body,
+    small: Math.max(frame.minRead, ref * (restrained ? lerp(0.046, 0.056, e) : lerp(0.05, 0.064, e)) * esc),
+    // a key line may be set huge; every other line's display word stays a step or two above the body
+    giant: restrained ? Math.min(giantFull, body * lerp(1.6, 2.3, c) * lerp(0.95, 1.08, e)) : giantFull,
+    cap: restrained ? body * 1.7 : Infinity,
     weight: sys.weight,
     displayPlate,
     displayWindow,
@@ -451,6 +458,17 @@ function autoExit(voice: TypeVoiceId, recipe: TypeRecipeId, motion: MotionKind):
 const ENTER_SECONDS: Record<Exclude<TypeEnterId, "auto">, number> = { cut: 0.05, fade: 0.55, rise: 0.75, fall: 0.8, wipe: 0.6, write: 0.9, scale: 0.4, glitch: 0.34, bloom: 0.85 };
 const EXIT_SECONDS: Record<Exclude<TypeExitId, "auto">, number> = { cut: 0.05, fade: 0.45, sink: 0.55, wipe: 0.45, dissolve: 0.85, scale: 0.32, glitch: 0.28, blur: 0.5 };
 
+/**
+ * Restraint: a line that is not one of the song's key lines never gets a display recipe that only
+ * works large (出血 runs off the frame, 鏤空窗 fills it): it becomes 巨字＋小字 at a modest scale.
+ * A recipe the editor set is kept. Hints without the flag (older callers) are left as they are.
+ */
+function restrain(hint: ResolvedHint): ResolvedHint {
+  if (hint.key !== false || hint.recipeFixed) return hint;
+  if (hint.recipe === "bleed" || hint.recipe === "window") return { ...hint, recipe: "giant-word" };
+  return hint;
+}
+
 /** A stable key for a composition input (the layout cache). */
 export function composeKey(input: Omit<ComposeInput, "measure">): string {
   const h = input.hint;
@@ -474,6 +492,8 @@ export function composeKey(input: Omit<ComposeInput, "measure">): string {
     h.exit,
     h.color,
     h.escalate ? 1 : 0,
+    h.key == null ? "" : h.key ? "k" : "n",
+    h.recipeFixed ? 1 : 0,
     h.motion ?? "",
     s.voice,
     Object.values(s.params)
@@ -493,6 +513,7 @@ export function composeKey(input: Omit<ComposeInput, "measure">): string {
     input.ctx.sectionLabel,
     input.ctx.songTitle,
     input.ctx.first ? 1 : 0,
+    input.ctx.zone ? `${input.ctx.zone.x},${input.ctx.zone.y},${input.ctx.zone.w},${input.ctx.zone.h}` : "",
   ].join("|");
 }
 
@@ -537,10 +558,13 @@ function compositionView(canvas: CanvasSpec, hint: ResolvedHint): { canvas: Canv
 /** Lay one line out (never throws; an empty line gives an empty composition). */
 export function composeLine(given: ComposeInput): Composition {
   const full = makeFrame(given.canvas, given.system.params);
-  const hint: ResolvedHint = { ...given.hint, orientation: effectiveOrientation(given.hint, given.lt.cjk, full.aspect) };
-  const view = compositionView(given.canvas, hint);
+  // 專屬畫面: the section's text zone (the image's negative space) narrows the readable area
+  const zone = given.ctx.zone ? canvasZone(given.ctx.zone, full.aspect) : null;
+  const hint0: ResolvedHint = restrain(given.hint);
+  const hint: ResolvedHint = { ...hint0, orientation: effectiveOrientation(hint0, given.lt.cjk, full.aspect) };
+  const view = zone ? null : compositionView(given.canvas, hint);
   const input: ComposeInput = { ...given, hint, canvas: view ? view.canvas : given.canvas };
-  const frame = view ? makeFrame(view.canvas, given.system.params) : full;
+  const frame = view ? makeFrame(view.canvas, given.system.params) : zone ? makeFrame(given.canvas, given.system.params, zone) : full;
   let recipe = hint.recipe;
   let pieces: Piece[] | null = null;
   const tried = new Set<TypeRecipeId>();
@@ -580,7 +604,7 @@ export function composeLine(given: ComposeInput): Composition {
   moveAll(pieces, clamp(hint.dx, -0.5, 0.5) * full.W, clamp(hint.dy, -0.5, 0.5) * full.H);
   const edited = scale !== 1 || hint.rotate !== 0 || hint.dx !== 0 || hint.dy !== 0;
   // nudged text may leave the readable band but never the canvas
-  fitInto(pieces, edited ? { x: 0, y: 0, w: full.W, h: full.H } : full.read, full.minRead);
+  fitInto(pieces, edited ? { x: 0, y: 0, w: full.W, h: full.H } : zone ? frame.read : full.read, full.minRead);
 
   const voice = input.system.voice;
   const motion: MotionKind = recipe === "whisper" && hint.motionWord === "" ? "still" : motionKindOf(hint.motionWord);
