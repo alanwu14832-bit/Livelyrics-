@@ -122,6 +122,12 @@ import { SwatchesIcon as PhSwatches } from "@phosphor-icons/react/dist/ssr/Swatc
 import { ShieldCheckIcon as PhShieldCheck } from "@phosphor-icons/react/dist/ssr/ShieldCheck";
 import { ShieldWarningIcon as PhShieldWarning } from "@phosphor-icons/react/dist/ssr/ShieldWarning";
 import { GridNineIcon as PhGridNine } from "@phosphor-icons/react/dist/ssr/GridNine";
+import { FadersIcon as PhFaders } from "@phosphor-icons/react/dist/ssr/Faders";
+import { PianoKeysIcon as PhPianoKeys } from "@phosphor-icons/react/dist/ssr/PianoKeys";
+import { PlugsConnectedIcon as PhPlugsConnected } from "@phosphor-icons/react/dist/ssr/PlugsConnected";
+import { LinkBreakIcon as PhLinkBreak } from "@phosphor-icons/react/dist/ssr/LinkBreak";
+import { LockSimpleIcon as PhLockSimple } from "@phosphor-icons/react/dist/ssr/LockSimple";
+import { WaveSquareIcon as PhWaveSquare } from "@phosphor-icons/react/dist/ssr/WaveSquare";
 import { SpinnerIcon } from "./kit-icons";
 import { CheckCircleIcon } from "./kit-icons";
 import { WarningCircleIcon } from "./kit-icons";
@@ -248,5 +254,13 @@ export const ShieldCheckIcon = /* @__PURE__ */ makeIcon(PhShieldCheck, "ShieldCh
 export const ShieldWarningIcon = /* @__PURE__ */ makeIcon(PhShieldWarning, "ShieldWarningIcon");
 export const GridNineIcon = /* @__PURE__ */ makeIcon(PhGridNine, "GridNineIcon");
 
+// sync and controllers (同步與控制器)
+export const FadersIcon = /* @__PURE__ */ makeIcon(PhFaders, "FadersIcon");
+export const PianoKeysIcon = /* @__PURE__ */ makeIcon(PhPianoKeys, "PianoKeysIcon");
+export const PlugsConnectedIcon = /* @__PURE__ */ makeIcon(PhPlugsConnected, "PlugsConnectedIcon");
+export const LinkBreakIcon = /* @__PURE__ */ makeIcon(PhLinkBreak, "LinkBreakIcon");
+export const LockSimpleIcon = /* @__PURE__ */ makeIcon(PhLockSimple, "LockSimpleIcon");
+export const WaveSquareIcon = /* @__PURE__ */ makeIcon(PhWaveSquare, "WaveSquareIcon");
+
 /** Every icon by name, for the /ui-lab gallery. */
-export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, FilmStripIcon, ImageIcon, ImagesIcon, FrameCornersIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon, UsersThreeIcon, TicketIcon, CalendarBlankIcon, DotsSixVerticalIcon, ArrowUpIcon, ArrowDownIcon, BookOpenIcon, MapPinIcon, ListNumbersIcon, SignInIcon, SignOutIcon, CoffeeIcon, HourglassIcon, ChartLineUpIcon, FlagIcon, SwatchesIcon, RepeatIcon, PushPinSimpleIcon, LifebuoyIcon, BroadcastIcon, ClockCountdownIcon, ShieldCheckIcon, ShieldWarningIcon, GridNineIcon, PrinterIcon };
+export const ALL_ICONS = { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, RewindIcon, FastForwardIcon, RecordIcon, CaretLeftIcon, CaretRightIcon, CaretDownIcon, CaretUpIcon, CaretUpDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, ArrowClockwiseIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, ArrowsMergeIcon, ArrowsLeftRightIcon, HouseIcon, BooksIcon, CheckIcon, CheckCircleIcon, WarningCircleIcon, WarningIcon, InfoIcon, XCircleIcon, XIcon, QuestionIcon, CircleIcon, CircleDashedIcon, SpinnerIcon, MusicNotesIcon, MusicNotesPlusIcon, WaveformIcon, MicrophoneIcon, MicrophoneSlashIcon, SpeakerHighIcon, SpeakerSlashIcon, MetronomeIcon, TimerIcon, ClockIcon, HandTapIcon, HandPalmIcon, ProjectorScreenIcon, MonitorIcon, MonitorPlayIcon, MoonIcon, SnowflakeIcon, EyeIcon, EyeSlashIcon, SubtitlesIcon, SubtitlesSlashIcon, SparkleIcon, PaletteIcon, FilmSlateIcon, FilmStripIcon, ImageIcon, ImagesIcon, FrameCornersIcon, CrosshairIcon, TargetIcon, CornersOutIcon, CornersInIcon, SquareHalfIcon, LightningIcon, PencilSimpleIcon, TrashIcon, ScissorsIcon, CopyIcon, PlusIcon, MinusIcon, DotsThreeIcon, MagnifyingGlassIcon, UploadSimpleIcon, DownloadSimpleIcon, ExportIcon, FileTextIcon, TextTIcon, TextAaIcon, KeyboardIcon, GearIcon, SlidersHorizontalIcon, PlugIcon, CircleHalfIcon, SunIcon, UsersThreeIcon, TicketIcon, CalendarBlankIcon, DotsSixVerticalIcon, ArrowUpIcon, ArrowDownIcon, BookOpenIcon, MapPinIcon, ListNumbersIcon, SignInIcon, SignOutIcon, CoffeeIcon, HourglassIcon, ChartLineUpIcon, FlagIcon, SwatchesIcon, RepeatIcon, PushPinSimpleIcon, LifebuoyIcon, BroadcastIcon, ClockCountdownIcon, ShieldCheckIcon, ShieldWarningIcon, GridNineIcon, PrinterIcon, FadersIcon, PianoKeysIcon, PlugsConnectedIcon, LinkBreakIcon, LockSimpleIcon, WaveSquareIcon };

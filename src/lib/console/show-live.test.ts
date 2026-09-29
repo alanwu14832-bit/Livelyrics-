@@ -130,9 +130,17 @@ describe("recovery and the session", () => {
       current: null,
       armed: null,
       takenAt: null,
-      ...DEFAULT_PREFS,
+      transition: DEFAULT_PREFS.transition,
+      autoPlay: DEFAULT_PREFS.autoPlay,
     });
-    expect(parsePrefs({ transition: "cut" })).toEqual({ transition: "cut", autoPlay: false });
+    expect(parsePrefs({ transition: "cut" })).toEqual({ transition: "cut", autoPlay: false, sync: { source: "manual", ltcDeviceId: "", freewheelSeconds: 2 }, followTimecode: false });
+  });
+
+  it("keeps the show's sync settings and 跟隨時間碼換歌 in the preferences (phase 5a)", () => {
+    const prefs = parsePrefs({ transition: "fade", sync: { source: "ltc", ltcDeviceId: "abc", freewheelSeconds: 4 }, followTimecode: true });
+    expect(prefs.sync).toEqual({ source: "ltc", ltcDeviceId: "abc", freewheelSeconds: 4 });
+    expect(prefs.followTimecode).toBe(true);
+    expect(parsePrefs({ sync: "nope", followTimecode: "yes" })).toMatchObject({ sync: { source: "manual" }, followTimecode: false });
   });
 });
 

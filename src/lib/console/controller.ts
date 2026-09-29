@@ -1101,7 +1101,7 @@ export class ConsoleController {
   // -------------------------------------------------------------------------
 
   async play(): Promise<void> {
-    if (!this.snapshot.project) return;
+    if (!this.snapshot.project || this.heldByTimecode()) return;
     if (this.settings.mode === "live") {
       this.clock.start(Date.now());
       this.afterClockChange();
@@ -1127,6 +1127,7 @@ export class ConsoleController {
   }
 
   pause(): void {
+    if (this.heldByTimecode()) return;
     if (this.settings.mode === "live") {
       this.clock.stop(Date.now());
       this.afterClockChange();
@@ -1157,7 +1158,7 @@ export class ConsoleController {
    * section ends the loop (the operator is navigating elsewhere); a hold stays.
    */
   seek(t: number): void {
-    if (!Number.isFinite(t)) return;
+    if (!Number.isFinite(t) || this.heldByTimecode()) return;
     if (this.loop != null) {
       const s = this.snapshot.project?.plan?.sections[this.loop];
       if ((!s || t < s.start - 1e-3 || t >= s.end) && this.applyLoop(null)) this.persistSession();
@@ -1227,6 +1228,16 @@ export class ConsoleController {
     const lines = linesOf(project);
     const line = lines[index];
     if (!project || !line) return;
+    if (this.following) {
+      if (this.heldByTimecode(true)) return;
+      // untimed lyrics under the timecode: the line is cued by hand, the time stays the timecode's
+      this.liveLine = index;
+      this.lastCued = index;
+      this.lineStartedAt = Date.now();
+      this.lineIndex = index;
+      this.publish();
+      return;
+    }
     if (this.loop != null && !this.loopLines().includes(index) && this.applyLoop(null)) this.persistSession();
     const now = Date.now();
     const t = line.start ?? this.clock.time(now);
@@ -1267,7 +1278,7 @@ export class ConsoleController {
 
   /** LIVE: take the lyric off the screen (the next cue continues after it). */
   clearLine(): void {
-    if (this.settings.mode !== "live" || this.liveLine == null) return;
+    if (this.settings.mode !== "live" || this.liveLine == null || this.heldByTimecode(true)) return;
     this.lastCued = this.liveLine;
     this.liveLine = null;
     this.publish();
@@ -1320,6 +1331,7 @@ export class ConsoleController {
 
   /** Enter: send the standby line and advance the standby to the following line. */
   cueSelected(): void {
+    if (this.heldByTimecode(true)) return;
     const sel = this.snapshot.selectedIndex;
     const n = linesOf(this.snapshot.project).length;
     if (sel == null || sel >= n) {
@@ -1351,7 +1363,7 @@ export class ConsoleController {
   jumpToSection(index: number): void {
     const project = this.snapshot.project;
     const section = project?.plan?.sections[index];
-    if (!project || !section) return;
+    if (!project || !section || this.heldByTimecode()) return;
     // (published once, with the jump)
     let changed = false;
     if (this.hold != null && this.hold !== index) changed = this.applyHold(null) || changed;
@@ -1386,7 +1398,7 @@ export class ConsoleController {
   /** PageDown / PageUp (and . / ,): the section after / before the one on stage. */
   stepSection(delta: 1 | -1): void {
     const plan = this.snapshot.project?.plan;
-    if (!plan || plan.sections.length === 0) return;
+    if (!plan || plan.sections.length === 0 || this.heldByTimecode()) return;
     const current = this.sectionIndex ?? sectionIndexAt(plan, this.songTime()) ?? 0;
     const target = Math.min(plan.sections.length - 1, Math.max(0, current + delta));
     if (target === current) return;
@@ -1430,6 +1442,7 @@ export class ConsoleController {
       this.setLoop(null);
       return;
     }
+    if (this.heldByTimecode()) return;
     const project = this.snapshot.project;
     const plan = project?.plan;
     if (!project || !plan || plan.sections.length === 0) return;
@@ -1647,6 +1660,203 @@ export class ConsoleController {
   }
 
   // -------------------------------------------------------------------------
+  // Timecode chase (phase 5a)
+  // -------------------------------------------------------------------------
+
+  /** The start timecode this song chases: the show's setlist, the song's own, or 01:00:00:00. */
+  private timecodeInfo(project: Project | null = this.snapshot.project): TimecodeInfo {
+    const own = project?.timecode?.start ? normalizeTcInput(project.timecode.start) : null;
+    const start = this.showStart ?? own ?? DEFAULT_START_TC;
+    return { start, from: this.showStart ? "setlist" : own ? "project" : "default", following: this.following };
+  }
+
+  /** Song time the timecode says now (before the song: negative), null without a reading. */
+  private tcSongTime(now: number): number | null {
+    const r = this.sync.timecode(now);
+    return r ? songTimeAt(r.position, this.snapshot.timecode.start, r.rate) : null;
+  }
+
+  /** The timecode drives the song clock (MTC / LTC locked, stopped at a locate, or freewheeling). */
+  isFollowingTimecode(): boolean {
+    return this.following;
+  }
+
+  /**
+   * Whether the timecode holds a kind of manual action now: "line" (next / previous / cue a line:
+   * TRACK, or LIVE with timed lyrics) or "time" (seek, sections, loop, play / pause). The console
+   * answers a held key with the HUD instead of running it.
+   */
+  timecodeHolds(kind: "line" | "time"): boolean {
+    return kind === "line" ? this.tcDrivesLines() : this.following;
+  }
+
+  /** The timecode cues the lines too (TRACK, or LIVE with timed lyrics). */
+  private tcDrivesLines(): boolean {
+    if (!this.following) return false;
+    if (this.settings.mode === "track") return true;
+    const lyrics = this.snapshot.project?.lyrics;
+    return !!lyrics && lyrics.lines.length > 0 && timedRatio(lyrics) >= 0.5;
+  }
+
+  /**
+   * Manual navigation while the timecode drives the song waits for 回到手動: true (and a notice)
+   * when it is held. `lines`: only held when the timecode also cues the lines.
+   */
+  private heldByTimecode(lines = false): boolean {
+    if (!this.following || (lines && !this.tcDrivesLines())) return false;
+    this.notify(`正在跟隨時間碼：要手動操作，請先按 ${MANUAL_KEY} 回到手動`, "info");
+    return true;
+  }
+
+  private onSyncChange(): void {
+    if (!this.attached) return;
+    this.updateFollow();
+    this.ensureTicking();
+  }
+
+  /** Start or stop following as the chase locks, freewheels and fails. */
+  private updateFollow(now: number = Date.now()): void {
+    if (!this.attached || !this.snapshot.project) return;
+    const src = this.sync.source;
+    const r = !this.silent && (src === "mtc" || src === "ltc") ? this.sync.timecode(now) : null;
+    const active = !!r && (r.status === "locked" || r.status === "freewheel" || r.status === "stopped");
+    if (active && !this.following) this.startFollowing(now);
+    else if (!active && this.following) this.stopFollowing(r?.status === "lost" ? "lost" : "manual", now);
+    if (this.following) {
+      const t = this.tcSongTime(now);
+      if (t != null) this.followT = t;
+    }
+  }
+
+  private startFollowing(now: number): void {
+    this.following = true;
+    this.sectionPin = null;
+    this.audioGraceUntil = 0;
+    const t = this.tcSongTime(now);
+    if (t != null) this.followT = t;
+    if (this.loop != null && this.applyLoop(null)) {
+      this.persistSession();
+      this.notify("循環段落已關閉：播放位置由時間碼決定", "info");
+    }
+    if (this.settings.mode === "live") this.clock.stop(now);
+    if (this.relockNotice) {
+      this.relockNotice = false;
+      this.notify("時間碼恢復，已重新鎖定", "ok");
+    }
+    this.set({ timecode: { ...this.snapshot.timecode, following: true }, liveHeld: false, playing: this.isPlaying() });
+    this.publish(now);
+  }
+
+  /**
+   * Manual takes over where the timecode left the song: LIVE keeps the line on screen (the clock
+   * runs to the next line's start and waits for a cue), TRACK keeps the audio where it is — a
+   * dropout also pauses it (no auto-advance without the timecode).
+   */
+  private stopFollowing(reason: "lost" | "manual", now: number): void {
+    const project = this.snapshot.project;
+    const t = Math.max(0, this.followT);
+    const drovelines = this.tcDrivesLines();
+    this.following = false;
+    if (project && this.settings.mode === "live") {
+      const lines = linesOf(project);
+      const d = this.duration();
+      const current = drovelines ? (project.lyrics ? lineIndexAt(project.lyrics, t, d) : null) : this.liveLine;
+      this.liveLine = current;
+      this.lastCued = current ?? this.lastCued ?? lastStartedLine(lines, t);
+      const next = nextTimedLineAfter(lines, t);
+      const hold = current != null ? liveHoldTime(lines, current, t) : next != null ? lines[next].start : null;
+      this.clock.jump(t, hold, now);
+      this.clock.start(now);
+      this.lineIndex = current;
+    } else {
+      const el = this.audio;
+      if (el) {
+        if (reason === "lost") el.pause();
+        try {
+          if (Math.abs(el.currentTime - t) > CHASE_DRIFT) el.currentTime = t;
+        } catch {
+          /* not seekable */
+        }
+      }
+    }
+    if (reason === "lost") {
+      this.relockNotice = true;
+      this.notify("時間碼中斷，已切回手動", "warn");
+    }
+    this.set({ timecode: { ...this.snapshot.timecode, following: false }, playing: this.isPlaying() });
+    this.publish(now);
+    this.ensureTicking();
+  }
+
+  /** TRACK: keep the monitor audio on the timecode (seek past 80 ms of drift, play / pause with it). */
+  private followAudio(now: number): void {
+    const el = this.audio;
+    const r = this.sync.timecode(now);
+    if (!el || !r || this.snapshot.audio.status === "error") return;
+    const t = songTimeAt(r.position, this.snapshot.timecode.start, r.rate);
+    const d = this.duration();
+    const forward = r.running && r.direction > 0 && t >= 0 && (d <= 0 || t < d);
+    if (t < 0) {
+      // pre-roll: the first frame waits
+      if (!el.paused) el.pause();
+      if (el.currentTime > 0.05 && now >= this.audioGraceUntil) {
+        el.currentTime = 0;
+        this.audioGraceUntil = now + CHASE_GRACE_MS;
+      }
+      return;
+    }
+    if (now >= this.audioGraceUntil && Math.abs(el.currentTime - t) > CHASE_DRIFT) {
+      try {
+        el.currentTime = d > 0 ? Math.min(t, d) : t;
+      } catch {
+        /* not seekable yet */
+      }
+      this.audioGraceUntil = now + CHASE_GRACE_MS;
+    }
+    if (forward && el.paused) {
+      this.ensureElementAnalyser();
+      this.audioGraceUntil = now + CHASE_GRACE_MS;
+      el.play().then(
+        () => {
+          this.playBlocked = false;
+        },
+        (err: unknown) => {
+          if (isAbort(err) || this.playBlocked) return;
+          this.playBlocked = true;
+          this.notify("瀏覽器暫時不允許播放監聽音訊：在控制台按一下任一處即可（時間碼照常驅動畫面）。", "warn");
+        },
+      );
+    } else if (!forward && !el.paused) el.pause();
+  }
+
+  /** 回到手動 (X): stop following the timecode / MIDI clock; the line on screen stays. True when it changed. */
+  backToManual(): boolean {
+    if (this.sync.source === "manual") return false;
+    // where the timecode is now, before it goes
+    this.updateFollow();
+    this.sync.setSource("manual");
+    return true;
+  }
+
+  /** This song's own start timecode (the per-song console; a show song takes the setlist's). */
+  setTimecodeStart(value: string | null): boolean {
+    const project = this.snapshot.project;
+    if (!project || this.showStart) return false;
+    const start = value == null || !value.trim() ? null : normalizeTcInput(value);
+    if (value != null && value.trim() && !start) return false;
+    const stored = start && start !== DEFAULT_START_TC ? start : null;
+    const next: Project = { ...project };
+    if (stored) next.timecode = { start: stored };
+    else delete next.timecode;
+    this.set({ project: next, timecode: this.timecodeInfo(next) });
+    this.publish();
+    api.updateProject(this.id, { timecode: stored ? { start: stored } : null }).catch((err: unknown) => {
+      this.notify(`起點時間碼沒有存成功：${errorMessage(err, "儲存失敗")}`, "error");
+    });
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
   // Overrides
   // -------------------------------------------------------------------------
 
@@ -1756,7 +1966,19 @@ export class ConsoleController {
 
   /** LED 安全模式 (phase 3): part of the output settings; the projection gets it at once. */
   updateSafety(patch: SafetyPatch): void {
+    this.ledFader.reset();
     this.updateOutput({ safety: patch });
+  }
+
+  /**
+   * A MIDI fader on 最高亮度 (0..1): the cap between 20 % and the ceiling it had when the fader
+   * took over, never above the venue's preset. Returns the new cap, null when safe mode is off.
+   */
+  setLedCapFromController(value: number): number | null {
+    const brightness = this.ledFader.brightnessFor(this.snapshot.project?.output?.safety, value);
+    if (brightness == null) return null;
+    if (Math.abs(brightness - (this.snapshot.project?.output?.safety?.brightness ?? -1)) > 0.001) this.updateOutput({ safety: { brightness } });
+    return brightness;
   }
 
   private async flushOutput(): Promise<void> {

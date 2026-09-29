@@ -15,6 +15,8 @@ import type { Project } from "@/lib/types";
 import { ControlTab } from "./ControlTab";
 import { DesignTab } from "./DesignTab";
 import { ResearchTab } from "./ResearchTab";
+import { useSyncSnapshot } from "./sync/hooks";
+import { lockView, type LockTone } from "./sync/SyncStatus";
 import { SyncTab } from "./SyncTab";
 import { Dot, Pane, useScrollEdge } from "./ui";
 
@@ -40,6 +42,14 @@ function readTab(): TabId {
   return "design";
 }
 
+/** The sync source's lock state as a dot on 同步 (nothing while manual). */
+const SYNC_DOT: Partial<Record<LockTone, { className: string; label: string }>> = {
+  green: { className: "bg-green", label: "同步（鎖定）" },
+  yellow: { className: "bg-yellow", label: "同步（自由運轉）" },
+  red: { className: "bg-red", label: "同步（中斷）" },
+  grey: { className: "bg-label-3", label: "同步（等待訊號）" },
+};
+
 /** Any override is active: a 6 px red dot on 控制 (so it is never forgotten). */
 const selectAnyOverride = (s: StageState) => {
   const o = s.overrides;
@@ -51,11 +61,14 @@ export function SidePanel({
   snap,
   project,
   onRedesign,
+  onOpenControllers,
 }: {
   controller: ConsoleController;
   snap: ConsoleSnapshot;
   project: Project;
   onRedesign: () => void;
+  /** the 控制器 sheet (MIDI learn) */
+  onOpenControllers: () => void;
 }) {
   // only rendered on the client once the project has loaded, so reading storage here is safe
   const [tab, setTab] = useState<TabId>(readTab);
@@ -63,6 +76,7 @@ export function SidePanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollTops = useRef<Record<TabId, number>>({ design: 0, research: 0, control: 0, sync: 0 });
   const anyOverride = useStageValue(controller.store, selectAnyOverride);
+  const syncDot = SYNC_DOT[lockView(useSyncSnapshot(controller.sync)).tone];
   const scrolled = useScrollEdge(panelRef, [tab]);
   const lastPointer = useRef(0);
 
@@ -106,12 +120,17 @@ export function SidePanel({
           getPanelId={(v) => `console-tabpanel-${v}`}
           options={TABS.map((t) => ({
             value: t.id,
-            ariaLabel: t.id === "control" && anyOverride ? "控制（有覆寫生效中）" : undefined,
+            ariaLabel: t.id === "control" && anyOverride ? "控制（有覆寫生效中）" : t.id === "sync" && syncDot ? syncDot.label : undefined,
             label:
               t.id === "control" && anyOverride ? (
                 <span className="inline-flex items-start gap-1">
                   {t.label}
                   <Dot className="mt-px bg-red" />
+                </span>
+              ) : t.id === "sync" && syncDot ? (
+                <span className="inline-flex items-start gap-1">
+                  {t.label}
+                  <Dot className={cx("mt-px", syncDot.className)} />
                 </span>
               ) : (
                 t.label
@@ -136,7 +155,7 @@ export function SidePanel({
         {tab === "design" && <DesignTab controller={controller} project={project} redesigning={snap.redesign.running} onRedesign={onRedesign} />}
         {tab === "research" && <ResearchTab project={project} />}
         {tab === "control" && <ControlTab controller={controller} project={project} output={snap.output} />}
-        {tab === "sync" && <SyncTab controller={controller} snap={snap} project={project} />}
+        {tab === "sync" && <SyncTab controller={controller} snap={snap} project={project} onOpenControllers={onOpenControllers} />}
       </div>
     </Pane>
   );

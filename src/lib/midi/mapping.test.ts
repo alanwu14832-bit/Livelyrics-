@@ -179,3 +179,41 @@ describe("MIDI map files", () => {
     expect(JSON.parse(JSON.stringify(cmds))).toEqual(cmds);
   });
 });
+
+describe("MIDI commands run the hotkeys' actions", () => {
+  it("maps every button to its console action", async () => {
+    const { buttonAction, commandAction } = await import("./actions");
+    const { BUTTON_TARGETS } = await import("./mapping");
+    for (const t of BUTTON_TARGETS) expect(buttonAction(t).type).toBeTruthy();
+    expect(buttonAction("scene7")).toEqual({ type: "scene", slot: 7 });
+    expect(buttonAction("sectionPrev")).toEqual({ type: "section", delta: -1 });
+    expect(buttonAction("offsetUp")).toEqual({ type: "offset", delta: 0.05 });
+    expect(buttonAction("clearLine")).toEqual({ type: "escape" });
+    expect(buttonAction("go")).toEqual({ type: "go" });
+    expect(buttonAction("manual")).toEqual({ type: "manual" });
+    expect(commandAction({ kind: "line", index: 3 })).toEqual({ type: "cueLine", index: 3 });
+    expect(commandAction({ kind: "section", index: 1 })).toEqual({ type: "jumpSection", index: 1 });
+    expect(commandAction({ kind: "value", target: "ledCap", value: 0.5 })).toEqual({ type: "control", target: "ledCap", value: 0.5 });
+  });
+});
+
+describe("continuous controls", () => {
+  it("the LED cap fader never goes above the preset it started under", async () => {
+    const { LedCapFader, intensityFromControl, lyricScaleFromControl } = await import("./controls");
+    const led = { enabled: true, preset: "led" as const, brightness: 0.7, flashLimit: true, redProtect: true, soften: 0.25 };
+    const f = new LedCapFader();
+    expect(f.brightnessFor(led, 1)).toBe(0.7);
+    expect(f.brightnessFor(led, 0)).toBe(0.2);
+    // passing 55 % (the outdoor preset's value) does not lower the ceiling
+    expect(f.brightnessFor({ ...led, preset: "outdoor", brightness: 0.55 }, 1)).toBe(0.7);
+    f.reset();
+    expect(f.brightnessFor({ ...led, preset: "outdoor", brightness: 0.55 }, 1)).toBe(0.55);
+    f.reset();
+    expect(f.brightnessFor({ ...led, preset: "custom", brightness: 0.82 }, 1)).toBe(0.8);
+    expect(f.brightnessFor({ ...led, enabled: false }, 1)).toBeNull();
+    expect(intensityFromControl(85 / 127)).toBe(1);
+    expect(intensityFromControl(1)).toBe(1.5);
+    expect(lyricScaleFromControl(0)).toBe(0.5);
+    expect(lyricScaleFromControl(1)).toBe(2);
+  });
+});

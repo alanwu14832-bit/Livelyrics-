@@ -115,6 +115,14 @@ describe("features", () => {
     expect(none.energy).toBeGreaterThan(0);
   });
 
+  it("follows the band's MIDI clock over the analysis grid, in TRACK too (phase 5a)", () => {
+    const s = initialStageState("x");
+    const track = rawFeatures(analysis, { ...s, audio: { level: 0.5, bass: 0, onset: 0, beatPhase: 0.2, clock: true } }, 7);
+    expect(track.beat).toBeCloseTo(0.2);
+    // without the flag (older consoles, the export) the grid stays
+    expect(rawFeatures(analysis, { ...s, audio: { level: 0.5, bass: 0, onset: 0, beatPhase: 0.2 } }, 7).beat).toBeCloseTo(0, 5);
+  });
+
   it("produces a beat pulse only while playing", () => {
     const m = new AudioFeatureMixer();
     const playing = { ...initialStageState("x"), playing: true };

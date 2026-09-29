@@ -50,6 +50,11 @@ describe("sanitizeStageState", () => {
     expect(s.audio).toEqual({ level: 1, bass: 0, onset: 0, beatPhase: 0 });
   });
 
+  it("keeps the MIDI clock flag of the beat only when it is exactly true (phase 5a)", () => {
+    expect(sanitizeStageState({ projectId: "p1", audio: { beatPhase: 0.4, clock: true } })!.audio).toEqual({ level: 0, bass: 0, onset: 0, beatPhase: 0.4, clock: true });
+    expect(sanitizeStageState({ projectId: "p1", audio: { beatPhase: 0.4, clock: "yes" } })!.audio.clock).toBeUndefined();
+  });
+
   it("only marks a hold when it is exactly true (older consoles never send it)", () => {
     expect(sanitizeStageState({ projectId: "p1" })!.sectionHeld).toBeUndefined();
     expect(sanitizeStageState({ projectId: "p1", sectionHeld: "true" })!.sectionHeld).toBeUndefined();

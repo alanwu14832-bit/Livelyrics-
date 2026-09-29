@@ -10,10 +10,17 @@
 // the toggles (sessionStorage, show-live.ts); the song itself restores its overrides, position
 // and hold / loop through session.ts, a look its overrides.
 //
+// Sync (phase 5a): one SyncEngine for the whole show (MIDI controllers, MIDI clock, MTC, LTC), handed
+// to every song it takes with the song's start timecode from the setlist; 「跟隨時間碼換歌」 takes the
+// song whose hour the timecode enters (never re-takes a song the operator left, looks stay manual).
+//
 // Framework-agnostic: React binds through subscribe()/getSnapshot().
 
 import { api } from "@/lib/api-client";
 import { lookToProject } from "@/lib/show";
+import { setlistSlots, slotAt, slotStart } from "@/lib/sync/chase";
+import { SyncEngine } from "@/lib/sync/engine";
+import type { SyncSettings } from "@/lib/sync/settings";
 import { DEFAULT_TAKE_TRANSITION, showChannelName, type StageTransition } from "@/lib/stage/protocol";
 import type { Band, LookItemKind, OutputSafety, Project, ProjectSummary, SetItem, Show } from "@/lib/types";
 import { ConsoleController, type LoadState } from "./controller";
@@ -67,6 +74,8 @@ export interface ShowLiveSnapshot {
   otherConsole: boolean;
   /** GO was pressed again too soon after a take */
   goLockedUntil: number;
+  /** 「跟隨時間碼換歌」 (phase 5a) */
+  followTimecode: boolean;
 }
 
 const TAKE_TRANSITIONS: Record<TakeTransition, StageTransition> = {
@@ -76,6 +85,8 @@ const TAKE_TRANSITIONS: Record<TakeTransition, StageTransition> = {
 
 /** How long to wait for a song taken without its project yet before 「GO 後自動播放」 gives up. */
 const AUTOPLAY_WAIT_MS = 15000;
+/** 跟隨時間碼換歌: how often the timecode is checked against the setlist (ms) */
+const FOLLOW_CHECK_MS = 100;
 
 export class ShowLiveController {
   readonly showId: string;
@@ -95,12 +106,18 @@ export class ShowLiveController {
   private autoplaySub: (() => void) | null = null;
   private autoplayTimer: ReturnType<typeof setTimeout> | null = null;
   private seq = 0;
+  /** MIDI, MTC, MIDI clock and LTC of the whole show (every song on air uses it) */
+  readonly sync: SyncEngine;
+  private followTimer: ReturnType<typeof setInterval> | null = null;
+  /** 跟隨時間碼換歌: the setlist item the timecode was last in (undefined: no reading yet) */
+  private lastSlot: string | null | undefined = undefined;
 
   constructor(showId: string) {
     this.showId = showId;
     this.channel = showChannelName(showId);
     this.consoleId = randomId();
     this.outputTarget = { url: `/s/${encodeURIComponent(showId)}/output`, name: `livelyrics-output-show-${showId}` };
+    this.sync = new SyncEngine();
     this.idle = new ProjectionLink(this.consoleId, {
       onHello: () => {
         if (this.idlePreload) this.idle.post({ type: "preload", project: this.idlePreload });
@@ -122,6 +139,7 @@ export class ShowLiveController {
       output: DISCONNECTED,
       otherConsole: false,
       goLockedUntil: 0,
+      followTimecode: false,
     };
   }
 
@@ -153,7 +171,10 @@ export class ShowLiveController {
     if (this.attached || typeof window === "undefined") return;
     this.attached = true;
     const prefs = loadPrefs(this.showId);
-    this.set({ transition: prefs.transition, autoPlay: prefs.autoPlay });
+    this.set({ transition: prefs.transition, autoPlay: prefs.autoPlay, followTimecode: prefs.followTimecode });
+    this.sync.configure(prefs.sync, (sync) => this.saveSyncPrefs(sync));
+    this.sync.attach();
+    this.followTimer = setInterval(() => this.checkTimecode(), FOLLOW_CHECK_MS);
     this.openIdle();
     if (this.snapshot.show) this.start(this.snapshot.show, this.snapshot.band, null);
     else void this.load();
@@ -171,6 +192,9 @@ export class ShowLiveController {
     const { onAir, next } = this.snapshot;
     next?.controller.detach();
     onAir?.controller.detach();
+    if (this.followTimer) clearInterval(this.followTimer);
+    this.followTimer = null;
+    this.sync.detach();
     this.closeIdle();
     this.set({ onAir: null, next: null, nextReady: false });
   }
@@ -251,7 +275,8 @@ export class ShowLiveController {
 
   private createControl(item: SetItem, opts: { resume: boolean; takenAt?: number | null }): ItemControl {
     if (item.kind === "song") {
-      const controller = new ConsoleController(item.projectId, { channel: null, consoleId: this.consoleId, output: this.outputTarget, resume: opts.resume });
+      const timecodeStart = slotStart(this.snapshot.show?.items ?? [], item.id);
+      const controller = new ConsoleController(item.projectId, { channel: null, consoleId: this.consoleId, output: this.outputTarget, resume: opts.resume, sync: this.sync, timecodeStart });
       controller.attach();
       return { kind: "song", itemId: item.id, seq: ++this.seq, controller };
     }
@@ -414,15 +439,53 @@ export class ShowLiveController {
   setTransition(transition: TakeTransition): void {
     if (transition === this.snapshot.transition) return;
     this.set({ transition });
-    savePrefs(this.showId, { transition, autoPlay: this.snapshot.autoPlay });
+    this.savePrefsNow();
     this.saveSession();
   }
 
   setAutoPlay(autoPlay: boolean): void {
     if (autoPlay === this.snapshot.autoPlay) return;
     this.set({ autoPlay });
-    savePrefs(this.showId, { transition: this.snapshot.transition, autoPlay });
+    this.savePrefsNow();
     this.saveSession();
+  }
+
+  private savePrefsNow(sync: SyncSettings = this.sync.settings): void {
+    savePrefs(this.showId, { transition: this.snapshot.transition, autoPlay: this.snapshot.autoPlay, sync, followTimecode: this.snapshot.followTimecode });
+  }
+
+  private saveSyncPrefs(sync: SyncSettings): void {
+    this.savePrefsNow(sync);
+  }
+
+  /** 「跟隨時間碼換歌」: take the song whose hour the timecode enters. */
+  setFollowTimecode(on: boolean): void {
+    if (on === this.snapshot.followTimecode) return;
+    this.lastSlot = undefined;
+    this.set({ followTimecode: on });
+    this.savePrefsNow();
+    if (on) this.checkTimecode();
+  }
+
+  /**
+   * 跟隨時間碼換歌: when the locked, running timecode enters a song's range (its hour, or up to the
+   * next song's start) and that song is not on air, take it with the show's take transition.
+   * Edge-triggered: a song the operator took off air stays off until the timecode enters another
+   * song, or stops and comes back. Looks are never taken this way.
+   */
+  private checkTimecode(now: number = Date.now()): void {
+    const show = this.snapshot.show;
+    if (!this.attached || !show || !this.snapshot.followTimecode) return;
+    const r = this.sync.timecode(now);
+    if (!r || r.status !== "locked" || !r.running || r.direction < 0) {
+      if (!r || r.status === "lost" || r.status === "waiting") this.lastSlot = undefined;
+      return;
+    }
+    const slot = slotAt(r.position, setlistSlots(show.items), r.rate);
+    const id = slot?.itemId ?? null;
+    if (id === this.lastSlot) return;
+    this.lastSlot = id;
+    if (id && id !== this.snapshot.live.current) this.takeItem(id, { now });
   }
 
   /** 「開啟投影視窗」 / O: the show's projection window (one for the whole show). */

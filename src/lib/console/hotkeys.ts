@@ -34,6 +34,17 @@ export type HotkeyAction =
   /** X: 回到手動 — stop following the timecode / MIDI clock (phase 5a) */
   | { type: "manual" };
 
+/**
+ * Everything a console view runs: its hotkeys, plus what only a controller can send (phase 5a):
+ * the test pattern, a lyric line or a section by number (the MIDI presets), and a continuous value.
+ */
+export type ConsoleAction =
+  | HotkeyAction
+  | { type: "testPattern" }
+  | { type: "cueLine"; index: number }
+  | { type: "jumpSection"; index: number }
+  | { type: "control"; target: "intensity" | "lyricScale" | "ledCap"; value: number };
+
 export interface KeyLike {
   key: string;
   code: string;
@@ -43,6 +54,9 @@ export interface KeyLike {
   altKey: boolean;
   repeat?: boolean;
 }
+
+/** 回到手動 (phase 5a): the key named in notices and the help sheet */
+export const MANUAL_KEY = "X";
 
 export const OFFSET_STEP = 0.05;
 export const OFFSET_FINE_STEP = 0.01;

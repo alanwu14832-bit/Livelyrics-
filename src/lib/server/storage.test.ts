@@ -114,6 +114,19 @@ describe("projects", () => {
     expect(await deleteProject(created.id)).toBe(false);
   });
 
+  it("keeps a start timecode and repairs a bad one (phase 5a)", async () => {
+    const p = await createProject({ meta, analysis: null, audio: { tempPath: await upload(), ext: "wav" } });
+    expect(p.timecode).toBeUndefined();
+    await updateProject(p.id, (d) => {
+      d.timecode = { start: "02:00:00:00" };
+    });
+    expect((await getProject(p.id))!.timecode).toEqual({ start: "02:00:00:00" });
+    await updateProject(p.id, (d) => {
+      (d as unknown as { timecode: unknown }).timecode = { start: "99:00" };
+    });
+    expect((await getProject(p.id))!.timecode).toBeUndefined();
+  });
+
   it("does not recreate a deleted project on save / update", async () => {
     const p = await createProject({ meta, analysis: null, audio: { tempPath: await upload(), ext: "wav" } });
     await deleteProject(p.id);

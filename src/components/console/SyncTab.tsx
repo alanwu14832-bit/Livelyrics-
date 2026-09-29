@@ -1,8 +1,9 @@
 "use client";
 
-// 同步: playback mode, lyric offset (a Stepper: ±0.05 s, Shift 0.01 s, auto-repeat), tempo (the
-// analysis and a big tap-tempo tile), live audio input (a Switch row, device, 3 px meters with no
-// track), monitoring (mute, volume, rate) and the projection window.
+// 同步: the sync source (phase 5a: 手動 / MIDI clock / MTC / LTC, the lock tile, 回到手動) and the MIDI
+// input with the 控制器 sheet, playback mode, lyric offset (a Stepper: ±0.05 s, Shift 0.01 s,
+// auto-repeat), tempo (the analysis and a big tap-tempo tile), live audio input (a Switch row,
+// device, 3 px meters with no track), monitoring (mute, volume, rate) and the projection window.
 
 import { memo, useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import { Button, Kbd, SegmentedControl, Slider, Spinner, Stepper, Switch, Tag, Tooltip, cx } from "@/components/ui";
@@ -12,6 +13,7 @@ import { formatBpm, formatOffsetSeconds } from "@/lib/console/format";
 import { OFFSET_FINE_STEP, OFFSET_STEP } from "@/lib/console/hotkeys";
 import { OFFSET_LIMIT, PLAYBACK_RATES } from "@/lib/console/settings";
 import type { Project } from "@/lib/types";
+import { MidiSection, SyncSourceSection } from "./sync/SyncPanel";
 import { Footnote, Group, GroupTitle, PopupSelect } from "./ui";
 import { useRafLoop } from "./useRaf";
 
@@ -73,7 +75,7 @@ function Row({ children, className }: { children: ReactNode; className?: string 
   );
 }
 
-function SyncTabImpl({ controller, snap, project }: { controller: ConsoleController; snap: ConsoleSnapshot; project: Project }) {
+function SyncTabImpl({ controller, snap, project, onOpenControllers }: { controller: ConsoleController; snap: ConsoleSnapshot; project: Project; onOpenControllers: () => void }) {
   const live = snap.mode === "live";
   const analysis = project.analysis;
   const mic = snap.mic;
@@ -89,6 +91,9 @@ function SyncTabImpl({ controller, snap, project }: { controller: ConsoleControl
 
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
+      <SyncSourceSection engine={controller.sync} song={{ controller, snap }} onManual={() => controller.backToManual()} />
+      <MidiSection engine={controller.sync} onOpenControllers={onOpenControllers} />
+
       <section aria-labelledby="sync-mode">
         <GroupTitle id="sync-mode" actions={<Kbd>M</Kbd>}>
           模式
