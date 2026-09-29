@@ -8,9 +8,20 @@
 // Framework-agnostic: React binds to it through subscribe()/getSnapshot() (low-frequency
 // UI state) and `store` (per-frame stage state). attach()/detach() are symmetric and
 // repeatable, so React StrictMode's mount → unmount → mount is safe.
+//
+// Sync (phase 5a): `sync` (a SyncEngine: MIDI, MTC, MIDI clock, LTC) can drive the same clock. With
+// MTC or LTC locked the timecode is the song clock (`following`): TRACK keeps its audio element on
+// it (a seek beyond 80 ms of drift, play while it runs, pause when it stops), LIVE takes the lyric
+// and section time straight from it. Manual navigation then waits for 回到手動 (X). A dropout
+// freewheels (the chase keeps time), then falls back to manual on the line that was showing. A
+// locked MIDI clock (節拍模式) gives the beat phase before the microphone and tap tempo.
 
 import { stageAssets } from "@/lib/asset-scope";
 import { api } from "@/lib/api-client";
+import { LedCapFader } from "@/lib/midi/controls";
+import { songTimeAt } from "@/lib/sync/chase";
+import { SyncEngine } from "@/lib/sync/engine";
+import { DEFAULT_START_TC, normalizeTcInput } from "@/lib/sync/timecode";
 import { createMediaElementAnalyser, createMicAnalyser, listAudioInputs, resumeAudioContext, type AudioInputDevice, type LiveAnalyser } from "@/lib/audio/live";
 import {
   DEFAULT_OVERRIDES,
@@ -28,6 +39,7 @@ import {
 } from "@/lib/stage/protocol";
 import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
 import { patchOutput, type OutputPatch } from "@/lib/output";
+import { MANUAL_KEY } from "./hotkeys";
 import type { SafetyPatch } from "@/lib/stage/safety";
 import type { Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
@@ -140,6 +152,17 @@ export interface ConsoleSnapshot {
   notices: Notice[];
   /** waveform computed in the browser when the project has no stored analysis peaks (null = loading, [] = unavailable) */
   fallbackPeaks: number[] | null;
+  /** 時間碼 (phase 5a): where this song starts on the timecode, and whether the timecode drives it now */
+  timecode: TimecodeInfo;
+}
+
+export interface TimecodeInfo {
+  /** HH:MM:SS:FF */
+  start: string;
+  /** setlist: the show's item (read-only here); project: the song's own; default: 01:00:00:00 */
+  from: "setlist" | "project" | "default";
+  /** MTC / LTC is locked (or freewheeling): the song clock follows it */
+  following: boolean;
 }
 
 /** How a console drives the projection. The per-song console (/p/[id]) uses the defaults. */
@@ -159,9 +182,20 @@ export interface ConsoleControllerOptions {
    * the show console carries a blackout across takes itself.
    */
   resume?: boolean;
+  /**
+   * The show console's sync engine (shared by every song it takes; the show owns its lifecycle).
+   * Without it the controller makes its own and keeps its settings with this song's.
+   */
+  sync?: SyncEngine;
+  /** The start timecode the show's setlist gives this song (else the song's own, else 01:00:00:00). */
+  timecodeStart?: string | null;
 }
 
 const TICK_MS = 33;
+/** TRACK chase: the audio element is sought when it drifts further than this from the timecode */
+const CHASE_DRIFT = 0.08;
+/** after a seek or a play() the element gets this long before its drift counts again (ms) */
+const CHASE_GRACE_MS = 300;
 /** LIVE loop: the clock parks this far before the looped section's end (it never shows the next section) */
 const LOOP_HOLD_MARGIN = 0.05;
 const SAVE_DEBOUNCE_MS = 700;
@@ -285,6 +319,22 @@ export class ConsoleController {
   /** false while the UI's toast stack owns notice lifetimes (it pauses on hover, focus and a hidden tab) */
   private noticeAutoDismiss = true;
 
+  // sync (phase 5a)
+  /** MIDI, MTC, MIDI clock and LTC for this console (owned, or the show's) */
+  readonly sync: SyncEngine;
+  private readonly ownsSync: boolean;
+  private readonly showStart: string | null;
+  private syncUnsub: (() => void) | null = null;
+  /** the timecode drives the song clock */
+  private following = false;
+  /** song time of the timecode at the last look (where manual takes over) */
+  private followT = 0;
+  private audioGraceUntil = 0;
+  /** a dropout fell back to manual: the next lock says the timecode is back */
+  private relockNotice = false;
+  private playBlocked = false;
+  private readonly ledFader = new LedCapFader();
+
   constructor(id: string, opts: ConsoleControllerOptions = {}) {
     this.id = id;
     this.store = createStageStore(initialStageState(id));
@@ -293,6 +343,10 @@ export class ConsoleController {
     this.channelTarget = opts.channel === undefined ? channelName(id) : opts.channel;
     this.resume = opts.resume ?? true;
     this.outputTarget = opts.output ?? { url: `/p/${encodeURIComponent(id)}/output`, name: `livelyrics-output-${id}` };
+    this.ownsSync = !opts.sync;
+    this.sync = opts.sync ?? new SyncEngine();
+    const showStart = opts.timecodeStart ? normalizeTcInput(opts.timecodeStart) : null;
+    this.showStart = showStart;
     this.link = new ProjectionLink(this.consoleId, {
       onHello: () => {
         this.broadcastProject(true);
@@ -324,6 +378,7 @@ export class ConsoleController {
       redesign: { running: false, instruction: "", log: [], text: "", error: null, finishedAt: null },
       notices: [],
       fallbackPeaks: null,
+      timecode: { start: showStart ?? DEFAULT_START_TC, from: showStart ? "setlist" : "default", following: false },
     };
   }
 
@@ -369,6 +424,12 @@ export class ConsoleController {
       mic: { ...this.snapshot.mic, deviceId: this.settings.micDeviceId },
     });
     this.restoreSession();
+    if (this.ownsSync) {
+      // this song's own sync settings (the show console hands in its engine, set up by the show)
+      this.sync.configure(this.settings.sync, (sync) => this.updateSettings({ sync }));
+      this.sync.attach();
+    }
+    this.syncUnsub = this.sync.subscribe(() => this.onSyncChange());
     if (this.channelTarget) this.openLink(this.channelTarget);
     this.heartbeatTimer = setInterval(() => this.heartbeat(), HEARTBEAT_MS);
     this.listenWindow();
@@ -396,6 +457,10 @@ export class ConsoleController {
     this.projectBroadcastTimer = null;
     this.windowCleanup?.();
     this.windowCleanup = null;
+    this.syncUnsub?.();
+    this.syncUnsub = null;
+    this.following = false;
+    if (this.ownsSync) this.sync.detach();
     this.releaseMic();
     this.releaseAudio();
     this.link.close();
@@ -431,15 +496,19 @@ export class ConsoleController {
       this.link.close();
       this.channelTarget = null;
       this.pendingTransition = null;
+      // a song off air never follows the timecode (its audio would play unseen)
+      if (this.following) this.stopFollowing("manual", Date.now());
       return;
     }
     this.channelTarget = channel;
     this.pendingTransition = opts.transition ?? null;
     if (!this.attached) return;
     this.openLink(channel);
+    this.updateFollow();
     this.broadcastProject(true);
     this.publish();
     if (this.preloadProject) this.link.post({ type: "preload", project: this.preloadProject });
+    this.ensureTicking();
   }
 
   /** Show mode: announce the armed item so the output warms its fonts and media (null: none). */
@@ -523,7 +592,7 @@ export class ConsoleController {
     // an output edit still waiting to be saved wins over the server's copy
     if (this.pendingOutput && current) next = { ...next, output: current.output };
     const first = !current;
-    this.set({ project: next });
+    this.set({ project: next, timecode: this.timecodeInfo(next) });
     this.clock.setLimit(this.duration());
     this.set({ duration: this.duration() });
     if (first) {
@@ -562,6 +631,7 @@ export class ConsoleController {
     this.seedTempo();
     this.clock.setLimit(this.duration());
     this.set({ duration: this.duration() });
+    this.updateFollow();
     this.broadcastProject(true);
     this.publish();
     this.ensureTicking();
@@ -758,6 +828,10 @@ export class ConsoleController {
   }
 
   private isPlaying(): boolean {
+    if (this.following) {
+      const r = this.sync.timecode();
+      return !!r && r.running && r.direction > 0;
+    }
     if (this.settings.mode === "live") return this.clock.isRunning;
     const el = this.audio;
     return !!el && !el.paused && !el.ended;
@@ -775,6 +849,14 @@ export class ConsoleController {
 
   /** Current song time (offset applied in TRACK mode). */
   songTime(now = Date.now()): number {
+    if (this.following) {
+      const tc = this.tcSongTime(now);
+      if (tc != null) {
+        const d = this.duration();
+        const t = this.settings.mode === "live" ? tc : tc + this.settings.offset;
+        return Math.max(0, d > 0 ? Math.min(t, d) : t);
+      }
+    }
     if (this.settings.mode === "live") return this.clock.time(now);
     const el = this.audio;
     const audioT = el && el.readyState > 0 && Number.isFinite(el.currentTime) ? el.currentTime : this.resumeAt;
@@ -785,8 +867,13 @@ export class ConsoleController {
     const project = this.snapshot.project;
     if (!project) return;
     let line: number | null;
-    if (this.settings.mode === "live") line = this.liveLine;
+    if (this.settings.mode === "live" && !this.tcDrivesLines()) line = this.liveLine;
     else line = project.lyrics ? lineIndexAt(project.lyrics, t, this.duration()) : null;
+    if (this.settings.mode === "live" && this.tcDrivesLines()) {
+      // the timecode cues the lines: manual takes over from the one on screen
+      this.liveLine = line;
+      if (line != null) this.lastCued = line;
+    }
     if (line !== this.lineIndex) {
       this.lineIndex = line;
       this.lineStartedAt = now;
@@ -814,12 +901,25 @@ export class ConsoleController {
     if (sel !== this.snapshot.selectedIndex) this.set({ selectedIndex: sel });
   }
 
+  /** 節拍模式: the MIDI clock's beat phase when it is the source, locked and running. */
+  private clockPhase(): number | null {
+    if (this.sync.source !== "clock") return null;
+    const b = this.sync.beat();
+    return b.locked && b.running && b.phase != null ? b.phase : null;
+  }
+
   private sampleAudio(t: number, playing: boolean): LiveAudioFeatures {
     const analysis = this.snapshot.project?.analysis ?? null;
     const nowSec = performance.now() / 1000;
+    // a locked MIDI clock (the band's tempo) wins over the microphone and tap tempo
+    const clock = this.clockPhase();
     if (this.settings.mode === "live") {
       // the mic analyser follows taps itself (and phase-locks them to detected onsets)
-      if (this.micAnalyser) return this.micAnalyser.getFeatures();
+      if (this.micAnalyser) {
+        const f = this.micAnalyser.getFeatures();
+        return clock != null ? { ...f, beatPhase: clock, clock: true } : f;
+      }
+      if (clock != null) return { ...NO_AUDIO, beatPhase: clock, clock: true };
       const tapped = this.tapClock.phase(nowSec);
       if (tapped != null) return { ...NO_AUDIO, beatPhase: tapped };
       return { ...NO_AUDIO, beatPhase: playing && analysis ? beatPhaseAt(analysis, t) : 1 };
@@ -827,6 +927,7 @@ export class ConsoleController {
     if (!playing) return NO_AUDIO;
     const hasGrid = !!analysis && ((analysis.beats?.length ?? 0) > 1 || analysis.bpm > 0);
     const f = this.elementAnalyser?.getFeatures() ?? NO_AUDIO;
+    if (clock != null) return { ...f, beatPhase: clock, clock: true };
     return { ...f, beatPhase: hasGrid ? beatPhaseAt(analysis, t) : f.beatPhase };
   }
 
@@ -838,7 +939,8 @@ export class ConsoleController {
     this.computeIndices(t, now);
     const el = this.audio;
     const buffering = this.settings.mode === "track" && !!el && !el.paused && el.readyState < 3;
-    const playing = this.isPlaying() && !buffering;
+    // the timecode keeps time while the monitor audio buffers
+    const playing = this.following ? this.isPlaying() : this.isPlaying() && !buffering;
     const state: StageState = {
       projectId: this.id,
       mode: this.settings.mode,
@@ -854,7 +956,7 @@ export class ConsoleController {
     };
     this.store.set(state);
     this.post({ type: "state", state });
-    if (this.settings.mode === "live") {
+    if (this.settings.mode === "live" && !this.following) {
       const held = this.clock.isHeld(now);
       if (held !== this.snapshot.liveHeld) this.set({ liveHeld: held });
     } else if (this.snapshot.liveHeld) this.set({ liveHeld: false });
@@ -862,7 +964,8 @@ export class ConsoleController {
 
   private needsTicking(): boolean {
     if (!this.attached || !this.snapshot.project) return false;
-    if (this.settings.mode === "live") return this.clock.isRunning || this.micAnalyser != null || this.tapClock.bpm != null;
+    if (this.following) return true;
+    if (this.settings.mode === "live") return this.clock.isRunning || this.micAnalyser != null || this.tapClock.bpm != null || this.clockPhase() != null;
     return this.isPlaying();
   }
 
@@ -879,8 +982,11 @@ export class ConsoleController {
 
   private tick(): void {
     try {
+      const now = Date.now();
+      this.updateFollow(now);
+      if (this.following && this.settings.mode === "track") this.followAudio(now);
       this.loopTrack();
-      this.publish();
+      this.publish(now);
       const playing = this.isPlaying();
       if (playing !== this.snapshot.playing) this.set({ playing });
     } catch (err) {
@@ -891,7 +997,7 @@ export class ConsoleController {
 
   /** TRACK 循環段落: playback that reaches the end of the looped section goes back to its start. */
   private loopTrack(): void {
-    if (this.loop == null || this.settings.mode !== "track" || !this.isPlaying()) return;
+    if (this.loop == null || this.following || this.settings.mode !== "track" || !this.isPlaying()) return;
     const section = this.snapshot.project?.plan?.sections[this.loop];
     const target = loopSeekTarget(section, this.songTime());
     if (target != null) this.seekTo(target + 0.001);

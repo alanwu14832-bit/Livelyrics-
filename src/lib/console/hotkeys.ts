@@ -2,7 +2,7 @@
 // keyboard-event-like object to an action. Physical key codes are used for letters and
 // digits so the shortcuts keep working while a Chinese IME (注音/倉頡) is active.
 // GO and standby only do something in the show console (/s/[id]/live); the per-song console
-// ignores them.
+// ignores them. X (回到手動, phase 5a) drops the timecode / MIDI clock sync back to manual.
 
 export type HotkeyAction =
   | { type: "togglePlay" }
@@ -30,7 +30,9 @@ export type HotkeyAction =
   /** G: take the armed item (show console) */
   | { type: "go" }
   /** S: take the standby look (show console) */
-  | { type: "standby" };
+  | { type: "standby" }
+  /** X: 回到手動 — stop following the timecode / MIDI clock (phase 5a) */
+  | { type: "manual" };
 
 export interface KeyLike {
   key: string;
@@ -107,6 +109,8 @@ export function hotkeyAction(e: KeyLike): HotkeyAction | null {
       return { type: "go" };
     case "KeyS":
       return { type: "standby" };
+    case "KeyX":
+      return { type: "manual" };
     case "PageDown":
     case "Period":
       return { type: "section", delta: 1 };
@@ -205,6 +209,7 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
       { keys: ["["], label: "偏移 −0.05 秒（Shift：−0.01）" },
       { keys: ["]"], label: "偏移 +0.05 秒（Shift：+0.01）" },
       { keys: ["T"], label: "Tap tempo（跟著拍子連按）" },
+      { keys: ["X"], label: "回到手動：停止跟隨時間碼或 MIDI clock" },
       { keys: ["?"], label: "顯示／隱藏快捷鍵說明" },
     ],
   },

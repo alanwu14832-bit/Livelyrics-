@@ -13,7 +13,7 @@ function memoryStorage() {
 describe("console settings", () => {
   it("round-trips through storage", () => {
     const store = memoryStorage();
-    const s = { ...defaultSettings(), mode: "live" as const, offset: 0.25, volume: 0.5, muted: true, micDeviceId: "abc", playbackRate: 0.75 };
+    const s = { ...defaultSettings(), mode: "live" as const, offset: 0.25, volume: 0.5, muted: true, micDeviceId: "abc", playbackRate: 0.75, sync: { source: "ltc" as const, ltcDeviceId: "dev1", freewheelSeconds: 3.5 } };
     saveSettings("p1", s, store);
     expect(store.map.has(settingsKey("p1"))).toBe(true);
     expect(loadSettings("p1", defaultSettings(), store)).toEqual(s);
@@ -30,6 +30,15 @@ describe("console settings", () => {
       ...d,
       volume: 1,
     });
+  });
+
+  it("keeps the sync settings per song, repaired", () => {
+    const d = defaultSettings();
+    expect(d.sync).toEqual({ source: "manual", ltcDeviceId: "", freewheelSeconds: 2 });
+    expect(parseSettings(JSON.stringify({ sync: { source: "mtc", freewheelSeconds: 99, ltcDeviceId: 5 } }), d).sync).toEqual({ source: "mtc", ltcDeviceId: "", freewheelSeconds: 10 });
+    expect(parseSettings(JSON.stringify({ sync: { source: "osc" } }), d).sync.source).toBe("manual");
+    // older settings without sync: manual
+    expect(parseSettings(JSON.stringify({ offset: 0.1 }), d).sync.source).toBe("manual");
   });
 
   it("clamps offsets and snaps them to milliseconds", () => {

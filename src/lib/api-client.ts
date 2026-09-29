@@ -29,6 +29,7 @@ import type {
   ShowSummary,
   SongArcDirective,
   SongMeta,
+  SongTimecode,
 } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
@@ -186,6 +187,8 @@ export const api = {
       output: OutputPatch;
       /** assign to a band (null = no band) */
       bandId: string | null;
+      /** phase 5a: the song's start timecode (null = the default 01:00:00:00) */
+      timecode: SongTimecode | null;
     }>,
   ) =>
     fetch(`/api/projects/${id}`, {

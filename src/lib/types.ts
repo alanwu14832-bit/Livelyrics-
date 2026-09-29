@@ -445,6 +445,14 @@ export interface Project {
   directionsJob?: JobState;
   /** who made the current plan (the design step, 用 claude.ai 研究, 採用這個方向); absent on older projects */
   planSource?: PlanSource;
+  /** 時間碼 (phase 5a): where the song starts on the playback rig's timecode; absent = 01:00:00:00 */
+  timecode?: SongTimecode;
+}
+
+/** A song's place on the playback rig's timecode (phase 5a, one song per hour by default). */
+export interface SongTimecode {
+  /** HH:MM:SS:FF, e.g. 01:00:00:00 */
+  start: string;
 }
 
 export type ProcessStepId = "lyrics" | "research" | "design";
@@ -583,7 +591,17 @@ export interface SetLook {
 }
 
 export type SetItem =
-  | { id: string; kind: "song"; projectId: string; note?: string }
+  | {
+      id: string;
+      kind: "song";
+      projectId: string;
+      note?: string;
+      /**
+       * 時間碼 (phase 5a): where this song starts on the playback rig's timecode, HH:MM:SS:FF. Absent =
+       * its position among the songs (song n at n:00:00:00, one song per hour).
+       */
+      timecode?: string;
+    }
   | { id: string; kind: LookItemKind; title: string; look: SetLook; note?: string };
 
 export type ArcRole = "opener" | "build" | "peak" | "breather" | "finale" | "encore";

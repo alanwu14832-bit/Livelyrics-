@@ -56,6 +56,11 @@ export interface LiveAudioFeatures {
   onset: number;
   /** 0..1 position inside the current beat (0 = on the beat) */
   beatPhase: number;
+  /**
+   * 節拍模式 (phase 5a): beatPhase comes from the band's MIDI clock, so the renderer follows it even
+   * in TRACK mode instead of the analysis beat grid. Optional (older consoles never send it).
+   */
+  clock?: boolean;
 }
 
 export interface StageState {
@@ -228,7 +233,7 @@ export function sanitizeStageState(raw: unknown, projectId?: string, now: number
     lineStartedAt: finite(raw.lineStartedAt) ? raw.lineStartedAt : now,
     sectionIndex: index(raw.sectionIndex),
     overrides: sanitizeOverrides(raw.overrides),
-    audio: { level: unit(audio.level, 0), bass: unit(audio.bass, 0), onset: unit(audio.onset, 0), beatPhase: unit(audio.beatPhase, 0) },
+    audio: { level: unit(audio.level, 0), bass: unit(audio.bass, 0), onset: unit(audio.onset, 0), beatPhase: unit(audio.beatPhase, 0), ...(audio.clock === true ? { clock: true } : {}) },
   };
   if (raw.sectionHeld === true) state.sectionHeld = true;
   return state;

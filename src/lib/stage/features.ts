@@ -73,7 +73,8 @@ export function rawFeatures(analysis: AudioAnalysis | null, state: StageState, t
     bass: Math.max(a.bass, lv.bass * 0.85),
     onset: Math.max(a.onset, lv.onset * 0.85),
     brightness: a.brightness,
-    beat: hasGrid ? beatPhaseAt(analysis, t) : lv.beat,
+    // the band's MIDI clock (節拍模式) wins over the analysis beat grid
+    beat: hasGrid && live?.clock !== true ? beatPhaseAt(analysis, t) : lv.beat,
   };
 }
 
