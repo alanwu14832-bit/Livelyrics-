@@ -253,7 +253,7 @@ export function ProcessClient({
       execute({ steps: retryFrom(recorded), lyricsText: readLyricsHandoff(id) ?? undefined, instruction: recorded.instruction, free: recorded.free });
       return;
     }
-    if (project.research && !project.plan) execute({ steps: ["design"] });
+    if (project.research && !project.plan) execute({ steps: ["design", "scene"] });
     else execute({ lyricsText: readLyricsHandoff(id) ?? undefined });
   };
   const rerunAll = () => execute({ lyricsText: lastRequest?.lyricsText ?? readLyricsHandoff(id) ?? undefined, free: lastRequest?.free });
@@ -507,7 +507,14 @@ export function ProcessClient({
 
           {!hasDirections && directions}
 
-          {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} reveal={showDone} />}
+          {showSummary && (
+            <KeyVisualSummary
+              key={`${project.updatedAt}-${plan.keyVisual.title}`}
+              project={project}
+              reveal={showDone}
+              scene={{ disabled: running, offline, onRegenerate: (instruction) => execute({ steps: ["scene"], instruction: instruction || undefined }), onProject: setProject }}
+            />
+          )}
 
           {!running && (
             <AssetLibrary

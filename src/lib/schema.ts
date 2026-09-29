@@ -330,6 +330,9 @@ export const TypeSectionSchema = z.object({
   scale: z.number().nullable().optional(),
   /** motion intensity 0–1 */
   motion: z.number().nullable().optional(),
+  /** 專屬畫面 (phase 7): the editor moved this section's text zone / changed how the words meet the image */
+  zone: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).nullable().optional(),
+  relation: z.enum(["plain", "knockout", "behind", "lit"]).nullable().optional(),
 });
 export type TypeSection = z.infer<typeof TypeSectionSchema>;
 

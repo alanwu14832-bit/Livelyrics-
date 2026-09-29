@@ -20,6 +20,7 @@ import { formatTimeShort } from "@/lib/timeline";
 import type { DesignPlan, Project, SectionDesign } from "@/lib/types";
 import { CUE_KIND_LABEL, LYRIC_STYLE_LABEL, PLACEMENT_LABEL, SCENE_LABEL, SECTION_KIND_LABEL } from "./labels";
 import { SectionPreview } from "./SectionPreview";
+import { SceneProgramPanel, type SceneProgramActions } from "./SceneProgramPanel";
 
 function isHex(v: string | undefined): v is string {
   return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
@@ -65,7 +66,7 @@ function revealAt(on: boolean, i: number): { className?: string; style?: CSSProp
   };
 }
 
-export function KeyVisualSummary({ project, reveal = false }: { project: Project; reveal?: boolean }) {
+export function KeyVisualSummary({ project, reveal = false, scene }: { project: Project; reveal?: boolean; scene?: SceneProgramActions }) {
   const plan = project.plan;
   const [selected, setSelected] = useState(() => (plan ? featuredSection(plan) : 0));
   const duration = useMemo(() => {
@@ -113,6 +114,10 @@ export function KeyVisualSummary({ project, reveal = false }: { project: Project
           </Reveal>
         )}
       </div>
+
+      <Reveal {...next()}>
+        <SceneProgramPanel project={project} actions={scene} />
+      </Reveal>
 
       {palette.length > 0 && (
         <Reveal {...next()}>

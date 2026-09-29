@@ -89,7 +89,7 @@ function PreviewPanelImpl({
     (s: StageStats) => {
       // LED 安全模式: the limiter's state for the control tab and the capsule
       publishLimiter(projectId, s.safety);
-      setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) ? prev : s));
+      setStats((prev) => (prev && prev.backend === s.backend && Math.round(prev.fps) === Math.round(s.fps) && prev.program?.state === s.program?.state ? prev : s));
     },
     [projectId],
   );
@@ -150,6 +150,14 @@ function PreviewPanelImpl({
               {stats && (
                 <FrameLabel className={cx("t-latin", (stats.backend === "lost" || stats.backend === "fallback") && "text-orange-text")}>
                   {BACKEND_LABELS[stats.backend]} {Math.round(stats.fps)} fps
+                </FrameLabel>
+              )}
+              {/* 專屬畫面: the program failed or ran over budget here; the built-in scenes are on */}
+              {(stats?.program?.state === "failed" || stats?.program?.state === "slow") && (
+                <FrameLabel className="text-orange-text">
+                  <span data-program-notice={stats.program.state} title={stats.program.log}>
+                    {stats.program.state === "failed" ? "專屬畫面無法編譯，已改用內建場景" : "專屬畫面太耗效能，已改用內建場景"}
+                  </span>
                 </FrameLabel>
               )}
               {limiter.damping && (

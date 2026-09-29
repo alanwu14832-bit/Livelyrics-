@@ -6,7 +6,7 @@ import type { ProgramDraw } from "../gl/renderer";
 import type { StageLook } from "../resolve";
 import type { Project } from "../../types";
 import { RELATION_CODE, SECTION_KIND_CODE } from "./contract";
-import { activeProgram, canvasZone, programCode, programSection } from "./model";
+import { activeProgram, canvasZone, planSection, programCode } from "./model";
 
 export interface ProgramFrameInput {
   project: Project;
@@ -43,7 +43,7 @@ export function programFrame(f: ProgramFrameInput): ProgramDraw | null {
   const code = programCode(program);
   if (!code || f.disabled?.has(code.key)) return null;
   const color = f.color ?? parseHex;
-  const s = programSection(program, f.look.section, f.look.sectionIndex);
+  const s = planSection(plan, program, f.look.section, f.look.sectionIndex);
   const duration = f.project.meta?.duration || f.project.analysis?.duration || plan.sections[plan.sections.length - 1]?.end || 1;
   const sec = f.look.section;
   const progress = sec ? clamp01((f.t - sec.start) / Math.max(0.001, sec.end - sec.start)) : clamp01(f.t / duration);

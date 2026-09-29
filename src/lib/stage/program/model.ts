@@ -146,6 +146,17 @@ export function programSection(program: SceneProgram, section: Pick<SectionDesig
   };
 }
 
+/**
+ * The section's state with the 排版 editor's composition override (typeSystem.sections[].zone /
+ * .relation: the operator moved the text zone or changed how the words meet the image).
+ */
+export function planSection(plan: DesignPlan | null | undefined, program: SceneProgram, section: Pick<SectionDesign, "id" | "kind"> | null | undefined, index: number | null): ProgramSectionState {
+  const s = programSection(program, section, index);
+  const ov = section ? plan?.typeSystem?.sections?.find((x) => x?.sectionId === section.id) : undefined;
+  if (!ov) return s;
+  return { ...s, ...(ov.zone ? { zone: normalizeZone(ov.zone) } : {}), ...(ov.relation ? { relation: relationOf(ov.relation) } : {}) };
+}
+
 /** A section's program state as a key ("" without an active program): two sections with the same key look alike. */
 export function programModeKey(plan: DesignPlan | null | undefined, section: Pick<SectionDesign, "id" | "kind"> | null | undefined, index: number | null): string {
   const program = activeProgram(plan);
@@ -174,7 +185,7 @@ export function sectionComposition(plan: DesignPlan | null | undefined, index: n
   if (!program || index == null) return null;
   const section = plan?.sections?.[index];
   if (!section) return null;
-  const s = programSection(program, section, index);
+  const s = planSection(plan, program, section, index);
   return { zone: canvasZone(s.zone, aspect), relation: s.relation };
 }
 

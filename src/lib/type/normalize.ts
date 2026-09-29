@@ -22,6 +22,8 @@ import {
 import type { LyricLine, SectionDesign, TypeLine, TypeParams, TypeSystem, TypeVoiceId } from "../types";
 import { sequenceTypeLines, type SequenceInput } from "./sequence";
 import { VOICES } from "./vocab";
+import { TYPE_RELATIONS } from "../schema";
+import { normalizeZone } from "../stage/program/model";
 
 type Obj = Record<string, unknown>;
 const asObj = (x: unknown): Obj | null => (x !== null && typeof x === "object" && !Array.isArray(x) ? (x as Obj) : null);
@@ -228,6 +230,10 @@ export function normalizeTypeSystem(raw: unknown, c: TypeNormalizeContext): Type
       if (scale != null && scale !== 1) out.scale = r2(clamp(scale, 0.6, 1.6));
       const motion = num(s.motion);
       if (motion != null) out.motion = r2(clamp(motion, 0, 1));
+      const zone = asObj(s.zone);
+      if (zone) out.zone = normalizeZone(zone);
+      const relation = oneOf(s.relation, TYPE_RELATIONS);
+      if (relation) out.relation = relation;
       if (Object.keys(out).length > 1) sections.push(out);
     }
     if (sections.length) system.sections = sections;

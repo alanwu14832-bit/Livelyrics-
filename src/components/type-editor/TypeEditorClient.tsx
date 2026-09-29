@@ -12,6 +12,7 @@
 // open console adopts it and the projection shows it at once. A console's own edits (and a
 // re-design) arrive as `project` messages and are taken in when nothing here is unsaved.
 
+import { sectionComposition } from "@/lib/stage/program/model";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppHeader, Banner, Button, EmptyState, Menu, MenuItem, SegmentedControl, Sheet, Skeleton, ToastStack, Tooltip, useToasts } from "@/components/ui";
@@ -529,7 +530,10 @@ function TypeEditor({ initialProject }: { initialProject: Project }) {
     ) : (
       <EmptyState icon={TextAaIcon} title="這首歌沒有歌詞" description="在歌詞編輯器加入歌詞後，每一句都會排成一張構圖。" />
     );
-  const sectionPanel = <SectionPanel sections={plan.sections} selected={sectionId} onSelect={setSectionId} override={sectionOverride} onChange={onSection} />;
+  const sectionIndex = sectionId ? plan.sections.findIndex((s) => s.id === sectionId) : -1;
+  // 專屬畫面: the section's text zone and relation (the program's, with this editor's override)
+  const composition = system && sectionIndex >= 0 ? sectionComposition({ ...plan, typeSystem: system }, sectionIndex) : null;
+  const sectionPanel = <SectionPanel sections={plan.sections} selected={sectionId} onSelect={setSectionId} override={sectionOverride} onChange={onSection} composition={composition} />;
   const songPanel = <SongPanel system={system} actions={songActions} />;
 
   return (
