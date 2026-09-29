@@ -63,7 +63,7 @@ export const PROGRAM_SLOW_SECONDS = 5;
 export const PROGRAM_SLOW_DT = 1 / 18;
 /** …then the built-in scene draws for this long; the program is switched off only if that is clearly faster */
 export const PROGRAM_PROBE_MS = 2500;
-export const PROGRAM_SLOW_GAIN = 0.66;
+export const PROGRAM_SLOW_GAIN = 0.5;
 /** a probe that cleared the program waits this long before the next one */
 export const PROGRAM_PROBE_COOLDOWN_MS = 30_000;
 
@@ -596,7 +596,8 @@ export class StageEngine {
         if (builtIn < probe.programDt * PROGRAM_SLOW_GAIN) {
           // the built-in scene is clearly faster: the program is over budget here
           this.programOff.set(code.key, { state: "slow" });
-          console.warn(`[Livelyrics] 專屬畫面「${program.title}」太耗效能，已改用內建場景。`);
+          // a handled fallback (the operator sees it on the preview): informational
+          console.info(`[Livelyrics] 專屬畫面「${program.title}」太耗效能，已改用內建場景。`);
           this.quality = 1;
           this.sizeDirty = true;
           this.setProgramStatus({ state: "slow", title: program.title });
