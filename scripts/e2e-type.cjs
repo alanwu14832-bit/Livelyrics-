@@ -272,6 +272,7 @@ const notBlank = (page, selector) =>
     const blank = await notBlank(exp, "img[data-export-preview]");
     const b = await previewAt(t);
     check("export frame is not blank", blank.ok, JSON.stringify(blank));
+    // Same frame twice: byte-identical (the ornament glyphs are preloaded, so no first frame falls back)
     check("export frame is deterministic (same frame twice)", a === b, `${a.length} / ${b.length} bytes`);
     await shot(exp, "type-07-export-preview");
     await exp.close();

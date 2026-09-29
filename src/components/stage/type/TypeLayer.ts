@@ -19,6 +19,7 @@ import { resolveLineDesign, type StageLook } from "@/lib/stage/resolve";
 import { transformHex, type ActiveSafety } from "@/lib/stage/safety";
 import { lineSpan } from "@/lib/timeline";
 import { compositionUniforms, mergeUniforms, type TypeClock } from "@/lib/type/animate";
+import { ORNAMENT_CHARS } from "@/lib/type/compose";
 import type { CanvasSpec, Composition } from "@/lib/type/model";
 import { composeProjectLine } from "@/lib/type/prepare";
 import { hasTypeSystem, resolveSystem } from "@/lib/type/resolve";
@@ -242,7 +243,7 @@ export class TypeLayer {
     const sys = resolveSystem(project.plan.typeSystem);
     const chars = new Set<string>();
     for (const l of project.lyrics?.lines ?? []) for (const ch of `${l.text ?? ""}${l.translation ?? ""}`) chars.add(ch);
-    for (const ch of `${project.plan.typeSystem.seal ?? ""}${project.meta?.title ?? ""}0123456789`) chars.add(ch);
+    for (const ch of `${project.plan.typeSystem.seal ?? ""}${project.meta?.title ?? ""}${ORNAMENT_CHARS}`) chars.add(ch);
     chars.delete(" ");
     const ok = await loadFaces(this.families, [...new Set([sys.weight, Math.max(500, sys.weight - 100), Math.max(500, sys.weight - 200), 700])], [...chars].join(""), 20000);
     this.fontToken++;

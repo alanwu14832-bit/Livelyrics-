@@ -39,6 +39,14 @@ const SECTION_LATIN: Record<string, string> = {
   interlude: "INTERLUDE",
 };
 
+/**
+ * Every character an ornament may draw besides the sung text: section labels, brackets, rules,
+ * numbers, Latin. Fonts are loaded for these too, so a first frame never falls back for one.
+ */
+export const ORNAMENT_CHARS = [
+  ...new Set(`${Object.values(SECTION_LATIN).join("")}「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
+].join("");
+
 /** The knockout treatment opens the display word of lines at least this strong (choruses, peaks). */
 const KNOCK_ENERGY = 0.6;
 
