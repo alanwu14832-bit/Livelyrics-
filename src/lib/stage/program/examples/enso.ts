@@ -57,7 +57,9 @@ vec3 scene(vec2 fc) {
   float zr = 0.5 * max((uZone.z - uZone.x) * aspect(), uZone.w - uZone.y);
   float r = mix(aspect() < 0.8 ? 0.3 : 0.26, zr * 1.05, closeUp);
   // the stroke is written across the section (the first beats land the brush)
-  float sweep = min(uParams.x, 0.08 + 0.92 * smoothstep(0.0, 0.7, uSectionProgress)) * 0.97;
+  // (the chorus lands the brush hard: a third of the circle on the first beats)
+  float start = mix(0.08, 0.35, closeUp);
+  float sweep = min(uParams.x, start + (1.0 - start) * smoothstep(0.0, 0.7, uSectionProgress)) * 0.97;
 
   // night paper: a dark warm ground with fibre
   vec3 paper = uBg * (0.9 + 0.1 * vnoise(fc * 0.02)) + vec3(0.01, 0.008, 0.004);

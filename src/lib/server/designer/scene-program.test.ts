@@ -76,7 +76,7 @@ describe("offline designer: songs differ structurally", () => {
   });
 
   it("the form follows the song: post-rock stands pillars, punk prints bars, folk lays strata", () => {
-    const byId = Object.fromEntries(SONG_FIXTURES.map((f, i) => [f.id, sceneForms(analyzeFindings(fixtureInput(f)))[0]]));
+    const byId = Object.fromEntries(SONG_FIXTURES.map((f) => [f.id, sceneForms(analyzeFindings(fixtureInput(f)))[0]]));
     expect(byId["last-light"]).toBe("pillars");
     expect(byId["static-youth"]).toBe("bars");
     expect(byId.tide).toBe("strata");
