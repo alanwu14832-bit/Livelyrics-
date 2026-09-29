@@ -404,6 +404,12 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
   }
 }
 
+/** A Latin name inside Chinese text gets a space on its Latin side(s): 「說 Livelyrics Band 是」. */
+function latinPad(name: string): string {
+  const head = /^[A-Za-z0-9]/.test(name) ? ` ${name}` : name;
+  return /[A-Za-z0-9.]$/.test(name) ? `${head} ` : head;
+}
+
 function sectionLabel(kind: SectionKind, n: number, total: number): string {
   const base = SECTION_KIND_LABELS[kind];
   if (total <= 1) return base;
@@ -664,7 +670,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const imageryText = imagery.length ? `歌詞裡的${imagery.map((h) => `「${h.imagery.name}」`).join("")}` : "音樂本身的能量起伏";
   const artist = findings.info?.musicbrainz?.artist;
   const factText = findings.genre
-    ? `公開資料說${input.meta?.artist?.trim() || "這個樂團"}是${artist?.country === "TW" ? "臺灣的" : ""}${findings.genre.label}${artist?.type === "Group" ? "樂團" : ""}，所以沿用${findings.genre.label}的視覺語法：${findings.genre.palette.note}。`
+    ? `公開資料說${latinPad(input.meta?.artist?.trim() || "這個樂團")}是${artist?.country === "TW" ? "臺灣的" : ""}${findings.genre.label}${artist?.type === "Group" ? "樂團" : ""}，所以沿用${findings.genre.label}的視覺語法：${findings.genre.palette.note}。`
     : "";
   const concept = [
     `這首${tempoText}的歌，在舞台上是「${title}」——${hints.world}`,

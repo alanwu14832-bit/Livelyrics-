@@ -142,6 +142,20 @@ describe("cloud pipeline (one step per request)", () => {
     expect(designerMock.researchSong.mock.calls[0][2]).toEqual({ timeoutMs: CLOUD_DESIGNER_BUDGET_MS });
   });
 
+  it("a free run is recorded, so its later steps skip the Claude API too", async () => {
+    designerMock.researchSong.mockResolvedValue(research);
+    designerMock.designSong.mockResolvedValue(plan());
+    const p = await newProject();
+    const run = { id: "run-free", steps: ["research", "design"] as Array<"lyrics" | "research" | "design"> };
+    await step(p.id, "research", run, { free: true });
+    expect((await getProject(p.id))!.pipeline).toMatchObject({ runId: "run-free", free: true });
+    // the next step's request does not repeat the option: the recorded run keeps it
+    await step(p.id, "design", run);
+    expect(designerMock.researchSong.mock.calls[0][2]).toEqual({ timeoutMs: CLOUD_DESIGNER_BUDGET_MS, configured: false });
+    expect(designerMock.designSong.mock.calls[0][2]).toEqual({ timeoutMs: CLOUD_DESIGNER_BUDGET_MS, configured: false });
+    expect((await getProject(p.id))!.status).toBe("ready");
+  });
+
   it("refuses a second request while a step runs, or while another run is in progress", async () => {
     let release!: () => void;
     designerMock.researchSong.mockImplementation(() => new Promise<Research>((resolve) => (release = () => resolve(research))));

@@ -20,6 +20,10 @@ import { cite, fakeTransport, fallbackBlock, message, refusalDetails, search, se
 import { demoInput } from "./testing/fixtures";
 
 const input = demoInput();
+/** the free research's sources are unreachable in these tests */
+const noNetwork = async (): Promise<Response> => {
+  throw new TypeError("fetch failed");
+};
 const BRIEF =
   "## 樂團視覺識別\n- 招牌色是深藍與燈火橘。\n\n## 歌曲意象與情緒\n- 夜晚的城市、燈火。\n\n## 現場表演觀察\n- 副歌大合唱。\n\n## 設計方向建議\n- 以燈火為母題。\n\n## 參考來源\n- [Live](https://band.example/live)";
 
@@ -142,11 +146,11 @@ describe("researchSong with Claude", () => {
     expect(research.brief).toContain("簡報未完成");
   });
 
-  it("falls back to offline research on refusal, discarding the partial output", async () => {
+  it("falls back to the free research on refusal, discarding the partial output", async () => {
     const t = fakeTransport([message([text("部分內容")], "refusal", { stop_details: refusalDetails("cyber") })]);
     const r = recorder();
-    const research = await researchSong(input, r.cb, { transport: t, configured: true });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { transport: t, configured: true, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(research.brief).not.toContain("部分內容");
     expect(r.logs.join("\n")).toContain("婉拒");
     expect(r.deltas.join("")).toContain("---");
@@ -155,10 +159,10 @@ describe("researchSong with Claude", () => {
   it("falls back on API errors and never throws", async () => {
     const t = fakeTransport([new Anthropic.RateLimitError(429, { type: "error" }, "rate limited", new Headers())]);
     const r = recorder();
-    const research = await researchSong(input, r.cb, { transport: t, configured: true });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { transport: t, configured: true, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(research.brief).toContain("429");
-    expect(r.logs.join("\n")).toContain("改用離線研究");
+    expect(r.logs.join("\n")).toContain("改用免費研究");
   });
 
   it("reports server-side fallbacks", async () => {
@@ -169,11 +173,12 @@ describe("researchSong with Claude", () => {
     expect(r.logs.join("\n")).toContain("claude-opus-4-8 接手");
   });
 
-  it("uses the offline designer without a credential", async () => {
+  it("uses the free research without a credential", async () => {
     const r = recorder();
-    const research = await researchSong(input, r.cb, { configured: false });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { configured: false, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(r.logs[0]).toContain("ANTHROPIC_API_KEY");
+    expect(r.deltas.join("")).toContain("查詢 MusicBrainz");
     expect(r.deltas.join("")).toContain("## 樂團視覺識別");
   });
 

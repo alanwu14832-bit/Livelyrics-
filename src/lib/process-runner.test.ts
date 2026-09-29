@@ -80,6 +80,15 @@ describe("runStepwise", () => {
     expect(deps.requests).toEqual([{ steps: ["design"], run: { id: "run-new", steps: ["design"] }, arc }]);
   });
 
+  it("carries the free option (no Claude API) on every step", async () => {
+    const deps = fakeDeps({});
+    await runStepwise("p1", { steps: ["research", "design"], free: true }, () => {}, undefined, deps);
+    expect(deps.requests).toEqual([
+      { steps: ["research"], run: { id: "run-new", steps: ["research", "design"] }, free: true },
+      { steps: ["design"], run: { id: "run-new", steps: ["research", "design"] }, free: true },
+    ]);
+  });
+
   it("stops at a failed step", async () => {
     const deps = fakeDeps({
       async stream(body, emit) {

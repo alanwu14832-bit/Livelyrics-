@@ -1,0 +1,319 @@
+// End-to-end check of 免費研究 and 用 claude.ai 研究 (manual Claude mode) against a running server
+// without an API key. The public sources are this script's own stub (the real MusicBrainz and
+// Wikipedia responses saved in fixtures/research/), so start the server pointing at it:
+//
+//   LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e \
+//   LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
+//   LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' npx next start -p 3100
+//   BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
+//
+//   1. The sources unreachable (the stub is not listening yet): the pipeline still finishes with a
+//      free research brief built from the lyrics and the audio.
+//   2. The sources stubbed: 〈大風吹〉 by 草東沒有派對 (uploaded through the page, so the audio is
+//      analysed): the stream shows 查詢 MusicBrainz… / 讀取維基百科… / 分析歌詞意象…, the brief names the
+//      album and the genre and cites the pages; the requests carry the Livelyrics User-Agent.
+//   3. 用 claude.ai 研究: copy the prompt (clipboard), paste a good reply wrapped in prose → the plan is
+//      applied and shows in the console; paste a broken reply → the error and 複製修正提示詞; the
+//      JSON-only fix applies and keeps the brief. 用 claude.ai 提案 builds the directions prompt.
+// Screenshots: the process page with the free brief (light, dark), the unreachable brief, the sheet
+// (copy, paste, error light and dark, success), the console with the pasted plan.
+const { chromium } = (() => {
+  for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
+    try {
+      return require(id);
+    } catch {
+      /* try the next location */
+    }
+  }
+  throw new Error("找不到 Playwright：請先執行 npm i --no-save playwright 與 npx playwright install chromium");
+})();
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+
+const BASE = process.env.BASE || "http://localhost:3100";
+const STUB_PORT = Number(process.env.STUB_PORT || 3199);
+const REPO = path.resolve(__dirname, "..");
+const SHOTS = process.env.SHOTS || path.join(REPO, ".e2e-shots");
+fs.mkdirSync(SHOTS, { recursive: true });
+const WAV = fs.readFileSync(path.join(REPO, "fixtures/demo-song.wav"));
+const LRC = fs.readFileSync(path.join(REPO, "fixtures/demo-lyrics.lrc"), "utf8");
+const FIX = path.join(REPO, "fixtures/research");
+const USER_AGENT = "Livelyrics/0.1 (contact: https://github.com/alanwu14832-bit/Livelyrics-)";
+
+const problems = [];
+const results = [];
+function check(name, ok, detail = "") {
+  results.push({ name, ok, detail });
+  console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
+}
+function watch(page, label) {
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning") problems.push(`[${label}] console.${m.type()}: ${m.text()}`);
+  });
+  page.on("pageerror", (e) => problems.push(`[${label}] pageerror: ${e.message}`));
+  page.on("response", (r) => {
+    // the broken paste answers 422 on purpose
+    if (r.status() >= 400 && !(r.status() === 422 && /\/manual$/.test(r.url()))) problems.push(`[${label}] HTTP ${r.status()} ${r.url()}`);
+  });
+}
+const shot = (page, name, opts = {}) => page.screenshot({ path: path.join(SHOTS, `${name}.png`), caret: "initial", ...opts });
+
+async function api(method, url, body) {
+  const res = await fetch(BASE + url, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(`${method} ${url}: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// the stub: MusicBrainz and Wikipedia from the saved responses
+// ---------------------------------------------------------------------------
+
+const stubRequests = [];
+function stubHandler(req, res) {
+  const url = new URL(req.url, `http://127.0.0.1:${STUB_PORT}`);
+  stubRequests.push({ path: `${url.pathname}${url.search}`, ua: req.headers["user-agent"] || "", lang: req.headers["accept-language"] || "" });
+  const send = (file) => {
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(fs.readFileSync(path.join(FIX, file)));
+  };
+  const p = url.pathname;
+  if (p === "/musicbrainz/ws/2/recording") return send("musicbrainz-recording-caodong.json");
+  if (p.startsWith("/musicbrainz/ws/2/artist/1636f82a")) return send("musicbrainz-artist-caodong.json");
+  if (p === "/musicbrainz/ws/2/artist") return send("musicbrainz-artist-search-empty.json");
+  if (p === "/wikipedia/zh/w/rest.php/v1/search/page") return send("wikipedia-zh-search-caodong.json");
+  if (p.startsWith("/wikipedia/zh/api/rest_v1/page/summary/")) {
+    const title = decodeURIComponent(p.split("/").pop() || "");
+    if (title === "草東沒有派對") return send("wikipedia-zh-summary-caodong.json");
+    if (title === "大風吹_(歌曲)") return send("wikipedia-zh-summary-song-caodong.json");
+  }
+  if (p.startsWith("/wikipedia/en/w/rest.php/v1/search/page")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end('{"pages":[]}');
+  }
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end('{"title":"Not found."}');
+}
+
+function startStub() {
+  const server = http.createServer(stubHandler);
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(STUB_PORT, "127.0.0.1", () => resolve(server));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// replies a user pastes back from claude.ai
+// ---------------------------------------------------------------------------
+
+const BRIEF = [
+  "我先搜尋了草東沒有派對與〈大風吹〉的資料。",
+  "",
+  "## 樂團視覺識別",
+  "- 臺北的獨立搖滾樂團，首張專輯《醜奴兒》以黑白、粗糙的影像與手寫字著稱（[維基百科](https://zh.wikipedia.org/wiki/%E8%8D%89%E6%9D%B1%E6%B2%92%E6%9C%89%E6%B4%BE%E5%B0%8D)）。",
+  "## 歌曲意象與情緒",
+  "- 〈大風吹〉：遊戲的名字變成對世代焦慮的吶喊，副歌是全場一起喊的口號（推測）。",
+  "## 現場表演觀察",
+  "- 現場的副歌是大合唱，樂迷會一起喊；安靜段落後的爆發是重點（[MusicBrainz](https://musicbrainz.org/artist/1636f82a-b541-4867-9eb7-e4b224552eef)）。",
+  "## 設計方向建議",
+  "- 黑白為底、一道刺眼的紅；副歌用巨字，安靜段落收成全黑。",
+  "## 參考來源",
+  "- [草東沒有派對 - 維基百科](https://zh.wikipedia.org/wiki/%E8%8D%89%E6%9D%B1%E6%B2%92%E6%9C%89%E6%B4%BE%E5%B0%8D)",
+].join("\n");
+
+function planReply(plan, title) {
+  const p = JSON.parse(JSON.stringify(plan));
+  p.keyVisual.title = title;
+  p.keyVisual.concept = "大風吹過空蕩的城市：黑白的畫面裡只留一道紅，副歌讓全場的吶喊變成巨字。";
+  return JSON.stringify(p, null, 2);
+}
+
+// ---------------------------------------------------------------------------
+
+async function waitForDone(page) {
+  await page.getByRole("status").filter({ hasText: "設計完成" }).first().waitFor({ timeout: 120000 });
+}
+
+async function openResearchPanel(page) {
+  const panel = page.locator('section[aria-label="研究簡報"]');
+  await panel.waitFor({ timeout: 30000 });
+  const summary = panel.locator("summary").first();
+  const open = await panel.locator("details").first().evaluate((d) => d.open).catch(() => false);
+  if (!open) await summary.click();
+  await page.waitForTimeout(700);
+  return panel;
+}
+
+async function clipboard(page) {
+  return page.evaluate(() => navigator.clipboard.readText());
+}
+
+(async () => {
+  const status = await api("GET", "/api/status");
+  check("server runs without an API key (免費研究模式)", status.claude === false, `claude=${status.claude}`);
+
+  const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: "light" });
+  context.setDefaultNavigationTimeout(90000);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(BASE).origin });
+  const page = await context.newPage();
+  watch(page, "process");
+  let stub = null;
+  try {
+    // ----------------------------------------------- 1. sources unreachable
+    const form = new FormData();
+    form.set("audio", new Blob([WAV], { type: "audio/wav" }), "demo-song.wav");
+    form.set("meta", JSON.stringify({ title: "連不上的歌", artist: "沒人知道的樂團", duration: 73 }));
+    form.set("analysis", "null");
+    const created = await fetch(`${BASE}/api/projects`, { method: "POST", body: form }).then((r) => r.json());
+    const run = await fetch(`${BASE}/api/projects/${created.id}/process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lyricsText: LRC }) });
+    const events = await run.text();
+    check("pipeline finishes with the sources unreachable", /"type":"done"/.test(events), events.slice(-160));
+    check("the stream showed the free research progress", events.includes("查詢 MusicBrainz…") && events.includes("讀取維基百科…") && events.includes("分析歌詞意象…"));
+    const offline = await api("GET", `/api/projects/${created.id}`);
+    check("a free research brief was still produced", offline.research?.engine === "free" && /## 歌曲意象與情緒/.test(offline.research.brief), offline.research?.engine);
+    check("it says the sources could not be reached", /連不上|查不到/.test(offline.research?.brief ?? ""));
+    check("the design followed it", !!offline.plan && /免費研究的發現/.test(offline.plan.designerNotes), offline.plan?.keyVisual?.title);
+    check("no request reached a stub that was not running", stubRequests.length === 0);
+    await page.goto(`${BASE}/p/${created.id}/process`, { waitUntil: "networkidle" });
+    await openResearchPanel(page);
+    await shot(page, "free-unreachable-light", { fullPage: true });
+
+    // ----------------------------------------------- 2. sources stubbed
+    stub = await startStub();
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await page.setInputFiles('input[aria-label="選擇音檔"]', path.join(REPO, "fixtures/demo-song.wav"));
+    await page.waitForSelector('section[aria-label="新作品"]', { timeout: 60000 });
+    await page.locator("label", { hasText: "貼上歌詞" }).first().click();
+    await page.fill('textarea[aria-label="貼上歌詞"]', LRC.replace(/^\[(ti|ar):[^\]]*\]\n/gm, ""));
+    await page.getByLabel("歌名").fill("大風吹");
+    await page.getByLabel("樂團／演出者").fill("草東沒有派對");
+    await page.getByRole("button", { name: /開始製作/ }).click();
+    await page.waitForURL(/\/p\/[^/]+\/process/, { timeout: 90000 });
+    const id = page.url().match(/\/p\/([^/?]+)\/process/)[1];
+    // the stream while it runs
+    const streamed = await page
+      .waitForFunction(() => /查詢 MusicBrainz|讀取維基百科|分析歌詞意象|免費研究/.test(document.body.innerText), null, { timeout: 60000 })
+      .then(() => true)
+      .catch(() => false);
+    check("the process page streams the free research", streamed);
+    await waitForDone(page);
+    await page.waitForTimeout(1500);
+    const song = await api("GET", `/api/projects/${id}`);
+    const brief = song.research?.brief ?? "";
+    check("brief engine is 免費研究", song.research?.engine === "free");
+    check("brief names the album and the genre from MusicBrainz", brief.includes("醜奴兒") && brief.includes("獨立搖滾"), brief.slice(0, 120).replace(/\n/g, " "));
+    check("brief quotes Wikipedia", brief.includes("維基百科"));
+    check("sources cite MusicBrainz and Wikipedia", (song.research?.sources ?? []).some((s) => s.url.startsWith("https://musicbrainz.org/")) && (song.research?.sources ?? []).some((s) => /wikipedia\.org/.test(s.url)), (song.research?.sources ?? []).map((s) => s.title).join("、"));
+    check("public facts cached on the project", song.research?.publicInfo?.status?.musicbrainz === "ok", JSON.stringify(song.research?.publicInfo?.status));
+    check("the stub was asked, with the Livelyrics User-Agent", stubRequests.length >= 3 && stubRequests.every((r) => r.ua === USER_AGENT), `${stubRequests.length} requests`);
+    check("zh Wikipedia asked for Taiwan variants", stubRequests.filter((r) => r.path.startsWith("/wikipedia/zh")).every((r) => /zh-TW/.test(r.lang)));
+    check("the design used the genre", /獨立搖滾/.test(song.plan?.designerNotes ?? ""), song.plan?.keyVisual?.title);
+    const panel = await openResearchPanel(page);
+    const panelText = await panel.innerText();
+    check("research panel labelled 免費研究（公開資料＋歌詞與音訊分析）", panelText.includes("免費研究（公開資料＋歌詞與音訊分析）"));
+    await shot(page, "free-brief-light", { fullPage: true });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForTimeout(600);
+    await shot(page, "free-brief-dark", { fullPage: true });
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.waitForTimeout(300);
+
+    // ----------------------------------------------- 3. 用 claude.ai 研究
+    await page.getByTestId("manual-open").click();
+    const prompt = page.getByTestId("manual-prompt");
+    await prompt.waitFor({ timeout: 30000 });
+    const promptText = await prompt.inputValue();
+    check("the prompt carries the song, lyrics by section, findings and the schema", promptText.includes("〈大風吹〉") && promptText.includes("【a") && promptText.includes("醜奴兒") && promptText.includes("- keyVisual：物件") && promptText.includes("```json"), `${promptText.length} chars`);
+    await page.getByTestId("manual-copy").click();
+    await page.getByTestId("manual-copy").filter({ hasText: "已複製" }).waitFor({ timeout: 5000 });
+    check("複製提示詞 puts the prompt on the clipboard", (await clipboard(page)) === promptText);
+    check("打開 claude.ai links to a new chat", (await page.getByTestId("manual-open-claude").getAttribute("href")) === "https://claude.ai/new");
+    await page.waitForTimeout(300);
+    await shot(page, "manual-copy");
+    // 精簡版
+    await page.getByRole("radio", { name: "精簡版" }).click();
+    await page.waitForFunction((full) => {
+      const el = document.querySelector('[data-testid="manual-prompt"]');
+      return el && el.value && el.value.length < full;
+    }, promptText.length, { timeout: 20000 });
+    check("精簡版 is shorter", (await prompt.inputValue()).length < promptText.length);
+    await page.getByRole("radio", { name: "完整版" }).click();
+
+    // a good reply, wrapped in prose
+    const good = `${BRIEF}\n\n以下是設計方案：\n\n\`\`\`json\n${planReply(song.plan, "大風吹過空城")}\n\`\`\`\n\n希望這份設計對你們的演出有幫助！`;
+    await page.getByTestId("manual-reply").fill(good);
+    await page.waitForTimeout(300);
+    await shot(page, "manual-paste");
+    await page.getByTestId("manual-apply").click();
+    await page.getByTestId("manual-success").waitFor({ timeout: 30000 });
+    const successText = await page.getByTestId("manual-success").innerText();
+    check("套用 applies the pasted plan", successText.includes("已套用 claude.ai 的設計方案") && successText.includes("大風吹過空城"), successText.replace(/\s+/g, " ").slice(0, 100));
+    await shot(page, "manual-success");
+    const applied = await api("GET", `/api/projects/${id}`);
+    check("saved plan and brief marked manual-claude", applied.plan?.keyVisual?.title === "大風吹過空城" && applied.planSource?.engine === "manual-claude" && applied.research?.engine === "manual-claude");
+    check("the pasted brief kept its sources and the cached public facts", (applied.research?.sources ?? []).some((s) => /wikipedia/.test(s.url)) && applied.research?.publicInfo?.status?.musicbrainz === "ok");
+    await page.getByTestId("manual-console").click();
+    await page.waitForURL(new RegExp(`/p/${id}$`), { timeout: 60000 });
+    await page.waitForFunction(() => document.body.innerText.includes("大風吹過空城"), null, { timeout: 30000 });
+    const consoleText = await page.locator("body").innerText();
+    check("the console shows the pasted plan", consoleText.includes("大風吹過空城") && consoleText.includes("claude.ai 設計"));
+    await page.waitForTimeout(1500);
+    await shot(page, "console-manual");
+
+    // a broken reply → the errors and 複製修正提示詞; then the JSON-only fix
+    await page.goto(`${BASE}/p/${id}/process`, { waitUntil: "networkidle" });
+    await page.getByTestId("manual-open").click();
+    await page.getByTestId("manual-prompt").waitFor({ timeout: 30000 });
+    const broken = `${BRIEF}\n\n\`\`\`json\n${planReply(applied.plan, "大風吹：第二版").replace('"lines": [', '"lines": [ ... ')}\n\`\`\``;
+    await page.getByTestId("manual-reply").fill(broken);
+    await page.getByTestId("manual-apply").click();
+    await page.getByTestId("manual-error").waitFor({ timeout: 30000 });
+    const errorText = await page.getByTestId("manual-error").innerText();
+    check("a broken reply shows a clear Chinese error with the line", /JSON 格式有錯/.test(errorText) && /JSON 第 \d+ 行第 \d+ 個字/.test(errorText), errorText.replace(/\s+/g, " ").slice(0, 140));
+    await page.getByTestId("manual-fix-copy").click();
+    await page.getByTestId("manual-fix-copy").filter({ hasText: "已複製" }).waitFor({ timeout: 5000 });
+    const fix = await clipboard(page);
+    check("複製修正提示詞 copies a fix request naming the problem", fix.includes("沒辦法套用到 Livelyrics") && /JSON 第 \d+ 行/.test(fix) && fix.includes("```json"));
+    check("nothing was saved from the broken reply", (await api("GET", `/api/projects/${id}`)).plan.keyVisual.title === "大風吹過空城");
+    await page.getByTestId("manual-error").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await shot(page, "manual-error-light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForTimeout(500);
+    await shot(page, "manual-error-dark");
+    await page.emulateMedia({ colorScheme: "light" });
+    // the corrected JSON from the same chat, without a brief
+    await page.getByTestId("manual-reply").fill(`好的，這是修正後的 JSON：\n\`\`\`json\n${planReply(applied.plan, "大風吹：第二版")}\n\`\`\``);
+    await page.getByTestId("manual-apply").click();
+    await page.getByTestId("manual-success").waitFor({ timeout: 30000 });
+    const fixed = await api("GET", `/api/projects/${id}`);
+    check("the JSON-only fix applies and keeps the brief", fixed.plan.keyVisual.title === "大風吹：第二版" && /## 設計方向建議/.test(fixed.research?.brief ?? "") && fixed.research?.engine === "manual-claude");
+    check("復原 is offered (the previous plan is kept)", fixed.previousPlan?.plan?.keyVisual?.title === "大風吹過空城");
+    await page.getByRole("button", { name: "完成" }).click();
+    await page.waitForTimeout(500);
+
+    // 用 claude.ai 提案 (directions)
+    await page.getByTestId("directions-manual").click();
+    await page.getByTestId("manual-prompt").waitFor({ timeout: 30000 });
+    const dirPrompt = await page.getByTestId("manual-prompt").inputValue();
+    check("用 claude.ai 提案 builds the directions prompt", dirPrompt.includes("提出設計方向") && dirPrompt.includes("- directions：陣列"));
+    await page.getByRole("button", { name: "取消" }).click();
+  } catch (err) {
+    check("run", false, err && err.stack ? err.stack : String(err));
+    await shot(page, "free-research-failure").catch(() => {});
+  } finally {
+    await browser.close();
+    if (stub) await new Promise((r) => stub.close(r));
+  }
+  const relevant = problems.filter((p) => !/favicon|Download the React DevTools/.test(p));
+  if (relevant.length) {
+    console.log("\nBrowser problems:");
+    for (const p of relevant.slice(0, 30)) console.log(`  ${p}`);
+  }
+  check("no browser errors", relevant.length === 0, `${relevant.length}`);
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\n${results.length - failed.length}/${results.length} passed`);
+  process.exit(failed.length ? 1 : 0);
+})();

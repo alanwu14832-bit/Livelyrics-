@@ -45,7 +45,7 @@ export function retryFrom(record: Pick<PipelineRecord, "steps" | "results" | "fa
   return i >= 0 ? record.steps.slice(i) : [...record.steps];
 }
 
-type Body = Pick<ProcessRequest, "lyricsText" | "instruction" | "arc">;
+type Body = Pick<ProcessRequest, "lyricsText" | "instruction" | "arc" | "free">;
 
 function stepEvent(step: ProcessStepId, result: PipelineRecord["results"][ProcessStepId]): PipelineEvent | null {
   if (!result) return null;
@@ -88,6 +88,7 @@ async function driveSteps(
       ...(step === "lyrics" && body.lyricsText ? { lyricsText: body.lyricsText } : {}),
       ...(body.instruction ? { instruction: body.instruction } : {}),
       ...(body.arc ? { arc: body.arc } : {}),
+      ...(body.free ? { free: true } : {}),
     };
     try {
       // every request ends with `done`; only the last one ends the run for the page
@@ -165,7 +166,7 @@ async function watchRun(
   const todo = remainingSteps(record);
   if (!todo.length) return fail(onEvent, "處理沒有正常結束，請重試。");
   // between steps: this page continues the run
-  return driveSteps(id, { id: runId, steps: record.steps }, todo, { instruction: record.instruction, arc: record.arc }, onEvent, signal, deps);
+  return driveSteps(id, { id: runId, steps: record.steps }, todo, { instruction: record.instruction, arc: record.arc, free: record.free }, onEvent, signal, deps);
 }
 
 /** Sleep that rejects with an AbortError when the signal fires. */

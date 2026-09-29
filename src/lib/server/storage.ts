@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ASSET_FILE_RE, coerceAssets, coerceBlobRef, isAssetId } from "@/lib/assets";
-import { coerceDirectionSet, coercePlanSnapshot } from "@/lib/directions";
+import { coerceDirectionSet, coercePlanSnapshot, coercePlanSource } from "@/lib/directions";
 import { coerceMoodboard } from "@/lib/moodboard";
 import { normalizeOutput } from "@/lib/output";
 import { coerceJob } from "@/lib/band";
@@ -168,8 +168,10 @@ function coercePipeline(raw: unknown): PipelineRecord | undefined {
   if (typeof raw.error === "string" && raw.error) record.error = raw.error;
   if (typeof raw.instruction === "string" && raw.instruction) record.instruction = raw.instruction;
   if (isRecord(raw.arc)) record.arc = raw.arc as unknown as PipelineRecord["arc"];
+  if (raw.free === true) record.free = true;
   return record;
 }
+
 
 /** Fill in defaults for anything missing so older / hand-edited files still load. */
 export function coerceProject(raw: unknown, id: string, fallbackTime: string): Project {
@@ -222,6 +224,8 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   if (previousPlan) project.previousPlan = previousPlan;
   const job = coerceJob(raw.directionsJob);
   if (job) project.directionsJob = job;
+  const planSource = project.plan ? coercePlanSource(raw.planSource) : undefined;
+  if (planSource) project.planSource = planSource;
   return project;
 }
 

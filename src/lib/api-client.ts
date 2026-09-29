@@ -298,7 +298,7 @@ export const api = {
    * Apply a pasted claude.ai reply. Resolves with `{ ok: false, issues, fixPrompt }` when the reply
    * cannot be used (HTTP 422); other failures reject like every other call.
    */
-  async manualApply(id: string, body: { target: ManualTarget; reply: string }): Promise<ManualApplyResult> {
+  async manualApply(id: string, body: { target: ManualTarget; reply: string; brief?: string }): Promise<ManualApplyResult> {
     const res = await fetch(`/api/projects/${id}/manual`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "apply", ...body }) });
     if (res.status === 422) return (await res.json()) as ManualApplyResult;
     return json<ManualApplyResult>(res);
@@ -501,6 +501,8 @@ export type ManualApplyResult =
       issues: ManualIssue[];
       /** paste this into the same claude.ai chat to get a corrected JSON */
       fixPrompt: string;
+      /** the research brief found in this reply: send it back with the corrected JSON so it is kept */
+      brief?: string;
     };
 
 export interface AssetUploadInput {

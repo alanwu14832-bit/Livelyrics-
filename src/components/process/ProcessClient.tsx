@@ -19,6 +19,7 @@ import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { DirectionsSection } from "@/components/directions/DirectionsPanel";
+import { ManualClaudeSheet } from "@/components/manual/ManualClaudeSheet";
 import { KeyVisualSummary } from "./KeyVisualSummary";
 import {
   applyEvents,
@@ -61,6 +62,7 @@ function cleanRequest(req: ProcessRequest): ProcessRequest {
   if (steps.length && steps.length < PROCESS_STEPS.length) out.steps = steps;
   if (req.lyricsText?.trim() && (!out.steps || out.steps.includes("lyrics"))) out.lyricsText = req.lyricsText;
   if (req.instruction?.trim()) out.instruction = req.instruction.trim();
+  if (req.free) out.free = true;
   return out;
 }
 
@@ -82,6 +84,8 @@ export function ProcessClient({
   const [runState, setRunState] = useState<RunState>(initialRunState);
   const [lastRequest, setLastRequest] = useState<ProcessRequest | null>(null);
   const [justFinished, setJustFinished] = useState(false);
+  // 用 claude.ai 研究 (manual Claude mode): the sheet is open
+  const [manualOpen, setManualOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const server = useServerStatus();
   // read inside the run callbacks: copy that names the server differs in cloud mode
@@ -139,7 +143,7 @@ export function ProcessClient({
             if (event.type === "attached") {
               sawAttached = true;
               // retry / re-run should repeat what the attached run does, not what this page asked for
-              setLastRequest((r) => ({ steps: event.steps, lyricsText: r?.attachOnly ? undefined : r?.lyricsText, instruction: r?.instruction }));
+              setLastRequest((r) => ({ steps: event.steps, lyricsText: r?.attachOnly ? undefined : r?.lyricsText, instruction: r?.instruction, free: r?.free }));
             }
             if (event.type === "step" && event.step === "lyrics" && (event.status === "done" || event.status === "skipped")) {
               // the lyrics now live on the project: never re-send the pasted text (it could overwrite later edits)
@@ -240,20 +244,20 @@ export function ProcessClient({
     if (runState.phase === "error" && lastRequest && !lastRequest.attachOnly) {
       const requested = lastRequest.steps ?? [...PROCESS_STEPS];
       const from = failedStep(runState) ?? runningStep(runState) ?? requested[0] ?? "lyrics";
-      execute({ steps: stepsFrom(requested, from), lyricsText: lastRequest.lyricsText, instruction: lastRequest.instruction ?? recorded?.instruction });
+      execute({ steps: stepsFrom(requested, from), lyricsText: lastRequest.lyricsText, instruction: lastRequest.instruction ?? recorded?.instruction, free: lastRequest.free ?? recorded?.free });
       return;
     }
     if (!project) return;
     if (recorded) {
       // a run that stopped (its request ran out of time, the page was closed): pick up where it stopped
-      execute({ steps: retryFrom(recorded), lyricsText: readLyricsHandoff(id) ?? undefined, instruction: recorded.instruction });
+      execute({ steps: retryFrom(recorded), lyricsText: readLyricsHandoff(id) ?? undefined, instruction: recorded.instruction, free: recorded.free });
       return;
     }
     if (project.research && !project.plan) execute({ steps: ["design"] });
     else execute({ lyricsText: readLyricsHandoff(id) ?? undefined });
   };
-  const rerunAll = () => execute({ lyricsText: lastRequest?.lyricsText ?? readLyricsHandoff(id) ?? undefined });
-  const redesign = (text: string, withResearch: boolean) => execute({ steps: withResearch ? ["research", "design"] : ["design"], instruction: text || undefined });
+  const rerunAll = () => execute({ lyricsText: lastRequest?.lyricsText ?? readLyricsHandoff(id) ?? undefined, free: lastRequest?.free });
+  const redesign = (text: string, withResearch: boolean, free = false) => execute({ steps: withResearch ? ["research", "design"] : ["design"], instruction: text || undefined, free });
 
   // ---------------------------------------------------------------------------
 
@@ -339,6 +343,8 @@ export function ProcessClient({
   const showSummary = !running && plan != null;
   const elapsed = runState.startedAt != null ? (runState.endedAt ?? now) - runState.startedAt : 0;
   const offline = server.state.kind === "ok" && !server.state.status.claude;
+  // this run skips the Claude API: 免費研究 and the offline designer
+  const freeRun = offline || !!lastRequest?.free;
   const research = runState.steps.research;
   const design = runState.steps.design;
   const showResearchStream = running || (phase === "error" && (research.text || research.status === "error"));
@@ -389,6 +395,8 @@ export function ProcessClient({
           />
 
           {(plan || project.research) && <RedesignBox disabled={running} hasResearch={project.research != null} offline={offline} onRedesign={redesign} />}
+
+          {!running && <ManualClaudeCard onOpen={() => setManualOpen(true)} connected={!offline && server.state.kind === "ok"} />}
 
           {runState.logs.length > 0 && <LogPanel logs={runState.logs} startedAt={runState.startedAt ?? 0} />}
         </aside>
@@ -466,7 +474,9 @@ export function ProcessClient({
                 research.status === "pending"
                   ? "等歌詞處理完成後開始研究樂團與歌曲…"
                   : research.status === "running"
-                    ? "設計師正在搜尋與閱讀資料：樂團的專輯視覺、MV、過去的舞台，以及這首歌的意象…"
+                    ? freeRun
+                      ? "免費研究：查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞的意象與情緒、音訊的速度與能量…"
+                      : "設計師正在搜尋與閱讀資料：樂團的專輯視覺、MV、過去的舞台，以及這首歌的意象…"
                     : research.status === "kept"
                       ? "這次沿用先前的研究。"
                       : "沒有研究內容。"
@@ -480,7 +490,13 @@ export function ProcessClient({
               text={design.text}
               live={design.status === "running"}
               maxHeight="20rem"
-              placeholder={design.status === "running" ? "設計師正在構思世界觀、色票與每一段的畫面…" : "研究完成後開始設計主視覺與段落。"}
+              placeholder={
+                design.status === "running"
+                  ? freeRun
+                    ? "離線設計師正在依免費研究的發現安排配色、場景與每一段的歌詞…"
+                    : "設計師正在構思世界觀、色票與每一段的畫面…"
+                  : "研究完成後開始設計主視覺與段落。"
+              }
             />
           )}
 
@@ -526,7 +542,37 @@ export function ProcessClient({
           {project.research && !showResearchStream && <ResearchPanel research={project.research} defaultOpen={!plan} />}
         </main>
       </div>
+      <ManualClaudeSheet
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        project={project}
+        target="plan"
+        onApplied={(p) => {
+          setProject(p);
+          setRunState(initialRunState());
+          setJustFinished(false);
+        }}
+      />
     </div>
+  );
+}
+
+/** 用 claude.ai 研究: the no-cost Claude path, next to 重新設計. */
+function ManualClaudeCard({ onOpen, connected }: { onOpen: () => void; connected: boolean }) {
+  return (
+    <section aria-labelledby="manual-claude-title" className="min-w-0">
+      <h2 id="manual-claude-title" className="mb-1.5 px-4 text-[13px] leading-5 text-label-2">
+        用 claude.ai 研究
+      </h2>
+      <div className="rounded-lg bg-surface p-4">
+        <p className="text-[13px] leading-5 text-label">
+          {connected ? "想省下 API 費用時：" : "不需要 API 金鑰："}把 Livelyrics 整理好的提示詞貼到你自己的 claude.ai 對話，讓 Claude 上網研究樂團並設計，再把回覆貼回來套用。
+        </p>
+        <Button variant="gray" icon={SparkleIcon} onClick={onOpen} className="mt-3" data-testid="manual-open">
+          用 claude.ai 研究
+        </Button>
+      </div>
+    </section>
   );
 }
 

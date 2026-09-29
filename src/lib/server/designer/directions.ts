@@ -28,6 +28,7 @@ import {
 import type {
   DesignDirection,
   DesignPlan,
+  DirectionEngine,
   DirectionReference,
   KeyVisual,
   LyricPlacement,
@@ -260,17 +261,26 @@ function imageList(moodboard: readonly MoodImage[] | undefined, refs: readonly D
   return nums.length ? nums.map((n) => `圖 ${n}`).join("、") : "";
 }
 
+function isWarmHue(h: number): boolean {
+  const x = ((h % 360) + 360) % 360;
+  return x < 70 || x >= 300;
+}
+
 /** The hue of the song's first image family of this temperature (the palette follows the lyrics). */
 function imageHue(f: Findings, pick: (x: Findings["imagery"][number]) => boolean): number | null {
   const hit = f.imagery.slice(0, 5).find(pick);
   return hit ? hit.family.hues[0] : null;
 }
 
-/** The first of the song's images (most vivid first) whose colour is at least 40° from every hue taken. */
-function distinctImage(f: Findings, taken: ReadonlyArray<number | null>, order: "vivid" | "weight"): Findings["imagery"][number] | null {
+/**
+ * The first of the song's images (most vivid first, or most weight) whose colour is at least 40°
+ * from every hue taken; images of the `prefer` temperature first (a cool film gets a warm collage).
+ */
+function distinctImage(f: Findings, taken: ReadonlyArray<number | null>, order: "vivid" | "weight", prefer?: "warm" | "cool"): Findings["imagery"][number] | null {
   const list = [...f.imagery.slice(0, 6)];
   if (order === "vivid") list.sort((x, y) => y.family.saturation * y.weight - x.family.saturation * x.weight);
-  return list.find((h) => taken.every((t) => t == null || hueDistance(h.family.hues[0], t) >= 40)) ?? null;
+  const ok = (h: Findings["imagery"][number]) => taken.every((t) => t == null || hueDistance(h.family.hues[0], t) >= 40);
+  return (prefer ? list.find((h) => h.family.temperature === prefer && ok(h)) : undefined) ?? list.find(ok) ?? null;
 }
 
 /** Song-specific scenes on an archetype's axis: the song's own scene family moves first where the axis allows it. */
@@ -310,23 +320,32 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   const bp = biblePalette(bible);
   const mood = moodSummary(req.moodboard ?? []);
   const f = analyzeFindings(req);
-  const warm = mood ? mood.warmth > 0.08 : f.hints.temperature === "warm";
+  const genre = f.genre;
+  // the axis this genre's own grammar lives on: its direction takes the genre's colours and lyric habits
+  const nativeAxis: "film" | "collage" | "minimal" | null = !genre
+    ? null
+    : genre.motion === "soft"
+      ? "film"
+      : genre.motion === "punchy"
+        ? "collage"
+        : genre.lyrics.density === "sparse" || genre.id === "post-punk"
+          ? "minimal"
+          : null;
+  const genreColours = !!genre && !mood && !bp;
+  const warm = mood ? mood.warmth > 0.08 : nativeAxis === "film" && genre ? isWarmHue(genre.palette.hues[0]) : f.hints.temperature === "warm";
   const briefHint = req.research?.engine === "claude" || req.research?.engine === "manual-claude" ? "延續研究簡報的方向，" : "";
   const names = f.imagery.slice(0, 2).map((h) => `「${h.family.name}」`);
   const imageryText = names.length ? `歌詞裡的${names.join("與")}` : "歌曲的能量起伏";
   const phrase = f.hints.singalong.find((p) => !p.chant)?.text ?? f.hints.singalong[0]?.text ?? null;
   const sung = (req.lyrics?.lines ?? []).some((l) => l.text.trim());
-  const genre = f.genre;
+  const genreLyrics = (axis: "film" | "collage" | "minimal") => (genre && axis === nativeAxis && sung ? `${genre.label}：${genre.lyrics.note}。` : "");
   const native = (axis: "film" | "collage" | "minimal") => {
     if (!genre) return "";
     const soft = genre.motion === "soft";
     const hit = axis === "film" ? soft : axis === "collage" ? genre.motion === "punchy" : genre.lyrics.density === "sparse" || genre.id === "post-punk";
     return hit ? `這是最貼近${genre.label}的做法：${genre.why}` : `${genre.label}的歌用這個方向，是刻意的反差。`;
   };
-  const findingsText = [
-    genre ? `公開資料把這個樂團歸在「${genre.label}」（${f.genres[0].evidence[0] ?? "公開資料"}）。` : "",
-    `音訊是「${f.audio.label}」型（${f.audio.why.split("；")[0]}）${sung && f.lyrics.emotion.hits ? `，歌詞情緒「${f.lyrics.emotion.label}」、人稱${f.lyrics.pov.label}` : ""}。`,
-  ].join("");
+  const findingsText = `免費研究：${genre ? `曲風「${genre.label}」（${f.genres[0].evidence[0] ?? "公開資料"}）、` : ""}音訊「${f.audio.label}」${sung && f.lyrics.emotion.hits ? `、歌詞情緒「${f.lyrics.emotion.label}」、人稱${f.lyrics.pov.label}` : ""}。`;
   const avoid = new Set([...(bible?.sceneAvoid ?? []), ...f.hints.avoidScenes]);
   const scenesOf = (a: Archetype, allowed: readonly SceneId[], preferBible: boolean): Partial<Record<SectionKind, SceneId[]>> => {
     const tailored = bible?.sceneAffinity.length ? a.scenes : tailorScenes(a.scenes, f, allowed);
@@ -350,7 +369,7 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   // A: film
   {
     const refs = refsFor(req.moodboard, mood, "取了它的色溫與明暗當作底色與主色");
-    const songHue = imageHue(f, (h) => h.family.temperature === (warm ? "warm" : "cool"));
+    const songHue = nativeAxis === "film" && genreColours ? genre!.palette.hues[0] : imageHue(f, (h) => h.family.temperature === (warm ? "warm" : "cool"));
     filmHue = songHue ?? (warm ? 28 : 208);
     const palette = bp ? rolesFirst(bp.entries, "shadow") : filmPalette(mood, warm, songHue);
     const name = bp ? "暗房膠片" : warm ? "暖調膠片感" : "冷調膠片感";
@@ -370,12 +389,12 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       moodKeywords: [...(warm ? ["懷舊", "顆粒", "溫度"] : ["冷調", "顆粒", "距離感"]), ...f.imagery.slice(0, 2).map((h) => h.family.name), "留白"].filter((k, i, a) => a.indexOf(k) === i).slice(0, 5),
       palette,
       typography: bible ? bibleFonts(bible, FILM.typography.letterSpacing, "沿用樂團視覺聖經的字體，字距放寬帶出電影字卡的呼吸感。") : withRationale(typo, typo.cjkFont === "noto-serif-tc" ? "宋體與高對比襯線字像電影片頭字卡，字重 700 在 LED 上仍清楚。" : "手寫與舊式的字，像底片邊上的字卡，字重 700 在 LED 上仍清楚。"),
-      motifs: ["底片顆粒", ...(f.imagery[0] ? [f.imagery[0].family.motif] : ["雨絲光線"]), "柔焦光斑"],
+      motifs: ["底片顆粒", ...(f.imagery[0] ? [f.imagery[0].family.motif] : ["雨絲光線"]), ...(nativeAxis === "film" && genre ? genre.motifs.slice(0, 1) : []), "柔焦光斑"].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4),
       emblem: FILM.emblem,
       scenes: scenesOf(FILM, FILM_SCENES, true),
       sceneTendency: `星雲、雨絲、波形與光斑${names.length ? `，${names[0]}的畫面放在主歌` : ""}：柔和、慢速、低飽和，副歌只把粒子密度拉高，不換成激烈的幾何。`,
       lyrics: FILM.lyrics,
-      lyricTreatment: `主歌上方淡入、導歌打字機、副歌整行 karaoke${phrase ? `讓觀眾跟唱「${phrase}」` : "讓觀眾跟唱"}，橋段直排；前奏與間奏留白。`,
+      lyricTreatment: `主歌上方淡入、導歌打字機、副歌整行 karaoke，${phrase ? `讓觀眾跟唱「${phrase}」` : "讓觀眾跟唱"}，橋段直排；前奏與間奏留白。${genreLyrics("film")}`,
       treatments: bible?.treatments.length ? bible.treatments : FILM.treatments,
       energy: FILM.energy,
       motion: FILM.motion,
@@ -384,8 +403,9 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   // B: collage
   {
     const refs = refsFor(req.moodboard, mood, "取了它最飽和的顏色放大成撞色拼貼");
-    const vivid = distinctImage(f, [filmHue], "vivid");
-    const songHue = vivid ? vivid.family.hues[0] : genre && hueDistance(genre.palette.hues[0], filmHue ?? 1000) >= 40 ? genre.palette.hues[0] : null;
+    const vivid = distinctImage(f, [filmHue], "vivid", warm ? "cool" : "warm");
+    const genreHue = genre ? genre.palette.hues.find((h) => filmHue == null || hueDistance(h, filmHue) >= 40) ?? null : null;
+    const songHue = nativeAxis === "collage" && genreColours && genreHue != null ? genreHue : vivid ? vivid.family.hues[0] : genreHue;
     collageHue = songHue ?? 12;
     const palette = bp ? rolesFirst(bp.entries, "accent") : collagePalette(mood, songHue);
     const imgs = imageList(req.moodboard, refs);
@@ -408,7 +428,7 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       scenes: scenesOf(COLLAGE, COLLAGE_SCENES, false),
       sceneTendency: "碎片、網格、粒子到隧道：高飽和、快切、跟拍點反應，最後一次副歌衝進隧道。",
       lyrics: COLLAGE.lyrics,
-      lyricTreatment: `主歌逐字跳出、副歌 impact 巨字口號${phrase ? `（「${phrase}」）` : ""}，橋段堆疊成詩句；器樂段不放歌詞。`,
+      lyricTreatment: `主歌逐字跳出、副歌 impact 巨字口號${phrase ? `（「${phrase}」）` : ""}，橋段堆疊成詩句；器樂段不放歌詞。${genreLyrics("collage")}`,
       treatments: bible?.treatments.length ? bible.treatments : COLLAGE.treatments,
       energy: COLLAGE.energy,
       motion: COLLAGE.motion,
@@ -418,7 +438,8 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   {
     const refs = mood ? refsFor(req.moodboard, mood, "只取它的一個顏色當唯一的點綴") : [];
     const accentImage = distinctImage(f, [filmHue, collageHue], "weight");
-    const accentHue = accentImage ? accentImage.family.hues[0] : null;
+    const genreAccent = nativeAxis === "minimal" && genreColours ? genre!.palette.hues.find((h) => [filmHue, collageHue].every((t) => t == null || hueDistance(h, t) >= 40)) ?? null : null;
+    const accentHue = genreAccent ?? (accentImage ? accentImage.family.hues[0] : null);
     const palette = bp ? rolesFirst(bp.entries, "primary").slice(0, 4) : minimalPalette(mood, accentHue);
     const imgs = imageList(req.moodboard, refs);
     specs.push({
@@ -426,7 +447,11 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       pitch: phrase ? `黑、白與一個點綴色：大量留白，讓「${phrase}」這幾個字與主唱成為唯一的焦點。` : "黑、白與一個點綴色：大量留白，讓字與主唱成為唯一的焦點。",
       rationale: [
         "把畫面減到只剩黑白、水墨與漸層，靠字體與留白說故事；螢幕像一張海報，把舞台燈光和主唱還給觀眾。",
-        accentImage && !mood && !bp ? `唯一的點綴色取自歌詞的「${accentImage.family.name}」（${accentImage.family.colors.split("、")[0]}）。` : "",
+        genreAccent != null
+          ? `唯一的點綴色取自${genre!.label}的配色（${genre!.palette.note}）。`
+          : accentImage && !mood && !bp
+            ? `唯一的點綴色取自歌詞的「${accentImage.family.name}」（${accentImage.family.colors.split("、")[0]}）。`
+            : "",
         findingsText,
         native("minimal"),
         imgs ? `${imgs}：${moodCue("唯一的點綴色")}。` : "",
@@ -441,7 +466,7 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       scenes: scenesOf(MINIMAL, MINIMAL_SCENES, false),
       sceneTendency: "漸層、水墨與主視覺符號：黑白為主、動得很少，breakdown 可以全黑。",
       lyrics: MINIMAL.lyrics,
-      lyricTreatment: `主歌下方小字幕、副歌詩句堆疊${phrase ? `，「${phrase}」放大` : ""}、橋段直排、尾奏打字機；字就是畫面。`,
+      lyricTreatment: `主歌下方小字幕、副歌詩句堆疊${phrase ? `，「${phrase}」放大` : ""}、橋段直排、尾奏打字機；字就是畫面。${genreLyrics("minimal")}`,
       treatments: bible?.treatments.length ? bible.treatments : MINIMAL.treatments,
       energy: MINIMAL.energy,
       motion: MINIMAL.motion,
@@ -836,7 +861,7 @@ export function directionId(seed: string): string {
 }
 
 /** Stored directions from specs (letters A, B, C; ids unique within the set). */
-export function buildDirections(specs: readonly DirectionSpec[], req: DesignRequest, meta: { engine: "claude" | "offline"; model?: string; now: string }): DesignDirection[] {
+export function buildDirections(specs: readonly DirectionSpec[], req: DesignRequest, meta: { engine: DirectionEngine; model?: string; now: string }): DesignDirection[] {
   const used = new Set<string>();
   return specs.slice(0, MAX_DIRECTIONS).map((spec, i) => {
     const letter = DIRECTION_LETTERS[i];

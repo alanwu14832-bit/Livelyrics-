@@ -210,7 +210,7 @@ export interface PublicInfo {
   notes: string[];
 }
 
-/** Who made the current plan, when it is known (set by 用 claude.ai 研究 and 採用這個方向). */
+/** Who made the current plan: the design step (Claude or the offline designer), 用 claude.ai 研究, or 採用這個方向. */
 export interface PlanSource {
   engine: DesignEngine;
   model?: string;
@@ -360,6 +360,8 @@ export interface PlanSnapshot {
   at: string;
   /** 繁中, what replaced it, e.g. 「採用方向 B「飽和拼貼」」 */
   reason: string;
+  /** who made that plan, when it was known (復原 brings it back with the plan) */
+  source?: PlanSource;
 }
 
 /** Fractions (0..0.3) of the canvas kept free of lyrics on each side. */
@@ -441,7 +443,7 @@ export interface Project {
   previousPlan?: PlanSnapshot;
   /** cloud mode: 提出設計方向 / 修改方向 in progress (or its last failure) */
   directionsJob?: JobState;
-  /** who made the current plan, when known (absent after a pipeline re-design) */
+  /** who made the current plan (the design step, 用 claude.ai 研究, 採用這個方向); absent on older projects */
   planSource?: PlanSource;
 }
 

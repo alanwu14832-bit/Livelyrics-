@@ -8,6 +8,7 @@ import { Disclosure, Tag } from "@/components/ui";
 import { ArrowSquareOutIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import type { Research } from "@/lib/types";
+import { researchEngineLabel } from "@/lib/research-labels";
 import { formatAbsoluteTime } from "@/components/home/relative-time";
 
 function hostname(url: string): string {
@@ -19,7 +20,7 @@ function hostname(url: string): string {
 }
 
 export function ResearchPanel({ research, defaultOpen = false }: { research: Research; defaultOpen?: boolean }) {
-  const engine = research.engine === "claude" ? `Claude${research.model ? `（${research.model}）` : ""}` : "離線研究";
+  const engine = researchEngineLabel(research);
   return (
     <section aria-label="研究簡報" className="min-w-0 rounded-lg bg-surface">
       <Disclosure

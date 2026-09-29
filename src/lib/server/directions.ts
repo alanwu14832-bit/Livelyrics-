@@ -59,6 +59,8 @@ export async function designRequestFor(project: Project, opts: { vision: boolean
     bible: band?.bible ?? null,
     bandName: band?.name,
     research: project.research,
+    // 免費研究's public facts (genre grammar) for the offline designer and directions
+    publicInfo: project.research?.publicInfo ?? null,
     previous: project.plan,
     moodboard,
   };

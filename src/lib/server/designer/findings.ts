@@ -131,14 +131,14 @@ function sceneFamily(imagery: readonly ImageryMatch[], genre: GenreRule | null):
   return { scenes, avoid: [...avoid] };
 }
 
-function worldSentence(imagery: readonly ImageryMatch[], lyrics: LyricAnalysis, audio: AudioMood, genre: GenreRule | null): string {
+/** The 世界觀 in one sentence: the lyric emotion, the two strongest images and the audio mood (the genre is told elsewhere). */
+function worldSentence(imagery: readonly ImageryMatch[], lyrics: LyricAnalysis, audio: AudioMood): string {
   const adj = EMOTION_ADJ[lyrics.emotion.label] ?? "有自己溫度";
   const verb = QUADRANT_VERB[audio.quadrant];
   const names = imagery.slice(0, 2).map((h) => `「${h.family.name}」`);
-  const g = genre ? `${genre.label}的` : "";
-  if (names.length === 2) return `一個${adj}的${g}世界：${names[0]}與${names[1]}${verb}。`;
-  if (names.length === 1) return `一個${adj}的${g}世界：${names[0]}${verb}。`;
-  return `一個${adj}的${g}世界，由音樂本身的能量${verb}。`;
+  if (names.length === 2) return `一個${adj}的世界：${names[0]}與${names[1]}${verb}。`;
+  if (names.length === 1) return `一個${adj}的世界：${names[0]}${verb}。`;
+  return `一個${adj}的世界，由音樂本身的能量${verb}。`;
 }
 
 /** The free-research findings for a designer input (deterministic; no network). */
@@ -199,7 +199,7 @@ export function analyzeFindings(input: DesignerInput, structure?: SongStructure)
       chorusStyle: genre?.lyrics.chorus ?? null,
       motion,
       singalong: lyrics.singalong,
-      world: worldSentence(imagery, lyrics, audio, genre),
+      world: worldSentence(imagery, lyrics, audio),
     },
   };
 }

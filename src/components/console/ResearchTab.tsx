@@ -7,7 +7,8 @@ import { Button, EmptyState, Tag } from "@/components/ui";
 import { ArrowSquareOutIcon, BooksIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import { hostOf } from "@/lib/console/format";
-import type { Project } from "@/lib/types";
+import { FREE_RESEARCH_LABEL, isClaudeResearch } from "@/lib/research-labels";
+import type { Project, Research } from "@/lib/types";
 import { Footnote, Group, GroupTitle } from "./ui";
 
 function formatDate(iso: string): string {
@@ -19,6 +20,20 @@ function formatDate(iso: string): string {
     return d.toISOString();
   }
 }
+
+const TAG_LABEL: Record<Research["engine"], string> = {
+  claude: "Claude 研究",
+  "manual-claude": "claude.ai 研究（手動貼上）",
+  free: FREE_RESEARCH_LABEL,
+  offline: "離線設計（未連網研究）",
+};
+
+/** What the brief is based on, for the briefs that are not a Claude API research. */
+const FOOTNOTE: Partial<Record<Research["engine"], string>> = {
+  free: "這份簡報由免費研究產生：查詢 MusicBrainz 與維基百科的公開資料，加上歌詞意象、情緒與音訊分析，沒有使用 Claude。想要更完整的樂團視覺研究，可以到設計總覽用 claude.ai 研究（不需要 API 金鑰）。",
+  "manual-claude": "這份簡報是從你在 claude.ai 的對話貼上的，內容與來源請自行確認。",
+  offline: "這份簡報由離線設計師依音訊分析與歌詞產生，沒有查詢網路資料。重新處理會改用免費研究（MusicBrainz、維基百科），也可以到設計總覽用 claude.ai 研究。",
+};
 
 function ResearchTabImpl({ project }: { project: Project }) {
   const research = project.research;
@@ -42,13 +57,11 @@ function ResearchTabImpl({ project }: { project: Project }) {
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <div>
         <div className="flex min-h-7 flex-wrap items-center gap-1.5">
-          <Tag tone={research.engine === "claude" ? "tint" : "neutral"}>{research.engine === "claude" ? "Claude 研究" : "離線設計（未連網研究）"}</Tag>
+          <Tag tone={isClaudeResearch(research) ? "tint" : "neutral"}>{TAG_LABEL[research.engine] ?? TAG_LABEL.offline}</Tag>
           {research.model && <Tag className="t-latin">{research.model}</Tag>}
           {research.createdAt && <span className="text-c-footnote text-label-2 tabular">{formatDate(research.createdAt)}</span>}
         </div>
-        {research.engine === "offline" && (
-          <Footnote className="mt-1">這份簡報由離線設計師依音訊分析與歌詞產生，沒有查詢網路資料。設定 ANTHROPIC_API_KEY 後重新處理，即可得到樂團視覺歷史的完整研究。</Footnote>
-        )}
+        {FOOTNOTE[research.engine] && <Footnote className="mt-1">{FOOTNOTE[research.engine]}</Footnote>}
       </div>
       <Group className="px-3 py-1">{research.brief.trim() ? <Markdown>{research.brief}</Markdown> : <p className="py-3 text-c-body text-label-2">研究內容是空的。</p>}</Group>
       {sources.length > 0 && (
