@@ -18,12 +18,31 @@ export interface LineText {
   latinOnly: boolean;
   /** unit ranges [from, to) between spaces and punctuation, trimmed */
   phrases: Array<[number, number]>;
+  /** units that begin a word of the line's word timing (empty without word timing): rows break there */
+  wordStarts: ReadonlySet<number>;
   translation: string | null;
 }
 
 const isWordUnit = (u: TextUnit) => u.kind === "cjk" || u.kind === "latin";
 
-export function lineText(text: string, units: TimedUnit[], emph: boolean[], translation: string | null = null): LineText {
+/** The units that begin a word of `words` (the lyric's word timing), matched in order in `text`. */
+export function wordStartsOf(text: string, units: readonly TextUnit[], words: ReadonlyArray<{ text: string }> | undefined): Set<number> {
+  const out = new Set<number>();
+  if (!words?.length) return out;
+  let cursor = 0;
+  for (const w of words) {
+    const t = (w?.text ?? "").trim();
+    if (!t) continue;
+    const at = text.indexOf(t, cursor);
+    if (at < 0) continue;
+    cursor = at + t.length;
+    const i = units.findIndex((u) => u.from >= at && u.kind !== "space");
+    if (i > 0) out.add(i);
+  }
+  return out;
+}
+
+export function lineText(text: string, units: TimedUnit[], emph: boolean[], translation: string | null = null, wordStarts: ReadonlySet<number> = new Set()): LineText {
   let cjk = 0;
   let latin = 0;
   for (const u of units) {
@@ -41,12 +60,37 @@ export function lineText(text: string, units: TimedUnit[], emph: boolean[], tran
     } else if (start < 0) start = i;
   }
   if (start >= 0) phrases.push([start, units.length]);
-  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), translation };
+  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), wordStarts, translation };
 }
 
 function isClosingQuote(ch: string): boolean {
   return "」』）》〉】〕”’)]".includes(ch);
 }
+
+/** Particles that lean on the word before them: a row never starts with one (「城市 / 的邊緣」). */
+const ATTACH_LEFT = new Set([..."的了著嗎呢吧啊呀喔哦嘛們得地啦吶"]);
+
+/**
+ * Common two-character words of lyrics (a line without word timing): a row never breaks inside
+ * one, and a content word among them may be featured though it holds a function character (方向).
+ */
+const LEXICON = new Set(
+  (
+    "世界 時間 未來 夢想 自由 青春 城市 天空 方向 故事 回憶 眼淚 黑夜 夜晚 晚上 夜色 明天 昨天 今天 永遠 一起 離開 想念 喜歡 孤單 寂寞 溫柔 名字 心跳 天亮 " +
+    "邊緣 誓言 點燃 等待 聲音 歌聲 聽見 看見 遇見 相信 希望 勇氣 快樂 悲傷 眼睛 雙手 身體 靈魂 生命 愛情 記憶 距離 地方 遠方 海洋 大海 星星 月亮 太陽 " +
+    "陽光 雨水 風雨 春天 夏天 秋天 冬天 早晨 黃昏 凌晨 午夜 房間 街道 路口 車站 窗外 屋頂 燈火 煙火 火花 宇宙 銀河 夢境 現實 真相 謊言 秘密 答案 問題 " +
+    "理由 意義 朋友 家人 情人 陌生 少年 少女 孩子 大人 時代 世代 焦慮 憤怒 吶喊 呼吸 心臟 胸口 淚水 微笑 擁抱 告別 再見 回家 流浪 旅行 奔跑 飛翔 墜落 " +
+    "燃燒 發光 閃耀 沉默 安靜 喧囂 孤獨 瘋狂 清醒 迷失 尋找 找到 放手 抓住 忘記 記得 原諒 後悔 承諾 盡頭 開始 結束 最後 最初 從前 以後 現在 此刻 瞬間 " +
+    "一生 交給 寫進 直到 就算 如果 雖然 但是 因為 所以 還是 已經 終於 突然 可是 然後 只是 就是 還有 不是 沒有 可以 應該 慢慢 輕輕 靜靜 深深 大聲 這個 那個 " +
+    "每一 我們 你們 他們 她們 自己 大家 一下 一點 一個 一次 一樣 一直 起來 下去 出來 回來 過去 不要 不會 不能 不再"
+  ).split(" "),
+);
+/** Words that never become the featured word (conjunctions, adverbs, pronouns, measure words). */
+const NOT_KEY = new Set(
+  "直到 就算 如果 雖然 但是 因為 所以 還是 已經 終於 突然 可是 然後 只是 就是 還有 不是 沒有 可以 應該 慢慢 輕輕 靜靜 深深 這個 那個 每一 我們 你們 他們 她們 自己 大家 一下 一點 一個 一次 一樣 一直 起來 下去 出來 回來 過去 不要 不會 不能 不再".split(" "),
+);
+/** A row may well start with these (a demonstrative opens a noun phrase: 交給 /「這個晚上」). */
+const BREAK_BEFORE = new Set([..."這那每"]);
 
 /** Characters that carry little meaning on their own (never the featured word). */
 const FUNCTION_CHARS = new Set([..."的了著嗎呢吧啊呀喔哦嘛是在把就都也還和與跟及或而且但卻又很太最這那個們我你他她它自己一不沒有要會能可以被讓給向從到對為於之其此裡中來去過得地啦嗎吶哪誰什麼怎樣"]);
@@ -122,21 +166,42 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
     return clipRange(lt, [a, b], maxCjk);
   }
   let best: { a: number; b: number; score: number } | null = null;
+  let clean = false;
+  let single: { a: number; b: number; score: number } | null = null;
+  const words = lt.wordStarts;
+  const wordEdge = (i: number, pa: number, pb: number) => i === pa || i === pb || words.has(i);
   lt.phrases.forEach(([pa, pb], pi) => {
     const len = cjkCount(lt, pa, pb);
+    const place = 0.35 * (pi / Math.max(1, lt.phrases.length - 1)) + 0.12 * len; // later, longer phrases a little
     for (let i = pa; i < pb - 1; i++) {
       const u0 = units[i];
       const u1 = units[i + 1];
       if (u0.kind !== "cjk" || u1.kind !== "cjk") continue;
-      let score = 0;
-      if (FUNCTION_CHARS.has(u0.text)) score -= 2.2;
-      if (FUNCTION_CHARS.has(u1.text)) score -= 2.2;
+      let score = place;
+      const pair = u0.text + u1.text;
+      const known = LEXICON.has(pair) && !NOT_KEY.has(pair);
+      const f0 = FUNCTION_CHARS.has(u0.text) && !known;
+      const f1 = FUNCTION_CHARS.has(u1.text) && !known;
+      if (f0) score -= 2.2;
+      if (f1) score -= 2.2;
+      if (NOT_KEY.has(pair)) score -= 3;
+      else if (known) score += 0.4;
+      if (!f0 && !f1 && !NOT_KEY.has(pair)) clean = true;
       if (i + 2 === pb) score += 1.4; // phrase-final nouns carry the image (城市的「邊緣」)
-      score += 0.35 * (pi / Math.max(1, lt.phrases.length - 1)); // later phrases a little
-      score += 0.12 * len; // in a longer phrase
+      // with word timing: a whole word beats two halves of two words
+      if (words.size) score += wordEdge(i, pa, pb) && wordEdge(i + 2, pa, pb) ? 0.9 : words.has(i + 1) ? -0.9 : 0;
       if (!best || score > best.score) best = { a: i, b: i + 2, score };
     }
+    // one strong character (跟著我「唱」), for a line whose every pair leans on a function word
+    for (let i = pa; i < pb; i++) {
+      const u = units[i];
+      if (u.kind !== "cjk" || FUNCTION_CHARS.has(u.text)) continue;
+      let score = place + (i + 1 === pb ? 0.8 : 0);
+      if (words.size && wordEdge(i, pa, pb) && wordEdge(i + 1, pa, pb)) score += 0.6;
+      if (!single || score > single.score) single = { a: i, b: i + 1, score };
+    }
   });
+  if (!clean && single) best = single;
   if (best) return [(best as { a: number }).a, (best as { b: number }).b];
   const first = units.findIndex((u) => u.kind === "cjk");
   return first >= 0 ? [first, first + 1] : null;
@@ -247,7 +312,8 @@ export function atomsOf(units: readonly TextUnit[], from: number, to: number): n
 export function trimIndices(units: readonly TextUnit[], idx: number[]): number[] {
   let a = 0;
   let b = idx.length;
-  while (a < b && units[idx[a]].kind === "space") a++;
+  // a row (or a part of the line) never opens with a space or a soft mark (「再遠」｜「，我們的歌」)
+  while (a < b && (units[idx[a]].kind === "space" || (units[idx[a]].kind === "punct" && DROP_AT_ROW_END.has(units[idx[a]].text)))) a++;
   for (;;) {
     while (b > a && units[idx[b - 1]].kind === "space") b--;
     if (b > a && units[idx[b - 1]].kind === "punct" && DROP_AT_ROW_END.has(units[idx[b - 1]].text)) {
@@ -262,6 +328,8 @@ export function trimIndices(units: readonly TextUnit[], idx: number[]): number[]
 export interface BreakOptions {
   /** max advance per row / column, in ems (tracking included by the caller's width function) */
   max: number;
+  /** units that begin a word (the line's word timing): breaks prefer them, and avoid the inside of a word */
+  wordStarts?: ReadonlySet<number>;
   maxRows: number;
   /** width of a list of unit indices in ems */
   width: (idx: number[]) => number;
@@ -293,6 +361,14 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     if (before.kind === "space" || after.kind === "space") return -2.4;
     if (before.kind === "punct") return -2;
     if ((before.kind === "latin") !== (after.kind === "latin")) return -0.8;
+    // a particle stays with the word it follows; a known word stays whole
+    if (after.kind === "cjk" && ATTACH_LEFT.has(after.text)) return 4.5;
+    const ws = o.wordStarts;
+    if (ws && ws.size) return ws.has(atoms[k][0]) ? -1.3 : 4.5;
+    if (before.kind === "cjk" && after.kind === "cjk") {
+      if (LEXICON.has(before.text + after.text)) return 4.5;
+      if (BREAK_BEFORE.has(after.text)) return -0.6;
+    }
     return 0.6;
   };
   const cjkIn = (idx: number[]) => idx.filter((i) => units[i].kind === "cjk" || units[i].kind === "latin").length;

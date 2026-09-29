@@ -22,6 +22,7 @@ import {
 import { FONTS } from "@/lib/font-meta";
 import { FONT_IDS, TYPE_COLOR_ROLES, TYPE_COLOR_TREATMENTS, TYPE_ENTER_IDS, TYPE_EXIT_IDS, TYPE_ORNAMENT_IDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "@/lib/schema";
 import { formatTimeShort } from "@/lib/timeline";
+import { effectiveOrientation } from "@/lib/type/compose";
 import { emphasizedUnits, tapUnits, type EditContext } from "@/lib/type/edit";
 import type { LineResolution } from "@/lib/type/resolve";
 import { findMotionWord, motionKindOf } from "@/lib/type/motion-words";
@@ -267,7 +268,7 @@ export interface LineActions {
   nudge: (dx: number, dy: number, done: boolean) => void;
   scale: (s: number, done: boolean) => void;
   rotate: (d: number, done: boolean) => void;
-  color: (c: TypeColorRole) => void;
+  color: (c: TypeColorRole | "auto") => void;
   lock: (on: boolean) => void;
   reset: () => void;
 }
@@ -366,7 +367,7 @@ export function LinePanel({
           value={own?.edit?.orientation ?? "auto"}
           onChange={(v) => actions.orientation(v === "auto" ? null : (v as TypeOrientation))}
           options={[
-            { value: "auto", label: `自動（${ORIENT_LABEL[h.orientation]}）` },
+            { value: "auto", label: `自動（${ORIENT_LABEL[effectiveOrientation(h, cjk, (project.output?.width || 1920) / (project.output?.height || 1080))]}）` },
             ...(["h", "v", "mixed"] as const).map((o) => ({ value: o, label: ORIENT_LABEL[o], disabled: !cjk && o !== "h" })),
           ]}
           fullWidth
@@ -438,11 +439,11 @@ export function LinePanel({
       </Group>
 
       <Group title="顏色" footer={COLOR_ROLES[h.color].description}>
-        <SegmentedControl<TypeColorRole>
+        <SegmentedControl<TypeColorRole | "auto">
           label="顏色"
           value={h.color}
           onChange={actions.color}
-          options={TYPE_COLOR_ROLES.map((id) => ({ value: id, label: COLOR_ROLES[id].label }))}
+          options={(["auto", ...TYPE_COLOR_ROLES] as const).map((id) => ({ value: id, label: COLOR_ROLES[id].label }))}
           fullWidth
         />
       </Group>

@@ -113,7 +113,7 @@ void main() {
   if (uGlitch > 0.001) {
     float band = floor(fc.y / (26.0 * s) + hash12(vec2(uSeed, 1.7)) * 9.0);
     float on = step(1.0 - 0.32 * uGlitch, hash12(vec2(band, uSeed + 0.37)));
-    tuv.x += (hash12(vec2(band * 1.7, uSeed + 3.1)) - 0.5) * 0.07 * uGlitch * on;
+    tuv.x += (hash12(vec2(band * 1.7, uSeed + 3.1)) - 0.5) * 0.05 * uGlitch * on;
   }
   vec4 T = plates(tuv);
   float ink = T.r;
@@ -194,14 +194,22 @@ void main() {
   }
 
   vec3 col = scene;
-  // the legibility halo: the stage darkens softly under readable text (no box, no scrim)
-  col = mix(col, uFill * 0.55 + col * 0.12, halo * uHalo * (1.0 - uGlow));
+  // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
+  // where the picture is bright (light type on a light scene still reads from the back of the hall)
+  float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, luma(scene))), 0.0, 0.96);
+  col = mix(col, uFill * 0.55 + col * 0.12, halo * haloK * (1.0 - uGlow));
   // glow: the halo turned into light (bloom entrances, 光)
   col += uInk * halo * uGlow * 0.55;
   // knockout: the frame fills with the background, the scene is seen only through the glyphs
   if (win > 0.001) {
     vec3 fill = mix(scene * 0.16, uFill, 0.9);
     vec3 inside = min(vec3(1.0), scene * 1.3 + uAccent * 0.16 + 0.05);
+    // the letters must read against the fill wherever the picture is as dark (or as light) as it:
+    // there the ink colour comes through, the scene's texture still inside the letters
+    float lf = luma(fill);
+    float li = luma(inside);
+    float need = lf < 0.5 ? clamp((lf + 0.42 - li) / 0.42, 0.0, 1.0) : clamp((li - lf + 0.42) / 0.42, 0.0, 1.0);
+    inside = lf < 0.5 ? mix(inside, max(inside, uInk), need * 0.78) : mix(inside, inside * 0.22, need * 0.78);
     col = mix(col, fill, win * (1.0 - windowMask));
     col = mix(col, inside, windowMask);
   }

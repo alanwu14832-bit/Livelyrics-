@@ -170,9 +170,10 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     rotate: clamp(edit?.rotate, -30, 30, 0),
     enter: oneOf(edit?.enter, TYPE_ENTER_IDS, "auto"),
     exit: oneOf(edit?.exit, TYPE_EXIT_IDS, "auto"),
-    color: oneOf(edit?.color, TYPE_COLOR_ROLES, "ink"),
+    color: edit?.color != null ? oneOf(edit.color, TYPE_COLOR_ROLES, "ink") : "auto",
     escalate,
     motion: override?.motion != null ? clamp(override.motion, 0, 1, 0.5) : null,
+    orientationFixed: edit?.orientation != null || override?.orientation != null,
   };
   // the first lyric line of its section carries the section's label and number
   let first0 = true;

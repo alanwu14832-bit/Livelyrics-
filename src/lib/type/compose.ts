@@ -4,11 +4,12 @@
 // every readable glyph inside the readable area at or above the legibility minimum, applies the
 // editor's nudge / scale / rotation, and settles the entrance, exit and motion.
 
-import type { TypeEnterId, TypeExitId, TypeRecipeId, TypeVoiceId } from "../types";
+import { DEFAULT_LYRIC_SAFE } from "../output";
+import type { TypeEnterId, TypeExitId, TypeOrientation, TypeRecipeId, TypeVoiceId } from "../types";
 import { makeFrame, type Frame } from "./frame";
 import { EMPTY_BOX, glyphBox, pieceBox, unionBox, type Box, type CanvasSpec, type Composition, type GlyphBox, type LineContext, type Measure, type Piece, type PlateId, type ResolvedHint, type ResolvedTypeSystem } from "./model";
 import { motionKindOf } from "./motion-words";
-import { RECIPE_FALLBACK, RECIPE_FNS, piece, zoneFor, type RecipeCtx } from "./recipes";
+import { RECIPE_FALLBACK, RECIPE_FNS, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
 import { createRng, hash32 } from "./rng";
 import type { LineText } from "./text";
 import { VOICES, type MotionKind } from "./vocab";
@@ -38,6 +39,9 @@ const SECTION_LATIN: Record<string, string> = {
   interlude: "INTERLUDE",
 };
 
+/** The knockout treatment opens the display word of lines at least this strong (choruses, peaks). */
+const KNOCK_ENERGY = 0.6;
+
 function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): RecipeCtx {
   const { hint, system: sys } = input;
   const p = sys.params;
@@ -48,8 +52,10 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   const esc = hint.escalate ? 1.08 : 1;
   const role = hint.color;
   const mainPlate: PlateId = role === "accent" ? "accent" : "ink";
-  const displayWindow = role === "window" || (sys.color === "knockout" && role !== "accent" && role !== "invert");
-  const displayPlate: PlateId = displayWindow ? "spot" : sys.color === "overprint" || role === "accent" ? "accent" : "ink";
+  // 鏤空 always opens the display word; the knockout treatment opens it on strong lines only (a
+  // whole song of filled frames would hide the stage); 主字色 / 點綴色 / 反白 never do
+  const displayWindow = role === "window" || (role === "auto" && sys.color === "knockout" && e >= KNOCK_ENERGY);
+  const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" || (role === "auto" && sys.color === "overprint") ? "accent" : "ink";
   return {
     lt: input.lt,
     hint,
@@ -140,6 +146,142 @@ function rotateAll(pieces: Piece[], rad: number, cx: number, cy: number) {
       p.rect = { ...p.rect, x: nx - p.rect.w / 2, y: ny - p.rect.h / 2 };
     }
   }
+}
+
+/**
+ * 反白: the display text (the giant word, else the main text) is cut out of blocks of the ink
+ * colour, one block per row (per column in vertical text); the stage shows through the letters.
+ */
+function invertDisplay(pieces: Piece[]): Piece[] {
+  const hasGiant = pieces.some((p) => p.role === "giant" && p.glyphs.length > 0);
+  const target = (p: Piece) => !p.echo && p.glyphs.length > 0 && (hasGiant ? p.role === "giant" : p.role === "main");
+  const out: Piece[] = [];
+  for (const p of pieces) {
+    if (!target(p)) {
+      out.push(p);
+      continue;
+    }
+    // runs along the reading direction: glyphs whose cross-axis centres lie close together
+    const across = (g: GlyphBox) => (p.vertical ? g.x : g.y);
+    const sorted = [...p.glyphs].sort((a, b) => across(a) - across(b));
+    const groups: GlyphBox[][] = [];
+    for (const g of sorted) {
+      const last = groups[groups.length - 1];
+      const ref = last?.[last.length - 1];
+      if (ref && Math.abs(across(g) - across(ref)) <= Math.max(ref.size, g.size) * 0.5) last.push(g);
+      else groups.push([g]);
+    }
+    groups.forEach((gs, i) => {
+      gs.sort((a, b) => a.order - b.order);
+      let b: Box = { ...EMPTY_BOX };
+      for (const g of gs) b = unionBox(b, glyphBox(g));
+      const size = Math.max(...gs.map((g) => g.size));
+      const padAlong = size * 0.24;
+      const padAcross = size * 0.14;
+      const rect = p.vertical ? { x: b.x - padAcross, y: b.y - padAlong, w: b.w + padAcross * 2, h: b.h + padAlong * 2 } : { x: b.x - padAlong, y: b.y - padAcross, w: b.w + padAlong * 2, h: b.h + padAcross * 2 };
+      out.push({ ...p, glyphs: gs, plate: "ink", window: false, rect, knockout: true, delay: p.delay + i * 0.06 });
+    });
+  }
+  return out;
+}
+
+/**
+ * A place for the translation where it touches nothing (a seal, an echo, the small text): the
+ * recipe's own when that is free, else under the text block, beside its foot or over it, flush
+ * with the block's edges and re-set for the measure, inside the readable area. Null: nowhere.
+ */
+function translationSpot(pieces: readonly Piece[], at: number, frame: Frame, r: RecipeCtx): Piece | null {
+  const tp = pieces[at];
+  const others = pieces.filter((p, k) => k !== at && p.role !== "grid" && !p.bleed);
+  const boxes = others.map(pieceBox).filter((b) => b.w > 0 && b.h > 0);
+  const size = Math.max(...tp.glyphs.map((g) => g.size));
+  const pad = size * 0.4;
+  const hits = (b: Box) => boxes.some((o) => b.x < o.x + o.w + pad && b.x + b.w + pad > o.x && b.y < o.y + o.h + pad && b.y + b.h + pad > o.y);
+  const rd = frame.read;
+  const inside = (b: Box) => b.x >= rd.x - 0.5 && b.y >= rd.y - 0.5 && b.x + b.w <= rd.x + rd.w + 0.5 && b.y + b.h <= rd.y + rd.h + 0.5;
+  const tb = pieceBox(tp);
+  if (!hits(tb) && inside(tb)) return tp;
+  const text = readableBox(others);
+  const block = text.w > 0 ? text : allBox(others);
+  if (block.w <= 0) return null;
+  const gap = size * 0.7;
+  // a candidate: the translation re-set for a measure, then moved to its row
+  const tryAt = (x: number, maxW: number, align: "left" | "right", yOf: (h: number) => number): Piece | null => {
+    if (maxW < size * 5) return null;
+    const probe = translationPiece(r, x, rd.y, maxW, align);
+    if (!probe) return null;
+    const pb = pieceBox(probe);
+    if (pb.w > maxW + 1) return null;
+    moveAll([probe], 0, yOf(pb.h) - pb.y);
+    const b = pieceBox(probe);
+    return inside(b) && !hits(b) ? probe : null;
+  };
+  const wide = Math.max(block.w, rd.w * 0.3);
+  const right = block.x + block.w + gap;
+  // everything drawn (echo trails, labels) for the rows past the whole composition
+  const full = allBox(others);
+  const fullW = Math.max(full.w, rd.w * 0.3);
+  // under the text first (it reads after it), then beside its foot, under everything, then over it
+  const cands = [
+    () => tryAt(block.x, wide, "left", () => block.y + block.h + gap),
+    () => tryAt(block.x + block.w - wide, wide, "right", () => block.y + block.h + gap),
+    () => tryAt(right, rd.x + rd.w - right, "left", (h) => block.y + block.h - h),
+    () => tryAt(rd.x, block.x - gap - rd.x, "right", (h) => block.y + block.h - h),
+    () => tryAt(block.x, fullW, "left", () => full.y + full.h + gap),
+    () => tryAt(full.x + full.w - fullW, fullW, "right", () => full.y + full.h + gap),
+    () => tryAt(block.x, wide, "left", (h) => block.y - gap - h),
+    () => tryAt(block.x + block.w - wide, wide, "right", (h) => block.y - gap - h),
+    () => tryAt(right, rd.x + rd.w - right, "left", () => block.y),
+    () => tryAt(rd.x, block.x - gap - rd.x, "right", () => block.y),
+  ];
+  for (const c of cands) {
+    const p = c();
+    if (p) return p;
+  }
+  return null;
+}
+
+/**
+ * The translation never sits on the composition. Where no place is free, the text block first
+ * moves up to leave it its rows (a display word stays put), then the composition shrinks (never
+ * below the minimum size).
+ */
+function placeTranslation(pieces: Piece[], frame: Frame, r: RecipeCtx): Piece[] {
+  const at = pieces.findIndex((p) => p.role === "translation");
+  if (at < 0 || !pieces[at].glyphs.length) return pieces;
+  const tp = pieces[at];
+  const put = (spot: Piece) => pieces.map((p, k) => (k === at ? spot : p));
+  let spot = translationSpot(pieces, at, frame, r);
+  if (spot) return put(spot);
+  const rd = frame.read;
+  const rest = pieces.filter((_, k) => k !== at);
+  const text = readableBox(rest.filter((p) => p.role !== "grid" && !p.bleed));
+  if (text.w <= 0) return pieces;
+  const size = Math.max(...tp.glyphs.map((g) => g.size));
+  const gap = size * 0.7;
+  const probe = translationPiece(r, text.x, rd.y, Math.max(text.w, rd.w * 0.3), "left");
+  const th = probe ? pieceBox(probe).h : pieceBox(tp).h;
+  // 1. the text moves up
+  const deficit = text.y + text.h + gap + th - (rd.y + rd.h);
+  // the whole composition moves together, except a word anchored to the frame edge (出血)
+  const movable = (p: Piece) => !p.bleed;
+  if (deficit > 0 && text.y - deficit >= rd.y) {
+    moveAll(rest, 0, -deficit, movable);
+    spot = translationSpot(pieces, at, frame, r);
+    if (spot) return put(spot);
+    moveAll(rest, 0, deficit, movable);
+  }
+  // 2. the composition shrinks
+  const need = th + gap * 1.5;
+  const smallest = minReadable(rest);
+  const kMin = smallest > 0 ? frame.minRead / smallest : 1;
+  const k = Math.min(1, (rd.h - need) / Math.max(1, text.h));
+  if (k < kMin || k < 0.55) return pieces;
+  scaleAll(rest, k, text.x + text.w / 2, text.y);
+  const nb = readableBox(rest);
+  moveAll(rest, 0, Math.max(rd.y - nb.y, Math.min(0, rd.y + rd.h - need - (nb.y + nb.h))), (p) => !p.bleed);
+  spot = translationSpot(pieces, at, frame, r);
+  return spot ? put(spot) : pieces;
 }
 
 /** Keep the readable text inside `area`: move it in, and shrink it (never below `min`) when it is larger. */
@@ -325,10 +467,51 @@ export function composeKey(input: Omit<ComposeInput, "measure">): string {
   ].join("|");
 }
 
+/**
+ * The canvas decides an automatic orientation too: on a tall frame (9:16) a display word stands up
+ * (巨字 becomes a column beside horizontal small text, 出血 and 鏤空窗 run vertically). An
+ * orientation set in the editor is kept.
+ */
+export function effectiveOrientation(hint: Pick<ResolvedHint, "recipe" | "orientation" | "orientationFixed">, cjk: boolean, aspect: number): TypeOrientation {
+  if (!cjk || hint.orientationFixed || !(aspect < 0.8) || hint.orientation !== "h") return hint.orientation;
+  switch (hint.recipe) {
+    case "giant-word":
+      return "mixed";
+    case "bleed":
+    case "window":
+      return "v";
+    default:
+      return hint.orientation;
+  }
+}
+
+/**
+ * An ultra-wide canvas (a 32:9 LED wall) is not one composition from end to end: a line is laid
+ * out in a 16:9-and-a-bit view that slides to the side its seed leans to (a bled word's view sits
+ * on the edge it bleeds from), then moved into place. Null on every other canvas.
+ */
+function compositionView(canvas: CanvasSpec, hint: ResolvedHint): { canvas: CanvasSpec; x0: number } | null {
+  const W = canvas.width || 1920;
+  const H = canvas.height || 1080;
+  if (!(W / H > 2.4)) return null;
+  const Ws = Math.min(W, Math.round(H * (16 / 9) * 1.2));
+  const zone = zoneFor(hint.seed);
+  const side = hint.recipe === "bleed" ? (zone.side === "right" ? "right" : "left") : zone.side;
+  const x0 = side === "left" ? 0 : side === "right" ? W - Ws : Math.round((W - Ws) / 2);
+  const s = canvas.safe ?? DEFAULT_LYRIC_SAFE;
+  const inner = 0.03;
+  const left = x0 <= 0 ? ((s.left ?? DEFAULT_LYRIC_SAFE.left) * W) / Ws : inner;
+  const right = x0 + Ws >= W ? ((s.right ?? DEFAULT_LYRIC_SAFE.right) * W) / Ws : inner;
+  return { canvas: { width: Ws, height: H, safe: { top: s.top, bottom: s.bottom, left: Math.min(0.3, left), right: Math.min(0.3, right) } }, x0 };
+}
+
 /** Lay one line out (never throws; an empty line gives an empty composition). */
-export function composeLine(input: ComposeInput): Composition {
-  const frame = makeFrame(input.canvas, input.system.params);
-  const hint = input.hint;
+export function composeLine(given: ComposeInput): Composition {
+  const full = makeFrame(given.canvas, given.system.params);
+  const hint: ResolvedHint = { ...given.hint, orientation: effectiveOrientation(given.hint, given.lt.cjk, full.aspect) };
+  const view = compositionView(given.canvas, hint);
+  const input: ComposeInput = { ...given, hint, canvas: view ? view.canvas : given.canvas };
+  const frame = view ? makeFrame(view.canvas, given.system.params) : full;
   let recipe = hint.recipe;
   let pieces: Piece[] | null = null;
   const tried = new Set<TypeRecipeId>();
@@ -348,23 +531,27 @@ export function composeLine(input: ComposeInput): Composition {
   }
   const r = recipeCtx(input, frame, recipe);
   pieces = pieces ?? [];
+  if (hint.color === "invert") pieces = invertDisplay(pieces);
   // legibility: the readable text stays in the readable area before anything else is added
   fitInto(pieces, frame.read, frame.minRead);
   pieces = ornaments(r, pieces, input);
+  pieces = placeTranslation(pieces, frame, r);
+  // an ultra-wide canvas: the view slides into place
+  if (view) moveAll(pieces, view.x0, 0);
 
-  // the editor's changes, around the readable block's centre
+  // the editor's changes, around the readable block's centre (fractions of the whole canvas)
   const b0 = readableBox(pieces);
   const cx = b0.x + b0.w / 2;
   const cy = b0.y + b0.h / 2;
   const smallest = minReadable(pieces);
-  const minScale = smallest > 0 ? frame.minRead / smallest : 0.5;
+  const minScale = smallest > 0 ? full.minRead / smallest : 0.5;
   const scale = clamp(hint.scale, Math.max(0.5, minScale), 2);
   scaleAll(pieces, scale, cx, cy);
   rotateAll(pieces, (clamp(hint.rotate, -30, 30) * Math.PI) / 180, cx, cy);
-  moveAll(pieces, clamp(hint.dx, -0.5, 0.5) * frame.W, clamp(hint.dy, -0.5, 0.5) * frame.H);
+  moveAll(pieces, clamp(hint.dx, -0.5, 0.5) * full.W, clamp(hint.dy, -0.5, 0.5) * full.H);
   const edited = scale !== 1 || hint.rotate !== 0 || hint.dx !== 0 || hint.dy !== 0;
   // nudged text may leave the readable band but never the canvas
-  fitInto(pieces, edited ? { x: 0, y: 0, w: frame.W, h: frame.H } : frame.read, frame.minRead);
+  fitInto(pieces, edited ? { x: 0, y: 0, w: full.W, h: full.H } : full.read, full.minRead);
 
   const voice = input.system.voice;
   const motion: MotionKind = recipe === "whisper" && hint.motionWord === "" ? "still" : motionKindOf(hint.motionWord);
@@ -373,6 +560,9 @@ export function composeLine(input: ComposeInput): Composition {
   const speed = lerp(1.45, 0.7, clamp(input.system.params.motionSpeed, 0, 1)) / VOICES[voice].speedScale;
   const readBounds = readableBox(pieces);
   const bounds = allBox(pieces);
+  const window = pieces.some((p) => p.window);
+  // 鏤空窗 and the 鏤空 role fill the frame; a display word the knockout treatment opens leaves the stage half seen
+  const windowFill = !window ? 0 : recipe === "window" || hint.color === "window" ? 1 : clamp(lerp(0.52, 0.84, (r.e - KNOCK_ENERGY) / (1 - KNOCK_ENERGY)), 0.52, 0.84);
   return {
     lineIndex: input.ctx.lineIndex,
     lineId: input.lineId,
@@ -390,10 +580,11 @@ export function composeLine(input: ComposeInput): Composition {
     pieces,
     readBounds,
     bounds,
-    window: pieces.some((p) => p.window),
+    window,
+    windowFill,
     seal: pieces.some((p) => p.role === "seal"),
     minReadable: minReadable(pieces),
-    key: String(hash32(composeKey(input))),
+    key: String(hash32(composeKey(given))),
   };
 }
 

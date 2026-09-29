@@ -164,8 +164,8 @@ export function pieceFrame(comp: Composition, piece: Piece, c: TypeClock): Piece
   }
   let slice = 0;
   if (piece.slices) {
-    const idle = 0.08 + 0.05 * Math.sin(TAU * c.t * 0.21);
-    slice = clamp01(idle + (1 - enter) * 0.9 + st * 0.8 + x * 0.8) * (c.safe ? 0.7 : 1);
+    const idle = Math.max(0.08 + 0.05 * Math.sin(TAU * c.t * 0.21), piece.tear ?? 0);
+    slice = clamp01(idle + (1 - enter) * 0.9 + st * 0.45 + x * 0.8) * (c.safe ? 0.7 : 1);
   }
   return { alpha: piece.alpha, spread, slice, sliceSeed: c.beat.known ? c.beat.index : Math.floor(c.t * 2) };
 }
@@ -276,7 +276,7 @@ export function glyphFrame(comp: Composition, piece: Piece, g: GlyphBox, i: numb
   const st = stutterAmount(comp, c);
   if (st > 0) {
     const q = hashUnit(`st|${comp.key}|${c.beat.index}|${k}`) - 0.5;
-    out.dx += q * (c.safe ? 0.12 : 0.24) * size * st;
+    out.dx += q * (c.safe ? 0.08 : 0.16) * size * st;
   }
 
   // the exit
@@ -340,10 +340,11 @@ export function compositionUniforms(comp: Composition, c: TypeClock, texture: nu
       u.eat = comp.exit === "dissolve" ? x : 0;
       break;
     case "glitch": {
-      const spike = Math.max(comp.enter === "glitch" ? 1 - enter : 0, comp.exit === "glitch" ? x : 0, st);
+      // the entrance and the exit may tear the line apart; a stutter while it holds only shakes it (it must still read)
+      const spike = Math.max(comp.enter === "glitch" ? 1 - enter : 0, comp.exit === "glitch" ? x : 0, st * 0.5);
       u.glitch = clamp01(tex * 0.18 + spike * 0.85) * (c.safe ? 0.75 : 1) * (c.since >= 0 ? 1 : 0);
       u.rgb = clamp01(0.25 + tex * 0.35 + spike * 0.5) * present;
-      u.eat = clamp01(tex * 0.22 + spike * 0.2) * present;
+      u.eat = clamp01(tex * 0.08 + spike * 0.24) * present;
       break;
     }
     case "title-sequence":
@@ -359,7 +360,7 @@ export function compositionUniforms(comp: Composition, c: TypeClock, texture: nu
   }
   if (comp.enter === "bloom") u.glow = (1 - enter) * 0.9 * (c.since >= 0 ? 1 : 0);
   if (comp.motion === "bloom") u.glow = Math.max(u.glow, (0.22 + 0.08 * Math.sin(TAU * c.t * 0.3)) * present);
-  if (comp.window) u.windowFill = c.since >= 0 ? easeInOut(clamp01(c.since / Math.max(0.3, comp.enterDur))) * (1 - easeInOut(x)) : 0;
+  if (comp.window) u.windowFill = c.since >= 0 ? clamp01(comp.windowFill ?? 1) * easeInOut(clamp01(c.since / Math.max(0.3, comp.enterDur))) * (1 - easeInOut(x)) : 0;
   if (comp.seal) u.seal = 1;
   u.seed = c.beat.known ? c.beat.index : Math.floor(c.t * 3);
   return u;

@@ -91,7 +91,7 @@ function fitRows(r: RecipeCtx, from: number, to: number, o: { wanted: number; mi
   const width = (ix: number[]) => rowEm(r.lt, ix, r.weight, o.tracking, r.measure);
   let size = Math.max(o.min, o.wanted);
   for (let guard = 0; guard < 40; guard++) {
-    const rows = breakRows(r.lt.units, from, to, { max: o.maxW / size, maxRows: o.maxRows, width, pyramid: o.pyramid });
+    const rows = breakRows(r.lt.units, from, to, { max: o.maxW / size, maxRows: o.maxRows, width, pyramid: o.pyramid, wordStarts: r.lt.wordStarts });
     const widths = rows.map((row) => width(row) * size);
     const w = Math.max(0, ...widths);
     const h = rows.length * size + (rows.length - 1) * size * (o.leading - 1);
@@ -117,7 +117,7 @@ function fitColumns(r: RecipeCtx, from: number, to: number, o: { wanted: number;
   const height = (ix: number[]) => columnEm(r.lt, ix, r.weight, o.tracking, r.measure);
   let size = Math.max(o.min, o.wanted);
   for (let guard = 0; guard < 40; guard++) {
-    const cols = breakRows(r.lt.units, from, to, { max: o.maxH / size, maxRows: o.maxCols, width: height });
+    const cols = breakRows(r.lt.units, from, to, { max: o.maxH / size, maxRows: o.maxCols, width: height, wordStarts: r.lt.wordStarts });
     const heights = cols.map((c) => height(c) * size);
     const h = Math.max(0, ...heights);
     const gap = size * o.gap;
@@ -173,10 +173,12 @@ function sideX(r: RecipeCtx, w: number, inset = 0): number {
 function bandY(r: RecipeCtx, h: number, topFrac = 0.1, midFrac = 0.46): number {
   const rd = r.frame.read;
   const free = Math.max(0, rd.h - h);
-  return rd.y + free * (r.zone.band === "top" ? topFrac : midFrac);
+  // a tall frame has room above and below: the composition stands around its optical centre
+  const tall = r.frame.aspect < 0.8;
+  return rd.y + free * (r.zone.band === "top" ? (tall ? Math.max(topFrac, 0.34) : topFrac) : tall ? Math.max(midFrac, 0.64) : midFrac);
 }
 
-function translationPiece(r: RecipeCtx, x: number, y: number, maxW: number, align: "left" | "right" | "center" = "left"): Piece | null {
+export function translationPiece(r: RecipeCtx, x: number, y: number, maxW: number, align: "left" | "right" | "center" = "left"): Piece | null {
   const tr = r.lt.translation;
   if (!tr) return null;
   const rd = r.frame.read;
@@ -189,16 +191,21 @@ function translationPiece(r: RecipeCtx, x: number, y: number, maxW: number, alig
   const glyphs: GlyphBox[] = [];
   const words = tr.split(/\s+/).filter(Boolean);
   const spaceW = 0.3 * size;
-  const rows: string[][] = [[]];
-  let rowW = 0;
-  for (const w of words) {
-    const ww = r.measure(w, /[㐀-鿿]/.test(w) ? "cjk" : "latin", weight) * size;
-    if (rowW > 0 && rowW + spaceW + ww > maxW && rows.length < 2) {
-      rows.push([]);
-      rowW = 0;
+  const widths = words.map((w) => r.measure(w, /[㐀-鿿]/.test(w) ? "cjk" : "latin", weight) * size);
+  const runW = (a: number, b: number) => widths.slice(a, b).reduce((s, w) => s + w, 0) + spaceW * Math.max(0, b - a - 1);
+  let rows: string[][] = [words];
+  if (runW(0, words.length) > maxW && words.length > 1) {
+    // two rows split where the wider one is as short as it can be (no widowed last word)
+    let best = 1;
+    let bestW = Infinity;
+    for (let k = 1; k < words.length; k++) {
+      const m = Math.max(runW(0, k), runW(k, words.length));
+      if (m < bestW) {
+        bestW = m;
+        best = k;
+      }
     }
-    rows[rows.length - 1].push(w);
-    rowW += (rowW > 0 ? spaceW : 0) + ww;
+    rows = [words.slice(0, best), words.slice(best)];
   }
   rows.forEach((row, ri) => {
     const text = row.join(" ");
@@ -333,7 +340,11 @@ function columns(r: RecipeCtx, big: boolean): Piece[] | null {
   const tracking = lerp(0.2, 0.06, r.d);
   const fit = fitColumns(r, 0, lt.units.length, { wanted: size, min: f.minRead, maxW: rd.w * (f.aspect < 1 ? 0.8 : 0.5), maxH: rd.h * lerp(0.66, 0.86, r.d), maxCols: big ? 2 : 3, tracking, gap: lerp(0.95, 0.55, r.d) });
   if (!fit) return null;
-  const stagger = fit.cols.length > 1 && r.rng.chance(0.5) ? fit.size * (big ? 0.9 : 1.6) : 0;
+  let stagger = fit.cols.length > 1 && r.rng.chance(0.5) ? fit.size * (big ? 0.9 : 1.6) : 0;
+  if (stagger) {
+    stagger = Math.min(stagger, (rd.h * 0.9 - fit.h) / (fit.cols.length - 1));
+    if (stagger < fit.size * 0.5) stagger = 0;
+  }
   const blockH = fit.h + stagger * (fit.cols.length - 1);
   const x = sideX(r, fit.w, r.rng.chance(0.4) ? 1 : 0);
   const top = bandY(r, blockH, 0.06, 0.42);
@@ -436,42 +447,31 @@ function gridPoem(r: RecipeCtx): Piece[] | null {
   const { lt, frame: f } = r;
   const rd = f.read;
   const vertical = r.hint.orientation === "v" && lt.cjk;
-  // phrases become lines of cells; a Latin word spans the cells its width needs
-  const lines: Cell[][] = [];
-  for (const [a, b] of lt.phrases) {
-    const cells: Cell[] = [];
-    for (let i = a; i < b; i++) {
-      const u = lt.units[i];
-      if (u.kind === "space") continue;
-      if (u.kind === "punct" && !"「」『』！？…".includes(u.text)) continue;
-      const span = u.kind === "latin" ? Math.max(1, Math.ceil(r.measure(u.text, "latin", r.weight) / 0.92)) : 1;
-      cells.push({ unit: i, span });
-    }
-    if (cells.length) lines.push(cells);
-  }
+  // a CJK character (or a kept mark) takes one cell, a Latin word the cells its width needs
+  const span = new Map<number, number>();
+  lt.units.forEach((u, i) => {
+    if (u.kind === "space") return;
+    if (u.kind === "punct" && !"「」『』！？…".includes(u.text)) return;
+    span.set(i, u.kind === "latin" ? Math.max(1, Math.ceil(r.measure(u.text, "latin", r.weight) / 0.92)) : 1);
+  });
+  if (!span.size) return null;
+  const cellsIn = (idx: number[]) => idx.reduce((a, i) => a + (span.get(i) ?? 0), 0);
+  const total = cellsIn([...span.keys()]);
+  const maxCols = f.aspect < 1 ? 5 : f.aspect > 2.4 ? 12 : 8;
+  // the poem's lines break at phrases and words and balance (never 「城市 / 的邊緣」, never one orphan cell)
+  const oneRow = f.aspect < 1 ? 5 : f.aspect > 2.4 ? 12 : 7;
+  const wanted = total <= oneRow ? 1 : total <= maxCols * 2 ? 2 : 3;
+  const cols0 = clamp(Math.ceil(total / wanted), 3, maxCols);
+  // one cell of slack: a word is never split to square the grid
+  const rowsIdx = wanted === 1 ? [allIdx(lt)] : breakRows(lt.units, 0, lt.units.length, { max: Math.min(maxCols, cols0 + 1), maxRows: 4, width: cellsIn, wordStarts: lt.wordStarts });
+  const lines: Cell[][] = rowsIdx.map((row) => row.filter((i) => span.has(i)).map((i) => ({ unit: i, span: span.get(i)! }))).filter((l) => l.length > 0);
   if (!lines.length) return null;
-  const longest = Math.max(...lines.map((l) => l.reduce((a, c) => a + c.span, 0)));
-  const cols = clamp(longest, 3, f.aspect < 1 ? 5 : 8);
-  // wrap long phrases
-  const wrapped: Cell[][] = [];
-  for (const l of lines) {
-    let cur: Cell[] = [];
-    let n = 0;
-    for (const c of l) {
-      if (n + c.span > cols && cur.length) {
-        wrapped.push(cur);
-        cur = [];
-        n = 0;
-      }
-      cur.push(c);
-      n += c.span;
-    }
-    if (cur.length) wrapped.push(cur);
-  }
-  const rows = wrapped.length;
+  const cols = clamp(Math.max(cols0, ...lines.map((l) => l.reduce((a, c) => a + c.span, 0))), 3, maxCols + 2);
+  const rows = lines.length;
   const across = vertical ? rows : cols;
   const down = vertical ? cols : rows;
-  const cell = Math.max(f.minRead / 0.72, Math.min((rd.w * (f.aspect < 1 ? 0.92 : 0.66)) / across, (rd.h * 0.8) / down, r.body * lerp(1.15, 1.45, r.e)));
+  // a tall frame's grid is set larger (the poem is the picture there)
+  const cell = Math.max(f.minRead / 0.72, Math.min((rd.w * (f.aspect < 1 ? 0.92 : 0.66)) / across, (rd.h * 0.8) / down, r.body * lerp(1.15, 1.45, r.e) * (f.aspect < 0.8 ? 1.35 : 1)));
   const gw = across * cell;
   const gh = down * cell;
   const x0 = sideX(r, gw);
@@ -480,10 +480,10 @@ function gridPoem(r: RecipeCtx): Piece[] | null {
   const glyphs: GlyphBox[] = [];
   const chips: Piece[] = [];
   let order = 0;
-  wrapped.forEach((line, li) => {
-    let pos = 0;
-    // a short line leaves its first cells empty on alternate rows: the grid breathes
-    if (!vertical && line.length < cols - 1 && r.rng.chance(0.35)) pos = Math.min(cols - line.length, 1);
+  lines.forEach((line, li) => {
+    const used = line.reduce((a, c) => a + c.span, 0);
+    // a later, shorter line may start a cell in (the indent of a poem); the rest of the grid stays empty
+    let pos = !vertical && li > 0 && used <= cols - 2 && r.rng.chance(0.4) ? 1 : 0;
     for (const c of line) {
       const u = lt.units[c.unit];
       const cx = vertical ? x0 + gw - (li + 0.5) * cell : x0 + (pos + c.span / 2) * cell;
@@ -517,55 +517,76 @@ function bleed(r: RecipeCtx): Piece[] | null {
   const crop = r.rng.range(0.14, 0.26);
   const pieces: Piece[] = [];
   const plate = r.displayWindow ? "spot" : r.displayPlate;
+  const gap = f.minRead * 0.8;
+  const giantOpts = { plate, window: r.displayWindow, bleed: true, readable: false, alpha: r.displayWindow ? 1 : 0.92 } as const;
   if (!vertical) {
     const kEm = rowEm(lt, kIdx, r.weight, -0.02, r.measure);
     const n = Math.max(1, kEm);
-    const G = Math.min(f.H * lerp(0.7, 0.98, r.c), (f.W * 0.74) / Math.max(0.6, n - crop), f.H * 0.98);
+    // as large as the frame allows while a readable column stays free beside it
+    const roomy = (rd.w * 0.62 - gap) / Math.max(0.6, n - crop);
+    const G = Math.min(f.H * lerp(0.7, 0.98, r.c), (f.W * 0.74) / Math.max(0.6, n - crop), f.H * 0.98, Math.max(roomy, f.H * 0.46));
     const kW = kEm * G;
     const leftEdge = r.zone.side !== "right";
     const kx = leftEdge ? -crop * G : f.W - kW + crop * G;
-    const cy = f.H * (r.zone.band === "top" ? 0.44 : 0.5);
-    pieces.push(piece("giant", setRow(lt, kIdx, kx, cy, style(r, G, -0.02, plate), r.measure, 100).glyphs, { plate, window: r.displayWindow, bleed: true, readable: false, alpha: r.displayWindow ? 1 : 0.92 }));
-    // the readable line in the free side
+    let cy = f.H * (r.zone.band === "top" ? 0.44 : 0.52);
+    // the readable line in the free side, its top on the giant's top (or its foot on the giant's foot)
     const visible = leftEdge ? kx + kW : kx;
-    const gap = f.minRead * 0.8;
     const freeX = leftEdge ? Math.max(rd.x, visible + gap) : rd.x;
     const freeW = leftEdge ? rd.x + rd.w - freeX : Math.min(rd.w, visible - gap - rd.x);
     let fit: RowsFit | null = null;
     let x = freeX;
     let y = rd.y;
     if (freeW >= rd.w * 0.24) {
-      fit = fitRows(r, 0, lt.units.length, { wanted: r.body * 0.8, min: f.minRead, maxW: freeW, maxH: rd.h * 0.6, maxRows: 4, tracking: 0.04, leading: 1.26 });
+      fit = fitRows(r, 0, lt.units.length, { wanted: r.body * 0.8, min: f.minRead, maxW: Math.min(freeW, rd.w * 0.46), maxH: rd.h * 0.6, maxRows: 4, tracking: 0.04, leading: 1.26 });
       if (fit) {
         x = leftEdge ? freeX : freeX + freeW - fit.w;
-        y = r.zone.band === "top" ? rd.y + rd.h * 0.04 : rd.y + (rd.h - fit.h) * 0.62;
+        y = r.zone.band === "top" ? clamp(cy - G * 0.4, rd.y, rd.y + rd.h - fit.h) : clamp(cy + G * 0.4 - fit.h, rd.y, rd.y + rd.h - fit.h);
       }
     }
     if (!fit) {
-      // too little room beside the giant: the line runs across its upper edge
+      // too little room beside the giant: the line runs above it and the giant drops under the line
       fit = fitRows(r, 0, lt.units.length, { wanted: r.body * 0.72, min: f.minRead, maxW: rd.w * 0.8, maxH: rd.h * 0.3, maxRows: 2, tracking: 0.04, leading: 1.22 });
       if (!fit) return null;
       x = leftEdge ? rd.x + rd.w - fit.w : rd.x;
       y = rd.y;
+      cy = Math.max(cy, y + fit.h + gap + G * 0.47);
     }
+    pieces.push(piece("giant", setRow(lt, kIdx, kx, cy, style(r, G, -0.02, plate), r.measure, 100).glyphs, giantOpts));
     pieces.push(piece("main", placeRows(r, fit, x, y, style(r, fit.size, 0.04), 1.26, leftEdge ? "left" : "right", 0), { plate: r.mainPlate, delay: 0.12 }));
     const tp = translationPiece(r, x, y + fit.h + fit.size * 0.4, fit.w, leftEdge ? "left" : "right");
     if (tp) pieces.push(tp);
     return pieces;
   }
-  // vertical: the column runs off the top or the bottom edge
+  // vertical: the column runs off the top or the bottom edge, the line stands beside it
   const kEm = columnEm(lt, kIdx, r.weight, 0, r.measure);
-  const G = Math.min(f.W * lerp(0.55, 0.78, r.c), (f.H * 0.74) / Math.max(0.6, kEm - crop));
+  const G = Math.min(f.W * lerp(0.55, 0.78, r.c), (f.H * 0.74) / Math.max(0.6, kEm - crop), f.aspect < 1 ? f.W * 0.5 : f.W);
   const kH = kEm * G;
   const topEdge = r.zone.band === "top";
   const ky = topEdge ? -crop * G : f.H - kH + crop * G;
-  const kxc = r.zone.side === "right" ? f.W - G * 0.55 : r.zone.side === "left" ? G * 0.55 : f.W / 2;
-  pieces.push(piece("giant", setColumn(lt, kIdx, kxc, ky, style(r, G, 0, plate), r.measure, 100).glyphs, { plate, window: r.displayWindow, bleed: true, readable: false, vertical: true, alpha: r.displayWindow ? 1 : 0.92 }));
+  const side = r.zone.side === "center" ? (hashUnit(`bleed|${Math.round(r.hint.seed)}`) < 0.5 ? "left" : "right") : r.zone.side;
+  const kxc = side === "right" ? f.W - G * 0.55 : G * 0.55;
+  pieces.push(piece("giant", setColumn(lt, kIdx, kxc, ky, style(r, G, 0, plate), r.measure, 100).glyphs, { ...giantOpts, vertical: true }));
+  const freeX = side === "right" ? rd.x : Math.max(rd.x, kxc + G / 2 + gap);
+  const freeW = side === "right" ? Math.min(rd.w, kxc - G / 2 - gap - rd.x) : rd.x + rd.w - freeX;
+  // the visible part of the column (the line aligns to its end inside the frame)
+  const visTop = Math.max(rd.y, ky);
+  const visBottom = Math.min(rd.y + rd.h, ky + kH);
+  if (freeW >= rd.w * 0.3) {
+    const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * 0.8, min: f.minRead, maxW: Math.min(freeW, rd.w * 0.5), maxH: rd.h * 0.5, maxRows: 3, tracking: 0.04, leading: 1.26 });
+    if (!fit) return null;
+    const x = side === "right" ? Math.max(rd.x, kxc - G / 2 - gap - fit.w) : Math.min(rd.x + rd.w - fit.w, kxc + G / 2 + gap);
+    const y = topEdge ? clamp(visBottom - fit.h, rd.y, rd.y + rd.h - fit.h) : clamp(visTop, rd.y, rd.y + rd.h - fit.h);
+    pieces.push(piece("main", placeRows(r, fit, x, y, style(r, fit.size, 0.04), 1.26, side === "right" ? "right" : "left", 0), { plate: r.mainPlate, delay: 0.12 }));
+    const tp = translationPiece(r, x, y + fit.h + fit.size * 0.4, fit.w, side === "right" ? "right" : "left");
+    if (tp) pieces.push(tp);
+    return pieces;
+  }
+  // a narrow frame: the line under (or over) the column's end, flush with its side
   const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * 0.8, min: f.minRead, maxW: rd.w * 0.9, maxH: rd.h * 0.3, maxRows: 3, tracking: 0.04, leading: 1.26 });
   if (!fit) return null;
   const y = topEdge ? Math.min(rd.y + rd.h - fit.h, ky + kH + fit.size * 0.6) : Math.max(rd.y, ky - fit.h - fit.size * 0.6);
-  const x = rd.x + (rd.w - fit.w) / 2;
-  pieces.push(piece("main", placeRows(r, fit, x, y, style(r, fit.size, 0.04), 1.26, "center", 0), { plate: r.mainPlate, delay: 0.12 }));
+  const x = side === "right" ? rd.x + rd.w - fit.w : rd.x;
+  pieces.push(piece("main", placeRows(r, fit, x, y, style(r, fit.size, 0.04), 1.26, side === "right" ? "right" : "left", 0), { plate: r.mainPlate, delay: 0.12 }));
   return pieces;
 }
 
@@ -580,8 +601,10 @@ function scatter(r: RecipeCtx): Piece[] | null {
   if (!units.length) return null;
   const vertical = lt.cjk && r.hint.orientation === "v";
   const calm = r.sys.voice === "ink" ? 0.55 : 1;
-  const base = Math.max(f.minRead * 1.05, r.body * lerp(0.82, 1.02, r.e));
-  const sizes = units.map((i) => Math.max(f.minRead, base * (lt.emph[i] ? 1.38 : 0.8 + 0.42 * r.rng.next())));
+  // the experimental voice throws the characters wider apart in size (the calm ones keep them close)
+  const loud = r.sys.voice === "glitch" ? 1 : 0;
+  const base = Math.max(f.minRead * 1.05, r.body * lerp(0.82, 1.02, r.e) * (1 + 0.18 * loud));
+  const sizes = units.map((i) => Math.max(f.minRead, base * (lt.emph[i] ? 1.38 + 0.2 * loud : 0.8 - 0.08 * loud + (0.42 + 0.3 * loud) * r.rng.next())));
   const adv = (k: number) => {
     const u = lt.units[units[k]];
     return (u.kind === "latin" ? r.measure(u.text, "latin", r.weight) : 1) * sizes[k];
@@ -657,7 +680,7 @@ function poster(r: RecipeCtx): Piece[] | null {
   const totalEm = width(all);
   const perRow = f.aspect < 1 ? 4 : lerp(7, 4.5, r.c);
   const maxRows = clamp(Math.round(totalEm / perRow + 0.4), 1, 4);
-  const rows = breakRows(lt.units, 0, lt.units.length, { max: Math.max(2, totalEm / Math.max(1, maxRows) + 0.8), maxRows, width }).filter((row) => row.length);
+  const rows = breakRows(lt.units, 0, lt.units.length, { max: Math.max(2, totalEm / Math.max(1, maxRows) + 0.8), maxRows, width, wordStarts: lt.wordStarts }).filter((row) => row.length);
   if (!rows.length) return null;
   let blockW = rd.w * (f.aspect < 1 ? 0.9 : lerp(0.46, 0.7, r.d)) * (0.9 + 0.2 * r.e);
   const gap = 0.06;
@@ -766,11 +789,55 @@ function echo(r: RecipeCtx): Piece[] | null {
 }
 
 function split(r: RecipeCtx): Piece[] | null {
-  const block = mainBlock(r, lerp(1.05, 1.3, r.e), 2, r.zone.side === "right" ? "right" : "left");
-  if (!block) return null;
-  block.pieces[0].slices = 5 + r.rng.int(5);
-  const tp = translationPiece(r, block.box.x, block.box.y + block.box.h + block.size * 0.5, block.box.w);
-  return [...block.pieces, ...(tp ? [tp] : [])];
+  const { lt, frame: f } = r;
+  const rd = f.read;
+  if (lt.cjk && r.hint.orientation === "v") {
+    const block = mainBlock(r, lerp(1.05, 1.3, r.e), 2, "left");
+    if (!block) return null;
+    block.pieces[0].slices = 5 + r.rng.int(5);
+    block.pieces[0].tear = 0.3;
+    return block.pieces;
+  }
+  // a torn poster: the line in two or three rows at its words, each row as wide as the block, the
+  // rows knocked out of line with each other and one of them torn into shifted slices
+  const tracking = lt.latinOnly ? -0.01 : 0.0;
+  const width = (ix: number[]) => rowEm(lt, ix, r.weight, tracking, r.measure);
+  const all = allIdx(lt);
+  const totalEm = width(all);
+  const rowsWanted = totalEm <= 4.5 ? 1 : totalEm <= 12 ? 2 : 3;
+  const rows = (rowsWanted === 1 ? [all] : breakRows(lt.units, 0, lt.units.length, { max: totalEm / rowsWanted + 0.8, maxRows: rowsWanted, width, wordStarts: lt.wordStarts })).filter((row) => row.length);
+  if (!rows.length) return null;
+  let blockW = rd.w * (f.aspect < 1 ? 0.9 : f.aspect > 2.4 ? 0.4 : lerp(0.46, 0.62, r.e));
+  let sizes: number[] = [];
+  for (let guard = 0; guard < 30; guard++) {
+    sizes = rows.map((row) => clamp(blockW / Math.max(0.5, width(row)), f.minRead * 1.1, rd.h * 0.3));
+    const h = sizes.reduce((a, sz) => a + sz * 1.04, 0);
+    if (h <= rd.h * 0.74 || blockW < rd.w * 0.25) break;
+    blockW *= 0.92;
+  }
+  const actualW = Math.max(...rows.map((row, i) => width(row) * sizes[i]));
+  const shifts = rows.map((_, i) => (i === 0 ? 0 : (r.rng.next() - 0.5) * 0.9 * sizes[i]));
+  const minShift = Math.min(0, ...shifts);
+  const maxShift = Math.max(0, ...shifts);
+  const blockH = sizes.reduce((a, sz) => a + sz * 1.04, 0) - sizes[sizes.length - 1] * 0.04;
+  const x = clamp(sideX(r, actualW + maxShift - minShift) - minShift, rd.x - minShift, rd.x + rd.w - actualW - maxShift);
+  const y0 = bandY(r, blockH, 0.14, 0.42);
+  const torn = rows.length > 1 ? 1 + r.rng.int(rows.length - 1) : 0;
+  const pieces: Piece[] = [];
+  let y = y0;
+  let order = 0;
+  rows.forEach((row, i) => {
+    const sz = sizes[i];
+    const w = width(row) * sz;
+    const rx = (r.zone.side === "right" ? x + actualW - w : x) + shifts[i];
+    const set = setRow(lt, row, rx, y + sz * 0.5, style(r, sz, tracking), r.measure, order);
+    order += set.glyphs.length;
+    pieces.push(piece("main", set.glyphs, { plate: r.mainPlate, slices: 4 + r.rng.int(5), tear: i === torn ? 0.2 : 0.05, delay: 0.05 * i }));
+    y += sz * 1.04;
+  });
+  const tp = translationPiece(r, x, y + sizes[sizes.length - 1] * 0.3, actualW, r.zone.side === "right" ? "right" : "left");
+  if (tp) pieces.push(tp);
+  return pieces;
 }
 
 // ---------------------------------------------------------------------------
@@ -780,24 +847,36 @@ function split(r: RecipeCtx): Piece[] | null {
 function whisper(r: RecipeCtx): Piece[] | null {
   const { lt, frame: f } = r;
   const rd = f.read;
-  const size = f.minRead * lerp(1.0, 1.28, r.e) * clamp(r.hint.scale, 0.8, 1.6);
+  const size = f.minRead * lerp(1.0, 1.28, r.e);
   const tracking = lt.latinOnly ? 0.08 : lerp(0.3, 0.16, r.d);
-  const vertical = lt.cjk && r.hint.orientation === "v";
+  // brush and ink whisper down a column; the others in one or two short rows
+  const vertical = lt.cjk && (r.hint.orientation === "v" || (r.sys.voice === "ink" && r.hint.orientation !== "h"));
+  // never centred like a caption: it hangs from a grid column on one side, at a third of the height
+  const side = r.zone.side === "center" ? (hashUnit(`whisper|${Math.round(r.hint.seed)}`) < 0.5 ? "left" : "right") : r.zone.side;
+  const inset = f.grid.cols >= 6 ? 1 : 0;
   if (vertical) {
-    const fit = fitColumns(r, 0, lt.units.length, { wanted: size, min: f.minRead, maxW: rd.w * 0.3, maxH: rd.h * 0.7, maxCols: 2, tracking, gap: 0.9 });
+    const fit = fitColumns(r, 0, lt.units.length, { wanted: size, min: f.minRead, maxW: rd.w * 0.3, maxH: rd.h * 0.62, maxCols: 2, tracking, gap: 0.9 });
     if (!fit) return null;
-    const x = r.zone.side === "left" ? colX(f.grid, 0) : colRight(f.grid, -1) - fit.w;
-    const y = rd.y + rd.h * (r.zone.band === "top" ? 0.04 : 0.22);
-    return [piece("main", placeColumns(r, fit, x + fit.w, y, style(r, fit.size, tracking)), { plate: r.mainPlate, vertical: true })];
+    const x = side === "left" ? colX(f.grid, inset) : colRight(f.grid, -1 - inset) - fit.w;
+    const y = rd.y + (rd.h - fit.h) * (r.zone.band === "top" ? 0.2 : 0.46);
+    const out = [piece("main", placeColumns(r, fit, x + fit.w, y, style(r, fit.size, tracking)), { plate: r.mainPlate, vertical: true })];
+    if (r.sys.params.ornament >= 0.2) {
+      // a short hairline over the first column
+      const rh = fit.size * 1.6;
+      const ry = y - fit.size * 0.8 - rh;
+      if (ry > f.safe.y) out.push(piece("rule", [], { plate: "ink", alpha: 0.7, readable: false, rect: { x: x + fit.w - fit.size / 2 - 1, y: ry, w: Math.max(2, fit.size * 0.04), h: rh } }));
+    }
+    return out;
   }
-  const fit = fitRows(r, 0, lt.units.length, { wanted: size, min: f.minRead, maxW: rd.w * (f.aspect < 1 ? 0.86 : 0.48), maxH: rd.h * 0.3, maxRows: 2, tracking, leading: 1.6 });
+  const measureW = rd.w * (f.aspect < 1 ? 0.8 : f.aspect > 2.4 ? 0.24 : 0.36);
+  const fit = fitRows(r, 0, lt.units.length, { wanted: size, min: f.minRead, maxW: measureW, maxH: rd.h * 0.3, maxRows: 2, tracking, leading: 1.7 });
   if (!fit) return null;
-  const x = r.zone.side === "right" ? colRight(f.grid, -1) - fit.w : r.zone.side === "center" ? rd.x + (rd.w - fit.w) / 2 : colX(f.grid, 0);
-  const y = rd.y + rd.h * (r.zone.band === "top" ? 0.06 : 0.4);
-  const out = [piece("main", placeRows(r, fit, x, y, style(r, fit.size, tracking), 1.6, r.zone.side === "right" ? "right" : r.zone.side === "center" ? "center" : "left"), { plate: r.mainPlate })];
-  if (r.sys.params.ornament >= 0.2 && r.zone.side !== "center") {
+  const x = side === "right" ? colRight(f.grid, -1 - inset) - fit.w : colX(f.grid, inset);
+  const y = rd.y + (rd.h - fit.h) * (r.zone.band === "top" ? 0.3 : 0.62);
+  const out = [piece("main", placeRows(r, fit, x, y, style(r, fit.size, tracking), 1.7, side === "right" ? "right" : "left"), { plate: r.mainPlate })];
+  if (r.sys.params.ornament >= 0.2) {
     const rw = fit.size * 1.6;
-    const rx = r.zone.side === "right" ? x + fit.w + fit.size * 0.7 : x - rw - fit.size * 0.7;
+    const rx = side === "right" ? x + fit.w + fit.size * 0.7 : x - rw - fit.size * 0.7;
     if (rx > f.safe.x - 1 && rx + rw < f.safe.x + f.safe.w + 1) out.push(piece("rule", [], { plate: "ink", alpha: 0.7, readable: false, rect: { x: rx, y: y + fit.size / 2 - 1, w: rw, h: Math.max(2, fit.size * 0.04) } }));
   }
   return out;

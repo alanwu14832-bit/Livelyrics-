@@ -190,7 +190,7 @@ describe("the 排版 editor's operations", () => {
     ts = E.setColorRole(ts, "l6", "accent", ctx);
     const h6 = resolveLine(plan(ts), lines, 6, { duration })!.hint;
     expect([h6.dx, h6.color]).toEqual([0.1, "accent"]);
-    expect(resolveLine(plan(ts), lines, 4, { duration })!.hint.color).toBe("ink");
+    expect(resolveLine(plan(ts), lines, 4, { duration })!.hint.color).toBe("auto");
   });
 
   it("sections take overrides; the A/B version has no edits; history undoes and redoes, drags merge", () => {

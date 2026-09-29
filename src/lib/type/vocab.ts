@@ -179,7 +179,8 @@ export const EXITS: Record<TypeExitId, string> = {
   blur: "失焦",
 };
 
-export const COLOR_ROLES: Record<TypeColorRole, { label: string; description: string }> = {
+export const COLOR_ROLES: Record<TypeColorRole | "auto", { label: string; description: string }> = {
+  auto: { label: "自動", description: "跟整首的顏色處理（鏤空：強的句子巨字變成窗）" },
   ink: { label: "主字色", description: "歌詞色，最清楚" },
   accent: { label: "點綴色", description: "整句用點綴色" },
   invert: { label: "反白", description: "字從一塊色塊裡挖空" },

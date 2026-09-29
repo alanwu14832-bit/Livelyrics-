@@ -7,12 +7,12 @@ import type { DesignPlan, LyricLine, TypeSystem } from "../types";
 import { composeKey, composeLine } from "./compose";
 import type { CanvasSpec, Composition, Measure } from "./model";
 import { resolveLine, resolveSystem, type LineResolution } from "./resolve";
-import { lineText, type LineText } from "./text";
+import { lineText, wordStartsOf, type LineText } from "./text";
 
 export function prepareLineText(lines: readonly LyricLine[], index: number, emphasis: readonly string[], songDuration: number): LineText | null {
   const p = prepareLine(lines, index, { maxChars: 16, maxLines: 2, songDuration, emphasis });
   if (!p || !p.units.some((u) => u.kind === "cjk" || u.kind === "latin")) return null;
-  return lineText(p.text, p.units, p.emphasis, p.translation);
+  return lineText(p.text, p.units, p.emphasis, p.translation, wordStartsOf(p.text, p.units, lines[index]?.words));
 }
 
 export interface ComposeProjectOptions {

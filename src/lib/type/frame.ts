@@ -30,7 +30,10 @@ export interface Frame {
   W: number;
   H: number;
   aspect: number;
-  /** size reference: the height of a 16:9 canvas of this width, capped by the real height */
+  /**
+   * size reference: the height of a 16:9 canvas of this width, capped by the real height; a tall
+   * canvas (9:16) leans towards its width (its type is set for the width, not for a letterbox)
+   */
   ref: number;
   short: number;
   safe: Box;
@@ -66,7 +69,7 @@ export function makeFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColu
     W,
     H,
     aspect: W / H,
-    ref: Math.min(H, (W * 9) / 16),
+    ref: Math.min(H, W * (0.8 + (9 / 16 - 0.8) * clamp((W / H - 9 / 16) / (16 / 9 - 9 / 16), 0, 1))),
     short,
     safe,
     read,

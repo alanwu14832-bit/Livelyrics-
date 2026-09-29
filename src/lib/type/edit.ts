@@ -324,8 +324,9 @@ export function setExit(ts: TypeSystem, lineId: string, exit: TypeExitId, ctx: E
   return editLine(ts, lineId, { exit: exit === "auto" ? undefined : exit }, ctx);
 }
 
-export function setColorRole(ts: TypeSystem, lineId: string, color: TypeColorRole, ctx: EditContext): TypeSystem {
-  return editLine(ts, lineId, { color: color === "ink" ? undefined : color }, ctx);
+/** The line's colour role; "auto" = what the song's colour treatment gives it. */
+export function setColorRole(ts: TypeSystem, lineId: string, color: TypeColorRole | "auto", ctx: EditContext): TypeSystem {
+  return editLine(ts, lineId, { color: color === "auto" ? undefined : color }, ctx);
 }
 
 /** Move the composition (fractions of the canvas width / height, clamped to ±0.5). */

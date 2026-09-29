@@ -4,11 +4,11 @@ import { createDemoProject } from "../stage/demo";
 import type { DesignPlan, LyricLine, TypeSystem } from "../types";
 import { composeLine } from "./compose";
 import { makeFrame } from "./frame";
-import { glyphBox, type CanvasSpec, type Composition, type ResolvedHint } from "./model";
+import { glyphBox, pieceBox, type Box, type CanvasSpec, type Composition, type ResolvedHint } from "./model";
 import { normalizeTypeSystem } from "./normalize";
 import { composeProjectLine, prepareLineText } from "./prepare";
 import { resolveSystem } from "./resolve";
-import { approxMeasure, breakRows, verticalForm } from "./text";
+import { approxMeasure, breakRows, keySpan, lineText, verticalForm, wordStartsOf } from "./text";
 import { tokenizeLyric } from "../stage/lyrics/tokenize";
 import { VOICES } from "./vocab";
 
@@ -101,6 +101,105 @@ describe("type engine: layout", () => {
       const glyphs = c.pieces.filter((p) => p.readable && p.role !== "translation").flatMap((p) => p.glyphs).filter((g) => g.unit >= 0);
       const byOrder = [...glyphs].sort((a, b) => a.order - b.order).map((g) => g.unit);
       expect(byOrder, recipe).toEqual([...byOrder].sort((a, b) => a - b));
+    }
+  });
+});
+
+describe("type engine: colour roles", () => {
+  it("反白 cuts the display text out of ink blocks that cover every glyph (one per row)", () => {
+    const c = compose(TEXTS[0], "title-card", CANVASES["16:9"], { color: "invert" });
+    const chips = c.pieces.filter((p) => p.knockout);
+    expect(chips.length).toBeGreaterThan(0);
+    for (const p of chips) {
+      expect(p.rect && p.plate).toBe("ink");
+      for (const g of p.glyphs) {
+        const b = glyphBox(g);
+        expect(b.x).toBeGreaterThanOrEqual(p.rect!.x - 0.5);
+        expect(b.x + b.w).toBeLessThanOrEqual(p.rect!.x + p.rect!.w + 0.5);
+        expect(b.y).toBeGreaterThanOrEqual(p.rect!.y - 0.5);
+        expect(b.y + b.h).toBeLessThanOrEqual(p.rect!.y + p.rect!.h + 0.5);
+      }
+    }
+    // a giant word is the one inverted, the small text stays plain
+    const g = compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "invert", motionWord: "風" });
+    expect(g.pieces.filter((p) => p.knockout).every((p) => p.role === "giant")).toBe(true);
+    expect(g.window).toBe(false);
+  });
+
+  it("the knockout treatment opens display words on strong lines only; 鏤空窗 and 鏤空 fill the frame", () => {
+    const quiet = compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "auto", energy: 0.3, motionWord: "風" }, "title-sequence");
+    const loud = compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "auto", energy: 0.9, motionWord: "風" }, "title-sequence");
+    expect(quiet.window).toBe(false);
+    expect(loud.window).toBe(true);
+    expect(loud.windowFill).toBeGreaterThan(0.4);
+    expect(loud.windowFill).toBeLessThan(1);
+    // 主字色 keeps it solid even there
+    expect(compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "ink", energy: 0.9, motionWord: "風" }, "title-sequence").window).toBe(false);
+    expect(compose(TEXTS[1], "window", CANVASES["16:9"], { color: "auto", energy: 0.8 }).windowFill).toBe(1);
+    expect(compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "window", energy: 0.3, motionWord: "風" }).windowFill).toBe(1);
+  });
+});
+
+const overlap = (a: Box, b: Box) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+describe("type engine: line breaks, key words, the translation", () => {
+  it("a row never starts with a particle, and a timed word stays whole", () => {
+    const text = "夜色慢慢落在城市的邊緣";
+    const units = tokenizeLyric(text);
+    for (const max of [5, 6, 7]) {
+      const rows = breakRows(units, 0, units.length, { max, maxRows: 3, width: (idx) => idx.length });
+      for (const row of rows.slice(1)) expect(units[row[0]].text, `max ${max}`).not.toBe("的");
+      // nor inside a common word (城市, 邊緣)
+      const joined = rows.map((r) => r.map((i) => units[i].text).join(""));
+      for (let k = 1; k < joined.length; k++) expect([joined[k - 1].slice(-1) + joined[k][0]], `max ${max}: ${joined.join(" / ")}`).not.toContain("城市");
+    }
+    const words = ["夜色", "慢慢", "落在", "城市的", "邊緣"].map((t) => ({ text: t, start: 0, end: 0 }));
+    const starts = wordStartsOf(text, units, words);
+    expect([...starts].sort((a, b) => a - b)).toEqual([2, 4, 6, 9]);
+    const rows = breakRows(units, 0, units.length, { max: 6, maxRows: 2, width: (idx) => idx.length, wordStarts: starts });
+    expect(rows.map((r) => r.map((i) => units[i].text).join(""))).toEqual(["夜色慢慢落在", "城市的邊緣"]);
+  });
+
+  it("the featured word is a strong character when every pair leans on a function word", () => {
+    const text = "Hey 跟著我唱";
+    const lt = lineText(text, tokenizeLyric(text).map((u) => ({ ...u, t0: 0, t1: 0 })), tokenizeLyric(text).map(() => false));
+    const k = keySpan(lt, "", 3)!;
+    expect(lt.units.slice(k[0], k[1]).map((u) => u.text).join("")).toBe("唱");
+    const lt2 = lineText("夜色慢慢落在城市的邊緣", tokenizeLyric("夜色慢慢落在城市的邊緣").map((u) => ({ ...u, t0: 0, t1: 0 })), []);
+    const k2 = keySpan(lt2, "", 3)!;
+    expect(lt2.units.slice(k2[0], k2[1]).map((u) => u.text).join("")).toBe("邊緣");
+    // a real pair is kept (not the phrase-final 「下」 of 一下)
+    const lt3 = lineText("安靜一下 聽見了嗎", tokenizeLyric("安靜一下 聽見了嗎").map((u) => ({ ...u, t0: 0, t1: 0 })), []);
+    const k3 = keySpan(lt3, "", 3)!;
+    expect(lt3.units.slice(k3[0], k3[1]).map((u) => u.text).join("")).toBe("聽見");
+  });
+
+  it("網格詩 breaks the poem at its words: no orphan cell", () => {
+    for (const [name, canvas] of Object.entries(CANVASES)) {
+      const c = compose("我們的歌會找到方向", "grid-poem", CANVASES[name] ?? canvas, { energy: 0.7 });
+      const main = c.pieces.find((p) => p.role === "main")!;
+      const rows = new Map<number, number>();
+      for (const g of main.glyphs) rows.set(Math.round(g.y), (rows.get(Math.round(g.y)) ?? 0) + 1);
+      expect(Math.min(...rows.values()), name).toBeGreaterThan(1);
+    }
+  });
+
+  it("the translation never sits on the composition", () => {
+    for (const [name, canvas] of Object.entries(CANVASES)) {
+      for (const recipe of TYPE_RECIPE_IDS) {
+        for (const voice of TYPE_VOICE_IDS) {
+          for (const [text, orientation, seed] of [[TEXTS[0], "mixed", 11], [TEXTS[2], "v", 77], [TEXTS[4], "h", 512], [TEXTS[1], "v", 3]] as const) {
+            const c = compose(text, recipe, canvas, { orientation, seed, energy: seed === 3 ? 0.35 : 0.8 }, voice, "Our song will find its way home tonight");
+            const tp = c.pieces.find((p) => p.role === "translation");
+            if (!tp) continue;
+            const tb = pieceBox(tp);
+            for (const p of c.pieces) {
+              if (p === tp || p.role === "grid" || p.bleed) continue;
+              expect(overlap(tb, pieceBox(p)), `${name} ${voice}/${recipe} "${text}": translation on ${p.role}`).toBe(false);
+            }
+          }
+        }
+      }
     }
   });
 });

@@ -51,11 +51,14 @@ export interface ResolvedHint {
   rotate: number;
   enter: TypeEnterId;
   exit: TypeExitId;
-  color: TypeColorRole;
+  /** the line's colour role; "auto" = what the system's colour treatment gives it */
+  color: TypeColorRole | "auto";
   /** the last chorus escalates the composition every earlier chorus showed */
   escalate: boolean;
   /** the section's motion override (0..1), null = the system's */
   motion: number | null;
+  /** the orientation was set in the editor (line or section): the canvas may not adapt it */
+  orientationFixed?: boolean;
 }
 
 /** Where the line sits in the song (ornaments: numbers, section label, title). */
@@ -130,6 +133,8 @@ export interface Piece {
   grid?: { cols: number; rows: number };
   /** 撕裂: the glyphs are drawn as this many horizontal slices that shift apart */
   slices?: number;
+  /** 0..1 how far the slices stay apart at rest (a torn row keeps its tear) */
+  tear?: number;
   /** 反白: the glyphs are cut out of the chip behind them */
   knockout?: boolean;
 }
@@ -158,6 +163,11 @@ export interface Composition {
   bounds: Box;
   /** the composition shows a knockout window (the spot plate is a mask) */
   window: boolean;
+  /**
+   * 0..1 how much the frame fills around the window glyphs: 1 for 鏤空窗 and the 鏤空 role; less
+   * for a display word the knockout treatment opens (the scene stays half seen around it)
+   */
+  windowFill: number;
   /** the composition carries a seal (the spot plate is vermilion) */
   seal: boolean;
   /** smallest readable glyph size (px) */
@@ -190,5 +200,7 @@ export function glyphBox(g: GlyphBox): Box {
 export function pieceBox(p: Piece): Box {
   let b: Box = p.rect ? { ...p.rect } : { ...EMPTY_BOX };
   for (const g of p.glyphs) b = unionBox(b, glyphBox(g));
+  // an echo copy is drawn at its offset (a little more while it breathes)
+  if (p.echo && b.w > 0) b = unionBox(b, { ...b, x: b.x + p.echo.dx * 1.15, y: b.y + p.echo.dy * 1.15 });
   return b;
 }
