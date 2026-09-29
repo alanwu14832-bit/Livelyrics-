@@ -25,6 +25,7 @@ import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
 import { describeError } from "./messages";
+import { backupModelName, withRetries, type RetryOptions } from "./retry";
 import { normalizePlan } from "./normalize";
 import { offlineDesign } from "./offline";
 import { freeResearch, type FreeResearchOptions } from "./free-research";
@@ -68,6 +69,11 @@ export interface DesignerDeps {
   fetch?: FetchLike;
   /** free-research lookup overrides (environment, budget, MusicBrainz spacing) */
   lookup?: FreeResearchOptions["lookup"];
+  /**
+   * Retries of transient Claude failures (5xx / overloaded). On by default for the real SDK transport;
+   * an injected transport gets none unless this is set.
+   */
+  retry?: Omit<RetryOptions, "onLog"> | false;
 }
 
 /** Claude did not finish inside DesignerDeps.timeoutMs (not a cancellation: the offline designer takes over). */
@@ -126,9 +132,12 @@ function resolveDeps(deps: DesignerDeps) {
     /** a key is set but this call was asked not to use it (免費研究 chosen for this run) */
     optedOut: !configured && deps.configured === false && isClaudeConfigured(),
     model: deps.model ?? modelName(),
-    transport: () => {
+    /** a fresh transport per step: the deadline, then retries (a backup model sticks for that step only) */
+    transport: (onLog?: (message: string) => void) => {
       const t = deps.transport ?? defaultTransport();
-      return deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
+      const timed = deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
+      const retry = deps.retry ?? (deps.transport ? false : { backupModel: backupModelName() });
+      return retry ? withRetries(timed, { ...retry, onLog }) : timed;
     },
     now: deps.now,
     free: { fetch: deps.fetch, now: deps.now, lookup: deps.lookup } satisfies FreeResearchOptions,
@@ -160,7 +169,7 @@ export async function researchSong(input: DesignerInput, cb: DesignerCallbacks =
   }
   try {
     cbs.onLog(`Claude（${d.model}）開始研究「${input.meta?.artist || "樂團"}」與〈${input.meta?.title || "這首歌"}〉…`);
-    return await claudeResearch(input, tracked, { transport: d.transport(), model: d.model, now: d.now });
+    return await claudeResearch(input, tracked, { transport: d.transport(cbs.onLog), model: d.model, now: d.now });
   } catch (err) {
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     const why = describeError(err);
@@ -243,7 +252,7 @@ export async function designSong(
   }
   try {
     cbs.onLog(`Claude（${d.model}）開始${req.instruction?.trim() ? "依指示重新" : ""}設計主視覺與段落…`);
-    const { plan, repairs, model } = await claudeDesign(req, cbs, { transport: d.transport(), model: d.model, now: d.now });
+    const { plan, repairs, model } = await claudeDesign(req, cbs, { transport: d.transport(cbs.onLog), model: d.model, now: d.now });
     if (repairs.length) cbs.onLog(`已自動修正方案：${repairs.slice(0, 5).join("；")}${repairs.length > 5 ? "…" : ""}`);
     cbs.onLog(`設計完成（${model}）：主視覺「${plan.keyVisual.title}」，${plan.sections.length} 個段落、${plan.cues.length} 個操作提示`);
     return plan;
@@ -273,7 +282,7 @@ export async function generateBible(input: BibleInput, cb: DesignerCallbacks = {
   try {
     cbs.onLog(`Claude（${d.model}）開始整理「${input.bandName}」的視覺聖經…`);
     const { raw, model } = await claudeStructured({ system: BIBLE_SYSTEM, prompt: buildBiblePrompt(input), schema: BibleDraftSchema, label: "視覺聖經" }, cbs, {
-      transport: d.transport(),
+      transport: d.transport(cbs.onLog),
       model: d.model,
       now: d.now,
     });
@@ -312,7 +321,7 @@ export async function planShowArc(input: ArcInput, cb: DesignerCallbacks = {}, d
     const { raw, model } = await claudeStructured(
       { system: ARC_SYSTEM, prompt: buildArcPrompt(input, bibleBlock(input.bible, input.bandName)), schema: ArcDraftSchema, label: "整場弧線" },
       cbs,
-      { transport: d.transport(), model: d.model, now: d.now },
+      { transport: d.transport(cbs.onLog), model: d.model, now: d.now },
     );
     return normalizeArc(raw, input, fallback, model, now);
   } catch (err) {
@@ -352,7 +361,7 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
     const { raw, model } = await claudeStructured(
       { system: DIRECTIONS_SYSTEM, prompt: buildDirectionsPrompt(req), schema: DirectionDraftSchema, label: "設計方向", before: images, effort: "medium", maxTokens: 16_000 },
       cbs,
-      { transport: d.transport(), model: d.model, now: d.now },
+      { transport: d.transport(cbs.onLog), model: d.model, now: d.now },
     );
     const specs = normalizeDirectionDrafts(raw, req, offline);
     const directions = buildDirections(specs, req, { engine: "claude", model, now });

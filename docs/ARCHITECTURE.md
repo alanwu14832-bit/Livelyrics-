@@ -936,6 +936,12 @@ keeps every contract above and changes only where things are kept and how long w
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
   colors, past stage shows), song meaning/imagery, mood/energy arc, reference live moments; returns
   sources. Must not reproduce full copyrighted lyrics in the brief.
+- Transient failures (HTTP ≥ 500 incl. 529, an `overloaded_error`/`api_error` inside an open stream) are
+  retried by `withRetries` (`retry.ts`, wrapped around the deadline transport per step): after the SDK's own
+  retries, wait 3 s and 8 s and retry the same model, then try `LIVELYRICS_BACKUP_MODEL` (default
+  `claude-opus-5-5`, `off` disables) once — first request of a step only, never a `pause_turn` continuation,
+  and never after output has started streaming. The backup sticks for the rest of that step. Injected test
+  transports get no retries unless `DesignerDeps.retry` is set.
 - Every Claude request (research, design, structured jobs) uses `adaptiveThinking()` in `claude.ts`:
   adaptive thinking with summaries plus `block_binding.prefix_mismatch_behavior: "drop_block"`
   (beta `thinking-binding-controls-2026-08-01`). Sonnet 5.5 binds thinking blocks to the conversation
