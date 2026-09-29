@@ -9,9 +9,9 @@
 //
 // Checks, in the per-song console /p/<id> and its projection window:
 //   - manual by default: no sync capsule, no MIDI or microphone request;
-//   - the 控制器 sheet: MIDI on, learn 一鍵黑場 (a note) and 畫面強度 (a CC), Esc cancels a learn;
-//     the pad blacks out (its note off does not), the fader moves the intensity; ProPresenter 式
-//     note n cues lyric line n;
+//   - the 控制器 sheet: MIDI on, learn 一鍵黑場 (a note) and 畫面強度 (a CC), Esc cancels a learn,
+//     the mapping file exports and imports; the pad blacks out (its note off does not), the fader
+//     moves the intensity; ProPresenter 式 note n cues lyric line n;
 //   - MIDI clock at 128 BPM: the readout shows ≈ 128, the projection's beat phase advances, and the
 //     lock is lost half a second after the clock stops;
 //   - MTC quarter frames: the timecode readout runs, the song follows (TRACK: its audio too) and
@@ -406,8 +406,19 @@ const OUT_SPY = () => {
     await page.locator('[data-preset="lineNotes"]').click();
     await page.waitForTimeout(300);
     check("ProPresenter 式 explains the mapping", /音符 0（C-2）→ 第 1 句/.test(await text('[data-preset-caption="lineNotes"]')), await text('[data-preset-caption="lineNotes"]'));
+    // the mapping file: 匯出 JSON, then 匯入 JSON… a copy with one more binding
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.locator("[data-midi-export]").click()]);
+    const exported = JSON.parse(fs.readFileSync(await dl.path(), "utf8"));
+    check("匯出 JSON writes the mapping file", dl.suggestedFilename() === "livelyrics-midi.json" && exported.kind === "midi-map" && exported.bindings.length === 2 && exported.lineNotes.enabled === true, JSON.stringify(exported.bindings));
+    const importPath = path.join(process.env.LTC_DIR || os.tmpdir(), `livelyrics-e2e-midi-${process.pid}.json`);
+    fs.writeFileSync(importPath, JSON.stringify({ ...exported, bindings: [...exported.bindings, { target: "freeze", kind: "note", channel: 0, number: 41 }] }));
+    await page.locator("[data-midi-import]").setInputFiles(importPath);
+    await page.waitForTimeout(500);
+    const imported = await page.locator('[data-midi-target="freeze"] [data-binding]').innerText().catch(() => "");
+    check("匯入 JSON… reads a mapping file", /音符 F1（41）/.test(imported) && /已匯入/.test(await text("#ctl-file-note")), `${imported} / ${await text("#ctl-file-note").catch(() => "")}`);
+    fs.unlinkSync(importPath);
     await closeSheet();
-    check("the mapping is remembered in this browser", await page.evaluate(() => JSON.parse(localStorage.getItem("livelyrics:midi") || "{}").map?.bindings?.length === 2));
+    check("the mapping is remembered in this browser", await page.evaluate(() => JSON.parse(localStorage.getItem("livelyrics:midi") || "{}").map?.bindings?.length === 3));
 
     // ---------------------------------------------------------- the pad and the fader
     await midi("note", 40, 110, 0);
@@ -531,6 +542,8 @@ const OUT_SPY = () => {
     // ---------------------------------------------------------- LTC from the (fake) microphone
     await page.getByRole("radio", { name: "LTC", exact: true }).click();
     const ltcLocked = await until(async () => (await attr("[data-lock-tile]", "data-lock-tile")) === "locked", 8000, 50);
+    // (the readouts are written on the next animation frame)
+    await until(async () => /^\d\d:/.test(await text("[data-lock-tile] [data-sync-tc]")), 2000, 30);
     const ltcTc = await text("[data-lock-tile] [data-sync-tc]");
     const ltcSong = await text("[data-lock-tile] [data-sync-song]");
     const ltcRate = await text("[data-lock-tile] [data-sync-rate]").catch(() => "");
