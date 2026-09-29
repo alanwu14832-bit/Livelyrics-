@@ -67,6 +67,8 @@ describe("free research brief", () => {
     expect(r.brief).toContain("草東沒有派對");
     expect(r.brief).toContain("醜奴兒");
     expect(r.brief).toContain("獨立搖滾");
+    // MusicBrainz's English area names read in Chinese
+    expect(r.brief).toContain("**草東沒有派對**：臺灣臺北的樂團");
     expect(r.brief).toMatch(/大合唱重點：「Hey」/);
     // the sources are the public pages it used
     const urls = r.sources.map((s) => s.url);
@@ -169,6 +171,16 @@ describe("findings drive the offline designer", () => {
     expect(sea.sections.some((s) => s.scene === "waves")).toBe(true);
     expect(sea.keyVisual.concept).toContain("海浪");
     expect(night.keyVisual.concept).toContain("夜色");
+  });
+
+  it("the 世界觀 says when the words and the sound pull apart", () => {
+    const calm = demoInput();
+    const slow = { ...calm.analysis!, bpm: 70, energy: calm.analysis!.energy.map(() => 0.25), brightness: calm.analysis!.brightness.map(() => 0.2), sections: calm.analysis!.sections.map((x) => ({ ...x, energy: 0.25 })) };
+    const f = analyzeFindings({ ...calm, analysis: slow });
+    expect(f.audio.label).toBe("陰鬱緩慢");
+    expect(f.lyrics.emotion.label).toBe("明亮激昂");
+    expect(f.hints.world).toContain("歌詞明亮而激昂、聲音卻陰鬱緩慢的世界");
+    expect(analyzeFindings(calm).hints.world).toBe("一個明亮而激昂的世界：「夜色」與「遠方」從安靜一路爆開。");
   });
 
   it("the sing-along phrase becomes an emphasis and a cue", () => {

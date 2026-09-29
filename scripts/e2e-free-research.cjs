@@ -15,8 +15,8 @@
 //   3. 用 claude.ai 研究: copy the prompt (clipboard), paste a good reply wrapped in prose → the plan is
 //      applied and shows in the console; paste a broken reply → the error and 複製修正提示詞; the
 //      JSON-only fix applies and keeps the brief. 用 claude.ai 提案 builds the directions prompt.
-// Screenshots: the process page with the free brief (light, dark), the unreachable brief, the sheet
-// (copy, paste, error light and dark, success), the console with the pasted plan.
+// Screenshots: the connect sheet, the process page with the free brief (light, dark), the unreachable
+// brief, the sheet (copy, paste, error light and dark, success), the console with the pasted plan.
 const { chromium } = (() => {
   for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
     try {
@@ -49,6 +49,8 @@ function check(name, ok, detail = "") {
 }
 function watch(page, label) {
   page.on("console", (m) => {
+    // the broken paste's 422 is also logged by the browser as a failed resource
+    if (/status of 422/.test(m.text())) return;
     if (m.type() === "error" || m.type() === "warning") problems.push(`[${label}] console.${m.type()}: ${m.text()}`);
   });
   page.on("pageerror", (e) => problems.push(`[${label}] pageerror: ${e.message}`));
@@ -145,6 +147,18 @@ async function openResearchPanel(page) {
   return panel;
 }
 
+/** Viewport screenshots down the research brief (sticky header and aside stay where they belong). */
+async function briefShots(page, name) {
+  const panel = page.locator('section[aria-label="研究簡報"]');
+  await panel.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.evaluate(() => window.scrollBy(0, -80));
+  await page.waitForTimeout(500);
+  await shot(page, `${name}-1`);
+  await page.evaluate(() => window.scrollBy(0, 820));
+  await page.waitForTimeout(400);
+  await shot(page, `${name}-2`);
+}
+
 async function clipboard(page) {
   return page.evaluate(() => navigator.clipboard.readText());
 }
@@ -161,6 +175,20 @@ async function clipboard(page) {
   watch(page, "process");
   let stub = null;
   try {
+    // ----------------------------------------------- 0. the home page status copy
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(600);
+    check("home says 免費研究模式", (await page.locator("body").innerText()).includes("目前使用免費研究模式"));
+    await page.getByRole("button", { name: "免費研究模式" }).click();
+    const connect = page.getByRole("dialog", { name: "連接 Claude" });
+    await connect.waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+    const connectText = await connect.innerText();
+    check("the connect sheet explains the free mode and the claude.ai option", connectText.includes("MusicBrainz") && connectText.includes("用 claude.ai 研究") && connectText.includes("ANTHROPIC_API_KEY"));
+    await shot(page, "home-connect-sheet");
+    await page.getByRole("button", { name: "關閉" }).click();
+    await page.waitForTimeout(400);
+
     // ----------------------------------------------- 1. sources unreachable
     const form = new FormData();
     form.set("audio", new Blob([WAV], { type: "audio/wav" }), "demo-song.wav");
@@ -169,7 +197,8 @@ async function clipboard(page) {
     const created = await fetch(`${BASE}/api/projects`, { method: "POST", body: form }).then((r) => r.json());
     const run = await fetch(`${BASE}/api/projects/${created.id}/process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lyricsText: LRC }) });
     const events = await run.text();
-    check("pipeline finishes with the sources unreachable", /"type":"done"/.test(events), events.slice(-160));
+    const finished = /"type":"done"/.test(events);
+    check("pipeline finishes with the sources unreachable", finished, finished ? "" : events.slice(-160));
     check("the stream showed the free research progress", events.includes("查詢 MusicBrainz…") && events.includes("讀取維基百科…") && events.includes("分析歌詞意象…"));
     const offline = await api("GET", `/api/projects/${created.id}`);
     check("a free research brief was still produced", offline.research?.engine === "free" && /## 歌曲意象與情緒/.test(offline.research.brief), offline.research?.engine);
@@ -178,7 +207,7 @@ async function clipboard(page) {
     check("no request reached a stub that was not running", stubRequests.length === 0);
     await page.goto(`${BASE}/p/${created.id}/process`, { waitUntil: "networkidle" });
     await openResearchPanel(page);
-    await shot(page, "free-unreachable-light", { fullPage: true });
+    await briefShots(page, "free-unreachable-light");
 
     // ----------------------------------------------- 2. sources stubbed
     stub = await startStub();
@@ -213,10 +242,16 @@ async function clipboard(page) {
     const panel = await openResearchPanel(page);
     const panelText = await panel.innerText();
     check("research panel labelled 免費研究（公開資料＋歌詞與音訊分析）", panelText.includes("免費研究（公開資料＋歌詞與音訊分析）"));
-    await shot(page, "free-brief-light", { fullPage: true });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
+    await shot(page, "free-process-light");
+    await briefShots(page, "free-brief-light");
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(600);
-    await shot(page, "free-brief-dark", { fullPage: true });
+    await briefShots(page, "free-brief-dark");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
+    await shot(page, "free-process-dark");
     await page.emulateMedia({ colorScheme: "light" });
     await page.waitForTimeout(300);
 
@@ -271,11 +306,11 @@ async function clipboard(page) {
     await page.getByTestId("manual-apply").click();
     await page.getByTestId("manual-error").waitFor({ timeout: 30000 });
     const errorText = await page.getByTestId("manual-error").innerText();
-    check("a broken reply shows a clear Chinese error with the line", /JSON 格式有錯/.test(errorText) && /JSON 第 \d+ 行第 \d+ 個字/.test(errorText), errorText.replace(/\s+/g, " ").slice(0, 140));
+    check("a broken reply shows a clear Chinese error with the line", /JSON 格式有錯/.test(errorText) && /省略了一部分內容/.test(errorText) && /第 \d+ 行第 \d+ 個字/.test(errorText), errorText.replace(/\s+/g, " ").slice(0, 160));
     await page.getByTestId("manual-fix-copy").click();
     await page.getByTestId("manual-fix-copy").filter({ hasText: "已複製" }).waitFor({ timeout: 5000 });
     const fix = await clipboard(page);
-    check("複製修正提示詞 copies a fix request naming the problem", fix.includes("沒辦法套用到 Livelyrics") && /JSON 第 \d+ 行/.test(fix) && fix.includes("```json"));
+    check("複製修正提示詞 copies a fix request naming the problem", fix.includes("沒辦法套用到 Livelyrics") && /第 \d+ 行第 \d+ 個字/.test(fix) && fix.includes("不能用 ... 代替") && fix.includes("```json"));
     check("nothing was saved from the broken reply", (await api("GET", `/api/projects/${id}`)).plan.keyVisual.title === "大風吹過空城");
     await page.getByTestId("manual-error").scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);

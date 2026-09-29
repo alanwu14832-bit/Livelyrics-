@@ -176,6 +176,8 @@ export interface RepairResult {
   text: string;
   /** 繁中, what was repaired */
   fixes: string[];
+  /** "..." / "…" outside strings: Claude left part of the JSON out (e.g. 「其餘段落…」) */
+  ellipsis: boolean;
 }
 
 function nextSignificant(text: string, from: number): string {
@@ -193,6 +195,7 @@ function nextSignificant(text: string, from: number): string {
  */
 export function repairJson(input: string): RepairResult {
   const fixes = new Set<string>();
+  let ellipsis = false;
   let out = "";
   let i = 0;
   type Last = "none" | "open" | "value" | "colon" | "comma";
@@ -346,6 +349,15 @@ export function repairJson(input: string): RepairResult {
       i++;
       continue;
     }
+    // an ellipsis where values were left out: kept (it cannot be repaired), and reported
+    if (s === "…" || (s === "." && input[i + 1] === ".")) {
+      let j = i;
+      while (j < n && (input[j] === "." || input[j] === "…")) j++;
+      out += input.slice(i, j);
+      ellipsis = true;
+      i = j;
+      continue;
+    }
     // numbers
     if (/[-+0-9.]/.test(s)) {
       valueStart();
@@ -392,7 +404,7 @@ export function repairJson(input: string): RepairResult {
     out += ch;
     i++;
   }
-  return { text: out, fixes: [...fixes] };
+  return { text: out, fixes: [...fixes], ellipsis };
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +421,7 @@ const JSON_ERRORS: Array<[RegExp, string]> = [
   [/Expected double-quoted property name|Expected property name/i, "這裡應該是用雙引號包起來的欄位名稱（或多了一個逗號）"],
   [/Expected ':' after property name/i, "欄位名稱後面缺少冒號 :"],
   [/Unterminated string/i, "字串沒有結束（少了結尾的雙引號）"],
+  [/Unterminated fractional number|No number after minus sign|Exponent part is missing a number/i, "數字的格式不對"],
   [/Bad control character/i, "字串裡有換行或控制字元"],
   [/Bad escaped character|Bad Unicode escape/i, "字串裡有錯誤的反斜線跳脫"],
   [/Unexpected non-whitespace character after JSON/i, "JSON 結束之後還有其他內容"],
@@ -438,6 +451,22 @@ function locate(text: string, pos: number): { line: number; column: number; snip
   const from = Math.max(0, column - 1 - 30);
   const snippet = `${from > 0 ? "…" : ""}${full.slice(from, column - 1)}⟪這裡⟫${full.slice(column - 1, column - 1 + 30)}${column - 1 + 30 < full.length ? "…" : ""}`;
   return { line, column, snippet: snippet.trim() };
+}
+
+/** Offset of the first "..." / "…" outside strings, or -1. */
+function ellipsisAt(text: string): number {
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "…" || (ch === "." && text[i + 1] === ".")) return i;
+  }
+  return -1;
 }
 
 function jsonErrorIssue(err: unknown, text: string): ReplyIssue {
@@ -477,6 +506,15 @@ export function parseReply(reply: string, target: ManualTarget): ParseOutcome {
       return { ok: true, value: JSON.parse(repaired.text), fixes: repaired.fixes, candidate };
     } catch (err) {
       const issues = [jsonErrorIssue(err, repaired.text)];
+      if (repaired.ellipsis) {
+        // the parse error points at the first "." anywhere; say where the ellipsis is instead
+        const at = ellipsisAt(repaired.text);
+        const where = at >= 0 ? locate(repaired.text, at) : null;
+        issues.splice(0, 1, {
+          message: `JSON 裡有「...」：省略了一部分內容（例如「其餘段落…」）${where ? `，在第 ${where.line} 行第 ${where.column} 個字（${where.snippet}）` : ""}。完整的 JSON 要寫出每個段落與欄位，不能用 ... 代替。`,
+          severity: "error",
+        });
+      }
       if (!candidate.complete) issues.push({ message: "左右括號的數量對不上：可能少了一個 } 或 ]。", severity: "error" });
       return { ok: false, truncated: false, candidate, issues };
     }
@@ -586,11 +624,11 @@ export function checkPlan(value: unknown, req: DesignRequest): PlanCheck {
     else issues.push({ path: "sections", message: "sections 裡沒有任何有數字 start／end（秒）的段落。", severity: "error" });
   }
   const left = placeholders(raw);
-  if (left.length >= 3) issues.push({ message: `還有 ${left.length} 個欄位是範本裡的（…）文字（例如 ${left.slice(0, 3).join("、")}）：Claude 沒有把範本填完。`, severity: "error" });
+  if (left.length >= 3) issues.push({ message: `還有 ${left.length} 個欄位是範本裡的（…）文字（例如 ${left.slice(0, 3).join("、")}）：範本還沒填完。`, severity: "error" });
   const st = analyzeStructure(req);
   const timed = Array.isArray(raw.sections) ? raw.sections.filter((s) => isObj(s) && typeof s.start === "number" && typeof s.end === "number").length : 0;
   if (timed > 0 && timed <= 2 && st.sections.length >= 5) {
-    issues.push({ path: "sections", message: `設計方案只有 ${timed} 個段落，但這首歌大約有 ${st.sections.length} 段（${st.sections.map((s) => formatTimeShort(s.start)).join("、")}）：範本只列了前幾段，請 Claude 輸出全部段落。`, severity: "error" });
+    issues.push({ path: "sections", message: `設計方案只有 ${timed} 個段落，但這首歌大約有 ${st.sections.length} 段（${st.sections.map((s) => formatTimeShort(s.start)).join("、")}）：範本只列了前幾段，全部段落都要輸出。`, severity: "error" });
   }
   if (warnings.length > MAX_TOLERATED_ISSUES) issues.push({ message: `有 ${warnings.length} 處不符合 DesignPlan 的規格，看起來是另一種格式的 JSON。`, severity: "error" });
   if (issues.length) return { ok: false, issues: [...issues, ...warnings.slice(0, 20)] };
@@ -622,7 +660,7 @@ export function checkDirections(value: unknown, req: DesignRequest, now: string)
   const warnings = checked.success ? [] : schemaIssues(checked.error, raw);
   const issues: ReplyIssue[] = [];
   const left = placeholders(raw);
-  if (left.length >= 3) issues.push({ message: `還有 ${left.length} 個欄位是範本裡的（…）文字（例如 ${left.slice(0, 3).join("、")}）：Claude 沒有把範本填完。`, severity: "error" });
+  if (left.length >= 3) issues.push({ message: `還有 ${left.length} 個欄位是範本裡的（…）文字（例如 ${left.slice(0, 3).join("、")}）：範本還沒填完。`, severity: "error" });
   const offline = offlineDirectionSpecs(req);
   const specs = normalizeDirectionDrafts(raw, req, offline).filter((s) => !offline.includes(s));
   const named = raw.directions.filter((d) => isObj(d) && typeof d.name === "string" && d.name.trim()).length;

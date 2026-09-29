@@ -87,9 +87,12 @@ export function analyzeAudioMood(analysis: AudioAnalysis | null, st: SongStructu
   const tempoNorm = bpm ? clamp((bpm - 60) / 110, 0, 1) : 0.5;
   const arousal = r2(clamp(0.45 * energy + 0.3 * tempoNorm + 0.25 * onset, 0, 1));
   const light = r2(clamp(0.5 + (brightness - 0.5) * 0.9 - (bass - 0.45) * 0.45, 0, 1));
+  // a clear tempo decides first (a 120 BPM song is never 緩慢, a 70 BPM one only when it is loud);
+  // in between, or without a tempo, the combined arousal
+  const driving = bpm >= 105 ? energy >= 0.35 : bpm > 0 && bpm < 90 ? energy >= 0.7 : arousal >= 0.5;
   let quadrant: MoodQuadrant;
-  if (contrast >= 0.45 && peak >= 0.78) quadrant = "release";
-  else if (arousal >= 0.5) quadrant = light < 0.5 ? "cold-drive" : "warm-groove";
+  if (contrast >= 0.4 && peak >= 0.75) quadrant = "release";
+  else if (driving) quadrant = light < 0.5 ? "cold-drive" : "warm-groove";
   else quadrant = light < 0.5 ? "dark-slow" : "gentle-float";
   const shape = shapeOf(energies);
   let peakAt: number | null = null;

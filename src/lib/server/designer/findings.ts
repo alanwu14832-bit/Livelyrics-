@@ -131,14 +131,21 @@ function sceneFamily(imagery: readonly ImageryMatch[], genre: GenreRule | null):
   return { scenes, avoid: [...avoid] };
 }
 
-/** The 世界觀 in one sentence: the lyric emotion, the two strongest images and the audio mood (the genre is told elsewhere). */
+/**
+ * The 世界觀 in one sentence: the lyric emotion, the two strongest images and the audio mood (the
+ * genre is told elsewhere). When the words and the sound pull apart (bright, wild lyrics on a slow,
+ * dark track, or the reverse) the sentence says so: that tension is itself the idea.
+ */
 function worldSentence(imagery: readonly ImageryMatch[], lyrics: LyricAnalysis, audio: AudioMood): string {
   const adj = EMOTION_ADJ[lyrics.emotion.label] ?? "有自己溫度";
   const verb = QUADRANT_VERB[audio.quadrant];
   const names = imagery.slice(0, 2).map((h) => `「${h.family.name}」`);
-  if (names.length === 2) return `一個${adj}的世界：${names[0]}與${names[1]}${verb}。`;
-  if (names.length === 1) return `一個${adj}的世界：${names[0]}${verb}。`;
-  return `一個${adj}的世界，由音樂本身的能量${verb}。`;
+  const loudWords = lyrics.emotion.arousal >= 0.5;
+  const loudSound = audio.quadrant === "release" || audio.quadrant === "cold-drive" || audio.quadrant === "warm-groove";
+  const world = lyrics.emotion.label !== "情緒不明顯" && loudWords !== loudSound ? `一個歌詞${adj}、聲音卻${audio.label}的世界` : `一個${adj}的世界`;
+  if (names.length === 2) return `${world}：${names[0]}與${names[1]}${verb}。`;
+  if (names.length === 1) return `${world}：${names[0]}${verb}。`;
+  return `${world}，由音樂本身的能量${verb}。`;
 }
 
 /** The free-research findings for a designer input (deterministic; no network). */

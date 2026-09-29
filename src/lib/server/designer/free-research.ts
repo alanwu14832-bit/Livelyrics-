@@ -46,6 +46,44 @@ const LINK_LABEL: Record<string, string> = {
 
 const COUNTRY: Record<string, string> = { TW: "臺灣", HK: "香港", CN: "中國", JP: "日本", KR: "韓國", US: "美國", GB: "英國", MY: "馬來西亞", SG: "新加坡", CA: "加拿大", AU: "澳洲", DE: "德國", FR: "法國", SE: "瑞典", IS: "冰島" };
 const ARTIST_TYPE: Record<string, string> = { Group: "樂團", Person: "音樂人", Orchestra: "樂團", Choir: "合唱團" };
+/** MusicBrainz areas are English names: the common ones in 繁中 */
+const AREA: Record<string, string> = {
+  Taipei: "臺北",
+  "New Taipei": "新北",
+  Taichung: "臺中",
+  Tainan: "臺南",
+  Kaohsiung: "高雄",
+  Hsinchu: "新竹",
+  Taoyuan: "桃園",
+  Keelung: "基隆",
+  Hualien: "花蓮",
+  Taitung: "臺東",
+  "Hong Kong": "香港",
+  Macau: "澳門",
+  Tokyo: "東京",
+  Osaka: "大阪",
+  Kyoto: "京都",
+  Seoul: "首爾",
+  Busan: "釜山",
+  Beijing: "北京",
+  Shanghai: "上海",
+  Guangzhou: "廣州",
+  Shenzhen: "深圳",
+  Chengdu: "成都",
+  "Kuala Lumpur": "吉隆坡",
+  Singapore: "新加坡",
+  London: "倫敦",
+  Manchester: "曼徹斯特",
+  Glasgow: "格拉斯哥",
+  "New York": "紐約",
+  "Los Angeles": "洛杉磯",
+  Austin: "奧斯汀",
+  Chicago: "芝加哥",
+  Seattle: "西雅圖",
+  Reykjavík: "雷克雅維克",
+  Paris: "巴黎",
+  Berlin: "柏林",
+};
 
 function clip(s: string, n: number): string {
   const t = s.replace(/\s+/g, " ").trim();
@@ -75,11 +113,16 @@ export function freeSources(info: PublicInfo | null): ResearchSource[] {
 function artistSentence(info: PublicInfo): string | null {
   const a = info.musicbrainz?.artist;
   if (!a) return null;
-  const where = [a.country ? COUNTRY[a.country] ?? a.country : "", a.area && a.area !== COUNTRY[a.country ?? ""] ? a.area : ""].filter(Boolean).join("");
+  const country = a.country ? COUNTRY[a.country] ?? a.country : "";
+  const areaName = a.area ? AREA[a.area] ?? a.area : "";
+  const latinArea = /^[A-Za-z]/.test(areaName);
+  const area = areaName && areaName !== country ? (country && latinArea ? `（${areaName}）` : areaName) : "";
+  const where = `${country}${area}`;
+  const whereText = where ? (/[A-Za-z]$/.test(where) ? `${where} 的` : `${where}的`) : "";
   const kind = a.type ? ARTIST_TYPE[a.type] ?? a.type : "音樂人";
   const since = a.beginYear ? `，${a.beginYear} 年開始活動` : "";
   const dis = a.disambiguation ? `（${a.disambiguation}）` : "";
-  return `**${a.name}**：${where ? `${where}的` : ""}${kind}${dis}${since}（${mdLink("MusicBrainz", musicBrainzUrl("artist", a.id))}）。`;
+  return `**${a.name}**：${whereText}${kind}${dis}${since}（${mdLink("MusicBrainz", musicBrainzUrl("artist", a.id))}）。`;
 }
 
 function sourcesStatus(info: PublicInfo): string {
@@ -114,7 +157,8 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
   const links = (info?.musicbrainz?.artist?.links ?? []).slice(0, 4).map((l) => mdLink(LINK_LABEL[l.type] ?? l.type, l.url));
   if (links.length) identity.push(`- 官方連結：${links.join("、")}——先看 MV 與現場照片的色調、字體與剪輯節奏，再決定配色。`);
   if (!found) {
-    identity.push(`- 公開資料查不到 **${artistName}**${info?.status.musicbrainz === "failed" || info?.status.wikipedia === "failed" ? "（部分來源這次連不上）" : "（可能是獨立或新樂團）"}，以下依歌詞與音訊推論。`);
+    const failed = [info?.status.musicbrainz === "failed", info?.status.wikipedia === "failed"].filter(Boolean).length;
+    identity.push(`- 公開資料查不到 **${artistName}**${failed === 2 ? "（MusicBrainz 與維基百科這次都連不上）" : failed === 1 ? "（部分來源這次連不上）" : "（可能是獨立或新樂團）"}，以下依歌詞與音訊推論。`);
     identity.push("- 建議補上：專輯封面、logo、演出照片放進「樂團素材」，喜歡的畫面放進「參考圖」，設計就會跟著它們的顏色走。");
   }
   if (g) identity.push(`- 「${g.label}」的視覺語法：${g.palette.note}；場景偏向${g.scenes.slice(0, 3).map((x) => SCENES[x].label).join("、")}；字體${g.typography.note}。${g.why}`);
@@ -186,7 +230,7 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
       ? `- 段落角色：前奏與間奏讓畫面主導；${SECTION_KIND_LABELS.verse}歌詞「${kindTreat("verse")}」、退到上方；${SECTION_KIND_LABELS.chorus}「${kindTreat("chorus")}」，一次比一次亮。${h.lyricDensity === "sparse" ? "這個曲風的歌詞要少：只留最關鍵的幾句。" : h.lyricDensity === "dense" ? "主歌字很密：不要逐字動畫。" : ""}`
       : "- 段落角色：全程由畫面與燈光敘事，安靜段落退後、能量高的段落跟著節拍爆開。",
     `- 字體：${h.typography ? `${h.typography.note}，字重 ${Math.max(600, h.typography.weight)}` : "粗黑體或宋體，字重 700 以上"}；每次最多兩行，避開主唱 IMAG 與畫面下緣。`,
-    `- 轉場：${h.motion === "soft" ? "柔和（光暈、淡入），不要硬切" : h.motion === "punchy" ? "跟著重拍硬切，爆點用閃白（LED 安全模式會改成淡入）" : "推進用擦除、爆點用閃白、回落用淡出"}。`,
+    `- 轉場：${h.motion === "soft" ? "柔和（光暈、淡入），不要硬切" : h.motion === "punchy" ? "跟著重拍硬切，爆點用閃白（LED 安全模式會改成淡入）" : "推進用擦除、爆點用閃白（LED 安全模式會改成淡入）、回落用淡出"}。`,
   ];
 
   const sources = freeSources(info);

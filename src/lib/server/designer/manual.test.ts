@@ -240,6 +240,17 @@ describe("clear errors and the fix prompt", () => {
     expect(r.fixPrompt).toContain("完整的設計方案（DesignPlan） JSON");
   });
 
+  it("an elided JSON (「...」 in place of sections) says what Claude left out", () => {
+    const elided = goodPlanJson().replace(/("sections": \[\n\s*\{)/, "$1 ...").replace('"cues": [', '"cues": [ …');
+    const r = readManualReply(`\`\`\`json\n${elided}\n\`\`\``, "plan", req(), SAFE);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.issues[0].message).toContain("省略了一部分內容");
+    expect(r.issues[0].message).toMatch(/在第 \d+ 行第 \d+ 個字（.*⟪這裡⟫…?\.\.\./);
+    expect(r.fixPrompt).toContain("不能用 ... 代替");
+    expect(repairJson('[1, ..., 3]').ellipsis).toBe(true);
+  });
+
   it("a cut-off reply is called truncated, with a shorter-answer fix prompt; a missing brace is not", () => {
     const cut = readManualReply(`\`\`\`json\n${goodPlanJson().slice(0, 4000)}`, "plan", req(), SAFE);
     expect(cut.ok).toBe(false);

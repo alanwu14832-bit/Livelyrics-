@@ -106,6 +106,7 @@ export function ManualClaudeSheet({
   const [undone, setUndone] = useState(false);
   const [copied, markCopied] = useCopied();
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
   const replyId = useId();
   const promptId = useId();
   const plan = target === "plan";
@@ -140,6 +141,11 @@ export function ManualClaudeSheet({
       cancelled = true;
     };
   }, [open, current, projectId, target, variant, instruction]);
+
+  // the outcome sits under the paste area: bring it into view
+  useEffect(() => {
+    if (result || requestError) resultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [result, requestError]);
 
   const bytes = utf8Length(reply);
   const tooBig = bytes > MANUAL_REPLY_MAX_BYTES;
@@ -248,7 +254,7 @@ export function ManualClaudeSheet({
                     aria-label="提示詞"
                     data-testid="manual-prompt"
                     onFocus={(e) => e.currentTarget.select()}
-                    className="mt-2 block font-mono text-[12px]! leading-[18px]!"
+                    className="mt-2 block text-[12px]! leading-[18px]!"
                   />
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
                     <Button variant="tinted" icon={copied === "prompt" ? CheckCircleIcon : CopyIcon} onClick={() => void copyPrompt()} data-testid="manual-copy" aria-live="polite">
@@ -327,7 +333,7 @@ export function ManualClaudeSheet({
                 invalid={tooBig}
                 spellCheck={false}
                 data-testid="manual-reply"
-                className="mt-2 block font-mono text-[12px]! leading-[18px]!"
+                className="mt-2 block text-[12px]! leading-[18px]!"
               />
               <p className={cx("mt-1 text-right text-[12px] leading-4 tabular", tooBig ? "text-red-text" : "text-label-2")} aria-live="polite">
                 {tooBig ? `超過 ${kb(MANUAL_REPLY_MAX_BYTES)}：請只貼 Claude 的這一則回覆` : `${kb(bytes)}／${kb(MANUAL_REPLY_MAX_BYTES)}`}
@@ -336,6 +342,7 @@ export function ManualClaudeSheet({
           </li>
         </ol>
 
+        <div ref={resultRef} className="flex scroll-mb-4 flex-col gap-4 empty:hidden">
         {requestError && <Banner tone="error" title="沒有完成" description={requestError} animateIn className="bg-fill-4!" />}
 
         {failure && (
@@ -415,6 +422,7 @@ export function ManualClaudeSheet({
             )}
           </section>
         )}
+        </div>
       </div>
     </Sheet>
   );
