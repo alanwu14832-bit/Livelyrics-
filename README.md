@@ -193,6 +193,18 @@ npm test            # vitest
 npm run build
 ```
 
+瀏覽器端對端測試（Playwright + Chromium）：先安裝一次 `npm i --no-save playwright && npx playwright install chromium`（不會寫進 `package.json`），再用正式版啟動一個測試用伺服器，資料放在暫存資料夾，不會動到自己的作品：
+
+```bash
+npm run build
+LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e npx next start -p 3100
+# 另開一個終端機：
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e.cjs             # 單首歌：上傳、處理、控制台、投影
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-show.cjs        # 演出模式：GO、待機、段落保持與循環
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-led.cjs         # LED 安全模式：亮度上限與閃爍限制
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-directions.cjs  # 設計方向、參考圖與一頁提案
+```
+
 commit 訊息以 `WIP:` 開頭的推送不會在 Vercel 建置（`vercel.json` 的 `ignoreCommand`），用來保存進行中的工作，不會把做到一半的版本放上預覽網址。
 
 架構、模組分工與資料契約見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。產品設計依據的業界研究見 [`reports/音樂祭大螢幕歌詞與視覺設計.md`](reports/音樂祭大螢幕歌詞與視覺設計.md)。

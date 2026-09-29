@@ -9,7 +9,17 @@
 //   - 「採用這個方向」 changes the plan the console shows; 「復原」 brings the old plan back;
 //   - the 一頁提案 fits one A4 landscape page (print emulation: no overflow, page.pdf has 1 page).
 // Screenshots: the directions comparison (light, dark), the mood board, the proposal (screen + PDF).
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+// Playwright: a normally installed copy first (e.g. `npm i --no-save playwright`), else the cloud container's global one
+const { chromium } = (() => {
+  for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
+    try {
+      return require(id);
+    } catch {
+      /* try the next location */
+    }
+  }
+  throw new Error("找不到 Playwright：請先執行 npm i --no-save playwright 與 npx playwright install chromium");
+})();
 const fs = require("node:fs");
 const path = require("node:path");
 const zlib = require("node:zlib");

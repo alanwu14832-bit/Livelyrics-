@@ -1,6 +1,16 @@
 // End-to-end smoke test of the whole Livelyrics flow on an isolated dev server.
 // Usage: start a dev server (e.g. on :3110), then `BASE=http://localhost:3110 SHOTS=/tmp/shots node scripts/e2e.cjs`.
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+// Playwright: a normally installed copy first (e.g. `npm i --no-save playwright`), else the cloud container's global one
+const { chromium } = (() => {
+  for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
+    try {
+      return require(id);
+    } catch {
+      /* try the next location */
+    }
+  }
+  throw new Error("找不到 Playwright：請先執行 npm i --no-save playwright 與 npx playwright install chromium");
+})();
 const fs = require("node:fs");
 const path = require("node:path");
 

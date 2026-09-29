@@ -7,7 +7,17 @@
 // window /s/<id>/output, GOes through every item, and checks what the projection shows: the look
 // text, the song's lyrics, standby mid-song, a held section while the lyrics advance, a loop that
 // wraps in LIVE and seeks back in TRACK, and a reload of the console tab.
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+// Playwright: a normally installed copy first (e.g. `npm i --no-save playwright`), else the cloud container's global one
+const { chromium } = (() => {
+  for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
+    try {
+      return require(id);
+    } catch {
+      /* try the next location */
+    }
+  }
+  throw new Error("找不到 Playwright：請先執行 npm i --no-save playwright 與 npx playwright install chromium");
+})();
 const fs = require("node:fs");
 const path = require("node:path");
 

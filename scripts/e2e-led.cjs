@@ -13,7 +13,17 @@
 //   - the brightness presets lower the peak luminance (室內 100 % > LED 牆 70 % > 戶外 55 %);
 //   - LED 模擬 appears on the console preview only, never in the projection window;
 //   - the pre-show check lists the sections safe mode changes; the export page applies it by default.
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+// Playwright: a normally installed copy first (e.g. `npm i --no-save playwright`), else the cloud container's global one
+const { chromium } = (() => {
+  for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
+    try {
+      return require(id);
+    } catch {
+      /* try the next location */
+    }
+  }
+  throw new Error("找不到 Playwright：請先執行 npm i --no-save playwright 與 npx playwright install chromium");
+})();
 const fs = require("node:fs");
 const path = require("node:path");
 
