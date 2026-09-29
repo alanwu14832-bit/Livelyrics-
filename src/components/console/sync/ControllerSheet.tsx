@@ -266,7 +266,12 @@ export function ControllerSheet({
       <div data-controller-sheet="">
         {/* the live readout: what the controller just sent, and the learn state */}
         <div
-          className={cx("sticky top-0 z-10 -mx-5 mb-3 px-5 py-2.5", learningInfo ? "bg-tint-soft" : learned && learnedInfo ? "bg-[color-mix(in_srgb,var(--green)_14%,var(--elevated))]" : "bg-elevated")}
+          className={cx(
+            // opaque (rows scroll under it): the state's hue mixed into the sheet surface
+            // (-top-2: flush with the scroll edge over the body's 8 px top padding)
+            "sticky -top-2 z-10 -mx-5 mb-3 px-5 py-2.5 shadow-[0_0.5px_0_var(--separator)]",
+            learningInfo ? "bg-[color-mix(in_srgb,var(--tint)_22%,var(--elevated))]" : learned && learnedInfo ? "bg-[color-mix(in_srgb,var(--green)_16%,var(--elevated))]" : "bg-elevated",
+          )}
           role="status"
           aria-live="polite"
           data-learn-banner={learningInfo ? "learning" : learned ? "learned" : "idle"}
@@ -298,7 +303,7 @@ export function ControllerSheet({
                 {m.status === "error" && m.message && <span className="block text-c-footnote text-red-text">{m.message}</span>}
                 {!m.supported && <span className="block text-c-footnote text-orange-text">{MIDI_UNSUPPORTED}</span>}
               </label>
-              <Switch id={midiId} checked={on} disabled={!m.supported || m.status === "starting"} onChange={(v) => (v ? void engine.enableMidi() : engine.disableMidi())} />
+              <Switch id={midiId} checked={on} disabled={!m.supported || m.status === "starting"} onChange={(v) => (v ? void engine.enableMidi() : engine.disableMidi())} data-midi-switch="" />
             </SyncRow>
             {m.supported && on && (
               <SyncRow>

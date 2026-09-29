@@ -10,7 +10,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button, Kbd, SegmentedControl, Spinner, Stepper, Switch, TextField, cx, type SegmentOption } from "@/components/ui";
-import { FadersIcon, HandTapIcon, PianoKeysIcon, WaveSquareIcon } from "@/components/ui/Icon";
+import { FadersIcon, HandTapIcon, PianoKeysIcon } from "@/components/ui/Icon";
 import { resumeAudioContext } from "@/lib/audio/live";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { MANUAL_KEY } from "@/lib/console/hotkeys";
@@ -48,7 +48,8 @@ const SOURCE_CAPTIONS: Record<SyncSource, string> = {
 function sourceOptions(supported: boolean): SegmentOption<SyncSource>[] {
   return [
     { value: "manual", label: "手動", caption: SOURCE_CAPTIONS.manual },
-    { value: "clock", label: <span className="t-latin">MIDI clock</span>, ariaLabel: "MIDI clock", caption: SOURCE_CAPTIONS.clock, disabled: !supported },
+    // (「MIDI clock」 does not fit a quarter of the panel: the caption and the tile spell it out)
+    { value: "clock", label: <span className="t-latin">Clock</span>, ariaLabel: "MIDI clock", caption: SOURCE_CAPTIONS.clock, disabled: !supported },
     { value: "mtc", label: <span className="t-latin">MTC</span>, ariaLabel: "MTC", caption: SOURCE_CAPTIONS.mtc, disabled: !supported },
     { value: "ltc", label: <span className="t-latin">LTC</span>, ariaLabel: "LTC", caption: SOURCE_CAPTIONS.ltc },
   ];
@@ -163,34 +164,36 @@ function StartTimecodeRow({ controller, snap }: { controller: ConsoleController;
             預設
           </Button>
         )}
-        <TextField
-          id={id}
-          value={draft}
-          invalid={invalid}
-          inputMode="numeric"
-          spellCheck={false}
-          autoComplete="off"
-          aria-describedby={`${id}-hint`}
-          className="w-[128px] font-numeric tabular"
-          onChange={(e) => {
-            setDraft(e.target.value);
-            if (invalid) setInvalid(false);
-          }}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit();
-              e.currentTarget.blur();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setDraft(tc.start);
-              setInvalid(false);
-              e.currentTarget.blur();
-            }
-          }}
-          data-start-tc-input=""
-        />
+        <span className="w-[132px] shrink-0">
+          <TextField
+            id={id}
+            value={draft}
+            invalid={invalid}
+            inputMode="numeric"
+            spellCheck={false}
+            autoComplete="off"
+            aria-describedby={`${id}-hint`}
+            className="font-numeric tabular"
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (invalid) setInvalid(false);
+            }}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit();
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setDraft(tc.start);
+                setInvalid(false);
+                e.currentTarget.blur();
+              }
+            }}
+            data-start-tc-input=""
+          />
+        </span>
       </SyncRow>
       <p id={`${id}-hint`} className={cx("px-3 pb-2 text-c-footnote", invalid ? "text-red-text" : "text-label-2")}>
         {invalid ? "時間碼格式是 HH:MM:SS:FF（例如 02:00:00:00），也可以只填小時（2）。" : tc.from === "project" ? `這首歌從 ${tc.start} 開始。` : `預設 ${DEFAULT_START_TC}：時間碼進入這一小時就是這首歌。`}
@@ -362,7 +365,7 @@ export function MidiSection({ engine, onOpenControllers }: { engine: SyncEngine;
               {m.status === "starting" ? <Spinner size={12} label={status.text} /> : status.text}
             </span>
           </label>
-          <Switch id={id} checked={on} disabled={!m.supported || m.status === "starting"} onChange={(v) => (v ? void engine.enableMidi() : engine.disableMidi())} />
+          <Switch id={id} checked={on} disabled={!m.supported || m.status === "starting"} onChange={(v) => (v ? void engine.enableMidi() : engine.disableMidi())} data-midi-switch="" />
         </SyncRow>
         {m.supported && on && (
           <SyncRow>
@@ -402,10 +405,7 @@ export function MidiSection({ engine, onOpenControllers }: { engine: SyncEngine;
       {!m.supported ? (
         <Footnote className="text-orange-text">{MIDI_UNSUPPORTED}。</Footnote>
       ) : (
-        <Footnote>
-          <WaveSquareIcon size={12} className="mr-1 inline align-[-1px]" />
-          按鍵、踏板與推桿都可以對應到控制台的動作；MIDI 設定記在這台電腦的瀏覽器裡，可以匯出帶到別台。
-        </Footnote>
+        <Footnote>按鍵、踏板與推桿都可以對應到控制台的動作；MIDI 設定記在這台電腦的瀏覽器裡，可以匯出帶到別台。</Footnote>
       )}
     </section>
   );

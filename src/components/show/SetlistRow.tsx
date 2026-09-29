@@ -2,7 +2,7 @@
 
 // One row of the setlist (Apple Music playlist row in edit mode): number or moment icon, artwork,
 // title and a quiet subtitle, the running length, the song's readiness, the arc note when there is
-// one, a ⋯ menu, and the iOS reorder grip on the right. Drag the grip, or focus it and use ↑ ↓
+// one, a custom start timecode (phase 5a), a ⋯ menu, and the iOS reorder grip on the right. Drag the grip, or focus it and use ↑ ↓
 // (Alt+↑ ↓ from anywhere in the row) to move the item.
 
 import { Reorder, useDragControls } from "motion/react";
@@ -24,6 +24,7 @@ import {
   SignInIcon,
   SignOutIcon,
   SparkleIcon,
+  TimerIcon,
   TrashIcon,
 } from "@/components/ui/Icon";
 import { spring } from "@/lib/motion";
@@ -69,9 +70,13 @@ export interface SetlistRowProps {
   onEditLook?: () => void;
   onApplyArc?: () => void;
   onDragEnd: () => void;
+  /** a song's start timecode (phase 5a): its own, or its setlist position's hour */
+  timecode?: { start: string; explicit: boolean } | null;
+  /** 設定時間碼… */
+  onTimecode?: () => void;
 }
 
-export function SetlistRow({ item, index, count, songNumber, song, arc, busy, disabled, onMove, onRemove, onEditLook, onApplyArc, onDragEnd }: SetlistRowProps) {
+export function SetlistRow({ item, index, count, songNumber, song, arc, busy, disabled, onMove, onRemove, onEditLook, onApplyArc, onDragEnd, timecode, onTimecode }: SetlistRowProps) {
   const controls = useDragControls();
   const isSong = item.kind === "song";
   const title = isSong ? (song?.title ?? "作品已刪除") : item.title;
@@ -135,6 +140,11 @@ export function SetlistRow({ item, index, count, songNumber, song, arc, busy, di
               <span className="min-w-0 truncate text-[17px] leading-[22px] font-semibold text-label">{title}</span>
             )}
             {arc && <Tag tone="tint">{ARC_ROLE_INFO[arc.role].label}</Tag>}
+            {timecode?.explicit && (
+              <Tag icon={TimerIcon} title={`時間碼 ${timecode.start} 開始`} data-setlist-tc="">
+                <span className="font-numeric tabular">{timecode.start}</span>
+              </Tag>
+            )}
           </p>
           <p className="truncate text-[13px] leading-[18px] text-label-2">{subtitle}</p>
           {arc && (
@@ -181,6 +191,11 @@ export function SetlistRow({ item, index, count, songNumber, song, arc, busy, di
                 {onApplyArc && (
                   <MenuItem icon={SparkleIcon} onSelect={onApplyArc} disabled={busy}>
                     依弧線重新設計
+                  </MenuItem>
+                )}
+                {onTimecode && (
+                  <MenuItem icon={TimerIcon} onSelect={onTimecode}>
+                    設定時間碼…
                   </MenuItem>
                 )}
                 <MenuSeparator />

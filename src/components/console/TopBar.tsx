@@ -4,7 +4,8 @@
 // bottom hairline, no material (nothing scrolls beneath it). Left: 「‹ 作品庫」, the key-visual
 // thumbnail and the title (shared elements with the library card), the status capsules. Centre:
 // TRACK / LIVE, the transport (prev 32, play 36 white circle, next 32) and the clock. Right: the
-// projection split control, 重新設計, 匯出 (the export page in a new tab), help. The centre stays centred: the left column shrinks (the
+// sync capsule (phase 5a, only when a sync source is chosen), LED safety, the projection split
+// control, 重新設計, 匯出 (the export page in a new tab), help. The centre stays centred: the left column shrinks (the
 // title truncates) instead of pushing the transport around when a capsule appears.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -19,6 +20,7 @@ import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { useStorageMode } from "@/components/home/use-storage-mode";
 import { capsuleItems } from "./feedback";
 import { SafetyCapsule } from "./SafetyControls";
+import { SyncCapsule } from "./sync/SyncStatus";
 import { Dot } from "./ui";
 import { useRafLoop } from "./useRaf";
 
@@ -188,7 +190,13 @@ export function TopBar({
   const capsules = capsuleItems(ov, snap);
   const palette = (project?.plan?.keyVisual.palette ?? []).map((p) => p.hex);
 
-  const status = live
+  const status = snap.timecode.following
+    ? live
+      ? "LIVE・跟隨時間碼"
+      : snap.audio.buffering
+        ? "TRACK・跟隨時間碼（緩衝中）"
+        : "TRACK・跟隨時間碼"
+    : live
     ? held
       ? "LIVE・等待下一句"
       : snap.playing
@@ -285,6 +293,7 @@ export function TopBar({
 
       {/* right: projection, re-design, help */}
       <div className="flex min-w-0 items-center justify-end gap-2">
+        <SyncCapsule engine={controller.sync} />
         <SafetyCapsule project={project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
         <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : compact ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">

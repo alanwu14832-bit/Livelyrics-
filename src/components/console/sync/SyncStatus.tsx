@@ -9,6 +9,7 @@
 // manual), grey 等待訊號. Readouts are written per frame through refs (no React re-render).
 
 import { useRef } from "react";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { Tooltip, cx } from "@/components/ui";
 import { SOFT_TEXT } from "@/components/ui/Tag";
 import { HandTapIcon, LinkBreakIcon, LockSimpleIcon, MetronomeIcon } from "@/components/ui/Icon";
@@ -121,6 +122,21 @@ export function BpmReadout({ engine, className, empty = "沒有 MIDI clock" }: {
       {empty}
     </span>
   );
+}
+
+/** A dot that flashes on every beat of a locked MIDI clock (per frame; steady under reduced motion). */
+export function BeatDot({ engine }: { engine: SyncEngine }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const reduce = useReducedMotion();
+  useRafLoop(() => {
+    const el = ref.current;
+    if (!el) return;
+    const b = engine.beat();
+    const phase = b.locked && b.phase != null ? b.phase : null;
+    const v = phase == null ? 0.15 : reduce ? (phase < 0.25 ? 1 : 0.3) : 0.15 + 0.85 * Math.pow(1 - phase, 3);
+    el.style.opacity = v.toFixed(3);
+  });
+  return <span ref={ref} aria-hidden="true" className="inline-block size-2.5 shrink-0 rounded-full bg-green" style={{ opacity: 0.15 }} data-beat-dot="" />;
 }
 
 /** Song time now (from a song controller). */
@@ -288,12 +304,18 @@ export function LockTile({
         )}
       </div>
       {showTimecode && <TimecodeReadout engine={engine} className="text-[22px] leading-[26px] font-semibold text-label" />}
-      <dl className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
-        {(src === "clock" || snap.midi.status === "on") && (
+      {src === "clock" && (
+        <div className="flex items-center gap-2">
+          <BpmReadout engine={engine} empty="-- BPM" className="text-[22px] leading-[26px] font-semibold text-label" />
+          <BeatDot engine={engine} />
+        </div>
+      )}
+      <dl className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1 empty:hidden">
+        {src !== "clock" && snap.midi.status === "on" && (
           <div className="flex items-baseline gap-1.5">
             <dt className="text-c-footnote text-label-2">拍速</dt>
             <dd className="text-c-body text-label">
-              <BpmReadout engine={engine} empty="無" />
+              <BpmReadout engine={engine} empty="—" />
             </dd>
           </div>
         )}

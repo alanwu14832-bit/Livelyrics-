@@ -153,6 +153,26 @@ describe("ConsoleController × timecode (phase 5a)", () => {
     c.detach();
   });
 
+  it("another source locking is not a 「恢復」", async () => {
+    const c = await ready();
+    c.sync.setSource("mtc");
+    c.sync.setFreewheel(0.5);
+    const stop = runMtc(c.sync, { hours: 1, minutes: 0, seconds: 13, frames: 0 });
+    await flush(400);
+    stop();
+    await flush(900);
+    expect(c.sync.getSnapshot().lock).toBe("lost");
+    // the operator goes to manual, then back to MTC: a new lock, no 「時間碼恢復」
+    c.backToManual();
+    c.sync.setSource("mtc");
+    const again = runMtc(c.sync, { hours: 1, minutes: 0, seconds: 20, frames: 0 });
+    await flush(400);
+    expect(c.isFollowingTimecode()).toBe(true);
+    expect(c.getSnapshot().notices.some((n) => n.message === "時間碼恢復，已重新鎖定")).toBe(false);
+    again();
+    c.detach();
+  });
+
   it("LIVE: the timecode cues the timed lines; 回到手動 keeps the line and waits for a cue", async () => {
     const c = await ready();
     c.setMode("live");
@@ -233,6 +253,36 @@ describe("ConsoleController × timecode (phase 5a)", () => {
 });
 
 describe("ConsoleController × MIDI clock (節拍模式)", () => {
+  it("TRACK, paused: a locked clock still beats the stage, and lets go when it stops", async () => {
+    const c = await ready();
+    c.sync.setSource("clock");
+    const period = 60000 / (120 * 24);
+    const t0 = Date.now();
+    let n = 0;
+    const timer = setInterval(() => {
+      while (t0 + n * period <= Date.now()) {
+        c.sync.handle({ type: "clock" }, t0 + n * period);
+        n++;
+      }
+    }, 5);
+    timers.push(timer);
+    await flush(600);
+    expect(c.getSnapshot().playing).toBe(false);
+    const phases = new Set<number>();
+    for (let i = 0; i < 5; i++) {
+      await flush(40);
+      const s = lastState();
+      expect(s).toMatchObject({ mode: "track", playing: false, audio: { clock: true } });
+      phases.add(Math.round(s.audio.beatPhase * 100));
+    }
+    expect(phases.size).toBeGreaterThan(3);
+    clearInterval(timer);
+    await flush(800);
+    expect(c.sync.getSnapshot().lock).toBe("lost");
+    expect(lastState().audio.clock).toBeUndefined();
+    c.detach();
+  });
+
   it("a locked clock gives the beat phase, before tap tempo", async () => {
     const c = await ready();
     c.setMode("live");

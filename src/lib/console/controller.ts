@@ -332,6 +332,8 @@ export class ConsoleController {
   private audioGraceUntil = 0;
   /** a dropout fell back to manual: the next lock says the timecode is back */
   private relockNotice = false;
+  /** the sync source the relock notice belongs to (another source is not a 「恢復」) */
+  private relockSource: string | null = null;
   private playBlocked = false;
   private readonly ledFader = new LedCapFader();
 
@@ -924,7 +926,8 @@ export class ConsoleController {
       if (tapped != null) return { ...NO_AUDIO, beatPhase: tapped };
       return { ...NO_AUDIO, beatPhase: playing && analysis ? beatPhaseAt(analysis, t) : 1 };
     }
-    if (!playing) return NO_AUDIO;
+    // TRACK paused: a running MIDI clock still beats (the rig plays, the song is not started yet)
+    if (!playing) return clock != null ? { ...NO_AUDIO, beatPhase: clock, clock: true } : NO_AUDIO;
     const hasGrid = !!analysis && ((analysis.beats?.length ?? 0) > 1 || analysis.bpm > 0);
     const f = this.elementAnalyser?.getFeatures() ?? NO_AUDIO;
     if (clock != null) return { ...f, beatPhase: clock, clock: true };
@@ -966,7 +969,7 @@ export class ConsoleController {
     if (!this.attached || !this.snapshot.project) return false;
     if (this.following) return true;
     if (this.settings.mode === "live") return this.clock.isRunning || this.micAnalyser != null || this.tapClock.bpm != null || this.clockPhase() != null;
-    return this.isPlaying();
+    return this.isPlaying() || this.clockPhase() != null;
   }
 
   private ensureTicking(): void {
@@ -1710,8 +1713,11 @@ export class ConsoleController {
 
   private onSyncChange(): void {
     if (!this.attached) return;
+    if (this.relockNotice && this.sync.source !== this.relockSource) this.relockNotice = false;
     this.updateFollow();
     this.ensureTicking();
+    // an idle console publishes the change itself (e.g. the MIDI clock's beat went away)
+    if (!this.tickTimer) this.publish();
   }
 
   /** Start or stop following as the chase locks, freewheels and fails. */
@@ -1781,6 +1787,7 @@ export class ConsoleController {
     }
     if (reason === "lost") {
       this.relockNotice = true;
+      this.relockSource = this.sync.source;
       this.notify("時間碼中斷，已切回手動", "warn");
     }
     this.set({ timecode: { ...this.snapshot.timecode, following: false }, playing: this.isPlaying() });

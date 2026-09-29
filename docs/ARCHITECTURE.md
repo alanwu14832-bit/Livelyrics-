@@ -50,9 +50,9 @@ show up in the product:
 
 | File | What |
 |---|---|
-| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 5 `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource` |
+| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 4b `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource`, phase 5a `SongTimecode` (`Project.timecode`, song `SetItem.timecode`) |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
-| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
+| `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `LiveAudioFeatures.clock` (phase 5a), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
 | `src/lib/moodboard.ts`, `src/lib/directions.ts` | phase 4: mood board limits, colour extraction, coercion, summary; directions coercion, select / undo / comment transforms, style-frame moments, the sign-off sheet data |
 | `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
@@ -95,7 +95,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/moodboard` GET/POST, `/api/projects/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | 參考圖 (phase 4): `{ images }` / upload (the media-library contract, images only, ≤ 12, 8 MB, `meta.stats` = the colours measured in the browser) → `{ image, images }` / file / `{ note?, name? }` / delete |
 | `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
 | `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
-| `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 5) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call, no `maxDuration`) |
+| `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 4b) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call, no `maxDuration`) |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 | `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
 | `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
@@ -419,7 +419,7 @@ pipeline and 「重新設計」 are unchanged. Types in `src/lib/types.ts` (`Moo
   directions reflecting the mood board, non-blank style frames, select → console, undo, the proposal
   in print emulation and `page.pdf` = one A4 landscape page, revise, reject).
 
-### 免費研究與手動 Claude 模式 (phase 5)
+### 免費研究與手動 Claude 模式 (phase 4b)
 
 For bands that do not pay for API tokens. Without `ANTHROPIC_API_KEY` the research step is **免費研究**
 (the default; also after a Claude failure, and for a run with `ProcessRequest.free`, the
@@ -510,6 +510,141 @@ remain available.
   `designer/analysis.test.ts`, `designer/free-research.test.ts`, `designer/manual.test.ts`,
   `server/manual.test.ts`; E2E `scripts/e2e-free-research.cjs` (a local stub serving the fixtures,
   then unreachable sources; the manual round trip with a good reply in prose and a broken one).
+
+### 同步與控制器 (phase 5a)
+
+MIDI controllers, the MIDI beat clock and timecode chase (MTC, LTC) for the per-song console (`/p/[id]`) and
+the show console (`/s/[id]/live`). Everything is opt-in: the default source is 手動, and neither MIDI nor
+audio permission is asked for until the operator picks a source or turns MIDI on, so manual operation and
+every existing path are unchanged. The projection windows never see any of it except the beat phase.
+
+- **Pure cores** (no DOM, all unit-tested). `src/lib/midi/parser.ts`: `MidiParser.feed(bytes, emit)` — running
+  status, realtime bytes (F8 FA FB FC FF; FE active sensing dropped) anywhere, also inside SysEx, note on with
+  velocity 0 = note off, CC, program change, pitch bend, pressure, SPP (F2), MTC quarter frames (F1), song
+  select, SysEx (bounded, `MAX_SYSEX_BYTES`); `describeMidi` for the readouts (`noteName`: middle C = C3).
+  `src/lib/midi/clock.ts`: `MidiClock` — 24 ppqn; a least-squares line through (tick number, time) of the last
+  4 beats; every tick is judged against the line (not the previous tick), so bunched / late ticks and coarse
+  timestamps are jitter; three ticks one period off = a lost or doubled tick (counted back in or out), three
+  drifting further = a tempo change (the line restarts); BPM display with 0.2 BPM hysteresis; Start / Stop /
+  Continue / SPP give the beat phase (`aligned` once a Start or SPP was seen); lock = a tick in the last
+  `CLOCK_LOCK_TIMEOUT_MS` (500). `src/lib/midi/mtc.ts`: `MtcAssembler` — eight consecutive quarter frames make a
+  timecode (24 / 25 / 29.97 DF / 30; a piece out of order or more than `MTC_MAX_PIECE_GAP_MS` after the last
+  starts over), the direction from the piece order (a turn restarts the run); the position at the completing
+  piece is the label + 1.75 frames forward (+0 backwards), i.e. the two-frame MTC latency is compensated; full-frame SysEx `F0 7F <dev> 01 01 hh mm ss ff
+  F7` locates. `src/lib/sync/timecode.ts`: rates, DF frame counting, `formatTc` / `parseTc` (full-width
+  separators, `HH`, `HH:MM`…), `TimecodeStringSchema` (zod), `DEFAULT_START_TC` 01:00:00:00.
+  `src/lib/sync/ltc.ts`: `LtcDecoder(sampleRate).process(samples)` — DC blocker, peak envelope with a release
+  and 30 % hysteresis (any level), interpolated zero crossings, biphase-mark bit timing with an adaptive
+  period (bootstrap, then α = 0.08 tracking: ±1 % speed and more), sync word 0x3FFD forward / 0xBFFC
+  backwards, 24 / 25 / 30 fps from the frame length, the DF flag (29.97), user bits ignored, the bit clock
+  forgotten after 1 s of silence. `src/lib/sync/chase.ts`: `TimecodeChase` — the playback rig's position as
+  a phase-locked estimate (pull 0.3 per frame, tolerance max(80 ms, 2 frames)); a jump relocates only after
+  `confirmFrames` (3) consistent frames more than that away, so one stray frame never moves the song; no
+  frame for `gapMs` → 自由運轉 (the clock runs on) for `freewheelMs` (default 2 s, settable 0.5–10 s) → 中斷
+  (the position freezes where the freewheel ended); a locate (MTC full frame) is 已定位 / stopped. Mapping:
+  `startSeconds`, `songTimeAt(position, start, rate)` (song time = timecode − the song's start),
+  `setlistSlots(items)` (a song's own `timecode`, else its position among the songs: song n at n:00:00:00,
+  none past 23 h), `slotStart`, `slotAt(position, slots, rate)` (from a start until the next start or one
+  hour later).
+- **Mapping** (`src/lib/midi/mapping.ts`). `MidiMapper.handle(msg, at)` → `{ commands, learned? }`; targets:
+  every hotkey action (`BUTTON_TARGETS`, incl. `go` / `standby`, `testPattern`, `scene1…9`, `manual`) and
+  the faders `intensity`, `lyricScale`, `ledCap` (`VALUE_TARGETS`). Bindings are a note or a CC with a
+  channel (or any channel). Safety: note off never fires; a CC used as a button fires rising through 64 and
+  re-arms below 40; buttons ignore repeats within 60 ms, GO / standby within 150 ms (tap never); explicit
+  bindings win over the presets; learning a trigger moves it away from the action that had it
+  (`replaced`). Presets: ProPresenter 式 `lineNotes { enabled, channel, offset }` (note n → lyric line
+  n + offset, 0-based) and 段落音符 `sectionNotes { enabled, channel, base }` (note base + k → section k).
+  `conflicts`, `conflictText`, `triggerLabel`, `exportMidiMap` / `importMidiMap` (JSON with `kind:
+  "midi-map"`, Chinese errors). `src/lib/midi/actions.ts` turns commands into `ConsoleAction`s
+  (`HotkeyAction` plus `testPattern`, `cueLine`, `jumpSection`, `control`); `src/lib/midi/controls.ts`:
+  `intensityFromControl` (0–150 %), `lyricScaleFromControl` (×0.5–2), `LedCapFader` (最高亮度 between 20 %
+  and the ceiling the safety settings had when the fader took over — the preset's brightness — so a
+  controller can dim the wall, never make it brighter; nothing when safe mode is off; forgotten when the
+  operator changes the safety settings).
+- **Browser side.** `src/lib/midi/access.ts` `MidiHub`: `navigator.requestMIDIAccess({ sysex })` (SysEx only
+  when MTC 定位 is on; denied SysEx retries without it), hot-plug through `onstatechange`, one input or all,
+  `port.open()`, event timestamps moved onto `Date.now()`. `MIDI_UNSUPPORTED` 「這個瀏覽器不支援 MIDI（Safari／
+  iPhone 不支援），請改用 Chrome 或 Edge」; the MIDI sources are disabled there, LTC still works.
+  `src/lib/sync/ltc-input.ts` `LtcInput`: `getUserMedia({ audio: { deviceId, echoCancellation: false,
+  noiseSuppression: false, autoGainControl: false, channelCount: 2 } })` into the shared AudioContext and the
+  AudioWorklet `public/worklets/ltc-decoder.js` (processor `livelyrics-ltc`, decoders on the first two
+  channels; the active one switches after 0.5 s of silence; frames and a 10 Hz level come back with their
+  sample positions). `ContextClock` maps sample positions to `Date.now()` from the least-delayed message of
+  the last 5 s minus the capture latency (`track.getSettings().latency`, default 10 ms), and each frame's
+  position gets its one frame of decode latency back (`framePosition`). The worklet is generated from the TS
+  core: `node scripts/build-worklets.mjs` (`--check` fails when it is stale; a unit test runs the generated
+  file in `node:vm` and decodes with it), so `ltc.ts` stays the one implementation.
+- **SyncEngine** (`src/lib/sync/engine.ts`, framework-agnostic, `subscribe` / `getSnapshot`). One per console
+  window: the per-song console's controller makes its own (settings from its `ConsoleSettings.sync`), the
+  show makes one for the whole show and hands it to every song it takes (`ConsoleControllerOptions.sync`,
+  plus `timecodeStart` from `slotStart`). It owns the hub, a parser per port, the mapper, the clock, the MTC
+  assembler, the chase and the LTC input. `SyncSnapshot { settings, lock, rate, midi, map, learning,
+  learned, ltc }`, `LockState` off / waiting / locked / stopped / freewheel / lost (a 100 ms poll). Live
+  readings for the frame loops, never through React: `timecode(now)` (the chased position and its label:
+  MTC / LTC sources only) and `beat(now)` (`ClockStatus`). Quarter frames and SysEx only count with MTC as the
+  source; clocks always (the readout shows any clock's tempo). `onCommand` delivers mapped commands to the
+  view on screen; `handle(msg, at)` is the entry every port uses (and the tests). `SyncSettings { source:
+  manual | clock | mtc | ltc, ltcDeviceId, freewheelSeconds }` (`src/lib/sync/settings.ts`): per project in
+  `ConsoleSettings.sync` (`livelyrics:console:<id>`), per show in `ShowLivePrefs.sync`
+  (`livelyrics:show-live-prefs:<id>`, with `followTimecode`). `MidiPrefs { enabled, input, sysex, map }` in
+  `localStorage["livelyrics:midi"]` (`src/lib/midi/prefs.ts`, best effort): one mapping per computer, shared
+  by every song and show, moved between computers as the exported JSON.
+- **Console clock** (the controller's one clock model, extended — no second clock). While the source is MTC
+  or LTC and the chase is locked, stopped at a locate or freewheeling, the controller *follows*: `songTime` =
+  the timecode's song time (`songTimeAt` with the song's start: the setlist's slot in the show, else
+  `Project.timecode.start`, else 01:00:00:00; TRACK adds the lyric offset), clamped to the song. TRACK: the
+  monitor audio chases it (seek when it drifts more than 80 ms, 300 ms grace after a seek; play / pause with
+  the timecode's motion; a blocked autoplay posts one notice and the timecode keeps driving). LIVE: the
+  timecode is the time; with timed lyrics it cues the lines, with untimed lyrics the operator still cues them
+  by hand. Manual transport, seek, sections, loop and line cues answer 「正在跟隨時間碼…請先按 X 回到手動」
+  (a notice, and the HUD 「跟隨時間碼中」) instead of fighting the timecode; hold (H) still works; a loop
+  is switched off when following starts. Lost → 「時間碼中斷，已切回手動」: LIVE keeps the line on screen and
+  holds at the next line's start, TRACK pauses where it is (no auto-advance without the timecode); the same
+  source locking again → 「時間碼恢復，已重新鎖定」. `backToManual()` (X) sets the source to 手動. A silent
+  (preloaded) show song never follows: its audio would play unseen. MIDI clock (節拍模式): a locked, running
+  clock is the beat phase in both modes (even TRACK paused), before the microphone and tap tempo; the state
+  says so with `LiveAudioFeatures.clock: true` (`sanitizeStageState` keeps only `true`), and the stage's
+  TRACK features take the clock's phase instead of the analysis grid (`src/lib/stage/features.ts`).
+- **Timecode per song and setlist.** `Project.timecode?: { start: "HH:MM:SS:FF" }` (absent = 01:00:00:00):
+  PATCH `/api/projects/[id]` `{ timecode: { start } | null }` (`parseTimecodePatch`, zod, stored with ":";
+  `coerceProject` repairs it), set in the 同步 tab's 起點時間碼 (`setTimecodeStart`). A song setlist item's
+  `timecode?: string` (absent = its position among the songs; `coerceSetItems` validates it), set on the show
+  page (the row's ⋯ → 「設定時間碼…」, `src/components/show/TimecodeSheet.tsx`: 依歌單順序 or a custom start,
+  a warning when two songs start at the same timecode; the row shows a custom start as a tag). 「跟隨時間碼換歌」
+  (the rail's switch, `ShowLiveController.setFollowTimecode`): every 100 ms, a locked, running, forward
+  timecode that enters a song's range whose song is not on air takes it with the show's take transition;
+  edge-triggered (a song the operator left is not taken back until the timecode enters another song or
+  stops), looks stay GO / manual. While it is on, the rail shows each song's start (`TC 01`).
+- **UI** (`src/components/console/sync/`, console chrome only). `SyncPanel.tsx`: 同步來源 (手動 / Clock /
+  MTC / LTC with captions; MIDI sources disabled without Web MIDI), the lock tile (`SyncStatus.tsx`
+  `LockTile`: green 鎖定 / 已定位, yellow 自由運轉 with the seconds, red 中斷, grey 等待訊號; the timecode
+  HH:MM:SS:FF with its rate, song position and offset, or the clock's BPM with a beat dot; readouts written
+  per frame through refs), the source's settings (MTC 定位 (SysEx); the LTC input, its level and the channel
+  it decodes; 起點時間碼 — read-only 「在演出頁設定」 in the show; 自由運轉 seconds), 回到手動 with its key,
+  and the MIDI section (on / off, input, activity light, the mapping summary, 「控制器…」). It heads the song
+  console's 同步 tab (whose tab carries the lock colour as a dot); the show's look and pre-show views open it
+  as the 「同步與控制器」 sheet (`SyncSheet.tsx`). `ControllerSheet.tsx` (控制器): the live last-message
+  readout and learn banner (學習中 / 已對應 …, what it replaced), MIDI on / input, the two presets with channel
+  and offset / base and what they map, every target by group with its key, its binding or 未對應, conflicts,
+  學習 / 取消 / 清除 (GO and standby only in the show console), JSON 匯出 / 匯入, 全部清除; Esc cancels a
+  learn before it closes the sheet, B still blacks out. `SyncCapsule` on the top bar (song, look and
+  pre-show views, never the output): 「MTC 鎖定」, 「LTC 自由運轉」, 「時間碼中斷」, 「MIDI clock 128 BPM」;
+  nothing while manual. MIDI commands reach whichever view is on screen (`useMidiCommands`), through the
+  same dispatch as its keys and the same HUD (faders answer 「畫面強度 85%」…), also while a sheet is open;
+  before a show song has loaded only GO / standby do.
+- **Tests.** Unit: parser (running status, interleaved realtime, SysEx), mapping (learn, conflicts, presets,
+  CC hysteresis, debounce, files), clock (jitter, bunching, quantized timestamps, tempo changes, lost /
+  doubled ticks, phase), MTC (every rate, direction, dropped pieces, locate), LTC (24 / 25 / 30 and 29.97 DF
+  at 44.1 and 48 kHz with noise, level changes, ±1 % speed, dropouts, user bits, reverse, block sizes; the
+  generated worklet in `node:vm`), chase (relocate, glitch rejection, freewheel → lost, setlist slots),
+  engine, the console controller with MTC / clock (follow, freewheel → manual, relock, LIVE, start
+  timecode, silent show songs), the show's 跟隨時間碼換歌, schema and storage fields. End to end:
+  `scripts/e2e-sync.cjs` (a fake MIDIAccess from an init script whose `window.__midi` sends stamped
+  messages through the real code; an LTC WAV as Chromium's fake microphone).
+- **Limits.** No real MIDI device, LTC hardware or Safari was tested. 29.97 fps non-drop LTC reads as 30
+  (the frame length cannot tell them apart; DF is flagged); the LTC position carries the capture latency the
+  browser reports (default 10 ms when it reports none); MTC direction is taken from the piece order and the
+  reverse position assumes the mirror of the forward latency.
 
 ### Band media and the output canvas (phase 1a)
 
@@ -682,7 +817,7 @@ keeps every contract above and changes only where things are kept and how long w
 - Offline designer (no credential or Claude failure): deterministic heuristic plan from analysis +
   lyric repetition (chorus detection) and the 免費研究 findings (genre grammar, imagery, emotion, audio
   mood, sing-along), palette from them (else mood & a stable hash), generated geometric motif SVG.
-  Without a credential `researchSong` is 免費研究 (`free-research.ts`, see phase 5), also after a Claude
+  Without a credential `researchSong` is 免費研究 (`free-research.ts`, see phase 4b), also after a Claude
   failure.
 - `normalizePlan`: clamp numbers, sort & cover `0..duration` with no gaps, colorway length 3, valid
   hex, WCAG contrast fix for `lyricColor`, CJK font must be CJK, drop unknown `lineId`s, sanitize
@@ -730,13 +865,15 @@ keeps every contract above and changes only where things are kept and how long w
   click = jump/cue), center live preview (`StageView`, aspect of the output window) + big
   current/next line, bottom timeline (waveform, section blocks, lyric ticks, cue markers, playhead,
   click/drag seek), right tabbed panel (設計 key visual & section rationale & quick per-section edits /
-  研究 brief & sources / 控制 overrides / 同步 offset, BPM, tap, mic).
+  研究 brief & sources / 控制 overrides / 同步 sync source, lock and MIDI (phase 5a), offset, BPM, tap, mic).
 - Hotkeys (shown in a `?` overlay): Space play/pause (live: next line), →/↓ next line, ←/↑ previous line,
   Enter cue selected, B blackout, L lyrics on/off, F freeze, 1–9 scene override, 0 follow plan,
   [ / ] offset −/+ 0.05 s, T tap tempo, O open output, M mode switch, ? help; PageDown or . / PageUp or ,
-  next / previous section, H 保持段落, R 循環段落 (phase 2b). The show console adds G (GO) and S (standby);
-  the per-song console ignores them. Physical key codes (`KeyH`, `Period`…), so an active IME does not
-  change them; every toggle and jump ignores key repeat.
+  next / previous section, H 保持段落, R 循環段落 (phase 2b), X 回到手動 (phase 5a: stop following the
+  timecode / MIDI clock; also in the show's look and pre-show views). The show console adds G (GO) and S
+  (standby); the per-song console ignores them. Physical key codes (`KeyH`, `Period`, `KeyX`…), so an active
+  IME does not change them; every toggle and jump ignores key repeat. MIDI controllers run the same actions
+  (`src/lib/midi/actions.ts` → the view's dispatch, with the HUD); see 同步與控制器 (phase 5a).
 - Re-design dialog: free-text instruction → `api.process(id, {steps:["design"], instruction})` with
   streamed progress; then broadcast the new project.
 

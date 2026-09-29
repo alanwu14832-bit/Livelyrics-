@@ -138,7 +138,7 @@ export class SyncEngine {
 
   private set(patch: Partial<SyncSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
-    for (const l of this.listeners) {
+    for (const l of [...this.listeners]) {
       try {
         l();
       } catch (err) {
@@ -376,8 +376,10 @@ export class SyncEngine {
       this.savePrefs({ map: this.mapper.current });
       this.set({ map: this.mapper.current, learning: null, learned: { ...learned, seq: ++this.learnSeq } });
     }
+    // (a snapshot: a command can mount another console view that subscribes while this runs)
+    const listeners = [...this.commandListeners];
     for (const cmd of commands) {
-      for (const l of this.commandListeners) {
+      for (const l of listeners) {
         try {
           l(cmd);
         } catch (err) {

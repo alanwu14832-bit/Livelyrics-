@@ -97,6 +97,9 @@ describe("free research brief", () => {
     expect(r.brief).toContain("這次連不上");
     expect(r.brief).toContain("爆發釋放");
     expect(r.brief).toContain("夜色");
+    // the emotion reads as two plain measures (not 「正負 0.26、激昂 0.69」)
+    expect(r.brief).toMatch(/情緒：\*\*[^*]+\*\*（正向程度 -?\d\.\d\d、激昂程度 \d\.\d\d/);
+    expect(r.brief).not.toContain("正負");
     expect(r.sources).toEqual([]);
     expect(r.publicInfo?.status.musicbrainz).toBe("failed");
   });

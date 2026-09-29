@@ -6,20 +6,24 @@
 // controller) — with the take transition (淡出淡入 / 直接切換) and 「GO 後自動播放」. Then every item:
 // kind colour swatch, title, length, readiness, arc role; the item on air is red (播出中, the
 // on-air colour), the armed one has the tint ring (待命); a click arms an item. At the bottom the
-// standby key: the show's safe screen, one press away at any time.
+// standby key: the show's safe screen, one press away at any time. 「跟隨時間碼換歌」 (phase 5a): with
+// MTC or LTC as the sync source, the timecode entering a song's hour takes that song; each song
+// row then shows its start timecode.
 
 import Link from "next/link";
-import { memo, useEffect, useRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Kbd, SegmentedControl, Switch, Tag, Tooltip, cx } from "@/components/ui";
 import { SOFT_TEXT } from "@/components/ui/Tag";
 import { BroadcastIcon, CaretLeftIcon, LifebuoyIcon, MusicNotesIcon, type UiIcon } from "@/components/ui/Icon";
 import { LOOK_ICONS } from "@/components/show/SetlistRow";
 import { useRafLoop } from "@/components/console/useRaf";
+import { useSyncSnapshot } from "@/components/console/sync/hooks";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { AUTO_STANDBY_ID, arcRoleLabel, type RailItem } from "@/lib/console/show-live";
 import type { ShowLiveController, ShowLiveSnapshot } from "@/lib/console/show-controller";
 import { ARC_ROLE_INFO, LOOK_KIND_INFO, PALETTE_EMPHASIS_INFO, SONG_STATUS_INFO, arcDirectiveFor, formatRunningTime } from "@/lib/show";
 import { createStageStore, initialStageState } from "@/lib/stage/protocol";
+import { setlistSlots } from "@/lib/sync/chase";
 import { formatTimeShort } from "@/lib/timeline";
 import type { SetItemKind } from "@/lib/types";
 
@@ -104,6 +108,7 @@ function RailRow({
   past,
   snap,
   onArm,
+  timecode,
   children,
 }: {
   item: RailItem;
@@ -112,6 +117,8 @@ function RailRow({
   past: boolean;
   snap: ShowLiveSnapshot;
   onArm: () => void;
+  /** 跟隨時間碼換歌: the song's start timecode */
+  timecode?: string | null;
   children?: ReactNode;
 }) {
   const length = itemLength(item);
@@ -161,7 +168,14 @@ function RailRow({
             )}
           </span>
         </span>
-        {length && <span className="shrink-0 self-start pt-0.5 text-c-footnote text-label-2 tabular">{length}</span>}
+        <span className="flex shrink-0 flex-col items-end gap-0.5 self-start pt-0.5">
+          {length && <span className="text-c-footnote text-label-2 tabular">{length}</span>}
+          {timecode && (
+            <span className="font-numeric text-[11px] leading-3 text-label-2 tabular" title={`時間碼 ${timecode} 開始`} data-rail-tc="">
+              {timecode.endsWith(":00:00:00") ? `TC ${timecode.slice(0, 2)}` : timecode}
+            </span>
+          )}
+        </span>
         {onAir && <OnAirProgress snap={snap} />}
       </button>
       {children}
@@ -231,8 +245,28 @@ function standbyRow(snap: ShowLiveSnapshot): RailItem | null {
   return { id: s.id, kind: "standby", title: s.title, songNumber: null, seconds: null, status: null, arcRole: null, swatch: [...s.look.colorway] };
 }
 
+/** 「跟隨時間碼換歌」: only meaningful with MTC / LTC as the show's source. */
+function FollowTimecodeRow({ ctl, snap }: { ctl: ShowLiveController; snap: ShowLiveSnapshot }) {
+  const sync = useSyncSnapshot(ctl.sync);
+  const timecode = sync.settings.source === "mtc" || sync.settings.source === "ltc";
+  return (
+    <div className="flex flex-col gap-0.5 px-1">
+      <label className="flex min-h-8 cursor-default items-center justify-between gap-2">
+        <span className="text-c-body text-label">跟隨時間碼換歌</span>
+        <Switch checked={snap.followTimecode} onChange={(v) => ctl.setFollowTimecode(v)} aria-label="跟隨時間碼換歌：時間碼進入某首歌的小時就播出那首歌" data-follow-timecode="" />
+      </label>
+      {snap.followTimecode && (
+        <p className={cx("text-c-footnote", timecode ? "text-label-2" : "text-orange-text")}>
+          {timecode ? "時間碼進入一首歌的小時就播出那首歌；畫面項目仍由 GO 播出。" : "先在「同步」選 MTC 或 LTC 作為同步來源。"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SetlistRailImpl({ ctl, snap }: { ctl: ShowLiveController; snap: ShowLiveSnapshot }) {
   const show = snap.show;
+  const starts = useMemo(() => new Map(setlistSlots(show?.items ?? []).map((s) => [s.itemId, s.start])), [show?.items]);
   const { current, armed } = snap.live;
   const listRef = useRef<HTMLOListElement>(null);
   const currentIndex = snap.rail.findIndex((r) => r.id === current);
@@ -286,6 +320,7 @@ function SetlistRailImpl({ ctl, snap }: { ctl: ShowLiveController; snap: ShowLiv
           <span className="text-c-body text-label">GO 後自動播放</span>
           <Switch checked={snap.autoPlay} onChange={(v) => ctl.setAutoPlay(v)} aria-label="GO 後自動播放（TRACK 模式的歌曲）" />
         </label>
+        <FollowTimecodeRow ctl={ctl} snap={snap} />
       </section>
 
       <div className="flex shrink-0 items-baseline justify-between gap-2 px-4 pt-1.5 pb-1 text-c-footnote text-label-2">
@@ -296,7 +331,16 @@ function SetlistRailImpl({ ctl, snap }: { ctl: ShowLiveController; snap: ShowLiv
       </div>
       <ol ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
         {snap.rail.map((item, i) => (
-          <RailRow key={item.id} item={item} onAir={item.id === current} armed={item.id === armed} past={currentIndex >= 0 && i < currentIndex} snap={snap} onArm={() => ctl.arm(item.id)}>
+          <RailRow
+            key={item.id}
+            item={item}
+            onAir={item.id === current}
+            armed={item.id === armed}
+            past={currentIndex >= 0 && i < currentIndex}
+            snap={snap}
+            onArm={() => ctl.arm(item.id)}
+            timecode={snap.followTimecode && item.kind === "song" ? starts.get(item.id) : null}
+          >
             {item.id === current && item.kind === "song" && <ArcNote snap={snap} itemId={item.id} />}
           </RailRow>
         ))}

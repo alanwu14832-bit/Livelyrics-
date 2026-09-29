@@ -11,15 +11,20 @@
 // The same song console runs inside the show console (/s/[id]/live, phase 2b): SongConsole takes
 // an existing controller (the show owns its lifecycle) and `show` slots — the GO / standby keys,
 // the show's key group in the help sheet, a top bar without 「‹ 作品庫」 beside the setlist rail.
+//
+// MIDI controllers (phase 5a) run the same actions as the keys, through the same dispatch and HUD
+// (plus the faders, the ProPresenter-style line notes and the section notes); X is 回到手動.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Banner, Button, EmptyState, Spinner, ToastStack, type HudHandle, type ToastItem } from "@/components/ui";
 import { MusicNotesIcon, WarningCircleIcon, type UiIcon } from "@/components/ui/Icon";
 import type { ConsoleController } from "@/lib/console/controller";
 import { useConsoleController, useConsoleSnapshot } from "@/lib/console/hooks";
-import { hotkeyAction, type HotkeyAction, type HotkeyHelpGroup } from "@/lib/console/hotkeys";
+import { hotkeyAction, type ConsoleAction, type HotkeyAction, type HotkeyHelpGroup } from "@/lib/console/hotkeys";
+import { commandAction } from "@/lib/midi/actions";
+import type { MidiCommand } from "@/lib/midi/mapping";
 import { CuePanel } from "./CuePanel";
-import { hudForAction } from "./feedback";
+import { applyControl, heldHud, hudForAction, manualHud } from "./feedback";
 import { HelpOverlay } from "./HelpOverlay";
 import { LyricsList } from "./LyricsList";
 import { PanelBoundary } from "./PanelBoundary";
@@ -29,6 +34,8 @@ import { SectionStrip } from "./SectionStrip";
 import type { SharedStage } from "./SharedStage";
 import { SidePanel } from "./SidePanel";
 import { ConsoleSkeleton, LoadErrorState, NotFoundState, NotReadyState } from "./States";
+import { ControllerSheet } from "./sync/ControllerSheet";
+import { useMidiCommands } from "./sync/hooks";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
 import { useConsoleHotkeys } from "./useConsoleHotkeys";
@@ -51,7 +58,7 @@ export interface ShowSlots {
 }
 
 /** Hotkeys that also work while the shortcut help sheet is open (it only explains them). */
-const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode", "hold", "loop"]);
+const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode", "hold", "loop", "manual"]);
 
 export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | null }) {
   const controller = useConsoleController(id);
@@ -72,6 +79,7 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
   const snap = useConsoleSnapshot(controller);
   const [helpOpen, setHelpOpen] = useState(false);
   const [redesignOpen, setRedesignOpen] = useState(false);
+  const [controllersOpen, setControllersOpen] = useState(false);
   const [openAnyway, setOpenAnyway] = useState(false);
   const hud = useRef<HudHandle>(null);
 
@@ -94,10 +102,14 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
   const toasts = useMemo<ToastItem[]>(() => snap.notices.map((n) => ({ id: String(n.id), tone: n.tone, message: n.message })), [snap.notices]);
   const dismissToast = useCallback((toastId: string) => controller.dismissNotice(Number(toastId)), [controller]);
 
-  /** Run a hotkey action and answer with the HUD in the same frame. False: not this console's key. */
+  /**
+   * Run a hotkey (or controller) action and answer with the HUD in the same frame. False: not this
+   * console's key. A key the timecode holds answers 「跟隨時間碼中」 (the controller refuses it).
+   */
   const dispatch = useCallback(
-    (action: HotkeyAction): boolean => {
+    (action: ConsoleAction): boolean => {
       const noticesBefore = controller.getSnapshot().notices.length;
+      const held = heldHud(action, controller);
       switch (action.type) {
         case "togglePlay":
           controller.spaceAction();
@@ -158,12 +170,30 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
           return true;
         case "escape":
           controller.clearLine();
+          if (held) hud.current?.show(held);
+          return true;
+        case "manual": {
+          const was = controller.sync.source;
+          hud.current?.show(manualHud(was, controller.backToManual()));
+          return true;
+        }
+        case "testPattern":
+          controller.toggleTestPattern();
+          break;
+        case "cueLine":
+          if ((controller.getSnapshot().project?.lyrics?.lines.length ?? 0) > action.index) controller.jumpToLine(action.index);
+          break;
+        case "jumpSection":
+          controller.jumpToSection(action.index);
+          break;
+        case "control":
+          hud.current?.show(applyControl(controller, action.target, action.value));
           return true;
       }
       // a blocked popup already explains itself in a notice: no 「已開啟」 HUD then
       const after = controller.getSnapshot().notices;
       if (action.type === "openOutput" && after.length > noticesBefore && after[after.length - 1]?.tone === "error") return true;
-      const content = hudForAction(action, controller);
+      const content = held ?? hudForAction(action, controller);
       if (content) hud.current?.show(content);
       return true;
     },
@@ -186,7 +216,20 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
     [active, controller, dispatch, show],
   );
   // keyboard-first operation (the sheets are modal and pass through their own keys)
-  useConsoleHotkeys({ active: active || !!show, paused: redesignOpen || helpOpen, onAction: onKey });
+  useConsoleHotkeys({ active: active || !!show, paused: redesignOpen || helpOpen || controllersOpen, onAction: onKey });
+
+  // MIDI controllers (phase 5a): the same actions, also while a sheet is open (a pad is not typing);
+  // before the song is on stage only the show's GO / standby
+  const onMidi = useCallback(
+    (cmd: MidiCommand) => {
+      const action = commandAction(cmd);
+      if (active) dispatch(action);
+      else if (show && (action.type === "go" || action.type === "standby")) show.onAction(action);
+    },
+    [active, dispatch, show],
+  );
+  useMidiCommands(controller.sync, onMidi);
+  const openControllers = useCallback(() => setControllersOpen(true), []);
 
   // B from inside the re-design sheet (outside its text field): blackout, with the HUD
   const blackoutFromSheet = useCallback(() => dispatch({ type: "blackout" }), [dispatch]);
@@ -275,7 +318,7 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
           </div>
         </PanelBoundary>
         <PanelBoundary area="panel" label="設計與控制">
-          <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} />
+          <SidePanel controller={controller} snap={snap} project={project} onRedesign={openRedesign} onOpenControllers={openControllers} />
         </PanelBoundary>
         <PanelBoundary area="timeline" label="時間軸">
           <Timeline controller={controller} project={project} duration={snap.duration} fallbackPeaks={snap.fallbackPeaks} mode={snap.mode} hold={snap.sectionHold} loop={snap.sectionLoop} />
@@ -294,6 +337,7 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
         onBlackout={blackoutFromSheet}
         onClose={() => setRedesignOpen(false)}
       />
+      <ControllerSheet open={controllersOpen} onClose={() => setControllersOpen(false)} engine={controller.sync} show={!!show} onBlackout={blackoutFromSheet} />
       {/* over the preview's top-right corner (solid in the console), never over the side-panel tabs */}
       <ToastStack
         toasts={toasts}

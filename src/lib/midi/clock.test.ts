@@ -52,6 +52,48 @@ describe("MIDI clock", () => {
     expect(Math.abs(clock.status(times.at(-1)!).bpm! - 128)).toBeLessThanOrEqual(0.3);
   });
 
+  it("bunched and late ticks are jitter, not a restart: the lock never drops", () => {
+    // a sender that runs late now and then and catches up (two ticks at once)
+    const clock = new MidiClock();
+    clock.start();
+    const period = 60000 / (128 * 24);
+    const times = ticks(128, 300, 1).map((t, i) => (i % 10 === 3 ? t + 0.8 * period : t));
+    let unlocked = 0;
+    for (const t of times) {
+      clock.tick(t);
+      if (!clock.status(t).locked) unlocked++;
+    }
+    expect(unlocked).toBeLessThanOrEqual(1); // the very first tick
+    expect(Math.abs(clock.status(times.at(-1)!).bpm! - 128)).toBeLessThanOrEqual(0.3);
+    // the phase keeps counting every tick: 299 ticks after Start
+    expect(clock.status(times.at(-1)!).phase).toBeCloseTo((299 % 24) / 24, 6);
+  });
+
+  it("coarse (quantized) timestamps still give the tempo, even at 200 BPM", () => {
+    for (const bpm of [128, 200]) {
+      const clock = new MidiClock();
+      // a driver that stamps in 15.6 ms steps (the old Windows timer): intervals of 0, 15.6, 31.2 ms
+      const step = 1000 / 64;
+      const times = ticks(bpm, 400, 0, 1003.3).map((t) => Math.floor(t / step) * step);
+      let unlocked = 0;
+      times.forEach((t, i) => {
+        clock.tick(t);
+        if (i > 0 && !clock.status(t).locked) unlocked++;
+      });
+      expect(unlocked).toBe(0);
+      expect(Math.abs(clock.status(times.at(-1)!).bpm! - bpm)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("follows a slower tempo too (never mistaken for lost ticks)", () => {
+    const clock = new MidiClock();
+    const fast = ticks(140, 150, 1);
+    for (const t of fast) clock.tick(t);
+    const slow = ticks(100, 150, 1, fast.at(-1)! + 60000 / (100 * 24));
+    for (const t of slow.slice(0, 72)) clock.tick(t);
+    expect(Math.abs(clock.status(slow[71]).bpm! - 100)).toBeLessThanOrEqual(0.5);
+  });
+
   it("gives the beat phase from Start (the first clock is the downbeat)", () => {
     const clock = new MidiClock();
     clock.start();

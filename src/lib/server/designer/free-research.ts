@@ -186,7 +186,7 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
     } else song.push("- 歌詞中沒有抓到明顯的具象意象：畫面以音樂能量與色彩為主。");
     const e = f.lyrics.emotion;
     const words = [...e.positive.slice(0, 3), ...e.negative.slice(0, 3)];
-    song.push(`- 情緒：**${e.label}**（正負 ${e.valence.toFixed(2)}、激昂 ${e.arousal.toFixed(2)}${words.length ? `；情緒詞：${words.join("、")}` : ""}${e.confidence === "low" ? "；情緒詞很少，僅供參考" : ""}）${e.hook ? `，副歌的 hook ${e.hook.arousal >= 0.6 ? "特別激昂" : e.hook.valence > e.valence + 0.2 ? "比主歌更明亮" : "延續整首的情緒"}` : ""}。`);
+    song.push(`- 情緒：**${e.label}**（正向程度 ${e.valence.toFixed(2)}、激昂程度 ${e.arousal.toFixed(2)}${words.length ? `；情緒詞：${words.join("、")}` : ""}${e.confidence === "low" ? "；情緒詞很少，僅供參考" : ""}）${e.hook ? `，副歌的 hook ${e.hook.arousal >= 0.6 ? "特別激昂" : e.hook.valence > e.valence + 0.2 ? "比主歌更明亮" : "延續整首的情緒"}` : ""}。`);
     song.push(`- 人稱：${f.lyrics.pov.label}——${f.lyrics.pov.note}`);
   } else {
     song.push("- 這首歌目前沒有歌詞：以音訊能量" + (g ? "與曲風" : "") + "為主，之後加入歌詞再重新研究，會得到意象與情緒的分析。");

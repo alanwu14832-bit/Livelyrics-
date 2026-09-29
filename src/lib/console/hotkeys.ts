@@ -229,6 +229,12 @@ export const HOTKEY_HELP: HotkeyHelpGroup[] = [
   },
 ];
 
+/** 回到手動 alone (the show console's look and pre-show views, which have no transport). */
+export const SYNC_HOTKEY_HELP: HotkeyHelpGroup = {
+  title: "同步",
+  entries: [{ keys: [MANUAL_KEY], label: "回到手動：停止跟隨時間碼或 MIDI clock" }],
+};
+
 /** The show console's own keys (演出控制台), shown first in its help sheet. */
 export const SHOW_HOTKEY_HELP: HotkeyHelpGroup = {
   title: "演出",

@@ -24,8 +24,10 @@ import { safetyOf, useSafetyToggle } from "@/components/console/SafetyControls";
 import { ARC_ROLE_INFO, LOOK_KINDS, LOOK_KIND_INFO, SONG_STATUS_INFO, arcDirectiveFor, defaultLook, formatRunningTime, moveItem, newSetItemId, setlistTotals, songItems, songStatus } from "@/lib/show";
 import { formatTimeShort } from "@/lib/timeline";
 import type { Band, LookItemKind, ProjectSummary, SetItem, Show } from "@/lib/types";
+import { setlistSlots } from "@/lib/sync/chase";
 import { LookSheet } from "./LookSheet";
 import { LOOK_ICONS, SetlistRow } from "./SetlistRow";
+import { TimecodeSheet } from "./TimecodeSheet";
 
 type Load = { kind: "loading" } | { kind: "missing" } | { kind: "error"; message: string } | { kind: "ok" };
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -48,6 +50,7 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
   const [save, setSave] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [editing, setEditing] = useState<LookItem | null>(null);
+  const [tcItem, setTcItem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirmCanvas, setConfirmCanvas] = useState(false);
   const [canvasNote, setCanvasNote] = useState<string | null>(null);
@@ -140,6 +143,31 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
     else router.push(liveHref, { transitionTypes: ["push"] });
   };
   const inSet = useMemo(() => new Set(show?.items.filter((i) => i.kind === "song").map((i) => (i as { projectId: string }).projectId)), [show]);
+  // 時間碼 (phase 5a): each song's start on the playback rig's timecode
+  const slots = useMemo(() => new Map(setlistSlots(show?.items ?? []).map((s) => [s.itemId, s])), [show?.items]);
+  const tcSong = useMemo(() => {
+    const it = tcItem ? show?.items.find((x) => x.id === tcItem) : undefined;
+    if (!it || it.kind !== "song") return null;
+    const songNumber = songItems(show!.items.slice(0, show!.items.indexOf(it) + 1)).length;
+    return { itemId: it.id, title: songMap.get(it.projectId)?.title ?? "作品已刪除", songNumber, timecode: it.timecode ?? null };
+  }, [tcItem, show, songMap]);
+  const tcOthers = useMemo(
+    () => [...slots.values()].filter((s) => s.itemId !== tcItem).map((s) => ({ start: s.start, label: `第 ${s.songNumber} 首「${songMap.get(s.projectId)?.title ?? "作品已刪除"}」` })),
+    [slots, tcItem, songMap],
+  );
+  const saveTimecode = (timecode: string | null) => {
+    if (!show || !tcItem) return;
+    setItems(
+      show.items.map((x) => {
+        if (x.id !== tcItem || x.kind !== "song") return x;
+        const next = { ...x };
+        if (timecode) next.timecode = timecode;
+        else delete next.timecode;
+        return next;
+      }),
+    );
+    setTcItem(null);
+  };
 
   const move = (from: number, to: number) => {
     if (!show) return;
@@ -373,6 +401,8 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
                               onMove={(to) => move(index, to)}
                               onRemove={() => setItems(show.items.filter((x) => x.id !== it.id))}
                               onEditLook={it.kind !== "song" ? () => setEditing(it) : undefined}
+                              timecode={slots.get(it.id) ?? null}
+                              onTimecode={it.kind === "song" ? () => setTcItem(it.id) : undefined}
                               onApplyArc={note && it.kind === "song" ? () => void redesignOne(it.id).catch((err) => setArcError(err instanceof Error ? err.message : String(err))) : undefined}
                               onDragEnd={() => {
                                 const s = showRef.current;
@@ -441,6 +471,7 @@ export function ShowClient({ id, initialName }: { id: string; initialName?: stri
             }}
           />
           <AddSongSheet open={adding} songs={songs} inSet={inSet} onClose={() => setAdding(false)} onAdd={(ids) => { addSongs(ids); setAdding(false); }} />
+          <TimecodeSheet song={tcSong} others={tcOthers} onClose={() => setTcItem(null)} onSave={saveTimecode} />
           <Alert
             open={confirmCanvas}
             title="套用到所有歌曲？"
