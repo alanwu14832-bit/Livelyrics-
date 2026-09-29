@@ -84,7 +84,11 @@ async function waitSaved(page, label) {
   check(`${label}: saved`, st === "saved", `status=${st}`);
 }
 
-/** Is the rendered frame of `selector` (a canvas or an img) not blank: several distinct colours. */
+/**
+ * Is the rendered frame of `selector` (a canvas or an img) not blank: several distinct colours and
+ * some bright pixels (the type). A WebGL canvas keeps its picture only until the frame is
+ * composited, so it is read inside frame callbacks (after the stage's own render of that frame).
+ */
 const notBlank = (page, selector) =>
   page.evaluate(async (sel) => {
     const el = document.querySelector(sel);
@@ -94,15 +98,26 @@ const notBlank = (page, selector) =>
     c.width = 64;
     c.height = 36;
     const ctx = c.getContext("2d");
-    ctx.drawImage(el, 0, 0, 64, 36);
-    const d = ctx.getImageData(0, 0, 64, 36).data;
-    const set = new Set();
-    let bright = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      set.add(`${d[i] >> 4},${d[i + 1] >> 4},${d[i + 2] >> 4}`);
-      if (d[i] + d[i + 1] + d[i + 2] > 450) bright++;
+    const sample = () => {
+      ctx.clearRect(0, 0, 64, 36);
+      ctx.drawImage(el, 0, 0, 64, 36);
+      const d = ctx.getImageData(0, 0, 64, 36).data;
+      const set = new Set();
+      let bright = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        set.add(`${d[i] >> 4},${d[i + 1] >> 4},${d[i + 2] >> 4}`);
+        if (d[i] + d[i + 1] + d[i + 2] > 450) bright++;
+      }
+      return { ok: set.size > 6 && bright > 0, colours: set.size, bright };
+    };
+    if (el.tagName !== "CANVAS") return sample();
+    let best = null;
+    for (let i = 0; i < 12; i++) {
+      const r = await new Promise((res) => requestAnimationFrame(() => res(sample())));
+      if (r.ok) return r;
+      if (!best || r.colours > best.colours) best = r;
     }
-    return { ok: set.size > 6 && bright > 0, colours: set.size, bright };
+    return best;
   }, selector);
 
 (async () => {
@@ -170,7 +185,7 @@ const notBlank = (page, selector) =>
     // switch the voice: the preview and the open projection follow
     const from = ts.voice;
     const to = from === "glitch" ? "ink" : "glitch";
-    await editor.locator(`[data-testid="voice-option"][data-voice="${to}"]`).first().click();
+    await editor.locator(`[data-testid="voice-option"][data-voice="${to}"]:visible`).first().click();
     await editor.waitForFunction((v) => document.querySelector('[data-testid="type-preview"] [data-type-layer]')?.getAttribute("data-voice") === v, to, { timeout: 20000 }).catch(() => {});
     check("editor: voice switch updates the preview", (await typeText(editor, '[data-testid="type-preview"]'))?.voice === to);
     await popup.waitForFunction((v) => document.querySelector("[data-type-layer]")?.getAttribute("data-voice") === v, to, { timeout: 20000 }).catch(() => {});
@@ -180,7 +195,7 @@ const notBlank = (page, selector) =>
     await shot(popup, "type-04-output-after-voice");
 
     // one line: reroll, emphasis tap, drag nudge
-    const lineIdx = lines.findIndex((l) => l.text.startsWith("燈火"));
+    const lineIdx = lines.findIndex((l) => l.text.startsWith("每一盞燈"));
     const lineId = lines[lineIdx].id;
     await editor.locator(`[data-testid="line-row"][data-line="${lineIdx}"]`).click();
     await editor.waitForTimeout(800);
@@ -215,7 +230,7 @@ const notBlank = (page, selector) =>
     await editor.waitForTimeout(300);
     await waitSaved(editor, "lock");
     const lockedBefore = (await api("GET", `/api/projects/${id}`)).plan.typeSystem;
-    await editor.locator('[data-testid="regenerate-all"]').first().click();
+    await editor.locator('[data-testid="regenerate-all"]:visible').first().click();
     await editor.waitForTimeout(600);
     await waitSaved(editor, "regenerate");
     const regen = (await api("GET", `/api/projects/${id}`)).plan.typeSystem;
@@ -273,11 +288,27 @@ const notBlank = (page, selector) =>
     const small = await ed.evaluate(() =>
       [...document.querySelectorAll('[data-testid="line-panel"] button, [data-testid="next-line"], [data-testid="prev-line"], [data-testid="play-line"]')]
         .filter((b) => b.offsetParent && !b.closest("[data-testid=recipe-thumb]"))
-        .map((b) => b.getBoundingClientRect())
+        // a control inside a 44 px label (the lock switch) is tapped through its label
+        .map((b) => (b.closest("label") ?? b).getBoundingClientRect())
         .filter((r) => r.height < 43.5 || r.width < 43.5).length,
     );
     check("phone: every line control is a 44 px target", small === 0, `${small} smaller`);
-    // the next line, then reroll, tap emphasis, nudge with the arrow pad
+    // the 整首 tab: switch the voice; the preview and the projection window follow
+    await ed.getByRole("tab", { name: "整首" }).tap();
+    await ed.waitForTimeout(400);
+    const now = (await api("GET", `/api/projects/${id}`)).plan.typeSystem.voice;
+    const next = now === "mv-card" ? "title-sequence" : "mv-card";
+    await ed.locator(`[data-testid="song-panel"] [data-testid="voice-option"][data-voice="${next}"]:visible`).first().tap();
+    await ed.waitForFunction((v) => document.querySelector('[data-testid="type-preview"] [data-type-layer]')?.getAttribute("data-voice") === v, next, { timeout: 20000 }).catch(() => {});
+    check("phone: voice switch updates the preview", (await typeText(ed, '[data-testid="type-preview"]'))?.voice === next);
+    await out.waitForFunction((v) => document.querySelector("[data-type-layer]")?.getAttribute("data-voice") === v || !document.querySelector("[data-type-layer]"), next, { timeout: 5000 }).catch(() => {});
+    const outPlan = await out.evaluate(() => document.querySelector("[data-type-layer]")?.getAttribute("data-voice") ?? "idle");
+    check("phone: the projection window takes the edit (no console needed)", outPlan === next || outPlan === "idle", outPlan);
+    await waitSaved(ed, "phone voice");
+    await shot(ed, "type-10-editor-phone-song");
+    // back to 這一句: the next line, then reroll, tap emphasis, nudge with the arrow pad
+    await ed.getByRole("tab", { name: "這一句" }).tap();
+    await ed.waitForTimeout(400);
     await ed.locator('[data-testid="next-line"]').tap();
     await ed.waitForTimeout(600);
     const cur = await ed.locator('[data-testid="current-line"]').innerText();
@@ -295,24 +326,12 @@ const notBlank = (page, selector) =>
     const pl = (await api("GET", `/api/projects/${id}`)).plan.typeSystem.lines.find((l) => l.lineId === lid);
     check("phone: reroll, emphasis and nudge saved", !!pl?.edit?.seed && (pl?.edit?.emphasis?.length ?? 0) > 0 && Math.abs((pl?.edit?.dx ?? 0) - 0.04) < 0.001 && Math.abs((pl?.edit?.dy ?? 0) + 0.02) < 0.001, JSON.stringify(pl?.edit));
     await shot(ed, "type-09-editor-phone-line");
-    // the 整首 tab: switch the voice; the preview and the projection window follow
-    await ed.getByRole("tab", { name: "整首" }).tap();
-    await ed.waitForTimeout(400);
-    const now = (await api("GET", `/api/projects/${id}`)).plan.typeSystem.voice;
-    const next = now === "mv-card" ? "title-sequence" : "mv-card";
-    await ed.locator(`[data-testid="song-panel"] [data-testid="voice-option"][data-voice="${next}"]`).first().tap();
-    await ed.waitForFunction((v) => document.querySelector('[data-testid="type-preview"] [data-type-layer]')?.getAttribute("data-voice") === v, next, { timeout: 20000 }).catch(() => {});
-    check("phone: voice switch updates the preview", (await typeText(ed, '[data-testid="type-preview"]'))?.voice === next);
-    await out.waitForFunction((v) => document.querySelector("[data-type-layer]")?.getAttribute("data-voice") === v || !document.querySelector("[data-type-layer]"), next, { timeout: 5000 }).catch(() => {});
-    const outPlan = await out.evaluate(() => document.querySelector("[data-type-layer]")?.getAttribute("data-voice") ?? "idle");
-    check("phone: the projection window takes the edit (no console needed)", outPlan === next || outPlan === "idle", outPlan);
-    await waitSaved(ed, "phone voice");
-    await shot(ed, "type-10-editor-phone-song");
-    // reload keeps the line edit
+    // reload keeps the voice and the line edit
     await ed.reload({ waitUntil: "networkidle" });
     await ed.waitForSelector('[data-testid="type-editor"]', { timeout: 60000 });
     const saved = (await api("GET", `/api/projects/${id}`)).plan.typeSystem;
-    check("phone: reload keeps voice and line edit", saved.voice === next && !!saved.lines.find((l) => l.lineId === lid)?.edit?.seed);
+    const kept = saved.lines.find((l) => l.lineId === lid)?.edit;
+    check("phone: reload keeps voice and line edit", saved.voice === next && kept?.seed === pl?.edit?.seed && kept?.dx === pl?.edit?.dx && JSON.stringify(kept?.emphasis) === JSON.stringify(pl?.edit?.emphasis), JSON.stringify({ voice: saved.voice, kept }));
     await ed.close();
     await out.close();
   } catch (e) {

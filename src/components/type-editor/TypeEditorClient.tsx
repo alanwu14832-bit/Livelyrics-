@@ -495,6 +495,7 @@ function TypeEditor({ initialProject }: { initialProject: Project }) {
         {playing ? "停止" : "從這句播放"}
       </Button>
       <SegmentedControl
+        touch
         label="比較"
         value={ab}
         onChange={setAb}
@@ -570,6 +571,7 @@ function TypeEditor({ initialProject }: { initialProject: Project }) {
           {transport}
           <div className="lg:hidden">
             <SegmentedControl<Tab>
+              touch
               kind="tabs"
               fullWidth
               label="排版範圍"

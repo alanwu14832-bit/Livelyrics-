@@ -183,6 +183,16 @@ describe("the 排版 editor's operations", () => {
     for (const l of ink.lines) if (l.lineId !== "l1") expect(Object.keys(VOICES.ink.recipes).concat("whisper")).toContain(l.recipe);
   });
 
+  it("a redraw keeps what an unlocked line's edit says about its words, not its old layout", () => {
+    const words = lines.find((l) => l.id === "l2")!.text;
+    let ts = E.nudgeTo(base, "l2", 0.2, -0.1, ctx);
+    ts = E.editLine(ts, "l2", { emphasis: [Array.from(words)[0]], color: "accent", seed: 999 }, ctx);
+    for (const next of [E.regenerateAll(ts, ctx), E.setVoice(ts, "glitch", ctx)]) {
+      const l2 = next.lines.find((l) => l.lineId === "l2")!;
+      expect(l2.edit).toEqual({ emphasis: [Array.from(words)[0]], color: "accent" });
+    }
+  });
+
   it("editing a repeat keeps what the first occurrence's edit gave every chorus", () => {
     let ts = E.nudgeTo(base, "l4", 0.1, 0, ctx);
     // the repeats follow the first occurrence

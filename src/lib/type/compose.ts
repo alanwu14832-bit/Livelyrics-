@@ -242,9 +242,9 @@ function translationSpot(pieces: readonly Piece[], at: number, frame: Frame, r: 
 }
 
 /**
- * The translation never sits on the composition. Where no place is free, the text block first
- * moves up to leave it its rows (a display word stays put), then the composition shrinks (never
- * below the minimum size).
+ * The translation never sits on the composition. Where no place is free, the composition first
+ * moves up to leave it its rows (a word anchored to the frame edge stays), then shrinks (never
+ * below the minimum size); when even that finds no place, the layout is left as the recipe made it.
  */
 function placeTranslation(pieces: Piece[], frame: Frame, r: RecipeCtx): Piece[] {
   const at = pieces.findIndex((p) => p.role === "translation");
@@ -277,11 +277,16 @@ function placeTranslation(pieces: Piece[], frame: Frame, r: RecipeCtx): Piece[] 
   const kMin = smallest > 0 ? frame.minRead / smallest : 1;
   const k = Math.min(1, (rd.h - need) / Math.max(1, text.h));
   if (k < kMin || k < 0.55) return pieces;
-  scaleAll(rest, k, text.x + text.w / 2, text.y);
+  const cx = text.x + text.w / 2;
+  scaleAll(rest, k, cx, text.y);
   const nb = readableBox(rest);
-  moveAll(rest, 0, Math.max(rd.y - nb.y, Math.min(0, rd.y + rd.h - need - (nb.y + nb.h))), (p) => !p.bleed);
+  const dy = Math.max(rd.y - nb.y, Math.min(0, rd.y + rd.h - need - (nb.y + nb.h)));
+  moveAll(rest, 0, dy, movable);
   spot = translationSpot(pieces, at, frame, r);
-  return spot ? put(spot) : pieces;
+  if (spot) return put(spot);
+  moveAll(rest, 0, -dy, movable);
+  scaleAll(rest, 1 / k, cx, text.y);
+  return pieces;
 }
 
 /** Keep the readable text inside `area`: move it in, and shrink it (never below `min`) when it is larger. */
@@ -318,7 +323,7 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const on = new Set(sys.ornaments);
   if (level < 0.12 || !on.size) return pieces;
   const f = r.frame;
-  const b = readableBox(pieces);
+  let b = readableBox(pieces);
   if (b.w <= 0) return pieces;
   const ctx = input.ctx;
   const out = [...pieces];
@@ -326,6 +331,23 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const sectionHead = ctx.first;
   const ornamentSeed = hash32(`orn|${input.lineId}|${Math.round(input.hint.seed)}`) / 4294967296;
   const vertical = pieces.some((p) => p.readable && p.vertical && p.role === "main");
+  // 「」 hang outside the text block (MV cards): the block steps in from the frame edge to make room
+  const wantBracket = on.has("bracket") && level >= 0.3 && ornamentSeed > 0.45 && ["giant-word", "vertical-column", "cross", "title-card", "whisper"].includes(input.hint.recipe);
+  const bs = clamp(Math.min(b.h, b.w) * 0.34, f.minRead * 0.9, f.ref * 0.16);
+  let bracketFits = false;
+  if (wantBracket) {
+    const need = bs * 1.14;
+    const leftRoom = b.x - need - f.safe.x;
+    const rightRoom = f.safe.x + f.safe.w - (b.x + b.w + need);
+    let shift = 0;
+    if (leftRoom < 0 && rightRoom >= -leftRoom) shift = -leftRoom;
+    else if (rightRoom < 0 && leftRoom >= -rightRoom) shift = rightRoom;
+    bracketFits = leftRoom + shift >= -1 && rightRoom - shift >= -1 && b.y - bs * 0.72 >= 0 && b.y + b.h + bs * 0.72 <= f.H;
+    if (bracketFits && shift) {
+      moveAll(out, shift, 0, (p) => !p.bleed);
+      b = readableBox(out);
+    }
+  }
   const gap = labelSize * 0.9;
   const above = b.y - gap - labelSize >= f.safe.y;
   const ly = above ? b.y - gap - labelSize : b.y + b.h + gap;
@@ -348,8 +370,7 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
     if (g.y + g.h / 2 < f.safe.y + f.safe.h) out.push(piece("label", [g], { plate: "ink", alpha: 0.66, readable: false, delay: 0.15 }));
   }
   // 「」 as graphics around the text block (MV cards)
-  if (on.has("bracket") && level >= 0.3 && ornamentSeed > 0.45 && ["giant-word", "vertical-column", "cross", "title-card", "whisper"].includes(input.hint.recipe)) {
-    const bs = clamp(Math.min(b.h, b.w) * 0.34, f.minRead * 0.9, f.ref * 0.16);
+  if (wantBracket && bracketFits) {
     const open = vertical ? "﹁" : "「";
     const close = vertical ? "﹂" : "」";
     const og: GlyphBox = { ch: open, font: "cjk", weight: sys.weight, size: bs, x: b.x - bs * 0.62, y: b.y - bs * 0.2, w: bs, h: bs, rotate: 0, plate: "accent", order: 960, unit: -1, t0: 0, tracking: 0 };
