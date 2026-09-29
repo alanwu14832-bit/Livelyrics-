@@ -60,6 +60,7 @@ import { analysisSummary, bibleBlock, catalogBlock, lyricExcerpt, songBlock, tri
 import { analyzeStructure, clamp } from "./structure";
 import { EMBLEM_STYLES, generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { chooseVoice, designTypeSystem, topRecipes } from "./type-design";
+import { directionSceneProgram } from "./scene-program";
 import type { DesignRequest } from "./types";
 import { RECIPES, VOICES } from "@/lib/type/vocab";
 
@@ -733,6 +734,8 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
     designerNotes: planNotes(spec, letter, sections, typeSystem.lines.length ? typeSystem : undefined),
     typeSystem,
   };
+  // 專屬畫面: each direction its own world (forms from its scene families)
+  plan.sceneProgram = directionSceneProgram(req, plan, [...(spec.scenes.chorus ?? []), ...(spec.scenes.verse ?? [])], letter);
   return normalizePlan(plan, req);
 }
 

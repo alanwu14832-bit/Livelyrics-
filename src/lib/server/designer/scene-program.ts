@@ -98,6 +98,26 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
   return normalizeSceneProgram(tagged, { sections: plan.sections }) ?? tagged;
 }
 
+/**
+ * A design direction's own program (phase 4 directions × phase 7): forms from the direction's scene
+ * families, seeded by its letter, so the three directions' style frames show three different worlds.
+ */
+export function directionSceneProgram(req: DesignerInput, plan: DesignPlan, scenes: readonly SceneId[], letter: string): SceneProgram {
+  const forms: FormId[] = [];
+  for (const s of scenes) for (const f of FORMS_BY_SCENE[s] ?? []) if (!forms.includes(f)) forms.push(f);
+  const f = analyzeFindings(req);
+  for (const x of sceneForms(f)) if (!forms.includes(x)) forms.push(x);
+  const program = composeSceneProgram({
+    seed: hashString(`${req.meta?.title ?? ""}|${req.meta?.artist ?? ""}|${letter}`),
+    forms,
+    sections: plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy })),
+    voice: plan.typeSystem?.voice ?? null,
+    arousal: f.audio.arousal,
+    title: req.meta?.title,
+  });
+  return normalizeSceneProgram({ ...program, recipe: `${program.recipe}#0` }, { sections: plan.sections }) ?? program;
+}
+
 /** The composer's salt of an offline program (「重新產生畫面」 without Claude draws salt + 1). */
 export function composerSalt(program: SceneProgram | null | undefined): number {
   const m = /#(\d+)$/.exec(program?.recipe ?? "");
