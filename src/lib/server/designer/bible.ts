@@ -159,7 +159,7 @@ export function offlineBible(input: BibleInput, now = new Date()): BandBible {
   }
   const dos = [
     "每首歌的配色都從樂團色盤取，明暗可以變，色相不變",
-    bible.lyricPolicy.mode === "full" ? "主歌用安靜的字幕，副歌才放大歌詞" : "副歌才讓歌詞成為畫面主角",
+    bible.lyricPolicy.mode === "full" ? "每一句歌詞都完整排版，副歌再放大" : "主歌的字小而安靜，副歌才讓歌詞成為畫面主角",
     input.assets.some((a) => a.kind === "logo") ? "樂團 logo 只在開場與結尾出現" : "開場與結尾回到同一個主視覺符號",
   ];
   const donts = ["不要讓畫面和主唱搶戲", "不要每首歌換一種字體", ...(bible.sceneAvoid.length ? [`不要用${bible.sceneAvoid.map((s) => SCENES[s].label).join("、")}`] : [])];
@@ -198,7 +198,7 @@ export const BIBLE_SYSTEM = `你是這個樂團的專職舞台視覺總監。樂
 - 色盤取自作品中反覆出現、最能代表樂團的顏色；第一色是最深的背景色；一定要有給歌詞用、在背景上對比 4.5:1 以上的亮色。
 - 字體從提供的清單選：cjkFont 必須是 CJK 字體、latinFont 必須是拉丁字體，字重 600 以上。
 - 場景與素材處理只能用提供的 id。
-- 歌詞政策：這個樂團的歌詞在螢幕上該出現多少（chorus-only＝副歌才顯示、full＝全曲字幕、minimal＝盡量不顯示）。
+- 歌詞政策：這個樂團的歌詞在螢幕上該有多大的份量（每一句都會排版出現；chorus-only＝副歌才放大、full＝每句都是主角、minimal＝只放大 hook）。
 - 所有文字用繁體中文。不要重製歌詞。`;
 
 function vocabBlock(): string {

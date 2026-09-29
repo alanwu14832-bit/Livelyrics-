@@ -9,8 +9,11 @@
 // SVG sanitizing, timeline coverage) whose repairs become notes; LED 安全模式's pre-show report is
 // added. What cannot be used comes back as errors plus a 修正提示詞 for the same claude.ai chat.
 // The research brief (the text around the JSON) is kept when it looks like one.
+// 字體藝術: the plan's type system is checked on its own — everything in it can be repaired (unknown
+// recipes and emphasis dropped, missing lines composed by the rules), so its problems become notes
+// and never refuse an otherwise usable plan.
 
-import { DesignPlanSchema } from "@/lib/schema";
+import { DesignPlanSchema, TypeSystemSchema } from "@/lib/schema";
 import { safetyReport, type ActiveSafety } from "@/lib/stage/safety";
 import { formatTimeShort } from "@/lib/timeline";
 import type { DesignDirection, DesignPlan, ResearchSource } from "@/lib/types";
@@ -616,8 +619,12 @@ export function checkPlan(value: unknown, req: DesignRequest): PlanCheck {
     return { ok: false, issues: [{ message: "這是「設計方向」的 JSON，不是設計方案：請到「設計方向」那邊用 claude.ai 提案並貼上，或請 Claude 依設計方案的規格重新輸出。", severity: "error" }] };
   }
   const issues: ReplyIssue[] = [];
-  const checked = DesignPlanSchema.safeParse(raw);
+  // the plan without its type system decides whether the reply is usable
+  const { typeSystem: rawType, ...planPart } = raw;
+  const checked = DesignPlanSchema.safeParse(planPart);
   const warnings = checked.success ? [] : schemaIssues(checked.error, raw);
+  const typeChecked = rawType == null ? null : TypeSystemSchema.safeParse(rawType);
+  const typeWarnings = typeChecked && !typeChecked.success ? schemaIssues({ issues: typeChecked.error.issues.map((i) => ({ ...i, path: ["typeSystem", ...i.path] })) }, raw) : [];
   if (!isUsablePlan(raw)) {
     if (!isObj(raw.keyVisual)) issues.push({ path: "keyVisual", message: "缺少 keyVisual（主視覺：標題、概念、配色、字體）。", severity: "error" });
     if (!Array.isArray(raw.sections)) issues.push({ path: "sections", message: "缺少 sections（每一段的畫面設計）。", severity: "error" });
@@ -633,10 +640,13 @@ export function checkPlan(value: unknown, req: DesignRequest): PlanCheck {
   if (warnings.length > MAX_TOLERATED_ISSUES) issues.push({ message: `有 ${warnings.length} 處不符合 DesignPlan 的規格，看起來是另一種格式的 JSON。`, severity: "error" });
   if (issues.length) return { ok: false, issues: [...issues, ...warnings.slice(0, 20)] };
 
-  const { plan, repairs } = normalizePlanWithReport(checked.success ? checked.data : raw, req);
+  const source = checked.success ? { ...checked.data, ...(rawType != null ? { typeSystem: typeChecked?.success ? typeChecked.data : rawType } : {}) } : raw;
+  const { plan, repairs } = normalizePlanWithReport(source, req);
   const notes = [
     ...warnings.slice(0, 12).map((w) => `${w.message}（已自動修正）`),
     ...(warnings.length > 12 ? [`另外 ${warnings.length - 12} 處不符合規格的欄位也已自動修正`] : []),
+    ...typeWarnings.slice(0, 6).map((w) => `${w.message}（字體藝術，已自動修正）`),
+    ...(typeWarnings.length > 6 ? [`字體藝術另外 ${typeWarnings.length - 6} 處不符合規格的欄位也已自動修正`] : []),
     ...repairs,
     ...left.map((p) => `${p} 還是範本的文字，請之後在控制台修改`),
   ];

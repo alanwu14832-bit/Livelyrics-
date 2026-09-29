@@ -8,7 +8,7 @@ import { memo, useMemo } from "react";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { stageAssets } from "@/lib/asset-scope";
 import { Button, Disclosure, Slider, Tag, Tooltip, cx } from "@/components/ui";
-import { SparkleIcon } from "@/components/ui/Icon";
+import { SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import type { ConsoleController } from "@/lib/console/controller";
 import { motifDataUrl, readableTextOn, withAlpha } from "@/lib/console/format";
@@ -19,6 +19,8 @@ import { FONTS, fontStack } from "@/lib/fonts";
 import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_TREATMENTS, SCENE_IDS } from "@/lib/schema";
 import { formatTimeShort } from "@/lib/timeline";
 import type { Asset, DesignPlan, LyricPlacement, LyricStyleId, MediaTreatment, Project, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
+import { hasTypeSystem } from "@/lib/type/resolve";
+import { COLOR_TREATMENTS, RECIPES, VOICES } from "@/lib/type/vocab";
 import { sectionName } from "./Preview";
 import { SafetyCheck } from "./SafetyControls";
 import { Footnote, Group, GroupTitle, KeyValues, PopupSelect } from "./ui";
@@ -27,6 +29,44 @@ const SCENE_OPTIONS = SCENE_IDS.map((id) => ({ value: id, label: SCENE_LABELS[id
 const STYLE_OPTIONS = LYRIC_STYLE_IDS.map((id) => ({ value: id, label: LYRIC_STYLE_LABELS[id] }));
 const PLACEMENT_OPTIONS = LYRIC_PLACEMENTS.map((id) => ({ value: id, label: PLACEMENT_LABELS[id] }));
 const TREATMENT_OPTIONS = MEDIA_TREATMENTS.map((id) => ({ value: id, label: MEDIA_TREATMENT_LABELS[id] }));
+/** 字體藝術: a section's lyrics are compositions or hidden (the legacy styles only apply without a type system) */
+const TYPE_LYRIC_OPTIONS: ReadonlyArray<{ value: "show" | "hidden"; label: string }> = [
+  { value: "show", label: "構圖（字體藝術）" },
+  { value: "hidden", label: "不顯示" },
+];
+
+/** The song's 字體語言 in the design tab, with the way into the 排版 editor. */
+function TypeCard({ controller, plan }: { controller: ConsoleController; plan: DesignPlan }) {
+  const ts = plan.typeSystem;
+  if (!ts) return null;
+  const voice = VOICES[ts.voice];
+  const count = new Map<string, number>();
+  for (const l of ts.lines) count.set(l.recipe, (count.get(l.recipe) ?? 0) + 1);
+  const top = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([id]) => RECIPES[id as keyof typeof RECIPES]?.label ?? id);
+  const edited = ts.lines.filter((l) => l.edit && Object.keys(l.edit).length).length;
+  return (
+    <section aria-labelledby="kv-type-art">
+      <GroupTitle id="kv-type-art">字體藝術</GroupTitle>
+      <Group className="mt-1">
+        <div className="flex flex-col gap-2 px-3 py-3">
+          <p className="text-c-body font-semibold text-label">{voice?.label ?? ts.voice}</p>
+          {voice && <p className="text-c-footnote text-label-2">{voice.description}</p>}
+          <KeyValues
+            items={[
+              { key: "字體", value: `${FONTS[ts.fonts.cjk]?.label ?? ts.fonts.cjk}＋${FONTS[ts.fonts.latin]?.label ?? ts.fonts.latin}` },
+              { key: "配色", value: COLOR_TREATMENTS[ts.color]?.label ?? ts.color },
+              { key: "構圖", value: top.join("、") || "—" },
+              ...(edited ? [{ key: "已調整", value: `${edited} 句` }] : []),
+            ]}
+          />
+          <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} className="self-start" data-testid="design-open-type-editor">
+            開啟排版
+          </Button>
+        </div>
+      </Group>
+    </section>
+  );
+}
 const NO_MEDIA = "__none__";
 
 /** A default look for material the operator just picked (lyrics keep priority). */
@@ -230,6 +270,7 @@ function SectionGroup({
   active,
   disabled,
   assets,
+  typeMode = false,
 }: {
   controller: ConsoleController;
   section: SectionDesign;
@@ -237,6 +278,8 @@ function SectionGroup({
   active: boolean;
   disabled: boolean;
   assets: Asset[];
+  /** 字體藝術: the lyrics are compositions (show / hide only; the 排版 page does the rest) */
+  typeMode?: boolean;
 }) {
   const [bg, primary, accent] = section.colorway;
   const name = sectionName(section);
@@ -277,17 +320,32 @@ function SectionGroup({
               <PopupSelect<SceneId> label="場景" value={section.scene} options={SCENE_OPTIONS} onChange={(scene) => controller.updateSection(index, { scene })} disabled={disabled} />
             </div>
           </Tooltip>
-          <Tooltip content={LYRIC_STYLE_HINTS[section.lyricStyle]}>
-            <div className="min-w-0">
-              <PopupSelect<LyricStyleId>
-                label="歌詞呈現"
-                value={section.lyricStyle}
-                options={STYLE_OPTIONS}
-                onChange={(lyricStyle) => controller.updateSection(index, { lyricStyle })}
-                disabled={disabled}
-              />
-            </div>
-          </Tooltip>
+          {typeMode ? (
+            <Tooltip content="每一句都依字體藝術排版；構圖在「排版」頁調整">
+              <div className="min-w-0">
+                <PopupSelect<"show" | "hidden">
+                  label="歌詞"
+                  value={section.lyricStyle === "hidden" ? "hidden" : "show"}
+                  options={TYPE_LYRIC_OPTIONS}
+                  onChange={(v) => controller.updateSection(index, { lyricStyle: v === "hidden" ? "hidden" : "line-fade" })}
+                  disabled={disabled}
+                />
+              </div>
+            </Tooltip>
+          ) : (
+            <Tooltip content={LYRIC_STYLE_HINTS[section.lyricStyle]}>
+              <div className="min-w-0">
+                <PopupSelect<LyricStyleId>
+                  label="歌詞呈現"
+                  value={section.lyricStyle}
+                  options={STYLE_OPTIONS}
+                  onChange={(lyricStyle) => controller.updateSection(index, { lyricStyle })}
+                  disabled={disabled}
+                />
+              </div>
+            </Tooltip>
+          )}
+          {!typeMode && (
           <PopupSelect<LyricPlacement>
             label="歌詞位置"
             value={section.lyricPlacement}
@@ -295,6 +353,8 @@ function SectionGroup({
             onChange={(lyricPlacement) => controller.updateSection(index, { lyricPlacement })}
             disabled={disabled}
           />
+          )}
+          {!typeMode && (
           <Slider
             label="字級"
             value={section.lyricScale}
@@ -306,6 +366,7 @@ function SectionGroup({
             disabled={disabled}
             className="-mt-1.5"
           />
+          )}
         </div>
         <MediaPicker controller={controller} section={section} index={index} assets={assets} disabled={disabled} />
       </div>
@@ -356,6 +417,7 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <KeyVisualCard controller={controller} plan={plan} sampleText={sampleText} />
+      <TypeCard controller={controller} plan={plan} />
       {/* LED 安全模式 pre-show check: what safe mode changes in this song */}
       <SafetyCheck project={project} />
       {library}
@@ -364,7 +426,7 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
         {redesigning ? <Footnote className="mt-0 mb-1.5">重新設計進行中，完成前暫停手動修改。</Footnote> : <Footnote className="mt-0 mb-1.5">修改會即時套用到投影並自動儲存。</Footnote>}
         <div className="flex flex-col gap-2">
           {plan.sections.map((s, i) => (
-            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={pickable} />
+            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={pickable} typeMode={hasTypeSystem(plan)} />
           ))}
         </div>
       </section>

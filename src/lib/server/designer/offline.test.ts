@@ -119,8 +119,9 @@ describe("offlineDesign edge cases", () => {
     const lines = Array.from({ length: 60 }, (_, i) => ({ id: `l${i}`, text: `第${i}句獨一無二的歌詞在這裡`, start: 4 + i * 1.1, end: null }));
     const p = offlineDesign({ meta: demoMeta(), lyrics: { source: "user", synced: true, lines }, analysis });
     expect(DesignPlanSchema.safeParse(p).success).toBe(true);
-    // dense sections fall back to calmer lyric styles
-    expect(p.sections.some((s) => s.lyricStyle === "subtitle" || s.lyricStyle === "karaoke")).toBe(true);
+    // never karaoke or subtitle (字體藝術): every one of the 60 lines is a composition
+    expect(p.sections.some((s) => s.lyricStyle === "subtitle" || s.lyricStyle === "karaoke")).toBe(false);
+    expect(p.typeSystem!.lines.map((l) => l.lineId)).toEqual(lines.map((l) => l.id));
   });
 });
 

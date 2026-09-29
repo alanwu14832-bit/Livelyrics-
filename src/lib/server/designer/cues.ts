@@ -50,9 +50,9 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
       const how =
         s.lyricStyle === "impact"
           ? "口號以巨字呈現，帶全場一起喊"
-          : s.lyricStyle === "karaoke"
-            ? "整行提前出現、填色跟唱"
-            : `歌詞以「${LYRIC_STYLES[s.lyricStyle].label}」呈現`;
+          : s.lyricStyle === "karaoke" || s.lyricStyle === "subtitle"
+            ? `歌詞以「${LYRIC_STYLES[s.lyricStyle].label}」呈現`
+            : "副歌的每一句都放大成畫面的主角";
       cues.push({
         time: round2(s.start),
         title: `${s.label}合唱`,

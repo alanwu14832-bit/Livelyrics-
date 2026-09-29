@@ -10,6 +10,10 @@
 //   seeked to the exact frame time (ExactMedia);
 // - lyrics: the live LyricLayer, laid out in a hidden host at the export size and stepped with
 //   now = song time, then painted into a canvas by LyricPainter (coloured, or as a luma matte).
+//   A plan with a type system (字體藝術) instead runs the live TypeLayer: its plates go through the
+//   same GL type pass as the projection, so the full frame carries the type before the LED safety
+//   pass; the background variant is a second render without the type on its own safety chain, and
+//   the lyric layer is the type pass rendered alone over transparent.
 //
 // Stateful parts (the audio mixer's smoothing, lyric enter / exit animations, the stack style's
 // drift) are advanced frame by frame; a jump (the first frame of a range, a single-frame preview,
@@ -21,7 +25,7 @@ import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, type RGB } from "@/lib/stage/color";
 import type { SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
-import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw, type TypeDraw } from "@/lib/stage/gl/renderer";
 import { FlashLimiter, LYRIC_INK, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
 import { mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media/draw";
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo } from "@/lib/stage/media/model";
@@ -31,9 +35,11 @@ import { clampWeight } from "@/lib/stage/lyrics/layout";
 import { resolveLineDesign } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
 import { FONTS } from "@/lib/font-meta";
+import { hasTypeSystem } from "@/lib/type/resolve";
 import { DEFAULT_OUTPUT, outputAspect } from "@/lib/output";
 import type { Asset, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "../lyrics/LyricLayer";
+import { TypeLayer } from "../type/TypeLayer";
 import { ExactMedia } from "./ExactMedia";
 import { LyricPainter } from "./LyricPainter";
 
@@ -46,8 +52,14 @@ export const PREROLL_SECONDS = 3;
 export const LIMITER_PREROLL_SECONDS = 1.5;
 
 export interface OfflineFrameRequest {
-  /** render scene + media into `sceneCanvas` */
+  /** the complete frame (scene, media and lyrics): read it with `drawFull` */
   scene: boolean;
+  /**
+   * the background-only picture (scene + media, no lyrics) in `sceneCanvas`; default = `scene`.
+   * Legacy plans render one picture for both; a plan with a type system renders the background
+   * separately (its full frame carries the type).
+   */
+  background?: boolean;
   /** paint the coloured lyric layer into `lyricCanvas` */
   lyrics: boolean;
   /** paint the white luma matte into `matteCanvas` */
@@ -98,12 +110,21 @@ export class OfflineStage {
   readonly lyricCanvas: HTMLCanvasElement;
   /** white-on-transparent lyric matte */
   readonly matteCanvas: HTMLCanvasElement;
+  /** 字體藝術: the complete frame (scene, media and the type pass); legacy plans compose it in drawFull */
+  readonly fullCanvas: HTMLCanvasElement;
 
   private renderer: StageRenderer | null;
   private wrap: HTMLDivElement;
   private host: HTMLDivElement;
   private lyrics: LyricLayer;
   private painter: LyricPainter | null = null;
+  /** 字體藝術: the type layer (plans with a type system) */
+  private type: TypeLayer;
+  private readonly typeMode: boolean;
+  private typeDraw: TypeDraw | null = null;
+  /** the background chain's own limiter (type mode: the background is a second picture) */
+  private bgLimiter: FlashLimiter | null = null;
+  private wantBackground = false;
   private media: ExactMedia;
   private mixer = new AudioFeatureMixer();
   private clock: SceneClock;
@@ -132,6 +153,7 @@ export class OfflineStage {
     this.sceneCanvas = makeCanvas(this.width, this.height);
     this.lyricCanvas = makeCanvas(this.width, this.height);
     this.matteCanvas = makeCanvas(this.width, this.height);
+    this.fullCanvas = makeCanvas(this.width, this.height);
     this.renderer = StageRenderer.create(this.sceneCanvas, {
       preserveDrawingBuffer: true,
       onError: (m) => {
@@ -161,6 +183,8 @@ export class OfflineStage {
     this.wrap.append(this.host);
     document.body.append(this.wrap);
     this.lyrics = new LyricLayer(this.host);
+    this.type = new TypeLayer(this.host);
+    this.typeMode = hasTypeSystem(project.plan);
     this.typography = resolveTypography(project.plan);
     this.cjkFamily = resolveCjkFamily(project, this.host);
     this.painter = new LyricPainter(this.lyrics.root, this.cjkFamily);
@@ -184,7 +208,9 @@ export class OfflineStage {
 
   private resetLimiter() {
     const s = this.safety;
-    this.limiter = s.on && (s.flashLimit || s.redProtect) ? new FlashLimiter({ ...this.grid, flashLimit: s.flashLimit, redProtect: s.redProtect, gain: s.gain }) : null;
+    const make = () => (s.on && (s.flashLimit || s.redProtect) ? new FlashLimiter({ ...this.grid, flashLimit: s.flashLimit, redProtect: s.redProtect, gain: s.gain }) : null);
+    this.limiter = make();
+    this.bgLimiter = this.typeMode ? make() : null;
     this.renderer?.resetSafetyFeedback();
   }
 
@@ -224,6 +250,7 @@ export class OfflineStage {
     const missing = families.filter((f) => ![...weights].every((w) => document.fonts.check(`${w} 64px "${f}"`, text)));
     if (missing.length) warnings.push(`字型「${missing.join("、")}」沒有載入完成，匯出的字形可能和投影不同。請先連上網路開一次投影視窗。`);
     this.lyrics.invalidateFit();
+    if (this.typeMode && !(await this.type.prepare(project))) warnings.push("排版用的字型沒有全部載入完成，匯出的字形可能和投影不同。請先連上網路開一次投影視窗。");
 
     // motif texture
     const svg = project.plan?.keyVisual?.motifSvg ?? "";
@@ -240,7 +267,8 @@ export class OfflineStage {
     if (this.renderer) {
       const scenes = new Set<SceneId>(["gradient"]);
       for (const s of project.plan?.sections ?? []) if ((SCENE_IDS as readonly string[]).includes(s.scene)) scenes.add(s.scene);
-      const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on);
+      const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on, this.typeMode);
+      if (this.typeMode && this.renderer.typeState() !== "ready") warnings.push("歌詞排版的著色器無法在這台電腦編譯：影片裡不會有排版的歌詞，請換一台電腦匯出。");
       if (this.safety.on && this.renderer.safetyState() !== "ready") warnings.push("LED 安全模式的著色器無法在這台電腦編譯：影片不會套用場景的亮度上限與閃爍限制，請換一台電腦匯出。");
       const sceneBad = bad.filter((k) => !k.startsWith("safety-"));
       if (sceneBad.length) warnings.push(`有 ${sceneBad.length} 個著色器無法編譯，該段會改用漸層場景。`);
@@ -268,6 +296,24 @@ export class OfflineStage {
     const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, null).style : "hidden";
     const showing = !!line && !!line.text?.trim() && style !== "hidden";
     this.lyricAmt += ((showing ? 1 : 0) - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
+    if (this.typeMode) {
+      // the type layer runs on the same clock (now = song time)
+      this.typeDraw = this.type.update({
+        project,
+        state,
+        t,
+        nowEpoch: t * 1000,
+        now: t * 1000,
+        look: lyricLook,
+        visible: true,
+        safety: this.safety,
+        width: this.width,
+        height: this.height,
+        output: this.output,
+      });
+      this.lastT = t;
+      return { frame, audio };
+    }
     // lyric animations run on "now" = song time in ms (live: performance.now())
     this.lyrics.update({
       project,
@@ -294,6 +340,7 @@ export class OfflineStage {
     this.lyrics.destroy();
     this.lyrics = new LyricLayer(this.host);
     this.painter = new LyricPainter(this.lyrics.root, this.cjkFamily);
+    this.type.clear();
     this.lyricAmt = 0;
     this.lastT = null;
     this.resetLimiter();
@@ -306,12 +353,18 @@ export class OfflineStage {
       const tk = t - k * dt;
       const d = this.lastT == null ? 0 : tk - this.lastT;
       const stepped = this.step(tk, d);
-      if (k <= limiterFrames && this.renderer && !this.renderer.lost) await this.renderScene(stepped.frame, stepped.audio, tk, d);
+      if (k <= limiterFrames && this.renderer && !this.renderer.lost) {
+        await this.renderScene(stepped.frame, stepped.audio, tk, d);
+        if (this.typeMode && this.wantBackground) await this.renderScene(stepped.frame, stepped.audio, tk, d, 1);
+      }
     }
   }
 
-  /** Scene + media through the LED-safety pass (the zero-lag limiter: this frame's own grid). */
-  private async renderScene(frame: OfflineSceneFrame, audio: StageAudioFrame, t: number, dt: number) {
+  /**
+   * Scene + media (+ the type pass on chain 0 in type mode) through the LED-safety pass (the
+   * zero-lag limiter: this frame's own grid). Chain 1 is the background-only picture.
+   */
+  private async renderScene(frame: OfflineSceneFrame, audio: StageAudioFrame, t: number, dt: number, chain: 0 | 1 = 0) {
     const r = this.renderer;
     if (!r || r.lost) throw new Error(this.rendererError ?? "無法使用 WebGL");
     let media: MediaDraw | null = null;
@@ -322,14 +375,15 @@ export class OfflineStage {
     }
     const beatIndex = beatIndexAt(this.project, t);
     const s = this.safety;
-    const limiter = this.limiter;
+    const limiter = chain === 1 ? this.bgLimiter : this.limiter;
     const ok = r.render({
       current: this.slotDraw(frame.current, audio, t, beatIndex),
       previous: frame.previous ? this.slotDraw(frame.previous, audio, t, beatIndex) : null,
       transition: frame.transition,
       clock: t % 3600,
       media,
-      safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: true } : null } : null,
+      safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: true } : null, chain } : null,
+      type: this.typeMode && chain === 0 ? this.typeDraw : null,
     });
     if (!ok) throw new Error(this.rendererError ?? "WebGL 繪製失敗");
     if (limiter) {
@@ -346,9 +400,9 @@ export class OfflineStage {
             buf[dst + x * 3 + 2] = g.data[src + x * 4 + 2] / 255;
           }
         }
-        const step = limiter.step(t, dt, buf, this.lyricEstimate(frame));
+        const step = limiter.step(t, dt, buf, this.typeMode ? null : this.lyricEstimate(frame));
         alpha = step.alpha;
-        if (step.engaged) this.limiterEngaged++;
+        if (step.engaged && chain === 0) this.limiterEngaged++;
       }
       r.composeSafety(alpha);
     }
@@ -406,7 +460,7 @@ export class OfflineStage {
     const line = typeof state.lineIndex === "number" ? lines[state.lineIndex] : undefined;
     const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, null).style : "hidden";
     const showing = !!line && !!line.text?.trim() && style !== "hidden";
-    const textBox = layers.some((l) => l.treatment === TREATMENT_CODE["mask-lyrics"]) ? this.lyrics.textBounds() : null;
+    const textBox = layers.some((l) => l.treatment === TREATMENT_CODE["mask-lyrics"]) ? (this.typeMode ? this.type.textBounds(this.output) : this.lyrics.textBounds()) : null;
     const lyricBox = mediaLyricBox(textBox, showing, style, lyricLook, this.output.lyricSafe, outputAspect(this.output));
     return { layers, time: t, lyricBox, lyricAmount: this.lyricAmt };
   }
@@ -419,11 +473,16 @@ export class OfflineStage {
     if (this.destroyed) throw new Error("renderer destroyed");
     const dt = 1 / fps;
     const last = this.lastT;
+    this.wantBackground = req.background ?? req.scene;
     if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps);
     const d = this.lastT == null ? 0 : t - this.lastT;
     const { frame, audio } = this.step(t, d);
 
-    if (req.scene) await this.renderScene(frame, audio, t, d);
+    if (this.typeMode) {
+      await this.renderTypeFrame(frame, audio, t, d, req);
+      return;
+    }
+    if (req.scene || this.wantBackground) await this.renderScene(frame, audio, t, d);
     if (req.lyrics) {
       const ctx = this.lyricCanvas.getContext("2d");
       if (ctx && this.painter) this.painter.paint(ctx, { t, matte: false });
@@ -431,6 +490,73 @@ export class OfflineStage {
     if (req.matte) {
       const ctx = this.matteCanvas.getContext("2d");
       if (ctx && this.painter) this.painter.paint(ctx, { t, matte: true });
+    }
+  }
+
+  /** Type mode: the full frame (chain 0), the background (chain 1) and the type layer alone. */
+  private async renderTypeFrame(frame: OfflineSceneFrame, audio: StageAudioFrame, t: number, d: number, req: OfflineFrameRequest) {
+    const wantFull = req.scene;
+    const wantBg = req.background ?? req.scene;
+    if (wantFull || req.lyrics || req.matte) {
+      await this.renderScene(frame, audio, t, d, 0);
+      const ctx = this.fullCanvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, this.width, this.height);
+        ctx.drawImage(this.sceneCanvas, 0, 0);
+      }
+    }
+    if (req.lyrics || req.matte) this.paintTypeLayer(req.lyrics, req.matte);
+    if (wantBg) await this.renderScene(frame, audio, t, d, 1);
+  }
+
+  /** The type pass alone over transparent into the lyric canvas (coloured) and the matte (white at its alpha). */
+  private paintTypeLayer(color: boolean, matte: boolean) {
+    const r = this.renderer;
+    const W = this.width;
+    const H = this.height;
+    const lctx = this.lyricCanvas.getContext("2d");
+    const mctx = this.matteCanvas.getContext("2d");
+    lctx?.clearRect(0, 0, W, H);
+    mctx?.clearRect(0, 0, W, H);
+    const draw = this.typeDraw;
+    if (!r || !draw) return;
+    const s = this.safety;
+    const data = r.renderTypeLayer(draw, s.on ? s.soften : 0, s.on ? s.gain : 1);
+    if (!data) return;
+    const col = color && lctx ? lctx.createImageData(W, H) : null;
+    const mat = matte && mctx ? mctx.createImageData(W, H) : null;
+    // GL rows are bottom-up and premultiplied; canvas image data is top-down and straight
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4;
+      const dst = y * W * 4;
+      for (let x = 0; x < W * 4; x += 4) {
+        const a = data[src + x + 3];
+        if (!a) continue;
+        if (col) {
+          const k = 255 / a;
+          col.data[dst + x] = Math.min(255, data[src + x] * k);
+          col.data[dst + x + 1] = Math.min(255, data[src + x + 1] * k);
+          col.data[dst + x + 2] = Math.min(255, data[src + x + 2] * k);
+          col.data[dst + x + 3] = a;
+        }
+        if (mat) {
+          mat.data[dst + x] = 255;
+          mat.data[dst + x + 1] = 255;
+          mat.data[dst + x + 2] = 255;
+          mat.data[dst + x + 3] = a;
+        }
+      }
+    }
+    if (col) lctx!.putImageData(col, 0, 0);
+    if (mat) mctx!.putImageData(mat, 0, 0);
+  }
+
+  /** The complete frame into `ctx` (scene, media and lyrics). */
+  drawFull(ctx: CanvasRenderingContext2D) {
+    if (this.typeMode) ctx.drawImage(this.fullCanvas, 0, 0);
+    else {
+      ctx.drawImage(this.sceneCanvas, 0, 0);
+      ctx.drawImage(this.lyricCanvas, 0, 0);
     }
   }
 
@@ -443,6 +569,7 @@ export class OfflineStage {
     if (this.destroyed) return;
     this.destroyed = true;
     this.lyrics.destroy();
+    this.type.destroy();
     this.wrap.remove();
     this.media.destroy();
     this.renderer?.dispose();

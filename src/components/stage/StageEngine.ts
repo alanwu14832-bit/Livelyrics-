@@ -9,7 +9,7 @@ import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
 import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
-import { StageRenderer, type GridReadback, type MediaDraw, type MediaLayerDraw, type SceneDraw } from "@/lib/stage/gl/renderer";
+import { StageRenderer, type GridReadback, type MediaDraw, type MediaLayerDraw, type SceneDraw, type TypeDraw } from "@/lib/stage/gl/renderer";
 import { FlashLimiter, LYRIC_INK, SAFETY_OFF, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
 import { placementBox, writingModeFor } from "@/lib/stage/lyrics/layout";
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo, type MediaLayerState } from "@/lib/stage/media/model";
@@ -19,8 +19,10 @@ import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { stageTime, type StageState, type StageStore } from "@/lib/stage/protocol";
 import { clamp, lyricLookAt, resolveLineDesign, resolveLook, type StageLook } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
+import { hasTypeSystem, typeModeActive } from "@/lib/type/resolve";
 import type { Asset, LyricStyleId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "./lyrics/LyricLayer";
+import { TypeLayer } from "./type/TypeLayer";
 import { MediaSources } from "./MediaSources";
 import { buildGuides, buildTestPattern, type GuidesHandle, type TestPatternHandle } from "./overlays";
 
@@ -77,6 +79,9 @@ export class StageEngine {
   private guides: GuidesHandle;
   private testPattern: TestPatternHandle;
   private lyrics: LyricLayer;
+  /** 字體藝術 (phase 6): plans with a type system draw their lyrics through the GL type pass */
+  private type: TypeLayer;
+  private typeMode = false;
   private renderer: StageRenderer | null;
   private director = new SceneDirector();
   private mixer = new AudioFeatureMixer();
@@ -160,6 +165,7 @@ export class StageEngine {
     root.append(this.fallback, this.canvas);
 
     this.lyrics = new LyricLayer(root);
+    this.type = new TypeLayer(root, this.lyrics.root);
     this.testPattern = buildTestPattern();
     this.overlay = document.createElement("div");
     Object.assign(this.overlay.style, { position: "absolute", inset: "0", background: "#000", opacity: "0", pointerEvents: "none" });
@@ -205,6 +211,8 @@ export class StageEngine {
       this.typographyPlan = plan;
       this.typography = resolveTypography(plan);
     }
+    // the type pass compiles ahead of the scenes: the first line must not wait for it
+    if (hasTypeSystem(plan)) this.renderer?.prewarmType();
     const output = project.output && project.output.width > 0 && project.output.height > 0 ? project.output : DEFAULT_OUTPUT;
     if (output.width !== this.output.width || output.height !== this.output.height) this.sizeDirty = true;
     this.output = output;
@@ -302,7 +310,9 @@ export class StageEngine {
   }
 
   private onFontsLoaded = () => {
-    if (!this.destroyed) this.lyrics.invalidateFit();
+    if (this.destroyed) return;
+    this.lyrics.invalidateFit();
+    this.type.invalidate();
   };
 
   // -------------------------------------------------------------------------
@@ -347,9 +357,10 @@ export class StageEngine {
   private prewarm(project: Project | null) {
     if (!this.renderer) return;
     const planScenes = (project?.plan?.sections ?? []).map((s) => s.scene);
-    const key = planScenes.join(",");
+    const key = `${planScenes.join(",")}|${hasTypeSystem(project?.plan) ? "type" : ""}`;
     if (key === this.prewarmKey) return;
     this.prewarmKey = key;
+    if (hasTypeSystem(project?.plan)) this.renderer.prewarmType();
     // the plan's scenes first, then the rest so operator overrides never stall
     this.renderer.prewarm([...new Set<SceneId>([...planScenes, "gradient", ...SCENE_IDS])]);
     // LED 安全模式 is on by default: its passes go first (a safe frame needs them)
@@ -407,7 +418,7 @@ export class StageEngine {
     const lines = project.lyrics?.lines ?? [];
     const idx = state.lineIndex;
     const line = typeof idx === "number" ? lines[idx] : undefined;
-    const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, state.overrides?.lyricStyle).style : "hidden";
+    const style = line ? resolveLineDesign(project.plan, line.id, lyricLook.lyricStyle, this.typeMode ? null : state.overrides?.lyricStyle).style : "hidden";
     const showing = !!line && !!line.text?.trim() && style !== "hidden" && state.overrides?.lyricsVisible !== false;
     this.lyricAmt += ((showing ? 1 : 0) - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
     this.presence = { showing, style };
@@ -450,7 +461,7 @@ export class StageEngine {
     // the measured text (5 times a second) for mask-lyrics, else the placement box
     if (layers.some((l) => l.treatment === TREATMENT_CODE["mask-lyrics"]) && now - this.textBoxAt > 200) {
       this.textBoxAt = now;
-      const b = this.lyrics.textBounds();
+      const b = this.typeMode ? this.type.textBounds(this.output) : this.lyrics.textBounds();
       if (b) this.textBox = b;
     }
     const lyricBox = mediaLyricBox(this.textBox, showing, style, lyricLook, this.output.lyricSafe, outputAspect(this.output));
@@ -570,11 +581,39 @@ export class StageEngine {
 
     // lyrics: styled by the section the line is sung in (a pickup keeps its style across the boundary)
     const lyricLook = lyricLookAt(project, state, t, look);
+    // 字體藝術: a plan with a type system composes every line (unless the operator forces a legacy style)
+    const typeMode = typeModeActive(project.plan, ov);
+    if (typeMode !== this.typeMode) {
+      this.typeMode = typeMode;
+      if (typeMode) this.lyrics.clear();
+      else this.type.clear();
+    }
     this.updatePresence(project, state, lyricLook, dt);
+
+    // the type layer (its texture goes into the GL pass; without WebGL it paints into the DOM)
+    const r = this.renderer;
+    let typeDraw: TypeDraw | null = null;
+    if (typeMode) {
+      this.type.setDomMode(!r || r.lost);
+      const [bw, bh] = r && !r.lost ? r.size : [Math.round(this.cssW * this.dpr), Math.round(this.cssH * this.dpr)];
+      typeDraw = this.type.update({
+        project,
+        state,
+        t,
+        nowEpoch,
+        now,
+        look: lyricLook,
+        visible: ov?.lyricsVisible !== false,
+        safety,
+        liveBeat: project.analysis?.beats?.length ? null : { phase: audio.beat, index: 0 },
+        width: bw,
+        height: bh,
+        output: this.output,
+      });
+    }
 
     // scene + band media
     let backend: StageStats["backend"] = "fallback";
-    const r = this.renderer;
     if (r && !r.lost) {
       backend = r.kind;
       r.idle();
@@ -595,6 +634,7 @@ export class StageEngine {
           clock: this.clock,
           media,
           safety: safety.on ? { soften: safety.soften, gain: safety.gain, alpha, measure: limiter ? { ...grid, sync: false } : null } : null,
+          type: typeDraw,
         });
         if (!ok) backend = "lost";
         else if (limiter) {
@@ -607,20 +647,21 @@ export class StageEngine {
     this.updateFallback(look, backend === "fallback" || backend === "lost");
     this.canvas.style.visibility = backend === "fallback" || backend === "lost" ? "hidden" : "visible";
 
-    this.lyrics.update({
-      project,
-      state,
-      t,
-      nowEpoch,
-      now,
-      look: lyricLook,
-      typography: this.typography,
-      pulse: audio.pulse * look.params.reactivity,
-      visible: ov?.lyricsVisible !== false,
-      aspect: outputAspect(this.output),
-      safe: this.output.lyricSafe,
-      safety,
-    });
+    if (!typeMode)
+      this.lyrics.update({
+        project,
+        state,
+        t,
+        nowEpoch,
+        now,
+        look: lyricLook,
+        typography: this.typography,
+        pulse: audio.pulse * look.params.reactivity,
+        visible: ov?.lyricsVisible !== false,
+        aspect: outputAspect(this.output),
+        safe: this.output.lyricSafe,
+        safety,
+      });
 
     // overlays
     const test = !!ov?.testPattern;
@@ -679,7 +720,8 @@ export class StageEngine {
 
   /** The lyric layer's estimated share of the luminance grid (the text is DOM, not in the readback). */
   private lyricEstimate(lyricLook: StageLook, now: number): LyricEstimate | null {
-    if (this.lyricAmt < 0.02) return null;
+    // the type pass draws the lyrics into the measured frame: nothing to estimate
+    if (this.typeMode || this.lyricAmt < 0.02) return null;
     // the measured text box, 5 times a second (reads layout)
     if (now - this.lyricBoxAt > 200) {
       this.lyricBoxAt = now;
@@ -738,6 +780,7 @@ export class StageEngine {
     const f = safety.on && safety.gain < 0.999 ? `brightness(${safety.gain.toFixed(4)})` : "";
     this.fallback.style.filter = f;
     this.testPattern.root.style.filter = f;
+    this.type.setDomFilter(f);
     this.canvas.style.filter = glFailed ? f : "";
   }
 
@@ -751,6 +794,7 @@ export class StageEngine {
     this.renderer = null;
     this.media.destroy();
     this.lyrics.destroy();
+    this.type.destroy();
     this.canvas.remove();
     this.fallback.remove();
     this.overlay.remove();

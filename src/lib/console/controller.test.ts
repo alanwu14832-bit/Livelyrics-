@@ -267,6 +267,31 @@ describe("ConsoleController", () => {
     c.detach();
   });
 
+  it("adopts the 排版 editor's type system from the channel and re-broadcasts it, without saving it again", async () => {
+    const c = await ready();
+    received = [];
+    fetchMock.mockClear();
+    const plan = c.getSnapshot().project!.plan!;
+    const typeSystem = { voice: "ink" as const, params: { scaleContrast: 0.6, density: 0.35, verticalRatio: 0.85, gridColumns: 5, gridMargin: 0.6, motionSpeed: 0.3, motionIntensity: 0.4, texture: 0.65, ornament: 0.5 }, color: "solid" as const, fonts: { cjk: "lxgw-wenkai-tc" as const, latin: "playfair-display" as const }, weight: 700, ornaments: [], seal: "", rationale: "", lines: [] };
+    const editor = new BroadcastChannel(channelName("ctrltest"));
+    editor.postMessage({ type: "plan", projectId: "ctrltest", plan: { ...plan, typeSystem }, sender: "editor1" });
+    await flush(60);
+    expect(c.getSnapshot().project!.plan!.typeSystem?.voice).toBe("ink");
+    expect(received.some((m) => m.type === "project" && m.project.plan?.typeSystem?.voice === "ink")).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false);
+    // a plan for another song is ignored
+    editor.postMessage({ type: "plan", projectId: "other", plan: { ...plan, typeSystem: { ...typeSystem, voice: "glitch" } }, sender: "editor1" });
+    await flush(40);
+    expect(c.getSnapshot().project!.plan!.typeSystem?.voice).toBe("ink");
+    // the console's own later edit keeps the adopted type system
+    c.updateSection(0, { scene: "tunnel" });
+    await c.flushSave();
+    const patch = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH");
+    expect(JSON.parse(String((patch![1] as RequestInit).body)).plan.typeSystem.voice).toBe("ink");
+    editor.close();
+    c.detach();
+  });
+
   it("reports a missing project", async () => {
     const c = new ConsoleController("missing");
     c.attach();

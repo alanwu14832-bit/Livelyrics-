@@ -198,6 +198,166 @@ export const CueNoteSchema = z.object({
 });
 export type CueNote = z.infer<typeof CueNoteSchema>;
 
+// ---------------------------------------------------------------------------
+// 字體藝術 (phase 6): the song's typographic system and a composition hint per lyric line.
+// Every line is a designed composition (recipe + seed), laid out deterministically by the type
+// engine (src/lib/type) for any canvas. Plans without `typeSystem` keep the legacy lyric styles.
+// ---------------------------------------------------------------------------
+
+/** The song's typographic voice (字體語言). */
+export const TYPE_VOICE_IDS = [
+  "mv-card", // 日系 MV 字卡: extreme scale contrast, h/v mix, big negative space, snap cuts, 「」 as graphics
+  "title-sequence", // 電影片頭／動態海報: type as shape, bleed, Swiss grid, rules and numbers, mask wipes
+  "ink", // 書法與水墨: brush texture, writing-order reveals, vertical, kai faces, a red seal
+  "glitch", // 實驗／故障感: slices, RGB split, echoes, overprint, grain, stutter on beats
+] as const;
+export const TypeVoiceIdSchema = z.enum(TYPE_VOICE_IDS);
+export type TypeVoiceId = z.infer<typeof TypeVoiceIdSchema>;
+
+/** Composition recipes: each lays a line out as a parameterized, seeded typographic composition. */
+export const TYPE_RECIPE_IDS = [
+  "giant-word", // 巨字＋小字: one word huge, the rest small hugging its edges
+  "vertical-column", // 直排欄: one or two vertical columns on a grid column
+  "cross", // 直橫交錯: one phrase vertical, the next horizontal, meeting at a corner
+  "grid-poem", // 網格詩: characters on a strict cell grid (manuscript / Swiss grid)
+  "bleed", // 出血: the key word so large it runs off the frame, the line readable beside it
+  "scatter", // 散落: characters scattered along a reading path, seeded sizes and angles
+  "poster", // 海報堆疊: rows stacked and justified to one width, heavy, with rules
+  "window", // 鏤空窗: huge glyphs as a mask onto the scene, the frame filled around them
+  "brush-write", // 書寫: a column written in reading order, optional 印章
+  "echo", // 殘影: the phrase repeated as a fading trail
+  "split", // 撕裂: sliced rows with offsets and RGB split, re-assembled at rest
+  "whisper", // 低語: tiny and restrained, wide tracking, for quiet lines
+  "title-card", // 片名卡: a centered title card between rules with a small Latin label
+] as const;
+export const TypeRecipeIdSchema = z.enum(TYPE_RECIPE_IDS);
+export type TypeRecipeId = z.infer<typeof TypeRecipeIdSchema>;
+
+export const TYPE_ORIENTATIONS = ["h", "v", "mixed"] as const;
+export const TypeOrientationSchema = z.enum(TYPE_ORIENTATIONS);
+export type TypeOrientation = z.infer<typeof TypeOrientationSchema>;
+
+/** How the display type meets the scene (readable small text always stays solid). */
+export const TYPE_COLOR_TREATMENTS = ["solid", "knockout", "overprint"] as const;
+export const TypeColorTreatmentSchema = z.enum(TYPE_COLOR_TREATMENTS);
+export type TypeColorTreatment = z.infer<typeof TypeColorTreatmentSchema>;
+
+export const TYPE_ORNAMENT_IDS = [
+  "rule", // hairline rules
+  "number", // line / section numbers
+  "section", // the section name as a small label
+  "title", // the song title as a small label
+  "seal", // a red seal stamp (印章)
+  "bracket", // 「」 corner brackets as graphics
+] as const;
+export const TypeOrnamentIdSchema = z.enum(TYPE_ORNAMENT_IDS);
+export type TypeOrnamentId = z.infer<typeof TypeOrnamentIdSchema>;
+
+export const TYPE_ENTER_IDS = ["auto", "cut", "fade", "rise", "fall", "wipe", "write", "scale", "glitch", "bloom"] as const;
+export const TypeEnterIdSchema = z.enum(TYPE_ENTER_IDS);
+export type TypeEnterId = z.infer<typeof TypeEnterIdSchema>;
+
+export const TYPE_EXIT_IDS = ["auto", "cut", "fade", "sink", "wipe", "dissolve", "scale", "glitch", "blur"] as const;
+export const TypeExitIdSchema = z.enum(TYPE_EXIT_IDS);
+export type TypeExitId = z.infer<typeof TypeExitIdSchema>;
+
+/** The colour role of a line's main text: 主字色, 點綴色, 反白 (knocked out of an ink chip), 鏤空 (the scene through the glyphs). */
+export const TYPE_COLOR_ROLES = ["ink", "accent", "invert", "window"] as const;
+export const TypeColorRoleSchema = z.enum(TYPE_COLOR_ROLES);
+export type TypeColorRole = z.infer<typeof TypeColorRoleSchema>;
+
+export const TypeParamsSchema = z.object({
+  scaleContrast: z.number().describe("0–1 字級對比：0 = 各字大小接近，1 = 巨字與小字的極端對比"),
+  density: z.number().describe("0–1 留白與密度：0 = 大量留白，1 = 字填滿畫面"),
+  verticalRatio: z.number().describe("0–1 直排比例：中文句子有多少比例用直排或直橫交錯（拉丁文字永遠橫排）"),
+  gridColumns: z.number().describe("網格欄數，整數 2–12（瑞士網格常用 12，日系字卡常用 4–6）"),
+  gridMargin: z.number().describe("0–1 網格邊界：0 = 貼齊安全區，1 = 很寬的邊界"),
+  motionSpeed: z.number().describe("0–1 動態速度"),
+  motionIntensity: z.number().describe("0–1 動態幅度"),
+  texture: z.number().describe("0–1 質地：水墨＝暈染與飛白，故障＝切片與顆粒，其他＝細微顆粒"),
+  ornament: z.number().describe("0–1 裝飾程度：線條、編號、段落名、歌名、印章出現的多寡"),
+});
+export type TypeParams = z.infer<typeof TypeParamsSchema>;
+
+/** A composition hint for one lyric line, compact enough for an LLM to write for every line. */
+export const TypeLineDraftSchema = z.object({
+  lineId: z.string().describe("歌詞行 id，例如 l12"),
+  recipe: TypeRecipeIdSchema,
+  emphasis: z.array(z.string()).describe("這一行裡要放大或換成點綴色的字（逐字相同的片段），0–2 個"),
+  orientation: TypeOrientationSchema.describe("h 橫排、v 直排、mixed 直橫交錯；拉丁文字的句子只能 h"),
+  energy: z.number().describe("0–1 這一行的份量：安靜的句子約 0.2，主歌 0.4，副歌 0.7 以上，最後一次副歌最大"),
+  motionWord: z.string().describe("驅動動態的意象詞，必須是這一行裡逐字相同的詞（例如 風、雨、火、心跳、浪、夜、光）；沒有就空字串"),
+  seed: z.number().describe("整數 0–999：同一個 recipe 的不同構圖；重複的句子用同一個 seed"),
+});
+export type TypeLineDraft = z.infer<typeof TypeLineDraftSchema>;
+
+/** What the 排版 editor changed on a line (every field optional; absent = the generated value). */
+export const TypeLineEditSchema = z.object({
+  recipe: TypeRecipeIdSchema.optional(),
+  emphasis: z.array(z.string()).optional(),
+  orientation: TypeOrientationSchema.optional(),
+  motionWord: z.string().optional(),
+  seed: z.number().optional(),
+  /** nudge, fraction of the canvas width / height */
+  dx: z.number().optional(),
+  dy: z.number().optional(),
+  /** size multiplier 0.5–2 */
+  scale: z.number().optional(),
+  /** degrees −30..30 */
+  rotate: z.number().optional(),
+  enter: TypeEnterIdSchema.optional(),
+  exit: TypeExitIdSchema.optional(),
+  color: TypeColorRoleSchema.optional(),
+});
+export type TypeLineEdit = z.infer<typeof TypeLineEditSchema>;
+
+export const TypeLineSchema = TypeLineDraftSchema.extend({
+  /** 鎖定: 「重新生成全部構圖」 keeps this line (and its edit) as it is */
+  locked: z.boolean().optional(),
+  /** the editor's changes on top of the generated hint; null / absent = as generated */
+  edit: TypeLineEditSchema.nullable().optional(),
+});
+export type TypeLine = z.infer<typeof TypeLineSchema>;
+
+/** Section-level override written by the editor (null fields = follow the lines). */
+export const TypeSectionSchema = z.object({
+  sectionId: z.string(),
+  recipe: TypeRecipeIdSchema.nullable().optional(),
+  orientation: TypeOrientationSchema.nullable().optional(),
+  /** size multiplier 0.6–1.6 */
+  scale: z.number().nullable().optional(),
+  /** motion intensity 0–1 */
+  motion: z.number().nullable().optional(),
+});
+export type TypeSection = z.infer<typeof TypeSectionSchema>;
+
+/** The song's 字體語言 as Claude writes it (no editor-only fields). */
+export const TypeSystemDraftSchema = z.object({
+  voice: TypeVoiceIdSchema,
+  params: TypeParamsSchema,
+  color: TypeColorTreatmentSchema.describe("solid 實色、knockout 鏤空（巨字變成看見場景的窗）、overprint 疊印（錯版的點綴色）"),
+  fonts: z.object({
+    cjk: FontIdSchema.describe("中文字體（必須是 CJK 字體 id）"),
+    latin: FontIdSchema.describe("拉丁字體（英文歌詞、標籤與編號）"),
+  }),
+  weight: z.number().describe("字重 600–900（大螢幕至少 600）"),
+  ornaments: z.array(TypeOrnamentIdSchema).describe("要出現的裝飾：rule 線條、number 編號、section 段落名、title 歌名、seal 印章（書法與水墨）、bracket 「」括號"),
+  seal: z.string().describe("印章上的字（1–4 個中文字，通常是歌名或樂團名的一兩個字）；不用就空字串"),
+  rationale: z.string().describe("為什麼是這個字體語言（繁體中文，1–2 句）"),
+  lines: z
+    .array(TypeLineDraftSchema)
+    .describe("每一行歌詞一筆構圖（依歌詞順序）；完全相同的重複句可以只寫第一次，系統會沿用同一個構圖"),
+});
+export type TypeSystemDraft = z.infer<typeof TypeSystemDraftSchema>;
+
+export const TypeSystemSchema = TypeSystemDraftSchema.extend({
+  lines: z.array(TypeLineSchema),
+  sections: z.array(TypeSectionSchema).optional(),
+  /** bumped by 「重新生成全部構圖」 (a salt for the seeds) */
+  generation: z.number().optional(),
+});
+export type TypeSystem = z.infer<typeof TypeSystemSchema>;
+
 export const DesignPlanSchema = z.object({
   version: z.literal(1),
   keyVisual: KeyVisualSchema,
@@ -207,5 +367,30 @@ export const DesignPlanSchema = z.object({
   designerNotes: z
     .string()
     .describe("整體設計說明：敘事弧線、歌詞與動畫如何搭配、現場注意事項（繁體中文 Markdown，150–400 字）"),
+  /** 字體藝術 (phase 6); absent / null on older plans (they keep the legacy lyric styles) */
+  typeSystem: TypeSystemSchema.nullable().optional(),
 });
 export type DesignPlan = z.infer<typeof DesignPlanSchema>;
+
+// ---------------------------------------------------------------------------
+// What automatic designers may write (Claude's structured output, the claude.ai template)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lyric styles an automatic designer may still choose. karaoke and subtitle stay valid for old
+ * plans (and the operator's own choices) but no engine picks them any more: every line is a
+ * designed composition, never a karaoke subtitle.
+ */
+export const AUTO_LYRIC_STYLE_IDS = LYRIC_STYLE_IDS.filter((id) => id !== "karaoke" && id !== "subtitle") as Exclude<LyricStyleId, "karaoke" | "subtitle">[];
+export const AutoLyricStyleIdSchema = z.enum(AUTO_LYRIC_STYLE_IDS as [Exclude<LyricStyleId, "karaoke" | "subtitle">, ...Exclude<LyricStyleId, "karaoke" | "subtitle">[]]);
+
+/** The DesignPlan Claude writes: the type system for every line, no karaoke / subtitle styles. */
+export const DesignPlanDraftSchema = DesignPlanSchema.extend({
+  sections: z
+    .array(SectionDesignSchema.extend({ lyricStyle: AutoLyricStyleIdSchema.describe("舊版渲染器的後備樣式；有 typeSystem 時每一行都依它的構圖排版") }))
+    .describe("cover the whole song from 0 to duration without gaps, in time order"),
+  lines: z
+    .array(LineDesignSchema.extend({ styleOverride: AutoLyricStyleIdSchema.nullable().describe("null = use section style") }))
+    .describe("only lines that need special treatment; may be empty"),
+  typeSystem: TypeSystemDraftSchema.describe("這首歌的字體語言與每一行歌詞的構圖（字體藝術）"),
+});

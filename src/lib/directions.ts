@@ -296,6 +296,8 @@ export interface ProposalDirection {
   statusLabel: string;
   palette: Array<{ hex: string; name: string; role: string }>;
   fonts: { cjk: string; latin: string; weight: number; sample: string };
+  /** 字體藝術: the direction's typographic voice (its label), when its plan has one */
+  typeVoice: string | null;
   sceneTendency: string;
   lyricTreatment: string;
   moments: StyleFrameMoment[];
@@ -331,7 +333,7 @@ export function specimenLine(project: Pick<Project, "lyrics" | "meta">): string 
  */
 export function proposalSheet(
   project: Pick<Project, "meta" | "lyrics" | "directions">,
-  opts: { bandName?: string; moodboard?: readonly MoodImage[]; fontLabel?: (id: string) => string; now?: Date } = {},
+  opts: { bandName?: string; moodboard?: readonly MoodImage[]; fontLabel?: (id: string) => string; voiceLabel?: (id: string) => string; now?: Date } = {},
 ): ProposalSheet {
   const clip = (s: string, n: number) => {
     // Markdown headings and emphasis go; a colour code keeps its "#"
@@ -349,6 +351,9 @@ export function proposalSheet(
   const dirs = project.directions?.directions ?? [];
   const directions: ProposalDirection[] = dirs.map((d) => {
     const kv = d.plan.keyVisual;
+    // 字體藝術: the lyrics are set in the type system's fonts
+    const ts = d.plan.typeSystem;
+    const fonts = ts ? { cjk: label(ts.fonts.cjk), latin: label(ts.fonts.latin), weight: ts.weight, sample } : { cjk: label(kv.typography.cjkFont), latin: label(kv.typography.latinFont), weight: kv.typography.weight, sample };
     return {
       id: d.id,
       letter: d.letter,
@@ -358,7 +363,8 @@ export function proposalSheet(
       status: d.status,
       statusLabel: DIRECTION_STATUS_LABEL[d.status],
       palette: kv.palette.slice(0, 6).map((c) => ({ hex: c.hex, name: c.name, role: c.role })),
-      fonts: { cjk: label(kv.typography.cjkFont), latin: label(kv.typography.latinFont), weight: kv.typography.weight, sample },
+      fonts,
+      typeVoice: ts ? (opts.voiceLabel?.(ts.voice) ?? ts.voice) : null,
       sceneTendency: clip(d.sceneTendency, 90),
       lyricTreatment: clip(d.lyricTreatment, 90),
       moments: styleFrameMoments(d.plan, project.lyrics),

@@ -22,10 +22,11 @@ export const MAX_BAND_ASSETS = 400;
 
 export const LYRIC_POLICY_MODES: readonly LyricPolicyMode[] = ["chorus-only", "full", "minimal"];
 
+// 字體藝術: every sung line is set as a composition; the policy decides how loud the lyrics are
 export const LYRIC_POLICY_INFO: Record<LyricPolicyMode, { label: string; description: string }> = {
-  "chorus-only": { label: "副歌才顯示歌詞", description: "主歌讓畫面與主唱說話，大合唱的副歌才讓歌詞成為畫面主角。" },
-  full: { label: "全曲字幕", description: "每一段都有歌詞，主歌用安靜的字幕，副歌放大。適合敘事型、歌詞是重點的樂團。" },
-  minimal: { label: "盡量不顯示", description: "畫面主導，只在最關鍵的一兩句 hook 出現歌詞。" },
+  "chorus-only": { label: "副歌才放大", description: "每一句都排版，但主歌是安靜的小字，讓畫面與主唱說話；大合唱的副歌才讓歌詞成為畫面主角。" },
+  full: { label: "每句都是主角", description: "每一段的歌詞都完整排版，主歌也有自己的構圖，副歌放大。適合敘事型、歌詞是重點的樂團。" },
+  minimal: { label: "只放大 hook", description: "畫面主導：其他句子都是低語般的小字，只有最關鍵的一兩句 hook 放大。" },
 };
 
 const HEX_RE = /^#[0-9a-f]{6}$/;

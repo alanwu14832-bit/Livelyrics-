@@ -356,6 +356,7 @@ export class ConsoleController {
         if (this.preloadProject) this.link.post({ type: "preload", project: this.preloadProject });
       },
       onStatus: (output, otherConsole) => this.set({ output, otherConsole }),
+      onPlan: (projectId, plan) => this.adoptTypeSystem(projectId, plan),
     });
     this.snapshot = {
       load: { status: "loading" },
@@ -1060,6 +1061,18 @@ export class ConsoleController {
   exportUrl(): string {
     const t = Math.max(0, Math.round(this.songTime() * 100) / 100);
     return `/p/${encodeURIComponent(this.id)}/export?t=${t}`;
+  }
+
+  /** 字體藝術: the 排版 editor in a new tab (its edits show on this console's projection at once). */
+  openTypeEditor(): void {
+    if (typeof window === "undefined") return;
+    let win: Window | null = null;
+    try {
+      win = window.open(`/p/${encodeURIComponent(this.id)}/type`, `livelyrics-type-${this.id}`);
+    } catch {
+      win = null;
+    }
+    if (!win) this.notify("瀏覽器封鎖了新分頁。請允許此網站開啟彈出視窗後再試一次。", "error");
   }
 
   openExport(): void {
@@ -1932,6 +1945,28 @@ export class ConsoleController {
     this.set({ save: { status: "pending", error: null } });
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * 字體藝術: the 排版 editor (another window) changed this song's type system and saved it. The
+   * console takes the type system (keeping its own section edits, saved or not) and shows it on the
+   * projection at once; it does not save it again (the editor did).
+   */
+  adoptTypeSystem(projectId: string, plan: DesignPlan): void {
+    const project = this.snapshot.project;
+    if (!project?.plan || project.id !== projectId || this.snapshot.redesign.running) return;
+    const typeSystem = plan.typeSystem ?? null;
+    if (JSON.stringify(project.plan.typeSystem ?? null) === JSON.stringify(typeSystem)) return;
+    const withType = (p: DesignPlan): DesignPlan => {
+      const next: DesignPlan = { ...p };
+      if (typeSystem) next.typeSystem = typeSystem;
+      else delete next.typeSystem;
+      return next;
+    };
+    this.set({ project: { ...project, plan: withType(project.plan) } });
+    if (this.pendingPlan) this.pendingPlan = withType(this.pendingPlan);
+    this.broadcastProject(true);
+    this.publish();
   }
 
   /**

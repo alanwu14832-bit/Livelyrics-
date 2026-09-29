@@ -81,7 +81,8 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/output` | STAGE | projection window — animation + lyrics only |
 | `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
 | `/p/[id]/proposal` | HOME | 一頁提案 (phase 4): the band sign-off sheet of the design directions, A4 landscape print layout, 「列印／存成 PDF」 |
-| `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan |
+| `/p/[id]/type` | HOME | 排版 (phase 6): the song's 字體語言 and every line's composition, desktop and phone (edits live on the projection) |
+| `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan (`?voice=&aspect=&project=`: 字體藝術 in a voice on a canvas) |
 | `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
 | `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
 | `/api/auth/login` POST, `/api/auth/logout` POST | SERVER | password gate: JSON `{ password, next? }` or a plain form post → session cookie / clear it |
@@ -646,6 +647,138 @@ every existing path are unchanged. The projection windows never see any of it ex
   browser reports (default 10 ms when it reports none); MTC direction is taken from the piece order and the
   reverse position assumes the mirror of the forward latency.
 
+### 字體藝術 (phase 6)
+
+Every sung line appears, and every line is a designed typographic composition, never a karaoke
+subtitle. A plan with `typeSystem` renders its lyrics through the type engine; a plan without one
+(every plan made before this phase) keeps the DOM lyric styles exactly as before, and so does a
+plan whose operator forces a lyric style in the console (`typeModeActive`).
+
+- **Data** (`src/lib/schema.ts`, re-exported in `types.ts`). `DesignPlan.typeSystem` (nullable,
+  optional): `voice` (`mv-card` 日系 MV 字卡, `title-sequence` 電影片頭／動態海報, `ink` 書法與水墨,
+  `glitch` 實驗／故障感), `params` (0–1: `scaleContrast`, `density`, `verticalRatio`, `gridMargin`,
+  `motionSpeed`, `motionIntensity`, `texture`, `ornament`; `gridColumns` 2–12), `color` (`solid` /
+  `knockout` / `overprint`), `fonts { cjk, latin }` (the font catalogue; the CJK one must be CJK),
+  `weight` 600–900, `ornaments` (rule, number, section, title, seal, bracket), `seal` (1–4
+  characters), `rationale`, and `lines`: one `TypeLine` per sung line — `recipe`, `emphasis` (exact
+  substrings), `orientation` h / v / mixed, `energy`, `motionWord` (an exact word of the line), `seed`
+  — plus the editor's fields: `locked`, `edit` (`TypeLineEdit`: recipe, emphasis, orientation,
+  motionWord, seed, `dx` / `dy` fractions of the canvas, `scale` 0.5–2, `rotate` ±30°, `enter`, `exit`,
+  `color` ink / accent / invert / window; no colour = 自動, what the song's colour treatment gives
+  the line). `typeSystem.sections` (the editor's per-section recipe /
+  orientation / scale / motion overrides) and `generation` (the salt of 「重新生成全部構圖」).
+  `DesignPlanDraftSchema` is what an automatic designer writes: the same plan with the type system
+  required, no editor fields, and `AUTO_LYRIC_STYLE_IDS` (no `karaoke`, no `subtitle`) for the legacy
+  section and line styles. `karaoke` and `subtitle` stay valid ids for old plans and the operator.
+- **Engine** (`src/lib/type/`, pure, deterministic, tested in Node). `vocab.ts` (the voices: their
+  recipe palettes with weights, default parameters, colour treatment, fonts and the faces that speak
+  them, weight, ornaments, entrance / exit, beat snap, motion and speed scale; the 13 recipes; the 繁中
+  labels), `motion-words.ts` (風 drifts, 雨 falls, 火 flickers, 心跳 pulses on the beat, 海 / 浪 wave,
+  夜 rises from the dark, 光 blooms, 碎 shatters, 奔跑 rushes, 轉 spins; stop compounds such as 開心),
+  `text.ts` (the line as units with 禁則 atoms, vertical forms: brackets, dashes and Latin rotated,
+  1–2 digit numbers upright; the row breaker balances rows, avoids orphans, never opens a row with a
+  soft mark or a particle (的了著…), breaks at the word timing's words or, without it, never inside a
+  small lexicon of lyric words (城市, 方向, 交給…) and willingly before 這 / 那 / 每; the featured
+  word of a display recipe: an emphasis run, the motion word, else the best pair of the line (a
+  lexicon word, a phrase-final noun) or one strong character when every pair leans on a function
+  word (跟著我「唱」)), `frame.ts` (the canvas in output pixels: the lyric safe area minus a bottom
+  band (10 % of the height, at most 20 % of the safe height), the column grid, the minimum readable
+  size = `STYLE_METRICS.subtitle.size` % of the short side, ≥ 22 px; the size reference is the
+  height of a 16:9 canvas of the width, leaning towards the width on a tall canvas so 9:16 type is
+  set for its width, not for a letterbox), `set.ts` (rows and columns of glyph boxes), `recipes.ts`
+  (the recipes; a tall canvas stands a composition around its optical centre), `compose.ts`
+  (`composeLine`: sizes from scale contrast, density and energy, the last chorus ×1.08;
+  `effectiveOrientation`: on a tall canvas an automatic orientation stands a display word up (巨字 a
+  column beside horizontal small text, 出血 and 鏤空窗 vertical; an orientation set in the editor
+  stays); an ultra-wide canvas (> 2.4 : 1, a 32:9 LED wall) composes each line in a 16:9-and-a-bit
+  view that slides to the side its seed leans to (a bled word's view on the edge it bleeds from); the
+  colour roles: 反白 cuts the display text out of blocks of the ink colour, 鏤空 makes it a window
+  that fills the frame, 自動 under the knockout treatment opens the display word of strong lines
+  (energy ≥ 0.6) with the frame only partly filled (0.52–0.84, the stage stays half seen);
+  `placeTranslation`: the translation never sits on the composition (a seal, an echo trail, the small
+  text): the recipe's place when free, else under the block, beside its foot, under everything, over
+  it, re-set in two balanced rows for the measure, then the block moves up, then it shrinks (never
+  below the minimum); the editor's scale, rotation and nudge (fractions of the whole canvas) applied
+  after the layout and fitted back into the canvas; entrance / exit timing), `animate.ts`
+  (per-glyph and per-piece frames: entrances, exits, the motion word's motion, the glitch stutter on
+  beats — at most 3 a second with LED 安全模式 on, a shake while the line holds (the entrance and
+  the exit may tear it apart), a torn row of 撕裂 keeps its tear — and the type-pass uniforms),
+  `resolve.ts` (`resolveLine`: the line's hint, a repeat's first occurrence (base and edit) unless it
+  was edited itself, the section override, the editor's edit, the last chorus's escalation;
+  `autoHint` for lines added after the design), `sequence.ts` (`sequenceTypeLines`: one coherent
+  system, consecutive lines vary (recipe, side of the frame), repeats reuse the first composition,
+  verses calm, choruses loud, the bridge brings recipes the song has not used, quiet lines whisper;
+  the band's lyric policy as typographic intensity: chorus-only keeps the verses small, minimal lets
+  only the hook be big), `normalize.ts` (`normalizeTypeSystem`: clamps, enums, fonts in the right
+  script, exact-substring emphasis and motion words, unknown ids and recipes dropped, the missing
+  hints drawn by the sequencer, editor fields kept when asked), `prepare.ts` (`composeProjectLine`),
+  `edit.ts` (the editor's operations and its undo history).
+- **Rendering.** `src/components/stage/type/TypePainter.ts` rasterizes glyphs once into a sprite
+  cache (per face, weight snapped to the faces' real weights, size step and plate) and composites the
+  compositions of the moment into one canvas: red = the ink plate, green = the accent plate, blue = the
+  spot plate (a knockout window or the seal), alpha = the plates plus a soft legibility halo. `TypeLayer`
+  decides what is on screen (the current line entering or holding, up to three leaving: a brief
+  overlap), caches compositions by layout key, clocks the entrance from the line start (snapped to
+  the beat grid for MV cards and glitch; live-cued lines from the cue) and exits on wall time, skips
+  repainting a static frame, and hands a `TypeDraw` to the renderer. `src/lib/stage/scenes/type.ts` is
+  the type pass: scene (+ media) and the plates → ink wobble, glitch slices, RGB split, ink bleed (blur
+  and a noisy threshold), dry-brush 飛白, characters eaten by bright scene areas, grain, the halo,
+  glow, knockout (the frame filled, the scene seen through the glyphs; where the picture is as dark
+  as the fill the ink colour comes through the letters so they keep their contrast), the halo
+  stronger over a bright picture, overprint (a misregistered
+  screened accent plate). In `StageRenderer` it runs after the media pass and before the LED safety
+  pass, so the brightness cap, the soften shoulder and the flash limiter measure the type too
+  (`renderTypeLayer` renders it alone over transparent for the export's lyric layer). Without WebGL the
+  painter draws real colours into a DOM canvas (the safety cap as a CSS filter). The current line's
+  text is also in a visually hidden element (`[data-type-layer]`, with `data-recipe` / `data-voice`).
+  One path everywhere: the projection, the console preview, the stage lab, the style frames, the
+  proposal and the export (`OfflineStage` runs `TypeLayer` on song time; the full frame is chain 0 of
+  the safety pass, the background variant a second picture on chain 1, the lyric layer the type pass
+  alone; `drawFull` composes the full variant).
+- **Designers.** Claude: `DESIGN_SYSTEM` rule 3 (every line a composition, the voices, the recipes,
+  emphasis, motion words, repeats may be left out) and `typeCatalogBlock()`; the prompt names how many
+  distinct lines to compose (`typeReminder`); the structured output is `designPlanJsonSchema()` from
+  `DesignPlanDraftSchema` (request shape unchanged: adaptive thinking with `drop_block`, the betas,
+  effort high, `DESIGN_MAX_TOKENS`). Free / offline: `designer/type-design.ts` (`chooseVoice`: the
+  genre rule's `type` (punk / metal / math rock / electronic / psychedelic → glitch, folk / ambient →
+  ink, city pop / indie pop / post-punk / hip hop / jazz → title-sequence, post-rock / shoegaze /
+  dream pop → MV cards with big whitespace, indie / alt rock / emo / pop / R&B → MV cards), else the
+  audio mood and the lyric emotion; `lineEmphasis` (chant, sing-along phrase, imagery), `lineMotion`,
+  `designTypeSystem` (the bible's fonts are kept whatever the voice)). No automatic designer picks
+  karaoke or subtitle; no section with sung lines is hidden (the genre rules and the lyric policy
+  make verses quiet instead). Directions: every direction speaks another voice (`directionVoices`:
+  the song's own voice on the look that suits it; `distinctVoices` for Claude's), `DirectionDraftSchema
+  .typeVoice`, and each plan carries its type system. The claude.ai prompt: the same rules and schema,
+  a `typeSystem` in the template, the compact catalogue in 精簡版; the reply checks the type system
+  apart (its problems are repaired and listed, never a refusal). `normalizePlan` (`typeSystem:
+  "fill"`, the default for design outputs) repairs and completes the type system, or designs one by
+  the rules when the engine wrote none, and replaces karaoke / subtitle; `"keep"` (the show arc, an
+  offline instruction, the previous plan) leaves an old plan old. Lyric edits re-point the hints
+  (`remapPlanLines`).
+- **排版 editor** (`/p/[id]/type`, `src/components/type-editor/`), linked from the design overview's
+  header, the console's top bar (a new tab) and its design tab. Song: the voice (a switch redraws the
+  unlocked lines in the new voice), every parameter, fonts, weight, colour treatment, ornaments and
+  seal, 「重新生成全部構圖」; section: recipe / orientation / size / motion overrides; line: recipe
+  thumbnails (the real engine in colour mode), 「換一個構圖」 (the next seed of a fixed sequence),
+  emphasis by tapping characters (adjacent ones join into a word), orientation, motion word, entrance
+  and exit, position by dragging the preview (fine pointers) or the arrow pad, size and rotation,
+  colour role, 鎖定, 「重設為生成的」. The preview is `<StageView>` at the output aspect, paused at the line
+  settled or playing from it, with an A/B against the generated version (no edits, no overrides).
+  Every change is an undo step (drags and slider moves merge), posted on the song's channel as a
+  `plan` message (a console adopts the type system and re-broadcasts, a per-song output without a
+  console shows it) and saved through `PATCH /api/projects/[id] { plan }` after 700 ms (last write
+  wins, like the console); a console's `project` messages come in when nothing here is unsaved. A
+  legacy plan offers 「建立字體語言」 in each voice. Phone: the preview sticks under the header, 44 px
+  targets, 「這一句／段落／整首」 tabs and a line sheet.
+- **Stage lab**: `?voice=<voice>&aspect=16:9|32:9|9:16&project=<id>&gen=<n>` shows a song in a voice
+  on a canvas (screenshots).
+- **Tests**: `src/lib/type/type.test.ts` (determinism, every recipe on 16:9 / 32:9 / 9:16 inside the
+  readable area at or above the minimum size, reading order, vertical forms, 禁則, orphans, Latin never
+  vertical), `src/lib/type/sequence.test.ts` (sequencing, the editor's operations, old plans),
+  `designer/type-design.test.ts` (every engine without karaoke / subtitle, the voice choice,
+  normalizePlan on the new fields, the output schema accepting a full plan, the manual reply), plus
+  protocol, remap and console adoption tests; E2E `scripts/e2e-type.cjs`.
+
 ### Band media and the output canvas (phase 1a)
 
 - `Project.assets: Asset[]` (image / video / logo; size and video length measured in the browser by
@@ -836,7 +969,7 @@ keeps every contract above and changes only where things are kept and how long w
   — connect analyser → destination), `createMicAnalyser()`, tap tempo; features 0..1.
 - Unit tests with synthetic signals (click track tempo, loud/quiet section boundaries).
 
-### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts), `src/app/p/[id]/output/**`, `src/app/s/[id]/output/**`, `src/app/stage-lab/**`
+### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts), `src/lib/type/**` (字體藝術), `src/app/p/[id]/output/**`, `src/app/s/[id]/output/**`, `src/app/stage-lab/**`
 - `<StageView project store showGuides renderScale />`: WebGL scene layer + DOM lyric layer +
   blackout/transition overlay + optional test pattern & safe-area guides. Reads `store.get()` in a
   rAF loop (no React re-render per frame). Extrapolates time with `stageTime()`.
@@ -877,7 +1010,7 @@ keeps every contract above and changes only where things are kept and how long w
 - Re-design dialog: free-text instruction → `api.process(id, {steps:["design"], instruction})` with
   streamed progress; then broadcast the new project.
 
-### HOME — `src/app/page.tsx`, `src/app/p/[id]/process/**`, `src/app/p/[id]/lyrics/**`, `src/components/{home,upload,process,lyrics-editor}/**`
+### HOME — `src/app/page.tsx`, `src/app/p/[id]/process/**`, `src/app/p/[id]/lyrics/**`, `src/app/p/[id]/type/**`, `src/components/{home,upload,process,lyrics-editor,type-editor}/**`
 - Home: brand header, server status (Claude connected vs 免費研究模式 + the claude.ai option + how to
   set `ANTHROPIC_API_KEY` in `.env.local`), dropzone → metadata + analysis progress → editable song info
   + lyrics option (auto / paste) → create → `/p/[id]/process`. Library cards with accent, status,

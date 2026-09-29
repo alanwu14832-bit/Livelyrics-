@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
-import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon } from "@/components/ui/Icon";
+import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
@@ -305,6 +305,13 @@ export function TopBar({
             </Button>
           )}
         </Tooltip>
+        {!compact && project?.plan && (
+          <Tooltip content="字體藝術：逐句調整歌詞的構圖（在新分頁開啟，修改會即時出現在投影）" placement="bottom-end">
+            <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor">
+              排版
+            </Button>
+          </Tooltip>
+        )}
         {!compact && (
           <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
             <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>

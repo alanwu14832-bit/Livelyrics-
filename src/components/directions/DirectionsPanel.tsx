@@ -21,6 +21,7 @@ import { mergedMoodboard } from "@/lib/moodboard";
 import type { DesignDirection, MoodImage, Project } from "@/lib/types";
 import { useStyleFrames, type FramesState, type StyleFrame } from "./style-frames";
 import { LYRIC_STYLE_LABEL, SCENE_LABEL } from "@/components/process/labels";
+import { RECIPES, VOICES } from "@/lib/type/vocab";
 
 const REVISE_SUGGESTIONS = ["顏色再暖一點", "副歌更有爆發力", "歌詞少一點", "更貼近參考圖", "字體更粗"];
 
@@ -213,7 +214,10 @@ function Palette({ direction }: { direction: DesignDirection }) {
 }
 
 function Specimen({ project, direction }: { project: Project; direction: DesignDirection }) {
-  const t = direction.plan.keyVisual.typography;
+  const kvt = direction.plan.keyVisual.typography;
+  // 字體藝術: the lyrics are set in the type system's fonts
+  const ts = direction.plan.typeSystem;
+  const t = ts ? { cjkFont: ts.fonts.cjk, latinFont: ts.fonts.latin, weight: ts.weight, letterSpacing: kvt.letterSpacing } : kvt;
   const bg = direction.plan.keyVisual.palette[0]?.hex ?? "#000";
   const fg = direction.plan.sections.find((s) => s.kind === "chorus")?.lyricColor ?? direction.plan.sections[0]?.lyricColor ?? "#fff";
   return (
@@ -255,6 +259,9 @@ function DirectionCard({
   const plan = direction.plan;
   const scenes = [...new Set(plan.sections.map((s) => s.scene))].slice(0, 5);
   const styles = [...new Set(plan.sections.filter((s) => s.lyricStyle !== "hidden").map((s) => s.lyricStyle))].slice(0, 4);
+  // 字體藝術: the voice and the recipes the compositions use most
+  const ts = plan.typeSystem;
+  const recipes = ts ? [...ts.lines.reduce((m, l) => m.set(l.recipe, (m.get(l.recipe) ?? 0) + 1), new Map<string, number>()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id]) => RECIPES[id as keyof typeof RECIPES]?.label ?? id) : [];
   const imageIndex = new Map(moodboard.map((m, i) => [m.id, i + 1]));
   const selected = direction.status === "selected";
   const rejected = direction.status === "rejected";
@@ -333,9 +340,18 @@ function DirectionCard({
         <dd className="min-w-0 text-label">
           {direction.lyricTreatment}
           <span className="mt-1 flex flex-wrap gap-1">
-            {styles.map((s) => (
-              <Tag key={s}>{LYRIC_STYLE_LABEL[s] ?? s}</Tag>
-            ))}
+            {ts ? (
+              <>
+                <Tag tone="tint" data-testid="direction-voice" data-voice={ts.voice}>
+                  {VOICES[ts.voice]?.label ?? ts.voice}
+                </Tag>
+                {recipes.map((r) => (
+                  <Tag key={r}>{r}</Tag>
+                ))}
+              </>
+            ) : (
+              styles.map((s) => <Tag key={s}>{LYRIC_STYLE_LABEL[s] ?? s}</Tag>)
+            )}
           </span>
         </dd>
       </dl>

@@ -17,6 +17,21 @@ export type {
   CueNote,
   SectionMedia,
   MediaTreatment,
+  TypeVoiceId,
+  TypeRecipeId,
+  TypeOrientation,
+  TypeColorTreatment,
+  TypeOrnamentId,
+  TypeEnterId,
+  TypeExitId,
+  TypeColorRole,
+  TypeParams,
+  TypeLineDraft,
+  TypeLineEdit,
+  TypeLine,
+  TypeSection,
+  TypeSystemDraft,
+  TypeSystem,
 } from "./schema";
 
 // ---------------------------------------------------------------------------

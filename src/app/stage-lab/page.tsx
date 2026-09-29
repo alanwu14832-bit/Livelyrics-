@@ -27,6 +27,8 @@ function one(sp: SearchParams, key: string): string | undefined {
  *   &gl=1 (force WebGL1) &aq=0 (no adaptive resolution) &intensity=&scale=&blackout=1&freeze=1&lyrics=0
  *   &slowmo=<1..20> (slow-motion section transitions for inspection)
  *   &safe=0 (LED 安全模式 off: the designed flash / bloom transitions, full brightness)
+ *   字體藝術: &project=<id> (a stored project) &voice=mv-card|title-sequence|ink|glitch
+ *   &aspect=16:9|32:9|9:16 (the output canvas) &gen=<n> (another draw of the voice's rules)
  */
 export default async function StageLabPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
@@ -49,6 +51,10 @@ export default async function StageLabPage({ searchParams }: { searchParams: Pro
     lyrics: one(sp, "lyrics"),
     slowmo: one(sp, "slowmo"),
     safe: one(sp, "safe"),
+    project: one(sp, "project"),
+    voice: one(sp, "voice"),
+    aspect: one(sp, "aspect"),
+    gen: one(sp, "gen"),
   };
   return (
     <div data-theme="dark" className="min-h-screen bg-bg text-label">

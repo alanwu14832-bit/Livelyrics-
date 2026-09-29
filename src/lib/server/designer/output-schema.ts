@@ -1,4 +1,4 @@
-// Structured-output JSON schema for DesignPlanSchema.
+// Structured-output JSON schema for DesignPlanDraftSchema (the DesignPlan a designer writes).
 //
 // The SDK helper (betaZodOutputFormat / zodOutputFormat) moves every keyword it does
 // not know — including `enum` and `const` — into the description text, so the closed
@@ -6,11 +6,11 @@
 // the schema with z.toJSONSchema instead and keep enums as real constraints, applying
 // the same strictness rules as the SDK (every property required, no additional
 // properties, unsupported keywords folded into the description). The response is
-// parsed and validated with DesignPlanSchema.safeParse by the caller.
+// parsed and validated with DesignPlanSchema.safeParse by the caller (a draft is a valid plan).
 
 import { z } from "zod";
 import type { BetaJSONOutputFormat } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { DesignPlanSchema } from "@/lib/schema";
+import { DesignPlanDraftSchema } from "@/lib/schema";
 
 type Json = Record<string, unknown>;
 
@@ -87,9 +87,13 @@ export function jsonOutputFormat(schema: z.ZodType): BetaJSONOutputFormat {
 
 let cached: Json | null = null;
 
-/** JSON schema of DesignPlan for output_config.format (enums enforced, all fields required). */
+/**
+ * JSON schema of the DesignPlan an automatic designer writes, for output_config.format (enums
+ * enforced, all fields required): the plan with its type system (字體藝術) and a composition hint
+ * per lyric line, and without the karaoke / subtitle styles no designer chooses any more.
+ */
 export function designPlanJsonSchema(): Json {
-  if (!cached) cached = strict(z.toJSONSchema(DesignPlanSchema, { target: "draft-2020-12", unrepresentable: "any" }));
+  if (!cached) cached = strict(z.toJSONSchema(DesignPlanDraftSchema, { target: "draft-2020-12", unrepresentable: "any" }));
   return structuredClone(cached);
 }
 

@@ -4,9 +4,11 @@
 // reordering lines in the editor shifts every id after the edit. A LineDesign (emphasis,
 // per-line style override, note) belongs to a line's *text*, so it follows the line with
 // the same text — the occurrence nearest to where the old line was — and is dropped when
-// that text no longer exists.
+// that text no longer exists. The type system's composition hints (字體藝術: recipe, seed, the
+// editor's nudges and locks) follow their lines the same way; a line without one is composed by
+// the rules.
 
-import type { DesignPlan, LineDesign, Lyrics } from "@/lib/types";
+import type { DesignPlan, Lyrics } from "@/lib/types";
 
 function key(text: string): string {
   return text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
@@ -19,15 +21,15 @@ function distance(oldStart: number | null, oldPos: number, newStart: number | nu
   return 1000 + Math.abs(oldPos - newPos) * 1000;
 }
 
-export interface RemapResult {
-  lines: LineDesign[];
+export interface RemapResult<T extends { lineId: string } = { lineId: string }> {
+  lines: T[];
   /** line designs whose text no longer exists in the new lyrics */
   dropped: number;
   /** line designs that now point at a different id */
   moved: number;
 }
 
-export function remapLineDesigns(designs: readonly LineDesign[], before: Lyrics, after: Lyrics): RemapResult {
+export function remapLineDesigns<T extends { lineId: string }>(designs: readonly T[], before: Lyrics, after: Lyrics): RemapResult<T> {
   const oldById = new Map(before.lines.map((l, i) => [l.id, { line: l, pos: before.lines.length > 1 ? i / (before.lines.length - 1) : 0 }]));
   const candidates = new Map<string, Array<{ id: string; start: number | null; pos: number }>>();
   after.lines.forEach((l, i) => {
@@ -39,7 +41,7 @@ export function remapLineDesigns(designs: readonly LineDesign[], before: Lyrics,
   });
 
   const used = new Set<string>();
-  const out: LineDesign[] = [];
+  const out: T[] = [];
   let dropped = 0;
   let moved = 0;
   for (const design of designs) {
@@ -64,8 +66,15 @@ export function remapLineDesigns(designs: readonly LineDesign[], before: Lyrics,
 
 /** The plan with its line designs re-pointed at `after` (returns the same plan when nothing changed). */
 export function remapPlanLines(plan: DesignPlan, before: Lyrics, after: Lyrics): DesignPlan {
-  if (plan.lines.length === 0) return plan;
-  const { lines, dropped, moved } = remapLineDesigns(plan.lines, before, after);
-  if (dropped === 0 && moved === 0) return plan;
-  return { ...plan, lines };
+  let next = plan;
+  if (plan.lines.length) {
+    const { lines, dropped, moved } = remapLineDesigns(plan.lines, before, after);
+    if (dropped || moved) next = { ...next, lines };
+  }
+  const ts = plan.typeSystem;
+  if (ts && Array.isArray(ts.lines) && ts.lines.length) {
+    const { lines, dropped, moved } = remapLineDesigns(ts.lines, before, after);
+    if (dropped || moved) next = { ...next, typeSystem: { ...ts, lines } };
+  }
+  return next;
 }

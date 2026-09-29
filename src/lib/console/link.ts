@@ -8,6 +8,7 @@
 // the show console, a second show console tab (another id) is still reported.
 
 import { parseStageMessage, type LimiterReport, type StageMessage } from "@/lib/stage/protocol";
+import type { DesignPlan } from "@/lib/types";
 
 export interface OutputStatus {
   connected: boolean;
@@ -32,6 +33,8 @@ export interface LinkHandlers {
   onHello: () => void;
   /** the output status or the other-console flag changed */
   onStatus: (output: OutputStatus, otherConsole: boolean) => void;
+  /** 字體藝術: the 排版 editor (another window) changed and saved this song's plan */
+  onPlan?: (projectId: string, plan: DesignPlan) => void;
 }
 
 /** A short random id for a console window or an output window. */
@@ -116,7 +119,7 @@ export class ProjectionLink {
   post(msg: StageMessage): void {
     const channel = this.channel;
     if (!channel) return;
-    const stamped = msg.type === "project" || msg.type === "state" || msg.type === "ping" || msg.type === "preload" ? { ...msg, sender: this.consoleId } : msg;
+    const stamped = msg.type === "project" || msg.type === "state" || msg.type === "ping" || msg.type === "preload" || msg.type === "plan" ? { ...msg, sender: this.consoleId } : msg;
     try {
       channel.postMessage(stamped);
     } catch (err) {
@@ -151,6 +154,14 @@ export class ProjectionLink {
         if (msg.sender && msg.sender === this.consoleId) return;
         this.lastOtherAt = Date.now();
         if (!this.other) this.setStatus(this.output, true);
+        break;
+      case "plan":
+        if (msg.sender && msg.sender === this.consoleId) return;
+        try {
+          this.handlers.onPlan?.(msg.projectId, msg.plan);
+        } catch (err) {
+          console.error("[Livelyrics] 套用排版的修改失敗：", err);
+        }
         break;
       default:
         break;
