@@ -17,6 +17,19 @@ export interface ExampleProgram {
   byKind: Partial<Record<SectionKind, KindState>>;
 }
 
+/** The kind an example's missing kind borrows from. */
+export const KIND_FALLBACK: Record<SectionKind, SectionKind> = {
+  intro: "outro",
+  verse: "verse",
+  "pre-chorus": "verse",
+  chorus: "chorus",
+  bridge: "breakdown",
+  solo: "chorus",
+  breakdown: "bridge",
+  outro: "intro",
+  interlude: "bridge",
+};
+
 /** The example's program laid onto a plan's sections (their kinds pick the states). */
 export function instantiateExample(ex: ExampleProgram, plan: Pick<DesignPlan, "sections">): SceneProgram {
   return {
@@ -26,7 +39,7 @@ export function instantiateExample(ex: ExampleProgram, plan: Pick<DesignPlan, "s
     concept: ex.concept,
     source: ex.source,
     sections: plan.sections.map((s) => {
-      const k = ex.byKind[s.kind] ?? ex.byKind.verse;
+      const k = ex.byKind[s.kind] ?? ex.byKind[KIND_FALLBACK[s.kind]] ?? ex.byKind.verse;
       const d = KIND_DEFAULTS[s.kind] ?? KIND_DEFAULTS.verse;
       return k ? { sectionId: s.id, ...k, params: [...k.params] } : { sectionId: s.id, mode: d.mode, params: [...d.params], zone: { x: 0.08, y: 0.14, w: 0.42, h: 0.6 }, relation: "plain", note: "" };
     }),

@@ -134,11 +134,12 @@ uniform（全部由系統提供，不能自己宣告）：
   vec4  uParams           這一段的四個參數 0–1（由你在 sections 裡指定）
   vec3  uBg, uPri, uAcc   這一段的配色：背景、主色、點綴
   vec3  uInk              這一段的歌詞色
-  vec3  uPal0 … uPal5     整首歌的色票（uPal0 最深；不足六色時重複）
+  vec3  uPal0, uPal1, uPal2, uPal3, uPal4, uPal5   整首歌的色票（uPal0 最深；不足六色時重複）
   vec4  uZone             這一段的文字區（uv：x0, y0, x1, y1，y 向上，0–1）
   float uRelation         字與畫面的關係：0 plain 1 knockout 2 behind 3 lit
   vec4  uTypeBox          目前歌詞實際的範圍（uv：x0, y0, x1, y1；沒有歌詞時全為 0）
   float uTypeAmt          歌詞可見程度 0–1
+  sampler2D uType, uMotif 歌詞字形與主視覺符號的貼圖：只能透過下面的 typeMask／typeGlow／motifMask 讀
 
 輔助（已定義，直接用，不能重新定義）：
   PI, TAU; sat(x); rot(a) → mat2; hash11(p), hash12(p), hash22(p); vnoise(p); fbm(p)（5 階）; fbm3(p)（3 階）
