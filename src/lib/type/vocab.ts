@@ -100,13 +100,15 @@ export const VOICES: Record<TypeVoiceId, VoiceInfo> = {
     label: "實驗／故障感",
     short: "故障",
     description: "切片與錯位、RGB 分離、殘影、疊印與顆粒，字被場景吃掉一部分；拍點上有種子決定的抖動（仍在 LED 安全的閃爍限制內）。",
-    recipes: { split: 5, echo: 4, scatter: 2, poster: 2, bleed: 2, "grid-poem": 2, window: 1.5 },
-    params: { scaleContrast: 0.7, density: 0.6, verticalRatio: 0.2, gridColumns: 8, gridMargin: 0.3, motionSpeed: 0.75, motionIntensity: 0.65, texture: 0.7, ornament: 0.45 },
+    // phase 7: a terminal-like grid and data labels (section codes, numbers) give the experimental
+    // voice its own structure; the tears and echoes stay, big-only recipes are rarer
+    recipes: { split: 5, echo: 3.5, "grid-poem": 3.5, scatter: 2, poster: 1.5, bleed: 1, window: 1 },
+    params: { scaleContrast: 0.6, density: 0.55, verticalRatio: 0.2, gridColumns: 8, gridMargin: 0.3, motionSpeed: 0.75, motionIntensity: 0.65, texture: 0.7, ornament: 0.6 },
     color: "overprint",
     fonts: { cjk: "chiron-hei-hk", latin: "space-grotesk" },
     fontsOk: { cjk: ["chiron-hei-hk", "noto-sans-tc"], latin: ["space-grotesk", "anton", "bebas-neue"] },
     weight: 800,
-    ornaments: ["number", "rule"],
+    ornaments: ["number", "section", "rule"],
     enter: "glitch",
     exit: "glitch",
     snap: true,
