@@ -1233,3 +1233,29 @@
     outline-offset: -2px;
   }
 }
+
+/* 一頁提案 (phase 4): the sign-off sheet prints as exactly one A4 landscape page. The paper is laid
+   out in millimetres (297 × 210 with 10 mm padding), so the named page has no margin of its own;
+   colours (frames, swatches, the specimen) are printed as shown. */
+@page proposal {
+  size: A4 landscape;
+  margin: 0;
+}
+.proposal-paper {
+  page: proposal;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .print-hide {
+    display: none !important;
+  }
+  .proposal-paper {
+    margin: 0 !important;
+    break-inside: avoid;
+  }
+}

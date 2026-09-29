@@ -3,6 +3,7 @@ import { remapPlanLines } from "@/lib/lyrics/remap";
 import { cancelRun, withLiveStatus } from "@/lib/server/pipeline";
 import { isValidBandId } from "@/lib/band";
 import { getBand, withBandAssets } from "@/lib/server/band-storage";
+import { withLiveProjectJob } from "@/lib/server/jobs";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
 import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch } from "@/lib/server/validate";
 import type { DesignPlan, Lyrics, ProjectOutput, SongMeta } from "@/lib/types";
@@ -18,7 +19,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const project = await getProject(id);
   if (!project) throw new HttpError(404, "找不到專案");
-  return json(withLiveStatus(await withBandAssets(project)));
+  return json(withLiveProjectJob(withLiveStatus(await withBandAssets(project))));
 });
 
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {

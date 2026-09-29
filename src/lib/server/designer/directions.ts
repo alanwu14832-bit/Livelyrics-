@@ -190,8 +190,6 @@ const MINIMAL: Archetype = {
   emblem: "crystal",
 };
 
-const ARCHETYPES = [FILM, COLLAGE, MINIMAL] as const;
-
 function entriesOf(roles: Array<[string, string]>): PaletteEntry[] {
   const seen = new Set<string>();
   const out: PaletteEntry[] = [];

@@ -2,7 +2,7 @@
 // (Band.bibleJob, Show.arcJob), so a refreshed page shows them running and polls, and one that lost
 // its request (the 300 s limit, a crash) is reported as failed instead of spinning forever.
 
-import type { Band, JobState, Show } from "@/lib/types";
+import type { Band, JobState, Project, Show } from "@/lib/types";
 
 /** a running job older than this lost its request (300 s limit + margin) */
 export const JOB_STALE_MS = 330_000;
@@ -29,6 +29,12 @@ export function withLiveBandJob(band: Band): Band {
 export function withLiveShowJob(show: Show): Show {
   if (!show.arcJob) return show;
   return { ...show, arcJob: liveJob(show.arcJob) };
+}
+
+/** A project as the API reports it: a stale 設計方向 job becomes an error. */
+export function withLiveProjectJob<T extends Pick<Project, "directionsJob">>(project: T): T {
+  if (!project.directionsJob) return project;
+  return { ...project, directionsJob: liveJob(project.directionsJob) };
 }
 
 export function errorText(err: unknown): string {

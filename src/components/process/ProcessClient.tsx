@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
-import { ExportIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { ExportIcon, FileTextIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, SwatchesIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import { retryFrom } from "@/lib/process-runner";
 import type { PipelineEvent, Project } from "@/lib/types";
@@ -18,6 +18,7 @@ import { useServerStatus } from "@/components/home/ServerStatus";
 import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
+import { DirectionsSection } from "@/components/directions/DirectionsPanel";
 import { KeyVisualSummary } from "./KeyVisualSummary";
 import {
   applyEvents,
@@ -343,6 +344,11 @@ export function ProcessClient({
   const showResearchStream = running || (phase === "error" && (research.text || research.status === "error"));
   const showDone = justFinished && plan != null && phase === "done";
   const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || /粗略/.test(runState.steps.lyrics.message ?? ""));
+  // 設計方向 (phase 4): the comparison spans the page once directions exist; before that a compact block in the main column
+  const hasDirections = !!project.directions?.directions.length;
+  const directions = !running ? (
+    <DirectionsSection project={project} onProject={setProject} disabled={running} offline={offline} wide={hasDirections} />
+  ) : null;
 
   return (
     <div className="min-h-dvh">
@@ -356,6 +362,11 @@ export function ProcessClient({
           <Button href={lyricsHref} transitionTypes={PUSH} variant="gray" icon={PencilSimpleIcon}>
             編輯歌詞
           </Button>
+          {!running && (
+            <Button href={hasDirections ? `/p/${encodeURIComponent(id)}/proposal` : "#directions"} transitionTypes={hasDirections ? PUSH : undefined} variant="gray" icon={hasDirections ? FileTextIcon : SwatchesIcon}>
+              {hasDirections ? "一頁提案" : "設計方向"}
+            </Button>
+          )}
           {plan && !running && (
             <Button href={exportHref} transitionTypes={PUSH} variant="gray" icon={ExportIcon}>
               匯出影片
@@ -368,6 +379,7 @@ export function ProcessClient({
       )}
 
       <div className={cx(pageContainerClass, "grid items-start gap-x-10 gap-y-8 pt-6 pb-24 lg:grid-cols-[360px_minmax(0,1fr)]")}>
+        {hasDirections && directions && <div className="min-w-0 lg:col-span-2">{directions}</div>}
         <aside className="min-w-0 space-y-8 lg:sticky lg:top-[68px]">
           <StepTimeline
             analysis={project.analysis}
@@ -471,6 +483,8 @@ export function ProcessClient({
               placeholder={design.status === "running" ? "設計師正在構思世界觀、色票與每一段的畫面…" : "研究完成後開始設計主視覺與段落。"}
             />
           )}
+
+          {!hasDirections && directions}
 
           {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} reveal={showDone} />}
 

@@ -47,10 +47,11 @@ show up in the product:
 
 | File | What |
 |---|---|
-| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error) |
+| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet` |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
+| `src/lib/moodboard.ts`, `src/lib/directions.ts` | phase 4: mood board limits, colour extraction, coercion, summary; directions coercion, select / undo / comment transforms, style-frame moments, the sign-off sheet data |
 | `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
 | `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
 | `src/lib/font-meta.ts` | `FONTS` registry + `fontStack(cjkFont, latinFont)` without next/font, so server code and tests can import it |
@@ -76,6 +77,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]` | CONSOLE | operator console |
 | `/p/[id]/output` | STAGE | projection window — animation + lyrics only |
 | `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
+| `/p/[id]/proposal` | HOME | 一頁提案 (phase 4): the band sign-off sheet of the design directions, A4 landscape print layout, 「列印／存成 PDF」 |
 | `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan |
 | `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
 | `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
@@ -87,6 +89,9 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/assets` GET/POST | SERVER | band media list / upload (multipart `file` + `meta` JSON `{width,height,duration?,name?,kind?,note?,tags?}` measured in the browser; magic-byte sniffed PNG/JPG/WebP/GIF/MP4/MOV/WebM, SVG rejected, 500 MB) → `{asset, assets}` |
 | `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
 | `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` (cloud: one step per request with `run`, `maxDuration` 300) |
+| `/api/projects/[id]/moodboard` GET/POST, `/api/projects/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | 參考圖 (phase 4): `{ images }` / upload (the media-library contract, images only, ≤ 12, 8 MB, `meta.stats` = the colours measured in the browser) → `{ image, images }` / file / `{ note?, name? }` / delete |
+| `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
+| `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 | `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
 | `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
@@ -97,7 +102,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/shows/[id]/arc` POST | SERVER | 整場弧線 (Claude or offline) saved on the show → `{ show, engine, logs }` |
 | `/api/shows/[id]/apply-output` POST | SERVER | copy the show's canvas onto every song of its setlist → `{ updated, show }` |
 
-Local data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/`: `projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}`,
+Local data lives in `process.env.LIVELYRICS_DATA_DIR ?? <cwd>/data/`: `projects/<id>/{project.json,audio.<ext>,assets/<assetId>.<ext>}` (mood board images too),
 `bands/<id>/{band.json,assets/<assetId>.<ext>}`, `shows/<id>/show.json` (all atomic writes, tolerant readers, per-key locks).
 Cloud data lives in one Postgres table and a Vercel Blob store (see "Cloud mode (Vercel)"). No route sets
 `maxDuration` above 300 (a higher value fails the Vercel deploy).
@@ -311,6 +316,105 @@ All of it is pure logic in `src/lib/stage/safety.ts` (tests: `safety.test.ts`) p
   blackout and the show's take fades are operator-driven and not limited. Recommend a Harding-style
   analysis of exported video for broadcast.
 
+### 設計方向提案與樂團確認 (phase 4)
+
+A designer pitches before producing: 2–3 clearly different directions, each with style frames,
+the band picks one or comments, then production starts. Directions are opt-in; the single-plan
+pipeline and 「重新設計」 are unchanged. Types in `src/lib/types.ts` (`MoodImage`, `MoodStats`,
+`DesignDirection`, `DirectionSet`, `DirectionComment`, `DirectionReference`, `PlanSnapshot`).
+
+- **Mood board (參考圖).** `Project.moodboard?: MoodImage[]` and `Band.moodboard?: MoodImage[]` (a
+  sibling list, never `assets`, so nothing on stage, in the export or in the media picker can show
+  them); `Project.bandMoodboard?` is the band's list attached on read by `withBandAssets` (scope
+  "band", never stored). `MoodImage` is an `Asset` (kind image) plus `stats?: MoodStats` (`palette`,
+  `weights`, `luma`, `saturation`, `warmth`) and the operator's `note`. Files sit next to the assets
+  (`<project>/assets/<id>.<ext>`, `bands/<id>/assets/…`, cloud: the same Blob prefixes, so the upload
+  token route is unchanged); ids are unique across assets and mood boards (`takenAssetIds` covers
+  both). Limits: 12 per scope, 8 MB, PNG / JPG / WebP / GIF (`src/lib/moodboard.ts`). Upload: the
+  routes reuse `receiveAssetUpload` / `receiveAssetRegistration` with `images` (image-only rules and
+  an `extend` hook for the stats). The browser (`src/lib/moodboard-client.ts`) decodes each image,
+  downscales it to ≤ 1024 px on the long edge, re-encodes WebP (JPEG where WebP encoding is missing),
+  and measures a 96 px copy with `extractMoodStats` (5-bit binning, deterministic farthest-point
+  k-means with k = 5, merge closer than 28, drop < 3 %). Deleting an image drops the direction
+  references to it; deleting a project / band removes the files. UI:
+  `src/components/moodboard/MoodBoard.tsx` (design overview, band page; the band's images read-only
+  on a song, numbered first).
+- **The designer sees them.** `DesignerInput.moodboard` (band first, then the song's:
+  `mergedMoodboard`) and `DesignerInput.moodboardImages` (`VisionImage { id, mediaType, data }`):
+  the server reads the files through `FileStore.read` (new: local disk / Blob GET, size-capped) in
+  `loadVisionImages` (≤ 3.5 MB each, ≤ 18 MB in all, other types skipped and logged), so the images
+  never pass through a function request body. Claude: `userContent` puts `visionContent` first — per
+  image a text block 「圖 n（樂團參考／這首歌的參考）：「note」」 then a base64 `image` block — and the
+  prompt text last; `moodboardBlock` lists the notes and measured colours and asks to extract
+  palette, texture, composition and typography cues and to cite 「圖 n」 in the rationale. Both the
+  design step of the pipeline (when Claude is configured) and the directions call use it. Offline:
+  `moodSummary` merges the images' palettes (a note about colour counts double; `vivid` = the most
+  saturated colour with real weight); `moodPalette` makes a stage palette from it (vivid = primary,
+  kept exactly when bright enough; a clearly different accent; the darkest hue as a 6 % background;
+  a ≥ 4.5:1 lyric colour) and `moodScenes` biases scene choice by tone. `offlineDesign` uses them
+  after the bible palette.
+- **Directions** (`src/lib/server/designer/directions.ts`). A compact `DirectionSpec` (name, pitch,
+  rationale, references, palette, typography, emblem, scene families and lyric style / placement
+  per section kind, treatments, energy, motion soft / punchy) is expanded by `expandDirection` into a
+  full plan on the song's real structure: the offline plan's timing, media, lines and cues, then the
+  direction's scenes (choruses climb the family, neighbours differ), colourways from `paletteRoles`,
+  lyric styles (vertical only for CJK; the bible's lyric policy), soft transitions for soft looks,
+  scaled intensity / speed / reactivity; `normalizePlan` last. Claude: `proposeDirections` makes one
+  structured-output call (`DirectionDraftSchema` via `jsonOutputFormat`, effort medium, 16 k tokens,
+  adaptive thinking, `fallbacks: "default"`, the mood board images before the prompt) under the
+  budget (`CLOUD_DESIGNER_BUDGET_MS` in both modes); `normalizeDirectionDrafts` checks everything
+  against the vocabularies (CJK / Latin fonts, scenes minus the bible's avoided ones, image numbers →
+  ids), repairs palettes (darkest first, a lyric colour; outside the bible's hues → the bible
+  palette), forces the bible fonts, drops duplicates and tops up with offline specs to ≥ 2. Any
+  failure or timeout → the offline directions. Offline: `offlineDirectionSpecs` — film (cool, or warm
+  after a warm mood board; desaturated; nebula / rain / waves / bokeh; line-fade, karaoke choruses,
+  vertical bridge; serif), collage (saturated complementary from the mood board's vivid hue; shards /
+  grid / tunnel; word-pop and impact; heavy sans), minimal (black and white with one accent, the
+  vivid colour; gradient / ink / motif; subtitle, stack, vertical; wide tracking). With a bible all
+  three use its palette (a different role leads) and fonts, never its avoided scenes. Stored as
+  `Project.directions: DirectionSet { engine, model?, createdAt, directions }`; each
+  `DesignDirection { id, letter A–C, name, pitch, rationale, references, sceneTendency,
+  lyricTreatment, plan, status proposed | selected | rejected, comments, engine, … }`.
+- **Actions** (`src/lib/server/directions.ts`, pure transforms in `src/lib/directions.ts`):
+  generate (replaces the set; the plan is untouched), revise (the redesign-with-instruction path:
+  `designSong` with `previous` = the direction's plan and the note as the instruction — Claude, or
+  the offline `applyInstruction`; the note becomes a `revision` comment; a selected direction goes
+  back to 提案中), select (`normalizePlan` against the current song, then `applySelection`: the plan is
+  replaced, the old one kept in `Project.previousPlan: PlanSnapshot`, one direction 已選定), undo
+  (`applyUndo`), status (退回 / 重新提案; the selected one cannot be rejected), comment / uncomment,
+  clear. Cloud: generate and revise record `Project.directionsJob` (`JobState`, 409 while fresh, a
+  stale one reads as failed via `withLiveProjectJob`), finish under `after()`; the page polls.
+- **Style frames** (`src/components/directions/style-frames.ts`). `styleFrameMoments(plan, lyrics)`
+  picks 3–4 moments (intro, the first chorus 60 % into its second line, the bridge or the quietest
+  section after the first chorus, the final chorus; filled up by energy). The browser renders them
+  with `OfflineStage` (the export renderer: real shaders, media, lyric layer and next/font faces;
+  the project's LED 安全模式 applied) on a copy of the project with the direction's plan at 960 px on
+  the long edge (the output canvas' aspect), 12 fps pre-roll, composited to JPEG object URLs. They
+  are cached client-side only: an in-memory LRU (12 directions) keyed by the plan, lyrics, canvas and
+  safety, shared across client navigations (design overview → 一頁提案), renders queued one at a time
+  (one WebGL context). Nothing is uploaded, so local and cloud mode behave the same; a reload renders
+  again (a few seconds a direction).
+- **UI.** `src/components/directions/DirectionsPanel.tsx` on the design overview: before any
+  direction a compact block (mood board, an optional brief, 「提出設計方向」); afterwards 「方向比較」 spans
+  the page above the step list: cards side by side (letter, name, status tag, the frame carousel —
+  opens on the first chorus, ← / →, thumbnails, 「放大檢視」 sheet — palette chips, a typography
+  specimen on the direction's background, the rationale, cited mood board images, scene and lyric
+  tendencies, comments, 「採用這個方向」 / 「修改」 (sheet with a note) / 「退回」), 「復原」 and 「一頁提案」. The
+  header gets 「設計方向」 (anchor) or 「一頁提案」.
+- **一頁提案** (`/p/[id]/proposal`, `src/components/proposal/ProposalClient.tsx`, data from
+  `proposalSheet`): one A4 landscape paper laid out in millimetres (297 × 210, 10 mm padding, always
+  light), so the screen preview is the page; `@page proposal { size: A4 landscape; margin: 0 }` and
+  `.proposal-paper { page: proposal; print-color-adjust: exact }` in `globals.css`, `.print-hide` for
+  the chrome. Columns per direction (hero frame, the other frames, palette with hex, specimen, pitch,
+  clipped rationale, tendencies, references), then the mood board strip and the sign-off box
+  (選擇方向 A／B／C with the selected one ticked, 意見, 簽名／日期). 「列印／存成 PDF」 = `window.print()`,
+  enabled once the frames are ready. Not built: 下載 PNG (rasterising the DOM needs a dependency) and
+  a public band share link (the cloud password gate covers every page; a safe link needs an HMAC-
+  signed, expiring, read-only token scoped to one project: future work).
+- **E2E**: `scripts/e2e-directions.cjs` (generated PNG mood board, note, the band board, offline
+  directions reflecting the mood board, non-blank style frames, select → console, undo, the proposal
+  in print emulation and `page.pdf` = one A4 landscape page, revise, reject).
+
 ### Band media and the output canvas (phase 1a)
 
 - `Project.assets: Asset[]` (image / video / logo; size and video length measured in the browser by
@@ -455,7 +559,7 @@ keeps every contract above and changes only where things are kept and how long w
   exactly as made; the renderer repairs anything out of range.
 - All route handlers: `export const runtime = "nodejs"`, `dynamic = "force-dynamic"`; JSON errors
   `{ error: string }` with proper status codes; validate ids (no path traversal); size limit ~200 MB.
-  `maxDuration` at most 300 (only the process, bible and arc routes set it).
+  `maxDuration` at most 300 (only the process, bible, arc and directions routes set it).
   Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`

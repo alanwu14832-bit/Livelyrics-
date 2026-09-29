@@ -12,10 +12,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { formatTimeShort } from "@/lib/timeline";
 import { coerceBible, sanitizeFonts } from "@/lib/band";
-import type { BandBible, DesignPlan, Research, ShowArc } from "@/lib/types";
+import type { BandBible, DesignPlan, DirectionSet, Research, ShowArc } from "@/lib/types";
 import { applyArc, ARC_SYSTEM, ArcDraftSchema, buildArcPrompt, normalizeArc, offlineArc, type ArcInput } from "./arc";
 import { BIBLE_SYSTEM, BibleDraftSchema, buildBiblePrompt, offlineBible, type BibleInput } from "./bible";
 import { bibleBlock } from "./prompts";
+import { buildDirections, buildDirectionsPrompt, DirectionDraftSchema, DIRECTIONS_SYSTEM, directionsSummary, normalizeDirectionDrafts, offlineDirectionSpecs } from "./directions";
+import { visionContent } from "./moodboard";
 import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, sdkTransport, type ClaudeTransport } from "./claude";
@@ -31,6 +33,8 @@ export { offlineDesign, offlineResearch } from "./offline";
 export { sanitizeSvg, generateMotifSvg } from "./svg";
 export { offlineBible, type BibleInput, type BibleSong } from "./bible";
 export { offlineArc, applyArc, type ArcInput, type ArcSong } from "./arc";
+export { offlineDirectionSpecs, expandDirection, buildDirections, normalizeDirectionDrafts, type DirectionSpec } from "./directions";
+export type { VisionImage } from "./moodboard";
 
 /** true when an Anthropic credential is configured (otherwise the offline designer is used) */
 export function isClaudeConfigured(): boolean {
@@ -299,5 +303,49 @@ export async function planShowArc(input: ArcInput, cb: DesignerCallbacks = {}, d
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     cbs.onLog(`Claude 無法規劃整場弧線：${describeError(err)}。改用離線設計師。`);
     return fallback;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 提出設計方向 (phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * 2–3 distinct design directions for the song, each expanded to a full plan. One Claude
+ * structured-output call (mood board images as vision input) when configured, the offline
+ * directions otherwise or on any failure / timeout. Never throws for Claude problems.
+ */
+export async function proposeDirections(req: DesignRequest, cb: DesignerCallbacks = {}, deps: DesignerDeps = {}): Promise<DirectionSet> {
+  const cbs = safeCallbacks(cb);
+  throwIfAborted(cb.signal);
+  const d = resolveDeps(deps);
+  const now = (d.now?.() ?? new Date()).toISOString();
+  const offline = offlineDirectionSpecs(req);
+  const offlineSet = (): DirectionSet => {
+    const directions = buildDirections(offline, req, { engine: "offline", now });
+    cbs.onDelta(directionsSummary(directions));
+    return { engine: "offline", createdAt: now, directions };
+  };
+  if (!d.configured) {
+    cbs.onLog("未設定 Claude，使用離線設計師提出三個方向：冷暖、飽和與黑白三個軸線各一個。");
+    return offlineSet();
+  }
+  try {
+    const images = visionContent(req.moodboard, req.moodboardImages);
+    cbs.onLog(`Claude（${d.model}）開始提出設計方向${images.length ? `，參考 ${images.length / 2} 張參考圖` : ""}…`);
+    const { raw, model } = await claudeStructured(
+      { system: DIRECTIONS_SYSTEM, prompt: buildDirectionsPrompt(req), schema: DirectionDraftSchema, label: "設計方向", before: images, effort: "medium", maxTokens: 16_000 },
+      cbs,
+      { transport: d.transport(), model: d.model, now: d.now },
+    );
+    const specs = normalizeDirectionDrafts(raw, req, offline);
+    const directions = buildDirections(specs, req, { engine: "claude", model, now });
+    cbs.onDelta(directionsSummary(directions));
+    cbs.onLog(`提出 ${directions.length} 個方向（${model}）：${directions.map((x) => `${x.letter}「${x.name}」`).join("、")}`);
+    return { engine: "claude", model, createdAt: now, directions };
+  } catch (err) {
+    if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
+    cbs.onLog(`Claude 無法提出設計方向：${describeError(err)}。改用離線設計師。`);
+    return offlineSet();
   }
 }

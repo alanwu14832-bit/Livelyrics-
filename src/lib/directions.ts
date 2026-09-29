@@ -314,7 +314,12 @@ export function proposalSheet(
   opts: { bandName?: string; moodboard?: readonly MoodImage[]; fontLabel?: (id: string) => string; now?: Date } = {},
 ): ProposalSheet {
   const clip = (s: string, n: number) => {
-    const t = s.replace(/[#*_>`]/g, "").replace(/\s+/g, " ").trim();
+    // Markdown headings and emphasis go; a colour code keeps its "#"
+    const t = s
+      .replace(/(^|\n)\s*#{1,6}\s+/g, "$1")
+      .replace(/[*_>`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     return t.length > n ? `${t.slice(0, n - 1)}…` : t;
   };
   const label = opts.fontLabel ?? ((id: string) => id);

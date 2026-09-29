@@ -20,7 +20,9 @@ import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
 import type { DesignerCallbacks, DesignerDeps } from "@/lib/server/designer";
 import { stageAssets } from "@/lib/asset-scope";
-import type { Asset, BandBible, Lyrics, PipelineEvent, PipelineRecord, PipelineStepId, Project } from "@/lib/types";
+import type { Asset, BandBible, Lyrics, MoodImage, PipelineEvent, PipelineRecord, PipelineStepId, Project } from "@/lib/types";
+import { mergedMoodboard } from "@/lib/moodboard";
+import { loadVisionImages } from "./directions";
 import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
@@ -561,7 +563,17 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
     }
     case "design": {
       const band = await bandContext(project);
+      // the mood board (phase 4): the band's, then the song's; Claude also gets the images themselves
+      const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
+      let moodboardImages: designer.VisionImage[] | undefined;
+      if (moodboard.length && designer.isClaudeConfigured()) {
+        const loaded = await loadVisionImages(project, moodboard, { signal });
+        moodboardImages = loaded.images;
+        if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
+      }
       const input = {
+        moodboard,
+        moodboardImages,
         meta: project.meta,
         lyrics: project.lyrics,
         analysis: project.analysis,
@@ -591,11 +603,11 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
 }
 
 /** The band's bible and library for a project's research / design (empty without a band). */
-async function bandContext(project: Project): Promise<{ bible: BandBible | null; bandName?: string; bandAssets: Asset[] }> {
+async function bandContext(project: Project): Promise<{ bible: BandBible | null; bandName?: string; bandAssets: Asset[]; bandMoodboard?: MoodImage[] }> {
   if (!project.bandId) return { bible: null, bandAssets: [] };
   const band = await getBand(project.bandId).catch(() => null);
   if (!band) return { bible: null, bandAssets: [] };
-  return { bible: band.bible, bandName: band.name, bandAssets: band.assets };
+  return { bible: band.bible, bandName: band.name, bandAssets: band.assets, bandMoodboard: band.moodboard };
 }
 
 async function lyricsStep(run: RunInternal, project: Project, signal: AbortSignal): Promise<StepResult> {

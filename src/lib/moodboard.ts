@@ -22,6 +22,7 @@ export const MOOD_FORMATS_LABEL = "PNG、JPG、WebP、GIF";
 const MAX_SAMPLES = 4096;
 const ITERATIONS = 12;
 const MERGE_DISTANCE = 28;
+const MIN_SHARE = 0.03;
 
 export type Rgb3 = [number, number, number];
 
@@ -191,7 +192,12 @@ export function extractMoodStats(data: ArrayLike<number>, k = 5): MoodStats {
     return [bin.rgb[0] / bin.w, bin.rgb[1] / bin.w, bin.rgb[2] / bin.w] as Rgb3;
   });
   const ws = keys.map((key) => bins.get(key)!.w);
-  const clusters = kmeans(pts, ws, k).slice(0, 6);
+  // colours under 3 % are resampling seams (the blend between two areas), not part of the palette
+  const all = kmeans(pts, ws, k);
+  const kept = all.filter((c) => c.weight >= MIN_SHARE);
+  const top = (kept.length ? kept : all.slice(0, 1)).slice(0, 6);
+  const mass = top.reduce((a, c) => a + c.weight, 0) || 1;
+  const clusters = top.map((c) => ({ hex: c.hex, weight: Math.round((c.weight / mass) * 1000) / 1000 }));
   const n = points.length;
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   return {
@@ -209,13 +215,20 @@ const HEX = /^#[0-9a-f]{6}$/;
 export function sanitizeMoodStats(v: unknown): MoodStats | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const o = v as Record<string, unknown>;
-  const palette = Array.isArray(o.palette) ? o.palette.filter((h): h is string => typeof h === "string").map((h) => h.trim().toLowerCase()).filter((h) => HEX.test(h)).slice(0, 6) : [];
-  if (!palette.length) return undefined;
   const num = (x: unknown, lo: number, hi: number, d: number) => (typeof x === "number" && Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : d);
+  const rawP = Array.isArray(o.palette) ? o.palette : [];
   const rawW = Array.isArray(o.weights) ? o.weights : [];
-  let weights = palette.map((_, i) => num(rawW[i], 0, 1, 1 / palette.length));
+  // colours and their shares stay paired when an entry is dropped
+  const pairs = rawP
+    .map((h, i) => ({ hex: typeof h === "string" ? h.trim().toLowerCase() : "", w: num(rawW[i], 0, 1e6, -1) }))
+    .filter((p) => HEX.test(p.hex))
+    .slice(0, 6);
+  if (!pairs.length) return undefined;
+  const palette = pairs.map((p) => p.hex);
+  const fallback = 1 / pairs.length;
+  let weights = pairs.map((p) => (p.w < 0 ? fallback : p.w));
   const sum = weights.reduce((a, w) => a + w, 0);
-  weights = weights.map((w) => Math.round((sum > 0 ? w / sum : 1 / palette.length) * 1000) / 1000);
+  weights = weights.map((w) => Math.round((sum > 0 ? w / sum : fallback) * 1000) / 1000);
   return { palette, weights, luma: num(o.luma, 0, 1, 0.5), saturation: num(o.saturation, 0, 1, 0.3), warmth: num(o.warmth, -1, 1, 0) };
 }
 

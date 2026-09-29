@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
+import { MoodBoard } from "@/components/moodboard/MoodBoard";
 import { BandArt, bandHref } from "@/components/home/BandShelf";
 import { ProjectArt, validPalette } from "@/components/home/ProjectArt";
 import { PUSH } from "@/components/home/transitions";
@@ -290,6 +291,21 @@ export function BandClient({ id, initialName }: { id: string; initialName?: stri
                 headingId="band-assets-title"
                 pickerRef={pickerRef}
                 onChange={(assets) => setState((s) => (s.kind === "ok" ? { ...s, band: { ...s.band, assets } } : s))}
+              />
+            </section>
+
+            <section className="mt-16" aria-labelledby="band-mood-title">
+              <SectionHeader
+                id="band-mood-title"
+                title="參考圖"
+                count={band.moodboard?.length ?? 0}
+                description="樂團喜歡的畫面、顏色與質感。設計師為這個樂團的每一首歌提出方向時都會參考；它們不會出現在舞台上。"
+              />
+              <MoodBoard
+                owner={{ kind: "band", id: band.id }}
+                images={band.moodboard ?? []}
+                headingId="band-mood-title"
+                onChange={(moodboard) => setState((s) => (s.kind === "ok" ? { ...s, band: { ...s.band, moodboard } } : s))}
               />
             </section>
           </>

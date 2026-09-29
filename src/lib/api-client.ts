@@ -17,6 +17,8 @@ import type {
   BandSummary,
   DesignPlan,
   Lyrics,
+  MoodImage,
+  MoodStats,
   PipelineEvent,
   Project,
   ProjectSummary,
@@ -221,44 +223,7 @@ export const api = {
     input: AssetUploadInput,
     opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
   ): Promise<{ asset: Asset; assets: Asset[] }> {
-    if ((await storageMode()) === "cloud") {
-      const { assetUploadType, uploadToBlob } = await import("./cloud-upload");
-      const { file, ...meta } = input;
-      const type = await assetUploadType(file);
-      const target = owner.kind === "band" ? ({ kind: "band-asset", bandId: owner.id } as const) : ({ kind: "project-asset", projectId: owner.id } as const);
-      // the last bit of the bar is the registration
-      const blob = await uploadToBlob(file, target, type, { signal: opts.signal, onProgress: (p) => opts.onProgress?.(p * 0.97) });
-      const res = await fetch(assetsBase(owner), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...meta, blob, fileName: file.name }),
-        signal: opts.signal,
-      });
-      const body = await json<{ asset: Asset; assets: Asset[] }>(res);
-      opts.onProgress?.(1);
-      return body;
-    }
-    const form = new FormData();
-    const { file, ...meta } = input;
-    form.set("meta", JSON.stringify(meta));
-    form.set("file", file);
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", assetsBase(owner));
-      xhr.responseType = "json";
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && e.total > 0) opts.onProgress?.(Math.min(1, e.loaded / e.total));
-      };
-      xhr.onload = () => {
-        const body = xhr.response as { asset?: Asset; assets?: Asset[]; error?: string } | null;
-        if (xhr.status >= 200 && xhr.status < 300 && body?.asset && body.assets) resolve({ asset: body.asset, assets: body.assets });
-        else reject(new Error(body?.error || `${xhr.status} ${xhr.statusText || "上傳失敗"}`));
-      };
-      xhr.onerror = () => reject(new Error("上傳失敗：無法連線到本機伺服器"));
-      xhr.onabort = () => reject(new DOMException("已取消上傳", "AbortError"));
-      opts.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
-      xhr.send(form);
-    });
+    return uploadToLibrary<{ asset: Asset; assets: Asset[] }>(assetsBase(owner), owner, input, opts, (b) => !!(b as { asset?: unknown })?.asset);
   },
 
   updateAsset: (id: string, assetId: string, patch: Partial<{ name: string; note: string | null; tags: string[] | null; kind: AssetKind }>) =>
@@ -285,6 +250,38 @@ export const api = {
   /** project: `plan` is the updated plan; band: every song and show look that showed it is cleared on the server */
   deleteOwnedAsset: (owner: AssetOwner, assetId: string) =>
     fetch(`${assetsBase(owner)}/${assetId}`, { method: "DELETE" }).then((r) => json<{ ok: true; assets: Asset[]; plan?: DesignPlan | null }>(r)),
+
+  // ---- mood board (參考圖, phase 4) -------------------------------------------
+
+  /** a song's or a band's mood board */
+  listMoodboard: (owner: AssetOwner) => fetch(moodBase(owner)).then((r) => json<{ images: MoodImage[] }>(r)),
+
+  moodImageUrl: (owner: AssetOwner, imageId: string) => `${moodBase(owner)}/${imageId}`,
+
+  /** `file` is the browser-downscaled image (src/lib/moodboard-client.ts), `stats` its measured colours */
+  uploadMoodImage(
+    owner: AssetOwner,
+    input: MoodUploadInput,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ image: MoodImage; images: MoodImage[] }> {
+    return uploadToLibrary<{ image: MoodImage; images: MoodImage[] }>(moodBase(owner), owner, input, opts, (b) => !!(b as { image?: unknown })?.image);
+  },
+
+  updateMoodImage: (owner: AssetOwner, imageId: string, patch: { note?: string | null; name?: string }) =>
+    fetch(`${moodBase(owner)}/${imageId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).then((r) =>
+      json<{ image: MoodImage; images: MoodImage[] }>(r),
+    ),
+
+  deleteMoodImage: (owner: AssetOwner, imageId: string) =>
+    fetch(`${moodBase(owner)}/${imageId}`, { method: "DELETE" }).then((r) => json<{ ok: true; images: MoodImage[] }>(r)),
+
+  // ---- design directions (設計方向, phase 4) ----------------------------------
+
+  /** 提出設計方向 / 修改 / 採用 / 復原 / 退回 / 意見 (see /api/projects/[id]/directions) */
+  directions: (id: string, body: DirectionsAction, signal?: AbortSignal) =>
+    fetch(`/api/projects/${id}/directions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }).then((r) =>
+      json<{ project: Project; engine?: "claude" | "offline"; logs?: string[] }>(r),
+    ),
 
   // ---- bands ----------------------------------------------------------------
 
@@ -361,7 +358,85 @@ function assetsBase(owner: AssetOwner): string {
   return owner.kind === "band" ? `/api/bands/${owner.id}/assets` : `/api/projects/${owner.id}/assets`;
 }
 
+function moodBase(owner: AssetOwner): string {
+  return owner.kind === "band" ? `/api/bands/${owner.id}/moodboard` : `/api/projects/${owner.id}/moodboard`;
+}
+
+/**
+ * Upload into a library route (media or mood board, same contract). Local: multipart with progress
+ * through XMLHttpRequest. Cloud: the file goes straight to Vercel Blob (progress from the SDK),
+ * then it is registered with the route as JSON.
+ */
+async function uploadToLibrary<T>(
+  base: string,
+  owner: AssetOwner,
+  input: { file: File } & Record<string, unknown>,
+  opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal },
+  ok: (body: unknown) => boolean,
+): Promise<T> {
+  if ((await storageMode()) === "cloud") {
+    const { assetUploadType, uploadToBlob } = await import("./cloud-upload");
+    const { file, ...meta } = input;
+    const type = await assetUploadType(file);
+    const target = owner.kind === "band" ? ({ kind: "band-asset", bandId: owner.id } as const) : ({ kind: "project-asset", projectId: owner.id } as const);
+    // the last bit of the bar is the registration
+    const blob = await uploadToBlob(file, target, type, { signal: opts.signal, onProgress: (p) => opts.onProgress?.(p * 0.97) });
+    const res = await fetch(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...meta, blob, fileName: file.name }),
+      signal: opts.signal,
+    });
+    const body = await json<T>(res);
+    opts.onProgress?.(1);
+    return body;
+  }
+  const form = new FormData();
+  const { file, ...meta } = input;
+  form.set("meta", JSON.stringify(meta));
+  form.set("file", file);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", base);
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) opts.onProgress?.(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onload = () => {
+      const body = xhr.response as ({ error?: string } & Record<string, unknown>) | null;
+      if (xhr.status >= 200 && xhr.status < 300 && ok(body)) resolve(body as T);
+      else reject(new Error(body?.error || `${xhr.status} ${xhr.statusText || "上傳失敗"}`));
+    };
+    xhr.onerror = () => reject(new Error("上傳失敗：無法連線到本機伺服器"));
+    xhr.onabort = () => reject(new DOMException("已取消上傳", "AbortError"));
+    opts.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(form);
+  });
+}
+
+export interface MoodUploadInput {
+  /** the downscaled image */
+  file: File;
+  width: number;
+  height: number;
+  name?: string;
+  note?: string;
+  stats?: MoodStats;
+  [key: string]: unknown;
+}
+
+export type DirectionsAction =
+  | { action: "generate"; instruction?: string }
+  | { action: "revise"; directionId: string; text: string }
+  | { action: "select"; directionId: string }
+  | { action: "undo" }
+  | { action: "status"; directionId: string; status: "rejected" | "proposed" }
+  | { action: "comment"; directionId: string; text: string }
+  | { action: "uncomment"; directionId: string; commentId: string }
+  | { action: "clear" };
+
 export interface AssetUploadInput {
+  [key: string]: unknown;
   file: File;
   /** pixel size measured in the browser (src/lib/media-probe.ts) */
   width: number;
