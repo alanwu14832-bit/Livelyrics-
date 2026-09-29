@@ -147,24 +147,29 @@ vec3 legibleBg(vec3 bg, vec3 ink, float soft, float gain) {
   return legToSrgb(bl);
 }
 // the readable glyphs dilated: rings of ink / accent taps plus the painter's halo (which already
-// follows each glyph's size; giant display glyphs have no halo, the rings cover them)
-float legibleCover(vec2 uv, float halo) {
+// follows each glyph's size; giant display glyphs have no halo, the rings cover them). x: around
+// the ink and accent plates (the picture), y: around the ink alone (the type's own accent layers —
+// a glitch echo, an overprint — behind the readable letters)
+vec2 legibleCover(vec2 uv, float halo) {
   float r1 = ${f(LEGIBLE_RING[0])} * min(uRes.x, uRes.y);
   float r2 = ${f(LEGIBLE_RING[1])} * min(uRes.x, uRes.y);
   vec2 px = 1.0 / uRes;
   float m = 0.0;
-  // ink and accent plates (the lyric and its labels, numbers and brackets): 8 taps on the inner
-  // ring, 12 on the outer (so a thin stroke between two outer taps is not missed)
+  float mi = 0.0;
+  // 8 taps on the inner ring, 12 on the outer (so a thin stroke between two outer taps is not missed)
   for (int i = 0; i < 8; i++) {
     float an = float(i) * 0.785398;
     vec4 t1 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r1 * px, 0.0, 1.0));
     m = max(m, max(t1.r, t1.g));
+    mi = max(mi, t1.r);
   }
   for (int i = 0; i < 12; i++) {
     float an = float(i) * 0.523599 + 0.26;
     vec4 t2 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r2 * px, 0.0, 1.0));
     m = max(m, max(t2.r, t2.g) * 0.85);
+    mi = max(mi, t2.r * 0.85);
   }
-  return max(smoothstep(0.04, 0.45, m), smoothstep(0.02, 0.3, halo));
+  float h = smoothstep(0.02, 0.3, halo);
+  return vec2(max(smoothstep(0.04, 0.45, m), h), smoothstep(0.04, 0.45, mi));
 }
 `;

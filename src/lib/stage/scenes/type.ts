@@ -231,8 +231,9 @@ void main() {
   float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, sl)), 0.0, 0.96) * haloScale;
   col = mix(col, uFill * 0.55 + col * 0.12, halo * haloK * (1.0 - uGlow));
   // the legibility guarantee: whatever the picture does under the words, the ink reads against it
-  // (every relation: plain, lit, the uncovered part of behind, and knockout's two tones)
-  float cover = legibleCover(tuv, haloRaw) * a * keepF;
+  // (every relation: plain, lit, the uncovered part of behind, knockout)
+  vec2 covers = legibleCover(tuv, haloRaw) * a * keepF;
+  float cover = covers.x;
   // knockout: the words cut a clean window out of the image's shapes — around the letters the
   // picture gives way to the background tone (a printed knockout), the letters keep the lyric colour
   if (uRelation > 0.5 && uRelation < 1.5) col = mix(col, uFill * 0.9 + col * 0.06, cover * 0.9);
@@ -259,6 +260,11 @@ void main() {
     acc *= 1.0 - uOverprint * 0.35;
   }
   col = mix(col, uAccent, acc);
+  // the type's own accent layers (a glitch echo stack, an overprint) behind the readable letters
+  // meet the same contrast (further out they keep their colour); solid accents — labels, numbers,
+  // rules, brackets — are type to read themselves and are left alone
+  float ghost = covers.y * min(1.0, acc * 3.0) * (1.0 - smoothstep(0.7, 0.95, acc));
+  if (ghost > 0.001) col = mix(col, legibleBg(col, inkC, uSoften, uGain), ghost);
   // the RGB split stays a fringe: the base glyph keeps (most of) the ink in every channel
   vec3 inkM = vec3(max(inkR, ink * 0.88), ink, max(inkB, ink * 0.88));
   col = col * (1.0 - inkM) + inkC * inkM;
