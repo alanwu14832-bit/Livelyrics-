@@ -51,6 +51,11 @@ vec3 scene(vec2 fc) {
   float gap = zoneCenter().x < 0.5 ? cuv.x - uZone.z : uZone.x - cuv.x;
   float thin = aspect() < 0.8 ? 1.0 : step(hash11(id * 2.1 + floor(sy) * 1.7), gap * 4.0 + 0.2);
   keepSeg *= mix(thin, 1.0, open);
+  // the words' block itself is cut clean (a printed poster's white space): no bar crosses it in the
+  // verse; in the chorus only a few thin segments run through it and the words are cut out of them
+  float zin = zoneMask(uv, 0.01);
+  float through = open * step(0.72, hash11(id * 5.3 + floor(sy) + 0.5)) * step(within, duty * 0.55);
+  keepSeg *= 1.0 - zin * (1.0 - through);
   float bar = step(within, duty) * present * segOn * keepSeg;
   float field = keepSeg;
 

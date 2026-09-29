@@ -2,17 +2,17 @@ import type { ExampleProgram } from "./types";
 
 // 碑: post-rock, long builds. One dark slab standing in fog beside the words, light held behind
 // it. The build lets the light leak around its edges; the chorus opens it into rays; the bridge
-// splits the slab down the middle. In the chorus the words pass behind the slab's edge.
+// splits the slab down the middle. In the chorus the rays light the words beside the slab.
 export const MONOLITH: ExampleProgram = {
   id: "monolith",
   title: "碑",
-  concept: "霧裡立著一塊黑色的石碑，光一直被它擋在後面；漸強時光從邊緣滲出來，副歌變成放射的光束、字從石碑後面走過，橋段石碑從中間裂開。",
+  concept: "霧裡立著一塊黑色的石碑，光一直被它擋在後面；漸強時光從邊緣滲出來，副歌變成放射的光束、照亮碑旁的字，橋段石碑從中間裂開。",
   brief: "後搖滾，約 90 BPM，長篇漸強、沉默與爆發、紀念與失去",
   byKind: {
     intro: { mode: 0, params: [0.1, 0.2, 0.1, 0.2], zone: { x: 0.08, y: 0.2, w: 0.36, h: 0.5 }, relation: "plain", note: "只有霧和石碑的輪廓" },
     verse: { mode: 0, params: [0.3, 0.35, 0.3, 0.35], zone: { x: 0.08, y: 0.18, w: 0.38, h: 0.52 }, relation: "plain", note: "光藏在碑後，字在左邊的霧裡" },
     "pre-chorus": { mode: 1, params: [0.55, 0.55, 0.55, 0.55], zone: { x: 0.08, y: 0.18, w: 0.4, h: 0.52 }, relation: "plain", note: "光從碑的邊緣滲出，塵埃上升" },
-    chorus: { mode: 2, params: [0.9, 0.8, 0.9, 0.7], zone: { x: 0.1, y: 0.2, w: 0.46, h: 0.48 }, relation: "behind", note: "光束放射，字從石碑後面走過" },
+    chorus: { mode: 2, params: [0.9, 0.8, 0.9, 0.7], zone: { x: 0.1, y: 0.2, w: 0.46, h: 0.48 }, relation: "lit", note: "光束放射，照亮碑旁的字" },
     bridge: { mode: 3, params: [0.6, 0.5, 0.6, 0.4], zone: { x: 0.08, y: 0.18, w: 0.36, h: 0.5 }, relation: "plain", note: "石碑裂開，一道光從中間穿過" },
     outro: { mode: 0, params: [0.15, 0.2, 0.15, 0.2], zone: { x: 0.08, y: 0.22, w: 0.36, h: 0.46 }, relation: "plain", note: "光退回碑後" },
   },
@@ -29,11 +29,9 @@ vec3 scene(vec2 fc) {
   float build = uParams.x;
   float light = uParams.z;
   float fy = floorY();
-  // the slab stands just beside the words, overlapping the zone's inner edge a little
+  // the slab stands beside the words with clear air between them (it never touches their block)
   bool zoneLeft = zoneCenter().x < 0.5;
-  // in the chorus it steps into the words' block, so they pass behind its edge
-  float inset = step(1.5, uMode) * (1.0 - step(2.5, uMode)) * 0.05;
-  float sxUv = aspect() < 0.8 ? 0.5 : (zoneLeft ? uZone.z + 0.035 - inset : uZone.x - 0.035 + inset);
+  float sxUv = aspect() < 0.8 ? 0.5 : (zoneLeft ? uZone.z + 0.06 : uZone.x - 0.06);
   vec2 base = uvToP(vec2(sxUv, fy));
   float halfW = 0.075;
   float h = aspect() < 0.8 ? 0.34 : 0.52;
@@ -76,7 +74,7 @@ vec3 scene(vec2 fc) {
   // the seam (bridge): light pours through the split
   float seam = step(2.5, uMode) * exp(-abs(q.x) * 90.0) * step(abs(q.y), h * 0.5);
   col += lc * seam * (0.8 + 0.4 * kick());
-  // the slab is the foreground the words pass behind
+  // the slab is the foreground (the words pass behind it if the section is set to 在形狀後面)
   gFront = slab;
   // its reflection on the wet floor
   if (uv.y < fy) {

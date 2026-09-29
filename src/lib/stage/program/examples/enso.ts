@@ -12,7 +12,7 @@ export const ENSO: ExampleProgram = {
     intro: { mode: 0, params: [0.35, 0.3, 0.2, 0.3], zone: { x: 0.1, y: 0.2, w: 0.36, h: 0.56 }, relation: "plain", note: "墨從右下角暈開" },
     verse: { mode: 0, params: [0.62, 0.4, 0.35, 0.4], zone: { x: 0.1, y: 0.16, w: 0.36, h: 0.6 }, relation: "plain", note: "圓畫到一半，停在字的右邊" },
     "pre-chorus": { mode: 1, params: [0.85, 0.55, 0.5, 0.5], zone: { x: 0.1, y: 0.16, w: 0.36, h: 0.6 }, relation: "plain", note: "這一筆快要畫完" },
-    chorus: { mode: 2, params: [1.0, 0.75, 0.8, 0.6], zone: { x: 0.33, y: 0.26, w: 0.34, h: 0.48 }, relation: "knockout", note: "圓把字圈起來，字從墨裡挖空" },
+    chorus: { mode: 2, params: [1.0, 0.75, 0.8, 0.6], zone: { x: 0.36, y: 0.32, w: 0.28, h: 0.36 }, relation: "knockout", note: "圓把字圈起來，字從墨裡挖空" },
     bridge: { mode: 3, params: [0.7, 0.5, 0.5, 0.4], zone: { x: 0.1, y: 0.18, w: 0.36, h: 0.56 }, relation: "plain", note: "圓散成漣漪" },
     outro: { mode: 0, params: [0.3, 0.3, 0.25, 0.25], zone: { x: 0.1, y: 0.2, w: 0.36, h: 0.56 }, relation: "plain", note: "只剩一個小小的朱紅日" },
   },
@@ -49,13 +49,20 @@ vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
   float closeUp = step(1.5, uMode) * (1.0 - step(2.5, uMode));
-  // the circle: beside the words (verse), around them (chorus)
+  // the circle: beside the words (verse), around them (chorus) — only when a circle around their
+  // block still fits the frame; otherwise (a tall frame's band) it closes beside them
   vec2 zc = zoneCenter();
-  vec2 opp = aspect() < 0.8 ? vec2(0.5, 1.0 - zc.y) : vec2(zc.x < 0.5 ? 0.7 : 0.3, 0.5);
+  float zr = 0.5 * length((uZone.zw - uZone.xy) * uRes / min(uRes.x, uRes.y));
+  closeUp *= step(0.8, aspect()) * step(zr * 1.34 + 0.01, 0.47);
+  // a tall frame: the circle takes the larger free part above or below the words' band, sized to it
+  float above = 1.0 - uZone.w;
+  float below = uZone.y;
+  vec2 opp = aspect() < 0.8 ? vec2(0.5, above > below ? 1.0 - above * 0.5 : below * 0.5) : vec2(zc.x < 0.5 ? 0.72 : 0.28, 0.5);
+  float rTall = min(0.3, 0.5 * max(above, below) * uRes.y / min(uRes.x, uRes.y) * 0.78);
   vec2 cUv = mix(opp, zc, closeUp);
   vec2 c = uvToP(cUv);
-  float zr = 0.5 * max((uZone.z - uZone.x) * aspect(), uZone.w - uZone.y);
-  float r = mix(aspect() < 0.8 ? 0.3 : 0.26, zr * 1.05, closeUp);
+  // around the words: the stroke's inner edge clears the corners of their block (half its diagonal)
+  float r = mix(aspect() < 0.8 ? rTall : 0.26, zr * 1.34 + 0.01, closeUp);
   // the stroke is written across the section (the first beats land the brush)
   // (the chorus lands the brush hard: a third of the circle on the first beats)
   float start = mix(0.08, 0.35, closeUp);

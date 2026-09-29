@@ -996,7 +996,8 @@ export class StageRenderer {
       this.drawSceneLayer(req, sceneTarget);
       this.drawMedia(mediaProg, sceneTarget, layers, req.media!, out);
     } else this.drawSceneLayer(req, out);
-    if (under && typeProg && type) this.drawType(typeProg, under, type, dest, false);
+    // the legibility guarantee aims at the contrast after the safety pass (its soften and cap)
+    if (under && typeProg && type) this.drawType(typeProg, under, type, dest, false, req.safety?.soften ?? 0, req.safety?.gain ?? 1);
     return true;
   }
 

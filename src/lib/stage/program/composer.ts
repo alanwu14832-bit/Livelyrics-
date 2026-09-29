@@ -350,6 +350,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     vec2 mp = vec2(cos(a), sin(a)) * rr;
     moons += fill(length(q - mp) - 0.006) * on;
   }
+  // the orbits fade out where they would cross the words' block
+  lines *= 1.0 - zoneMask(uv, 0.05) * 0.9;
+  moons *= 1.0 - zoneMask(uv, 0.02);
   col += lc * lines * (0.5 + 0.6 * light);
   col = mix(col, lc, sat(moons));
   vec2 pq = p - c;
@@ -436,6 +439,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   vec2 cuv = ((rot(-ang) * cr - mo()) * min(uRes.x, uRes.y) + 0.5 * uRes) / uRes;
   float inZone = step(0.5, zoneMask(cuv, 0.0));
   float keep = mix(1.0 - inZone, 1.0 - inZone * step(0.5, hash11(id * 5.3 + floor(sy))), open);
+  // the words' block is cut clean: nothing crosses it in the verse, a few thin segments in the chorus
+  float through = open * step(0.72, hash11(id * 5.3 + floor(sy) + 0.5)) * step(fract(s), duty * 0.55);
+  keep *= 1.0 - zoneMask(uv, 0.01) * (1.0 - through);
   float bar = step(fract(s), duty) * present * step(0.2, fract(sy)) * keep;
   vec3 col = uBg * 0.92;
   float accent = step(K_ACC - 0.5, mod(id, K_ACC));
@@ -461,9 +467,12 @@ float brushAt(float t, float off, float w) {
 vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float closeUp = step(1.5, uMode) * (1.0 - step(2.5, uMode));
   vec2 zc = zoneCenter();
-  vec2 c = toP(mix(focalUv(), zc, closeUp * (1.0 - K_SHAPE))) + mo();
-  float zr = 0.5 * max((uZone.z - uZone.x) * aspect(), uZone.w - uZone.y);
-  float R = mix(0.24 * K_SCALE, zr * 1.05, closeUp * (1.0 - K_SHAPE));
+  // the circle closes around the words only when its inner edge clears their block's corners and
+  // it still fits the frame; otherwise it closes on the far side
+  float zr = 0.5 * length((uZone.zw - uZone.xy) * uRes / min(uRes.x, uRes.y));
+  float around = closeUp * (1.0 - K_SHAPE) * step(0.8, aspect()) * step(zr * 1.34 + 0.01, 0.47);
+  vec2 c = toP(mix(focalUv(), zc, around)) + mo() * (1.0 - around);
+  float R = mix(0.24 * K_SCALE, zr * 1.34 + 0.01, around);
   float sweep = min(uParams.x, 0.08 + 0.92 * smoothstep(0.0, 0.7, uSectionProgress)) * 0.97;
   vec3 col = uBg * (0.9 + 0.1 * vnoise(fc * 0.02));
   float wash = fbm(uv * vec2(aspect(), 1.0) * 2.0 + vec2(T() * 0.01, 0.0));
@@ -486,6 +495,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
   }
+  // the stroke lifts off the paper before it would cross the words' block
+  ink *= 1.0 - zoneMask(uv, 0.04) * (1.0 - around);
   col = mix(col, mix(uInk, vec3(1.0), 0.08) * (0.8 + 0.2 * uParams.z), ink);
   vec2 sun = c + vec2(R * 0.55, -R * 0.3);
   col = mix(col, uAcc, fill(length(p - sun) - (0.026 + 0.01 * uParams.z)));

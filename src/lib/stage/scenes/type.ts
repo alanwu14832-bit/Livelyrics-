@@ -11,7 +11,11 @@
 // text), glow (the halo turned to light), knockout (the frame filled, the scene seen only through
 // the window glyphs, lifted so the letters read), overprint (a misregistered accent plate, screen).
 // uLayer = 1 renders the type alone over transparent (premultiplied) for the export's lyric layer.
+// 可讀性保證 (phase 7): for every relation the picture under a dilated mask of the readable glyphs
+// is attenuated until the lyric colour meets the contrast target (legibility.ts).
 // Common GLSL ES 1.00 / 3.00 subset.
+
+import { LEGIBILITY_GLSL } from "./legibility";
 
 export const TYPE_UNIFORMS = [
   "uRes",
@@ -99,6 +103,7 @@ vec3 softenC(vec3 x, float s) {
 }
 
 vec4 plates(vec2 uv) { return TEX(uType, clamp(uv, 0.0, 1.0)); }
+${LEGIBILITY_GLSL}
 
 void main() {
   vec2 fc = gl_FragCoord.xy;
@@ -154,9 +159,11 @@ void main() {
   }
   vec4 sceneA = TEX(uScene, uv);
   vec3 scene = sceneA.rgb;
+  float keepF = 1.0;
+  float haloRaw = halo;
   // behind: the scene program's foreground shape (1 - alpha) covers the words
   if (uRelation > 1.5 && uRelation < 2.5) {
-    float keepF = 1.0 - smoothstep(0.1, 0.9, 1.0 - sceneA.a);
+    keepF = 1.0 - smoothstep(0.1, 0.9, 1.0 - sceneA.a);
     ink *= keepF;
     inkR *= keepF;
     inkB *= keepF;
@@ -210,13 +217,7 @@ void main() {
   float sl = luma(scene);
   vec3 inkC = uInk;
   float haloScale = 1.0;
-  if (uRelation > 0.5 && uRelation < 1.5) {
-    // knockout: where the words cross the image's bright shapes they are cut out of it (the
-    // background tone); over the dark they stay the lyric colour, so they always read
-    float cut = smoothstep(0.34, 0.58, sl);
-    inkC = mix(uInk, uFill * 0.9 + 0.02, cut);
-    haloScale = 1.0 - cut * 0.85;
-  } else if (uRelation > 2.5) {
+  if (uRelation > 2.5) {
     // lit: the image lights the words (the letters take the hue and light of what is behind them)
     float m = max(max(scene.r, scene.g), max(scene.b, 0.04));
     vec3 hueC = scene / m;
@@ -224,10 +225,18 @@ void main() {
     inkC = mix(uInk, mix(uInk, hueC, 0.55) * (0.82 + 0.3 * lightK), 0.35 + 0.45 * lightK);
     inkC = mix(inkC, vec3(1.0), 0.12 * lightK);
   }
+  inkC = legibleInk(inkC, uSoften, uGain);
   // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
   // where the picture is bright (light type on a light scene still reads from the back of the hall)
   float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, sl)), 0.0, 0.96) * haloScale;
   col = mix(col, uFill * 0.55 + col * 0.12, halo * haloK * (1.0 - uGlow));
+  // the legibility guarantee: whatever the picture does under the words, the ink reads against it
+  // (every relation: plain, lit, the uncovered part of behind, and knockout's two tones)
+  float cover = legibleCover(tuv, haloRaw) * a * keepF;
+  // knockout: the words cut a clean window out of the image's shapes — around the letters the
+  // picture gives way to the background tone (a printed knockout), the letters keep the lyric colour
+  if (uRelation > 0.5 && uRelation < 1.5) col = mix(col, uFill * 0.9 + col * 0.06, cover * 0.9);
+  if (cover > 0.001) col = mix(col, legibleBg(col, inkC, uSoften, uGain), cover);
   // glow: the halo turned into light (bloom entrances, 光; a lit relation glows a little)
   col += inkC * halo * (uGlow * 0.55 + (uRelation > 2.5 ? 0.16 : 0.0));
   // knockout: the frame fills with the background, the scene is seen only through the glyphs
@@ -250,7 +259,8 @@ void main() {
     acc *= 1.0 - uOverprint * 0.35;
   }
   col = mix(col, uAccent, acc);
-  vec3 inkM = vec3(inkR, ink, inkB);
+  // the RGB split stays a fringe: the base glyph keeps (most of) the ink in every channel
+  vec3 inkM = vec3(max(inkR, ink * 0.88), ink, max(inkB, ink * 0.88));
   col = col * (1.0 - inkM) + inkC * inkM;
   col = mix(col, uSpot, seal);
   col += grain * max(ink, acc);

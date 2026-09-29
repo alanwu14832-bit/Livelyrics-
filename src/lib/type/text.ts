@@ -82,9 +82,39 @@ const LEXICON = new Set(
     "理由 意義 朋友 家人 情人 陌生 少年 少女 孩子 大人 時代 世代 焦慮 憤怒 吶喊 呼吸 心臟 胸口 淚水 微笑 擁抱 告別 再見 回家 流浪 旅行 奔跑 飛翔 墜落 " +
     "燃燒 發光 閃耀 沉默 安靜 喧囂 孤獨 瘋狂 清醒 迷失 尋找 找到 放手 抓住 忘記 記得 原諒 後悔 承諾 盡頭 開始 結束 最後 最初 從前 以後 現在 此刻 瞬間 " +
     "一生 交給 寫進 直到 就算 如果 雖然 但是 因為 所以 還是 已經 終於 突然 可是 然後 只是 就是 還有 不是 沒有 可以 應該 慢慢 輕輕 靜靜 深深 大聲 這個 那個 " +
-    "每一 我們 你們 他們 她們 自己 大家 一下 一點 一個 一次 一樣 一直 起來 下去 出來 回來 過去 不要 不會 不能 不再"
+    "每一 我們 你們 他們 她們 自己 大家 一下 一點 一個 一次 一樣 一直 起來 下去 出來 回來 過去 不要 不會 不能 不再 " +
+    // compounds with a bound character: 之間／時間, 開往／前往 (a row never breaks before 間 or 往 here)
+    "之間 之中 之後 之前 之外 之上 之下 時間 空間 人間 世間 中間 夜間 瞬間 房間 開往 前往 通往 飛往 駛往 去往 嚮往 以往 往事 " +
+    "巴士 潮汐 霓虹 公路 海邊 海岸 岸邊 海浪 浪花 沙灘 月光 星光 燈光 街燈 路燈 車窗 夜行 雨夜 下雨 大雨 雨傘 月台 車廂 列車 火車 公車 電車 " +
+    "耳機 螢幕 訊號 噪音 天際 光線 影子 黎明 日落 日出 夕陽 霧氣 石碑 紀念 失去 沉睡 醒來 燈塔 遠處 深處 身邊 心裡 夢裡 風中 雨中 光芒"
   ).split(" "),
 );
+/** Characters bound to both neighbours (潮汐「之」間, 夢想之城): a row never breaks on either side. */
+const BOUND = new Set([..."之"]);
+
+/** Length of the run of CJK units through index `i`, going backwards (dir −1) or forwards (+1). */
+function cjkRun(units: readonly TextUnit[], i: number, dir: 1 | -1): number {
+  let n = 0;
+  for (let k = i; k >= 0 && k < units.length && units[k].kind === "cjk"; k += dir) n++;
+  return n;
+}
+
+/** Breaking between units i and i + 1 would split a word (a known compound, a bound character). */
+export function splitsWord(units: readonly TextUnit[], i: number): boolean {
+  const a = units[i];
+  const b = units[i + 1];
+  if (!a || !b || a.kind !== "cjk" || b.kind !== "cjk") return false;
+  if (BOUND.has(a.text) || BOUND.has(b.text)) return true;
+  return LEXICON.has(a.text + b.text);
+}
+
+/** Breaking between units i and i + 1 would leave a one-character fragment of a run (夜行巴士 開｜往海). */
+export function leavesFragment(units: readonly TextUnit[], i: number): boolean {
+  const a = units[i];
+  const b = units[i + 1];
+  if (!a || !b || a.kind !== "cjk" || b.kind !== "cjk") return false;
+  return cjkRun(units, i, -1) === 1 || cjkRun(units, i + 1, 1) === 1;
+}
 /** Words that never become the featured word (conjunctions, adverbs, pronouns, measure words). */
 const NOT_KEY = new Set(
   "直到 就算 如果 雖然 但是 因為 所以 還是 已經 終於 突然 可是 然後 只是 就是 還有 不是 沒有 可以 應該 慢慢 輕輕 靜靜 深深 這個 那個 每一 我們 你們 他們 她們 自己 大家 一下 一點 一個 一次 一樣 一直 起來 下去 出來 回來 過去 不要 不會 不能 不再".split(" "),
@@ -120,12 +150,24 @@ function cjkCount(lt: LineText, a: number, b: number): number {
 
 /** Trim a range to at most `max` CJK characters (keeping the start). */
 function clipRange(lt: LineText, [a, b]: [number, number], max: number): [number, number] {
+  const units = lt.units;
+  const total = cjkCount(lt, a, b);
+  if (total <= max) return [a, b];
+  // a word one character over the limit stays whole (潮汐之間 is the featured word, not 潮汐之)
+  const spaced = units.slice(a, b).some((u) => u.kind !== "cjk");
+  if (!spaced && total <= max + 1) return [a, b];
+  // else the longest start of at most `max` characters that ends between words
   let n = 0;
+  let cut = -1;
+  let hard = -1;
   for (let i = a; i < b; i++) {
-    if (lt.units[i].kind === "cjk") n++;
-    if (n > max) return [a, i];
+    if (units[i].kind === "cjk") n++;
+    if (n > max) break;
+    hard = i + 1;
+    if (i + 1 < b && !splitsWord(units, i) && !(n === 1 && units[i + 1]?.kind === "cjk")) cut = i + 1;
   }
-  return [a, b];
+  if (cut > a) return [a, cut];
+  return [a, hard > a ? hard : a + 1];
 }
 
 /**
@@ -188,6 +230,10 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
       else if (known) score += 0.4;
       if (!f0 && !f1 && !NOT_KEY.has(pair)) clean = true;
       if (i + 2 === pb) score += 1.4; // phrase-final nouns carry the image (城市的「邊緣」)
+      // never half of a compound (開「往海」, 潮汐「之間」 cut from its 潮汐)
+      if (i > pa && splitsWord(units, i - 1)) score -= 2.5;
+      if (i + 2 < pb && splitsWord(units, i + 1)) score -= 2.5;
+      if (BOUND.has(u0.text) || BOUND.has(u1.text)) score -= 2.5;
       // with word timing: a whole word beats two halves of two words
       if (words.size) score += wordEdge(i, pa, pb) && wordEdge(i + 2, pa, pb) ? 0.9 : words.has(i + 1) ? -0.9 : 0;
       if (!best || score > best.score) best = { a: i, b: i + 2, score };
@@ -361,15 +407,18 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     if (before.kind === "space" || after.kind === "space") return -2.4;
     if (before.kind === "punct") return -2;
     if ((before.kind === "latin") !== (after.kind === "latin")) return -0.8;
-    // a particle stays with the word it follows; a known word stays whole
+    // a particle stays with the word it follows; a known word or a bound character stays whole
+    // (潮汐之間, 開往) whatever the word timing says (it may be per character)
     if (after.kind === "cjk" && ATTACH_LEFT.has(after.text)) return 4.5;
+    const at = atoms[k - 1][atoms[k - 1].length - 1];
+    // (both cost more than an overflowing row: the caller then sets the type a little smaller)
+    if (splitsWord(units, at)) return 2000;
+    // a one-character fragment of a phrase is left behind (夜行巴士 開｜往海的方向)
+    const frag = leavesFragment(units, at) ? 60 : 0;
     const ws = o.wordStarts;
-    if (ws && ws.size) return ws.has(atoms[k][0]) ? -1.3 : 4.5;
-    if (before.kind === "cjk" && after.kind === "cjk") {
-      if (LEXICON.has(before.text + after.text)) return 4.5;
-      if (BREAK_BEFORE.has(after.text)) return -0.6;
-    }
-    return 0.6;
+    if (ws && ws.size) return (ws.has(atoms[k][0]) ? -1.3 : 4.5) + frag;
+    if (before.kind === "cjk" && after.kind === "cjk" && BREAK_BEFORE.has(after.text)) return -0.6 + frag;
+    return 0.6 + frag;
   };
   const cjkIn = (idx: number[]) => idx.filter((i) => units[i].kind === "cjk" || units[i].kind === "latin").length;
   let best: { cost: number; rows: number[][] } | null = null;
@@ -404,14 +453,20 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     if (dp[rows][n] === INF) continue;
     const splits: number[][] = [];
     let k = n;
+    let torn = false;
     for (let r = rows; r >= 1; r--) {
       const j = back[r][k];
       splits.unshift(rowOf(j, k));
+      if (j > 0) {
+        const at = atoms[j - 1][atoms[j - 1].length - 1];
+        if (splitsWord(units, at) || leavesFragment(units, at)) torn = true;
+      }
       k = j;
     }
     const fits = splits.every((row) => o.width(row) <= o.max + 1e-6);
-    // fewer rows are better when they fit; a split that overflows only wins when nothing fits
-    const scored = dp[rows][n] + (rows - 2) * 2.5 + (fits ? 0 : 1000);
+    // fewer rows are better when they fit; a split that overflows (or tears a word) only wins when
+    // nothing fits cleanly — between those, a slightly overflowing row beats a torn word
+    const scored = dp[rows][n] + (rows - 2) * 2.5 + (fits && !torn ? 0 : 1000);
     if (!best || scored < best.cost) best = { cost: scored, rows: splits.filter((r) => r.length) };
   }
   return best ? best.rows : [whole];

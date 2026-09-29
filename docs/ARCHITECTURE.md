@@ -927,12 +927,38 @@ uniform（全部由系統提供，不能自己宣告）：
   narrows the readable area to the zone (`makeFrame(canvas, params, zone)`: the grid, margins and the
   recipes' sides / bands then live inside it; the size reference stays the canvas', so a small zone
   means smaller type, not a new scale; the ultra-wide view is not used with a zone); `fitInto` keeps
-  readable text inside it. The type pass (`scenes/type.ts`, `uRelation`): knockout = over the image's
-  bright shapes the letters take the background tone (over the dark they keep the lyric colour, so they
-  always read) and the halo backs off; behind = the program's `gFront` hides the words where the
+  readable text inside it. The type pass (`scenes/type.ts`, `uRelation`): knockout = the words cut a
+  clean window out of the image's shapes: under the dilated glyph mask the picture gives way to the
+  background tone (a printed knockout) and the letters keep the lyric colour (an earlier version
+  flipped the letters to the background tone over bright shapes; over busy stripes that left words
+  half dark, half light and unreadable); behind = the program's `gFront` hides the words where the
   foreground covers them; lit = the letters take the hue and light of the image behind them, with a
   little glow; plain = as before. The program can react to the words through `typeMask` /
   `typeGlow` / `uTypeBox`.
+- **Legibility guarantee** (`scenes/legibility.ts`, in the type pass for every relation and every
+  scene, built-in or program). A dilated mask of the readable glyphs (two rings of ink / accent taps
+  at 0.6 % and 1.4 % of the output's shorter side, plus the painter's halo) marks the picture around
+  the letters; there the picture is attenuated in linear light until the lyric colour meets
+  `LEGIBLE_TARGET` (5.4 : 1 WCAG, margin over the required 4.5 for the mask's soft edge and grain) as
+  it leaves the wall — the LED safety pass that follows (soften shoulder, brightness cap) is part of
+  the computation (`uSoften` / `uGain` in the type pass): light ink darkens it, dark ink lifts it; an
+  ink that could reach the target over neither black nor the capped white (a mid-grey, a mid pink) is
+  lifted first (`legibleInk`). The RGB
+  split stays a fringe: the base glyph keeps ≥ 88 % of the ink in every channel. The TypeScript
+  mirror is unit-tested over a colour grid; `e2e-scene` measures rendered frames of a hostile
+  full-bleed stripe program (`scripts/legibility.cjs`: with vs without the lyrics, the median glyph
+  against the 90th-percentile picture pixel in a ring around the glyphs; light the type itself adds —
+  glow, echo, fringe — is not counted as picture). The composer and the examples also keep busy forms
+  out of the zone: bars are cut clean at the zone per pixel (a few thin segments run through in the
+  chorus), orbits and brush strokes fade there, a circle closes around the words only when its inner
+  edge clears the block's corners (else it closes beside them), the slab stands clear of the words.
+- **Line breaking between words** (`type/text.ts`). Rows never break inside a known compound or next
+  to a bound character (`splitsWord`: the lexicon, now with 之間 / 時間 / 開往 / 前往 … and 之 bound to
+  both sides) and never leave a one-character fragment of a phrase (`leavesFragment`): such a split
+  only wins when nothing else fits, and a slightly overflowing row (the type set a little smaller)
+  beats it. The featured word (`keySpan`) is a whole word: an emphasized run one character over the
+  limit stays whole (潮汐之間), otherwise it is cut between words; pair windows that halve a compound
+  lose. `linebreak.test.ts` checks the fixture lines on both canvases.
 - **Restraint.** `key-lines.ts`: a small budget of 重點句 per song (≈ one in ten distinct lines, 1–3),
   chosen for meaning — the line that names the song, the chorus hook (repeated in the choruses, the
   first line of the first chorus), then very strong lines —; `ResolvedHint.key`. Every other line is
@@ -983,7 +1009,7 @@ uniform（全部由系統提供，不能自己宣告）：
 - **Examples** (`src/lib/stage/program/examples/`): five hand-written programs of the quality the
   prompt asks for — 夜航 (city pop: a setting sun, a city line, its reflection; the bridge an eclipse),
   潮間帶 (folk: a tidal flat under a low moon; the chorus floods it; the bridge a mirror), 碑 (post-rock:
-  a slab in fog, light leaking, rays; the words pass behind it; the bridge splits it), 圓相 (ink ballad:
+  a slab in fog beside the words, light leaking, rays that light them; the bridge splits it), 圓相 (ink ballad:
   a dry-brush circle drawn across each section; the chorus closes it around the words and cuts them
   out), 訊號 (post-punk / electronic: printed bars that jump on the beat; the chorus runs them through
   the words). `instantiateExample` lays one onto a plan by section kind. They are the prompt's

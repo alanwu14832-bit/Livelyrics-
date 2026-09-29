@@ -10,6 +10,8 @@
 //     scene on the output and in the preview, and the console tells the operator;
 //   - LED 安全模式 still clamps a program that tries to strobe (safe mode off: > 3 flashes a second;
 //     on: at most 3 and the limiter damps);
+//   - the legibility guarantee: over full-bleed stripes that ignore the words' zone the lyrics meet
+//     4.5:1 against the picture around them (plain and knockout), measured on the rendered frames;
 //   - the design overview: the key still renders, 「使用專屬畫面」 switches back to the built-in
 //     scenes and on again (saved), 「重新產生畫面」 runs the scene step and draws another program.
 // Playwright: a normally installed copy first (e.g. `npm i --no-save playwright`), else the cloud container's global one
@@ -25,6 +27,7 @@ const { chromium } = (() => {
 })();
 const fs = require("node:fs");
 const path = require("node:path");
+const { measureContrast, PROBE_PROGRAM } = require("./legibility.cjs");
 
 const BASE = process.env.BASE || "http://localhost:3100";
 const REPO = path.resolve(__dirname, "..");
@@ -190,6 +193,9 @@ function maxFlashesPerSecond(samples) {
 const BROKEN = "vec3 scene(vec2 fc) {\n  float x = vec3(1.0);\n  return uBg * x;\n}\n";
 /** A program that tries to strobe the whole field four times a second. */
 const STROBE = "vec3 scene(vec2 fc) {\n  return vec3(step(0.5, fract(uClock * 4.0)));\n}\n";
+/** A hostile program for the legibility guarantee: full-bleed white and cyan stripes that ignore the words' zone. */
+const STRIPES =
+  "vec3 scene(vec2 fc) {\n  vec2 p = centered(fc);\n  float s = step(0.5, fract((p.x + p.y) * 7.0));\n  vec3 c = mix(vec3(1.0), vec3(0.2, 0.9, 0.85), step(0.5, fract((p.x + p.y) * 3.5)));\n  return mix(vec3(0.03), c, s);\n}\n";
 
 (async () => {
   const browser = await chromium.launch({ args: ARGS });
@@ -276,6 +282,41 @@ const STROBE = "vec3 scene(vec2 fc) {\n  return vec3(step(0.5, fract(uClock * 4.
     check("the limiter engaged on the program's strobe", limiter.engaged > 0, JSON.stringify(limiter));
     check("the brightness cap lowers the program's peak", peakOn < peakOff - 0.1, `${peakOn.toFixed(3)} vs ${peakOff.toFixed(3)}`);
     await output.close();
+
+    // --- the legibility guarantee: over a hostile full-bleed program the lyrics still meet 4.5:1
+    // (measured on the rendered frame: the glyphs, located on a probe of the same moment over flat
+    // grey, against the ring of picture around them), for the plain and the knockout relation
+    const lines = (song.lyrics?.lines ?? []).filter((l) => l.text && l.text.trim() && l.end - l.start > 1.5);
+    const times = [lines[Math.floor(lines.length * 0.3)], lines[Math.floor(lines.length * 0.7)]].filter(Boolean).map((l) => Math.round((l.start + Math.min(2.5, (l.end - l.start) * 0.6)) * 100) / 100);
+    const measurePage = await context.newPage();
+    const ratios = [];
+    const grab = async (t) => {
+      const p = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await p.goto(`${BASE}/stage-lab?project=${id}&program=plan&chrome=0&play=0&aq=0&t=${t}`, { waitUntil: "load" });
+      await waitProgram(p, "ready", 60000);
+      await p.waitForTimeout(3000);
+      const b = await p.screenshot();
+      await p.close();
+      return b;
+    };
+    for (const relation of ["plain", "knockout"]) {
+      const sections = program.sections.map((s) => ({ ...s, relation }));
+      // the probe: the same moments over flat grey (where the glyphs are)
+      await api("PATCH", `/api/projects/${id}`, { plan: { ...plan, sceneProgram: { ...program, source: PROBE_PROGRAM, title: "灰階探針", sections } } });
+      const probes = [];
+      for (const t of times) probes.push(await grab(t));
+      await api("PATCH", `/api/projects/${id}`, { plan: { ...plan, sceneProgram: { ...program, source: STRIPES, title: "條紋測試", sections } } });
+      for (let k = 0; k < times.length; k++) {
+        const frame = await grab(times[k]);
+        const m = await measureContrast(measurePage, frame, probes[k]);
+        ratios.push({ relation, t: times[k], ...m });
+        fs.writeFileSync(path.join(SHOTS, `scene-legibility-${relation}-${times[k]}.png`), frame);
+      }
+    }
+    await measurePage.close();
+    const worst = Math.min(...ratios.map((r) => (r.ratio == null ? 0 : r.ratio)));
+    console.log(`legibility: ${ratios.map((r) => `${r.relation}@${r.t} ${r.ratio == null ? "—" : r.ratio.toFixed(2)}`).join(", ")}`);
+    check("over a hostile program every lyric frame meets 4.5:1 (plain and knockout)", ratios.length >= 2 && worst >= 4.5, `worst ${worst.toFixed(2)}:1 over ${ratios.length} frames`);
 
     // --- the design overview: key still, switch back to the built-in scenes, regenerate
     await api("PATCH", `/api/projects/${id}`, { plan });
