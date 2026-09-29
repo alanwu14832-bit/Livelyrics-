@@ -118,7 +118,8 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
   const forms = input.forms.length ? input.forms : FORM_IDS;
   // the best-fitting form most of the time, the second one sometimes (a salt redraws it)
   const pick = r();
-  const form = (input.salt ? forms[Math.floor(pick * Math.min(3, forms.length))] : pick < 0.78 || forms.length < 2 ? forms[0] : forms[1]) ?? "horizon";
+  // the best-fitting form; a salt (「重新產生畫面」) draws among the three that fit best
+  const form = (input.salt ? forms[(Math.floor(pick * Math.min(3, forms.length)) + (input.salt % 3)) % Math.min(3, forms.length)] : forms[0]) ?? "horizon";
   const tex = TEXTURE_FOR_VOICE[input.voice ?? "mv-card"] ?? TEXTURE_FOR_VOICE["mv-card"];
   const texture = tex[Math.floor(r() * tex.length)];
   const mot = MOTION_FOR_FORM[form];
