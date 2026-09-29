@@ -48,7 +48,7 @@ export function isClaudeConfigured(): boolean {
 }
 
 export function modelName(): string {
-  return process.env.LIVELYRICS_MODEL?.trim() || "claude-opus-5";
+  return process.env.LIVELYRICS_MODEL?.trim() || "claude-sonnet-5-5";
 }
 
 /** Injection points for tests, and the time budget of a serverless request. */

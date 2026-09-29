@@ -10,6 +10,7 @@ import type {
   BetaMessageParam,
   BetaMessageStreamParams,
   BetaStopReason,
+  BetaThinkingConfigAdaptive,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { DesignPlanSchema } from "@/lib/schema";
 import type { DesignPlan, Research } from "@/lib/types";
@@ -34,6 +35,8 @@ import type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
 
 /** Beta header for the scalar `fallbacks: "default"` form. */
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+/** Beta header that allows `thinking.block_binding` (the preserved-thinking controls). */
+export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
 export const MAX_CONTINUATIONS = 5;
 export const RESEARCH_MAX_TOKENS = 24_000;
 export const DESIGN_MAX_TOKENS = 48_000;
@@ -62,6 +65,15 @@ export interface ClaudeTransport {
 export function clientOptions(env: Record<string, string | undefined> = process.env): ClientOptions {
   const workspace = env.ANTHROPIC_WORKSPACE_ID?.trim();
   return workspace ? { defaultHeaders: { "anthropic-workspace-id": workspace } } : {};
+}
+
+/**
+ * Adaptive thinking with summaries for the progress stream. On newer accounts Sonnet 5.5 rejects
+ * (400) a replayed thinking block whose conversation prefix changed; a `pause_turn` continuation
+ * that isn't byte-identical drops that block instead of failing the whole step.
+ */
+export function adaptiveThinking(): BetaThinkingConfigAdaptive {
+  return { type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } };
 }
 
 /** Transport backed by the official SDK (`client.beta.messages.stream` + `finalMessage`). */
@@ -170,8 +182,8 @@ export function researchParams(input: DesignerInput, model: string): BetaMessage
     system: RESEARCH_SYSTEM,
     messages: [{ role: "user", content: buildResearchPrompt(input, st) }],
     tools: [{ type: "web_search_20260209", name: "web_search", max_uses: WEB_SEARCH_MAX_USES }],
-    thinking: { type: "adaptive", display: "summarized" },
-    betas: [FALLBACK_BETA],
+    thinking: adaptiveThinking(),
+    betas: [FALLBACK_BETA, THINKING_BINDING_BETA],
     fallbacks: "default",
   };
 }
@@ -351,9 +363,9 @@ export function designParams(req: DesignRequest, model: string): BetaMessageStre
     max_tokens: DESIGN_MAX_TOKENS,
     system: [{ type: "text", text: DESIGN_SYSTEM, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userContent(req, buildDesignPrompt(req, st)) }],
-    thinking: { type: "adaptive", display: "summarized" },
+    thinking: adaptiveThinking(),
     output_config: { effort: "high", format: designPlanOutputFormat() },
-    betas: [FALLBACK_BETA],
+    betas: [FALLBACK_BETA, THINKING_BINDING_BETA],
     fallbacks: "default",
   };
 }

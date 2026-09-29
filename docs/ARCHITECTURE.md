@@ -659,12 +659,17 @@ keeps every contract above and changes only where things are kept and how long w
   Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`
-- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-opus-5`), server tool `web_search_20260209`,
+- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-sonnet-5-5`), server tool `web_search_20260209`,
   adaptive thinking, streaming, `pause_turn` continuation (≤ 5), refusal handling, server-side
   `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Writes a Traditional-Chinese Markdown
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
   colors, past stage shows), song meaning/imagery, mood/energy arc, reference live moments; returns
   sources. Must not reproduce full copyrighted lyrics in the brief.
+- Every Claude request (research, design, structured jobs) uses `adaptiveThinking()` in `claude.ts`:
+  adaptive thinking with summaries plus `block_binding.prefix_mismatch_behavior: "drop_block"`
+  (beta `thinking-binding-controls-2026-08-01`). Sonnet 5.5 binds thinking blocks to the conversation
+  prefix and, on accounts created from 2026-08-31, rejects a replayed block whose prefix changed; a
+  `pause_turn` continuation that isn't byte-identical therefore drops that block instead of failing.
 - One shared SDK client (`clientOptions()` in `claude.ts`): the SDK reads `ANTHROPIC_API_KEY` /
   `ANTHROPIC_AUTH_TOKEN`; when `ANTHROPIC_WORKSPACE_ID` is set every request also sends the
   `anthropic-workspace-id` header, which an identity-linked key that isn't bound to one workspace needs

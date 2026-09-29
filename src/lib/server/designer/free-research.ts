@@ -7,7 +7,7 @@
 
 import { formatTimeShort } from "@/lib/timeline";
 import { FREE_RESEARCH_LABEL } from "@/lib/research-labels";
-import { isFreshPublicInfo, lookupPublicInfo, publicQuery, type LookupOptions } from "@/lib/server/research/public-info";
+import { coercePublicInfo, isFreshPublicInfo, lookupPublicInfo, publicQuery, type LookupOptions } from "@/lib/server/research/public-info";
 import { musicBrainzUrl } from "@/lib/server/research/musicbrainz";
 import type { FetchLike } from "@/lib/server/research/http";
 import type { PublicInfo, Research, ResearchSource } from "@/lib/types";
@@ -266,7 +266,8 @@ export async function freeResearch(input: DesignerInput, cb: Callbacks, opts: Fr
   const delta = (t: string) => cb.onDelta(t);
   delta(`${opts.afterPartial ? "\n\n---\n\n" : ""}### 免費研究\n\n`);
   const q = publicQuery(input.meta);
-  let info: PublicInfo | null = input.publicInfo ?? null;
+  // the cached lookup comes from a stored project: read it defensively
+  let info: PublicInfo | null = coercePublicInfo(input.publicInfo ?? null);
   if (info && isFreshPublicInfo(info, q, now())) {
     cb.onLog(`沿用先前查到的公開資料（${info.fetchedAt.slice(0, 10)}）`);
     delta("- 沿用先前查到的公開資料（MusicBrainz、維基百科）\n");

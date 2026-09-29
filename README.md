@@ -28,8 +28,8 @@ npm run dev
 ANTHROPIC_API_KEY=sk-ant-...
 # 只有金鑰沒有綁定單一 workspace 時才需要（錯誤訊息會說「沒有綁定 workspace」）
 # ANTHROPIC_WORKSPACE_ID=wrkspc_...
-# 選用：換模型（預設 claude-opus-5）
-# LIVELYRICS_MODEL=claude-opus-5
+# 選用：換模型（預設 claude-sonnet-5-5；要最好的品質可改 claude-opus-5-5，費用約兩倍）
+# LIVELYRICS_MODEL=claude-sonnet-5-5
 # 選用：資料存放位置（預設 ./data）
 # LIVELYRICS_DATA_DIR=/path/to/livelyrics-data
 ```
@@ -62,7 +62,7 @@ node scripts/seed-demo.mjs
    | `LIVELYRICS_PASSWORD` | 建議設定：整個網站需要先輸入這個密碼（登入後保持 30 天，改密碼會讓所有人登出）。沒設定時任何知道網址的人都能使用 |
    | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用免費研究模式。建立金鑰時把它綁定到一個 workspace（例如 Default）最簡單 |
    | `ANTHROPIC_WORKSPACE_ID` | 只有金鑰沒有綁定單一 workspace 時才需要：填 `wrkspc_` 開頭的 workspace ID（Claude Console 的 **Settings › Workspaces**）。沒填時 Claude 會回應 400「沒有綁定 workspace」 |
-   | `LIVELYRICS_MODEL` | 選用：換模型（預設 claude-opus-5） |
+   | `LIVELYRICS_MODEL` | 選用：換模型（預設 `claude-sonnet-5-5`；要最好的品質可改 `claude-opus-5-5`，費用約兩倍） |
    | `LIVELYRICS_BLOB_DELIVERY` | 選用：設成 `proxy` 時音檔與素材經由函式轉送，預設 `redirect` 直接從 Blob 讀取（見下方） |
    | `LIVELYRICS_STORAGE` | 選用：`cloud` 或 `local` 強制指定模式；一般不需要 |
    | `LIVELYRICS_FREE_SOURCES` | 選用：設成 `off` 時免費研究不查 MusicBrainz 與維基百科，只分析歌詞與音訊 |
@@ -230,7 +230,15 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e.cjs             # �
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-show.cjs        # 演出模式：GO、待機、段落保持與循環
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-led.cjs         # LED 安全模式：亮度上限與閃爍限制
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-directions.cjs  # 設計方向、參考圖與一頁提案
-BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs  # 免費研究與用 claude.ai 研究（伺服器要用下方的設定啟動）
+```
+
+免費研究與「用 claude.ai 研究」的測試不連外部網站：伺服器改查腳本內建的測試資料來源（`fixtures/research/` 的真實回應），所以要這樣啟動：
+
+```bash
+LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e \
+  LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
+  LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' npx next start -p 3100
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 ```
 
 commit 訊息以 `WIP:` 開頭的推送不會在 Vercel 建置（`vercel.json` 的 `ignoreCommand`），用來保存進行中的工作，不會把做到一半的版本放上預覽網址。

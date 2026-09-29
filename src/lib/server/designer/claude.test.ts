@@ -12,6 +12,7 @@ import {
   researchParams,
   runWithContinuations,
   sdkTransport,
+  THINKING_BINDING_BETA,
   tidyBrief,
 } from "./claude";
 import { designSong, researchSong } from "./index";
@@ -20,6 +21,8 @@ import { cite, fakeTransport, fallbackBlock, message, refusalDetails, search, se
 import { demoInput } from "./testing/fixtures";
 
 const input = demoInput();
+/** adaptive thinking with summaries; a replayed block whose prefix changed is dropped, not a 400 */
+const THINKING = { type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } };
 /** the free research's sources are unreachable in these tests */
 const noNetwork = async (): Promise<Response> => {
   throw new TypeError("fetch failed");
@@ -81,8 +84,8 @@ describe("request parameters", () => {
     const p = researchParams(input, "claude-opus-5");
     expect(p.model).toBe("claude-opus-5");
     expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 8 }]);
-    expect(p.thinking).toEqual({ type: "adaptive", display: "summarized" });
-    expect(p.betas).toEqual([FALLBACK_BETA]);
+    expect(p.thinking).toEqual(THINKING);
+    expect(p.betas).toEqual([FALLBACK_BETA, THINKING_BINDING_BETA]);
     expect(p.fallbacks).toBe("default");
     const prompt = userText(p.messages[0]);
     expect(prompt).toContain("示範之歌");
@@ -95,7 +98,7 @@ describe("request parameters", () => {
     const p = designParams({ ...input, research: null }, "claude-opus-5");
     expect(p.output_config?.effort).toBe("high");
     expect(p.output_config?.format?.type).toBe("json_schema");
-    expect(p.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(p.thinking).toEqual(THINKING);
     expect(p.fallbacks).toBe("default");
     expect(p.tools).toBeUndefined();
     const prompt = userText(p.messages[0]);
@@ -317,12 +320,13 @@ describe("real SDK transport (fake fetch)", () => {
     const [first, second] = requests;
     expect(first.url).toContain("/v1/messages");
     expect(first.headers.get("anthropic-beta")).toContain(FALLBACK_BETA);
+    expect(first.headers.get("anthropic-beta")).toContain(THINKING_BINDING_BETA);
     expect(first.headers.get("x-api-key")).toBe("test-key");
     expect(first.body).toMatchObject({
       model: "claude-opus-5",
       stream: true,
       fallbacks: "default",
-      thinking: { type: "adaptive", display: "summarized" },
+      thinking: THINKING,
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
     });
     expect(first.body.betas).toBeUndefined();

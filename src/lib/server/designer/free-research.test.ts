@@ -113,6 +113,13 @@ describe("free research brief", () => {
     expect(cached.brief).toBe(one.brief);
   });
 
+  it("a malformed cached lookup (a hand-edited project file) is ignored, not trusted", async () => {
+    const f = caodongFetch();
+    const r = await freeResearch(caodongInput({ publicInfo: { version: 1, status: "ok" } as never }), callbacks().cb, { fetch: f.fn, now: NOW, lookup: TEST_LOOKUP });
+    expect(f.calls.length).toBeGreaterThan(0);
+    expect(r.brief).toContain("醜奴兒");
+  });
+
   it("researchSong without a key is the free research (the pipeline's research step)", async () => {
     const c = callbacks();
     const r: Research = await researchSong(caodongInput(), c.cb, { configured: false, fetch: caodongFetch().fn, now: NOW, lookup: TEST_LOOKUP });
