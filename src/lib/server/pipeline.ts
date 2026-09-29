@@ -1,4 +1,6 @@
-// Processing pipeline: lyrics -> research -> design, saving the project after each step.
+// Processing pipeline: lyrics -> research -> design -> scene, saving the project after each step.
+// The scene step (phase 7) writes the song's own scene program (專屬畫面) with its own budget, so the
+// design step stays inside its 300 s in cloud mode.
 //
 // Local mode: a per-project in-memory run registry. A request while a run is active attaches to
 // it (past events are replayed, then live ones stream); runs keep going when every subscriber
@@ -34,10 +36,10 @@ import { findBestLyrics } from "./lrclib";
 import { getProject, updateProject } from "./storage";
 import { isCloudStorage } from "./store";
 
-export type PipelineStep = "lyrics" | "research" | "design";
-export const ALL_STEPS: readonly PipelineStep[] = ["lyrics", "research", "design"];
+export type PipelineStep = "lyrics" | "research" | "design" | "scene";
+export const ALL_STEPS: readonly PipelineStep[] = ["lyrics", "research", "design", "scene"];
 
-const STEP_LABEL: Record<PipelineStep, string> = { lyrics: "歌詞", research: "研究", design: "設計" };
+const STEP_LABEL: Record<PipelineStep, string> = { lyrics: "歌詞", research: "研究", design: "設計", scene: "畫面" };
 
 /** how long a finished run stays attachable / in memory */
 const RETAIN_MS = 60_000;
@@ -634,7 +636,54 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         message: `主視覺「${checked.data.keyVisual.title}」，${checked.data.sections.length} 個段落、${checked.data.cues.length} 個操作提示`,
       };
     }
+    case "scene":
+      return sceneStep(run, project, signal);
   }
+}
+
+/**
+ * 專屬畫面: the song's own scene program for the current plan. Claude writes it when configured (its
+ * own step and budget); without Claude the design step already composed one offline, so a run that
+ * designed skips this step, and a run of only this step (「重新產生畫面」) draws another composition.
+ */
+async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal): Promise<StepResult> {
+  const plan = project.plan;
+  if (!plan) return { skipped: true, message: "還沒有設計方案，略過專屬畫面" };
+  const free = isFreeRun(run);
+  const claude = designer.isClaudeConfigured() && !free;
+  const steps = run.cloud ? run.cloud.steps : normalizeSteps(run.request.steps);
+  const instruction = (run.cloud ? run.cloud.instruction : run.request.instruction)?.trim() || undefined;
+  const designed = steps.includes("design");
+  if (!claude && designed && plan.sceneProgram) {
+    return { skipped: true, message: `沿用設計步驟的專屬畫面「${plan.sceneProgram.title}」（離線作曲器）` };
+  }
+  const band = await bandContext(project);
+  const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
+  const req = {
+    meta: project.meta,
+    lyrics: project.lyrics,
+    analysis: project.analysis,
+    bible: band.bible,
+    bandName: band.bandName,
+    moodboard,
+    research: project.research,
+    publicInfo: project.research?.publicInfo ?? null,
+    instruction,
+    previous: plan,
+    arc: (run.cloud ? run.cloud.arc : run.request.arc) ?? null,
+  };
+  const cb = designerCallbacks(run, "scene", signal);
+  const deps = designerDeps(run) ?? {};
+  // without Claude: another draw of the composer (a regenerate), or the first one for an older plan
+  const salt = plan.sceneProgram ? designer.composerSalt(plan.sceneProgram) + 1 : 0;
+  const result = await raceAbort(designer.designSceneProgram(req, plan, cb, deps, { salt }), signal);
+  const program = result.program;
+  return {
+    apply: (p) => {
+      if (p.plan) p.plan = { ...p.plan, sceneProgram: program };
+    },
+    message: `專屬畫面「${program.title}」（${result.engine === "claude" ? `Claude${result.model ? `，${result.model}` : ""}` : "離線作曲器"}）`,
+  };
 }
 
 /** The band's bible and library for a project's research / design (empty without a band). */

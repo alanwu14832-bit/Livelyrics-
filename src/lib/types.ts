@@ -131,7 +131,7 @@ export interface SongMeta {
   mimeType: string;
 }
 
-export type PipelineStepId = "analyze" | "lyrics" | "research" | "design" | "done";
+export type PipelineStepId = "analyze" | "lyrics" | "research" | "design" | "scene" | "done";
 
 export type ProjectStatus = "new" | "processing" | "ready" | "error";
 
@@ -474,7 +474,8 @@ export interface SongTimecode {
   start: string;
 }
 
-export type ProcessStepId = "lyrics" | "research" | "design";
+/** scene (phase 7): the song's own scene program (專屬畫面), after the design */
+export type ProcessStepId = "lyrics" | "research" | "design" | "scene";
 
 /**
  * A pipeline run as recorded on the project in cloud mode, where every step is its own request
@@ -706,7 +707,7 @@ export type PipelineEvent =
    * finished) instead of starting one. `steps` are the steps that run covers;
    * `sameRequest` is false when this request's own steps/instruction/lyrics were NOT applied.
    */
-  | { type: "attached"; steps: Array<"lyrics" | "research" | "design">; sameRequest: boolean }
+  | { type: "attached"; steps: Array<"lyrics" | "research" | "design" | "scene">; sameRequest: boolean }
   | { type: "step"; step: PipelineStepId; status: "start" | "done" | "skipped" | "error"; message?: string }
   | { type: "log"; step: PipelineStepId; message: string }
   /** incremental research text / designer thoughts to show live */

@@ -36,6 +36,7 @@ import { inputMood, moodPalette, moodScenes } from "./moodboard";
 import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./type-design";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
+import { offlineSceneProgram } from "./scene-program";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
 
@@ -743,6 +744,8 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     designerNotes: designerNotes(ctx, sections, title, st.lines.length ? typeSystem : undefined),
     typeSystem,
   };
+  // 專屬畫面: the offline composer's program (form from the findings, the rest from the seed)
+  plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings);
   return normalizePlan(plan, input);
 }
 

@@ -15,6 +15,8 @@ import { TYPE_VOICE_IDS } from "@/lib/schema";
 import { normalizeTypeSystem } from "@/lib/type/normalize";
 import { VOICES } from "@/lib/type/vocab";
 import { exampleProgram, instantiateExample } from "@/lib/stage/program/examples";
+import { FORM_IDS, composeSceneProgram, type FormId } from "@/lib/stage/program/composer";
+import { hashString } from "@/lib/stage/motif";
 import type { LyricPlacement, LyricStyleId, Project, SceneId, TypeVoiceId } from "@/lib/types";
 
 export interface StageLabInitial {
@@ -53,6 +55,12 @@ export interface StageLabInitial {
 function withProgram(p: Project, program: string | undefined): Project {
   if (!p.plan || !program || program === "plan") return p;
   if (program === "off") return { ...p, plan: { ...p.plan, sceneProgram: null } };
+  // composer:<form>[:<salt>] — the offline composer with one form (the lab's view of every form)
+  const m = /^composer:([a-z]+)(?::(\d+))?$/.exec(program);
+  if (m && (FORM_IDS as readonly string[]).includes(m[1])) {
+    const sceneProgram = composeSceneProgram({ seed: hashString(p.id + m[1]), forms: [m[1] as FormId], sections: p.plan.sections, voice: p.plan.typeSystem?.voice ?? "mv-card", title: p.meta.title, salt: Number(m[2] ?? 0) });
+    return { ...p, plan: { ...p.plan, sceneProgram } };
+  }
   const ex = exampleProgram(program);
   return ex ? { ...p, plan: { ...p.plan, sceneProgram: instantiateExample(ex, p.plan) } } : p;
 }
