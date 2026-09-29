@@ -154,10 +154,19 @@ describe("findings drive the offline designer", () => {
     expect(new Set([palette(post), palette(punk), palette(city), palette(none)]).size).toBe(4);
     expect(punk.keyVisual.typography.weight).toBe(900);
     expect(post.keyVisual.typography.cjkFont).toBe("noto-serif-tc");
-    // post-rock: sparse lyrics, soft transitions; punk: word-pop verses and impact choruses
+    // post-rock: sparse lyrics (every line still set, the verses small), soft transitions; punk:
+    // word-pop verses and impact choruses
     const verse = (p: typeof post) => p.sections.find((s) => s.kind === "verse")!;
-    expect(verse(post).lyricStyle).toBe("hidden");
+    expect(verse(post).lyricStyle).not.toBe("hidden");
     expect(verse(punk).lyricStyle).toBe("word-pop");
+    // 字體藝術: the genre picks the typographic voice
+    expect(post.typeSystem?.voice).toBe("mv-card");
+    expect(punk.typeSystem?.voice).toBe("glitch");
+    expect(city.typeSystem?.voice).toBe("title-sequence");
+    expect(plan("folk").typeSystem?.voice).toBe("ink");
+    const verseIds = new Set(demoInput().lyrics.lines.filter((l) => l.start != null && l.start >= verse(post).start && l.start < verse(post).end).map((l) => l.id));
+    expect(post.typeSystem!.lines.filter((l) => verseIds.has(l.lineId)).every((l) => l.energy <= 0.34)).toBe(true);
+    expect(post.designerNotes).toContain("## 字體語言");
     expect(post.sections.some((s) => s.transitionIn === "flash")).toBe(false);
     expect(punk.sections.some((s) => s.kind === "chorus" && s.lyricStyle === "impact")).toBe(true);
     // the genre's scene family (city pop's grid) and the avoided ones (post-rock avoids the grid)

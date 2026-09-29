@@ -118,3 +118,15 @@ describe("LED 安全模式 on the wire", () => {
     expect(oldPong && "limiter" in oldPong).toBe(false);
   });
 });
+
+describe("the 排版 editor's plan message (字體藝術)", () => {
+  const plan = { version: 1, keyVisual: { title: "t" }, sections: [], lines: [], cues: [], designerNotes: "" };
+  it("carries the project id and the plan, stamped by its sender", () => {
+    expect(parseStageMessage({ type: "plan", projectId: "p1", plan, sender: "ed1" })).toEqual({ type: "plan", projectId: "p1", plan, sender: "ed1" });
+  });
+  it("drops a plan message without a usable plan or project id", () => {
+    expect(parseStageMessage({ type: "plan", projectId: "p1" })).toBeNull();
+    expect(parseStageMessage({ type: "plan", projectId: "", plan })).toBeNull();
+    expect(parseStageMessage({ type: "plan", projectId: "p1", plan: { sections: "x" } })).toBeNull();
+  });
+});

@@ -1,7 +1,8 @@
 // Offline designer: how the band's visual bible (視覺聖經) constrains a heuristic plan. The bible
 // palette replaces the generated one (roles by lightness and contrast), its fonts replace the
 // mood fonts, avoided scenes are never picked and preferred ones win ties, the lyric policy
-// decides which sections show lyrics, and preferred treatments replace the default media looks.
+// decides how loud each section's lyrics are (字體藝術: every sung line is set; the policy makes
+// verses small and quiet, never absent), and preferred treatments replace the default media looks.
 // Pure; every function returns new objects.
 
 import { paletteRoles } from "@/lib/show";
@@ -64,11 +65,17 @@ export function avoidScene(scene: SceneId, bible: BandBible | null | undefined, 
 
 type LyricPick = { style: LyricStyleId; placement: LyricPlacement; scale: number };
 
+/** The quiet style of a section the policy keeps in the background (small, calm, never a subtitle). */
+const QUIET: LyricPick = { style: "line-fade", placement: "upper-third", scale: 0.85 };
+
 /**
- * The lyric policy on top of the per-section choice:
- *   chorus-only  lyrics only in choruses (the loudest section when no chorus was found)
- *   minimal      only the last chorus (or the loudest section), as a hook
- *   full         every section with lyrics shows them; verses that would hide get a subtitle
+ * The lyric policy on top of the per-section choice. Every section with sung lines shows them —
+ * each line is a designed composition (字體藝術), the type system reads the policy as intensity —
+ * so the policy decides which sections carry the lyrics loudly:
+ *   chorus-only  choruses keep their style (the loudest section when no chorus was found); the other
+ *                sections are quiet
+ *   minimal      only the last chorus (or the loudest section) is loud, as a hook (impact); the rest quiet
+ *   full         every section with lyrics keeps its style; a section that would hide gets the quiet one
  */
 export function applyLyricPolicy(
   pick: LyricPick,
@@ -76,16 +83,16 @@ export function applyLyricPolicy(
   ctx: { bible: BandBible | null; isLastChorus: boolean; isLoudest: boolean; hasChorus: boolean },
 ): LyricPick {
   const b = ctx.bible;
-  if (!b || !s.hasLines) return pick;
+  if (!s.hasLines) return pick;
+  // every sung line appears
+  const shown = pick.style === "hidden" ? { ...QUIET, placement: pick.placement === "lower-third" ? QUIET.placement : pick.placement } : pick;
+  if (!b) return shown;
   const mode = b.lyricPolicy.mode;
-  if (mode === "full") {
-    if (pick.style === "hidden" && s.kind !== "solo" && s.kind !== "interlude") return { style: "subtitle", placement: "lower-third", scale: 0.9 };
-    return pick;
-  }
-  const keep = mode === "chorus-only" ? (ctx.hasChorus ? s.kind === "chorus" : ctx.isLoudest) : ctx.hasChorus ? ctx.isLastChorus : ctx.isLoudest;
-  if (!keep) return { style: "hidden", placement: pick.placement, scale: pick.scale };
-  if (mode === "minimal" && pick.style !== "impact") return { style: "impact", placement: "center", scale: Math.max(pick.scale, 1.2) };
-  return pick;
+  if (mode === "full") return shown;
+  const loud = mode === "chorus-only" ? (ctx.hasChorus ? s.kind === "chorus" : ctx.isLoudest) : ctx.hasChorus ? ctx.isLastChorus : ctx.isLoudest;
+  if (!loud) return { ...QUIET, placement: shown.placement === "lower-third" ? QUIET.placement : shown.placement, scale: Math.min(shown.scale, QUIET.scale) };
+  if (mode === "minimal" && shown.style !== "impact") return { style: "impact", placement: "center", scale: Math.max(shown.scale, 1.2) };
+  return shown;
 }
 
 const BEAT_OK = 0.55;

@@ -11,11 +11,15 @@
 // output performs itself) and the next item is announced ahead with `preload`. Every addition is
 // optional, so older windows and consoles keep working with newer ones.
 //
+// 字體藝術 (phase 6): the 排版 editor (/p/[id]/type) posts `plan` on the song's channel after an
+// edit; a console adopts its type system and re-broadcasts the project, and a per-song output
+// without a console shows it directly.
+//
 // Both the console's preview and the projection window render through the same
 // <StageView project store /> component, so the preview is exactly the output.
 
 import { normalizeOutput } from "../output";
-import type { LyricStyleId, Project, SceneId } from "../types";
+import type { DesignPlan, LyricStyleId, Project, SceneId } from "../types";
 
 export type PlaybackMode = "track" | "live";
 
@@ -147,7 +151,12 @@ export type StageMessage =
   /** console -> output: ask the output window to toggle fullscreen (needs a user gesture there; best effort) */
   | { type: "fullscreen" }
   /** console -> output: ask the output window to close */
-  | { type: "close" };
+  | { type: "close" }
+  /**
+   * 排版 editor -> consoles and the per-song output: the plan after a 字體藝術 edit (the editor saves
+   * it). A console adopts its type system and re-broadcasts; an output without a console shows it.
+   */
+  | { type: "plan"; projectId: string; plan: DesignPlan; sender?: string };
 
 /**
  * LED 安全模式 (phase 3): what the projection window's flash limiter is doing, reported on every
@@ -292,6 +301,12 @@ export function parseStageMessage(raw: unknown): StageMessage | null {
       return { type: "fullscreen" };
     case "close":
       return { type: "close" };
+    case "plan": {
+      // the renderer repairs the rest (resolve.ts, the type engine's resolver) and never throws
+      const plan = raw.plan;
+      if (typeof raw.projectId !== "string" || !raw.projectId || !isRecord(plan) || !Array.isArray(plan.sections) || !isRecord(plan.keyVisual)) return null;
+      return { type: "plan", projectId: raw.projectId, plan: plan as unknown as DesignPlan, ...sender };
+    }
     default:
       return null;
   }

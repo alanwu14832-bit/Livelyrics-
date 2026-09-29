@@ -160,7 +160,7 @@ export function applyArc(plan: DesignPlan, arc: SongArcDirective, input: Designe
   });
   const note = `## 整場弧線\n「${arc.showName}」第 ${arc.position + 1} 首（共 ${arc.total} 首），角色：${ARC_ROLE_INFO[arc.role].label}；配色重心：${PALETTE_EMPHASIS_INFO[arc.emphasis].label}。${arc.note}`;
   const designerNotes = plan.designerNotes.includes("## 整場弧線") ? plan.designerNotes.replace(/## 整場弧線[\s\S]*?(?=\n## |\n> |$)/, `${note}\n`) : `${note}\n\n${plan.designerNotes}`;
-  return normalizePlan({ ...plan, sections, designerNotes }, input);
+  return normalizePlan({ ...plan, sections, designerNotes }, input, { typeSystem: "keep" });
 }
 
 // ---------------------------------------------------------------------------

@@ -65,7 +65,13 @@ describe("offline directions", () => {
     const chorusScenes = (p: typeof a) => new Set(p.sections.filter((s) => s.kind === "chorus").map((s) => s.scene));
     const overlap = [...chorusScenes(a)].filter((s) => chorusScenes(b).has(s) && chorusScenes(c).has(s));
     expect(overlap).toEqual([]);
-    // lyric treatment: karaoke vs impact vs a poem stack on the chorus
+    // lyric treatment: three typographic voices (字體藝術), never karaoke or subtitle
+    expect(new Set([a, b, c].map((p) => p.typeSystem!.voice)).size).toBe(3);
+    for (const p of [a, b, c]) {
+      expect(p.sections.every((s) => s.lyricStyle !== "karaoke" && s.lyricStyle !== "subtitle")).toBe(true);
+      expect(p.typeSystem!.lines.length).toBe(r.lyrics.lines.filter((l) => l.text.trim()).length);
+    }
+    for (const d of dirs) expect(d.lyricTreatment).not.toMatch(/karaoke|卡拉|字幕/);
     const chorusStyle = (p: typeof a) => p.sections.find((s) => s.kind === "chorus")!.lyricStyle;
     expect(new Set([chorusStyle(a), chorusStyle(b), chorusStyle(c)]).size).toBe(3);
     // typography differs
@@ -122,13 +128,18 @@ describe("offline directions", () => {
       expect(kv.palette.every((p) => bibleHex.has(p.hex)), kv.palette.map((p) => p.hex).join()).toBe(true);
       expect(kv.typography.cjkFont).toBe("lxgw-wenkai-tc");
       expect(kv.typography.latinFont).toBe("playfair-display");
+      const sung = (s: (typeof d.plan.sections)[number]) => r.lyrics.lines.some((l) => l.start != null && l.start >= s.start && l.start < s.end && l.text.trim());
       for (const s of d.plan.sections) {
         expect(["tunnel", "shards", "grid"]).not.toContain(s.scene);
-        if (s.kind !== "chorus") expect(s.lyricStyle).toBe("hidden");
+        // chorus-only (字體藝術): the verses still show their lines, quietly
+        if (sung(s)) expect(s.lyricStyle).not.toBe("hidden");
       }
+      // the bible's fonts are the type system's fonts in every voice
+      expect(d.plan.typeSystem!.fonts).toEqual({ cjk: "lxgw-wenkai-tc", latin: "playfair-display" });
     }
-    // still distinct: different chorus looks
+    // still distinct: different chorus looks and three typographic voices
     expect(new Set(dirs.map((d) => d.plan.sections.find((s) => s.kind === "chorus")!.lyricStyle)).size).toBeGreaterThan(1);
+    expect(new Set(dirs.map((d) => d.plan.typeSystem!.voice)).size).toBe(3);
   });
 
   it("the single-plan offline designer uses the mood board palette too", () => {
@@ -188,7 +199,10 @@ describe("normalizeDirectionDrafts", () => {
     expect(s.typography.letterSpacing).toBe(0.2);
     expect(s.scenes.chorus).toEqual(["rain", "tunnel"]);
     expect(s.scenes.bridge).toEqual(offline[0].scenes.bridge);
-    expect(s.lyrics.chorus).toEqual({ style: "karaoke", placement: "center" });
+    // karaoke is never an automatic choice: the offline direction's chorus style stays
+    expect(s.lyrics.chorus).toEqual(offline[0].lyrics.chorus);
+    expect(s.typeVoice).toBe(offline[0].typeVoice);
+    expect(normalizeDirectionDrafts({ directions: [draft({ typeVoice: "glitch" })] }, req({ moodboard: BOARD }), offline)[0].typeVoice).toBe("glitch");
     expect(s.lyrics.verse).toEqual(offline[0].lyrics.verse);
     expect(s.references).toEqual([{ imageId: "a00000000002", cue: "顆粒感" }]);
     expect(s.treatments).toEqual(["grain-film"]);
@@ -236,7 +250,9 @@ describe("normalizeDirectionDrafts", () => {
     expect(item.additionalProperties).toBe(false);
     expect(item.required).toEqual(expect.arrayContaining(["name", "pitch", "rationale", "palette", "typography", "scenes", "lyrics", "references"]));
     expect(item.properties.scenes.items?.properties?.kind.enum).toContain("chorus");
-    expect(item.properties.lyrics.items?.properties?.style.enum).toContain("karaoke");
+    expect(item.properties.lyrics.items?.properties?.style.enum).not.toContain("karaoke");
+    expect(item.properties.lyrics.items?.properties?.style.enum).not.toContain("subtitle");
+    expect((item.properties as Record<string, { enum?: unknown[] }>).typeVoice.enum).toEqual(["mv-card", "title-sequence", "ink", "glitch"]);
     // a draft with an unknown scene is not a valid draft (the normalizer repairs it anyway)
     expect(DirectionDraftSchema.safeParse({ directions: [draft({ energy: 0.5 })] }).success).toBe(false);
   });

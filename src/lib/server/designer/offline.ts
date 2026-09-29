@@ -4,6 +4,8 @@
 // findings (findings.ts: the genre's visual grammar from the public facts, the lyric imagery,
 // emotion, point of view and sing-along phrases, the audio mood), and produces a tasteful, valid
 // DesignPlan. The band's bible, the mood board palette and normalizePlan still have the last word.
+// 字體藝術: the song's typographic voice comes from the same findings (type-design.ts) and every
+// sung line gets a composition hint; no section with lyrics is hidden, none gets karaoke / subtitle.
 
 import { assignMedia } from "./media";
 import { activeBible, applyLyricPolicy, applyTreatments, avoidScene, biasScenes, biblePalette } from "./bible-style";
@@ -31,6 +33,8 @@ import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
 import { generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { inputMood, moodPalette, moodScenes } from "./moodboard";
+import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./type-design";
+import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
@@ -214,6 +218,8 @@ interface SectionPlanCtx {
   moodScenes: SceneId[];
   /** the free-research findings (genre grammar, imagery families, sing-along phrases…) */
   findings: Findings;
+  /** 字體藝術: the song's typographic voice */
+  voice: VoiceChoice;
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
@@ -286,15 +292,16 @@ function genreLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx, pic
     return { style: st, placement: st === "line-fade" ? (s.kind === "verse" ? "upper-third" : "center") : (PLACEMENT_FOR[st] ?? pick.placement), scale };
   };
   if (s.kind === "verse" || s.kind === "pre-chorus") {
-    if (g.lyrics.density === "sparse") return s.kind === "verse" ? style(g.lyrics.verse === "hidden" ? "hidden" : g.lyrics.verse, 0.9) : pick;
-    if (g.lyrics.density === "dense") return style("subtitle", 0.9);
+    // sparse genres keep the verse small and quiet (every line still appears), dense ones calm
+    if (g.lyrics.density === "sparse") return s.kind === "verse" ? style(g.lyrics.verse, 0.85) : pick;
+    if (g.lyrics.density === "dense") return style("line-fade", 0.9);
     if (s.kind === "verse" && ordinal === 0) return style(g.lyrics.verse, pick.scale);
     return pick;
   }
   if (s.kind === "chorus") {
     // the last chorus keeps the biggest treatment; the first follows the genre's chorus style
     if (last) return g.lyrics.chorus === "impact" && avgUnits <= 9 ? style("impact", 1.25) : pick;
-    const target = g.lyrics.chorus === "impact" && avgUnits > 9 ? "karaoke" : g.lyrics.chorus;
+    const target = g.lyrics.chorus === "impact" && avgUnits > 9 ? "word-pop" : g.lyrics.chorus;
     return style(target, Math.max(pick.scale, target === "impact" ? 1.15 : 1.05));
   }
   return pick;
@@ -312,14 +319,15 @@ function baseLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx, avgU
   const dense = s.density > 5;
   switch (s.kind) {
     case "chorus": {
-      if (dense) return { style: "karaoke", placement: "center", scale: 1.05 };
+      // never karaoke: the chorus is big type (字體藝術 composes every line; these are the legacy fallback)
+      if (dense) return { style: "line-fade", placement: "center", scale: 1.05 };
       const last = ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1;
-      if (last) return avgUnits <= 9 ? { style: "impact", placement: "center", scale: 1.2 } : { style: "karaoke", placement: "center", scale: 1.2 };
-      if (ordinal === 0) return { style: "karaoke", placement: "center", scale: 1.1 };
-      return { style: "word-pop", placement: "center", scale: 1.15 };
+      if (last) return avgUnits <= 9 ? { style: "impact", placement: "center", scale: 1.2 } : { style: "word-pop", placement: "center", scale: 1.2 };
+      if (ordinal === 0) return { style: "word-pop", placement: "center", scale: 1.1 };
+      return avgUnits <= 9 ? { style: "impact", placement: "center", scale: 1.15 } : { style: "word-pop", placement: "center", scale: 1.15 };
     }
     case "verse":
-      if (dense) return { style: "subtitle", placement: "lower-third", scale: 0.9 };
+      if (dense) return { style: "line-fade", placement: "upper-third", scale: 0.9 };
       if (ordinal % 2 === 1) return poetic ? { style: "vertical", placement: "vertical-right", scale: 1 } : { style: "stack", placement: "left", scale: 0.95 };
       return { style: "line-fade", placement: "upper-third", scale: 0.95 };
     case "pre-chorus":
@@ -371,13 +379,14 @@ function transitionBase(s: StructSection, prev: StructSection | undefined): Sect
   return rise >= 0.15 ? "wipe" : "fade";
 }
 
-function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, placement: LyricPlacement, energy: number, songHasLyrics: boolean): string {
+function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, placement: LyricPlacement, energy: number, songHasLyrics: boolean, voice?: VoiceChoice): string {
   const sc = SCENES[scene].label;
-  const ly = LYRIC_STYLES[style].label;
+  // 字體藝術: the lyrics are compositions in the song's voice (the legacy style is only a fallback)
+  const ly = voice ? `${VOICES[voice.voice].short}構圖` : LYRIC_STYLES[style].label;
   const where = LYRIC_PLACEMENTS_INFO[placement].split("：")[0];
   const hidden = style === "hidden";
   // how this section treats lyrics, for sections whose sentence depends on it
-  const lyricClause = !songHasLyrics ? "這首歌沒有歌詞，畫面本身就是主角" : hidden ? "這段不放歌詞" : `歌詞以「${ly}」放在${where}`;
+  const lyricClause = !songHasLyrics ? "這首歌沒有歌詞，畫面本身就是主角" : hidden ? "這段不放歌詞" : voice ? `每一句歌詞都是「${ly}」` : `歌詞以「${ly}」放在${where}`;
   switch (kind) {
     case "intro":
       return `以「${sc}」開場，先讓觀眾認得這首歌的世界；歌詞留白。`;
@@ -389,7 +398,9 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
       if (hidden) return `主歌以「${sc}」維持中低亮度；${lyricClause}，把焦點留給主唱。`;
       return style === "subtitle"
         ? `主歌字很密，畫面「${sc}」為主、歌詞退到小字幕，不和主唱搶戲。`
-        : `主歌以「${sc}」維持中低亮度，${lyricClause}，避開主唱 IMAG。`;
+        : voice
+          ? `主歌以「${sc}」維持中低亮度，${lyricClause}，小而安靜、避開主唱 IMAG。`
+          : `主歌以「${sc}」維持中低亮度，${lyricClause}，避開主唱 IMAG。`;
     case "pre-chorus":
       return hidden ? `導歌用「${sc}」慢慢堆疊張力；${lyricClause}，為副歌蓄勢。` : `導歌用「${sc}」慢慢堆疊張力，歌詞「${ly}」為副歌蓄勢。`;
     case "bridge":
@@ -461,7 +472,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
       transitionIn: transitionFor(s, st.sections[i - 1], ctx.findings.hints.motion),
       media: null,
-      rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0),
+      rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0, ctx.voice),
     };
   });
 }
@@ -527,7 +538,7 @@ function arcDescription(st: SongStructure): string {
   return parts.join(" → ");
 }
 
-function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: string): string {
+function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: string, typeSystem?: DesignPlan["typeSystem"]): string {
   const choruses = sections.filter((s) => s.kind === "chorus");
   const hidden = sections.filter((s) => s.lyricStyle === "hidden").map((s) => s.label);
   const verse = sections.find((s) => s.kind === "verse");
@@ -543,14 +554,19 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
         ]
       : [
           verse && verse.lyricStyle !== "hidden"
-            ? `- 主歌：歌詞「${LYRIC_STYLES[verse.lyricStyle].label}」、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
+            ? typeSystem
+              ? `- 主歌：歌詞是小而安靜的構圖、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
+              : `- 主歌：歌詞「${LYRIC_STYLES[verse.lyricStyle].label}」、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
             : "- 敘事段落：畫面保持低調，把焦點留給主唱。",
           choruses.length
-            ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
+            ? typeSystem
+              ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}」`).join("、")}，歌詞放大成畫面的主角，重複的句子沿用同一個構圖讓觀眾跟唱。`
+              : `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
             : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
           hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
         ]),
     "",
+    ...(typeSystem ? typeNotes(typeSystem, sections) : []),
     ...findingsNotes(ctx),
     "## 現場注意",
     "- 任何狀況先按 **B** 全黑；樂團即興延長或跳段時，切到現場模式手動 cue。",
@@ -659,6 +675,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     loudestLyricIndex,
     moodScenes: moodScenes(moodboard),
     findings,
+    voice: chooseVoice(findings, st.cjk),
   };
   const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible, input.assets);
   const title = makeTitle(mood, imagery, seed);
@@ -695,6 +712,20 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     : baseTypography;
 
   const cues: CueNote[] = findingsCues(suggestCues(sections, st.duration, input.lyrics?.lines ?? []), sections, findings, st);
+  const lines = buildLines(ctx, sections);
+  // 字體藝術: the song's voice and a composition for every sung line
+  const { system: typeSystem } = designTypeSystem({
+    lines: (input.lyrics?.lines ?? []).filter((l) => l && typeof l.id === "string" && typeof l.text === "string"),
+    sections,
+    duration: st.duration,
+    findings,
+    cjk: st.cjk,
+    bible,
+    planFonts: { cjk: typography.cjkFont, latin: typography.latinFont },
+    lineDesigns: lines,
+    bandName: input.bandName,
+    title: input.meta?.title,
+  });
   const plan: DesignPlan = {
     version: 1,
     keyVisual: {
@@ -707,9 +738,10 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       typography,
     },
     sections,
-    lines: buildLines(ctx, sections),
+    lines,
     cues,
-    designerNotes: designerNotes(ctx, sections, title),
+    designerNotes: designerNotes(ctx, sections, title, st.lines.length ? typeSystem : undefined),
+    typeSystem,
   };
   return normalizePlan(plan, input);
 }
@@ -750,7 +782,7 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
     "",
     "## 設計方向建議",
     `- 先訂下世界觀：以${imagery[0] ? `「${imagery[0].imagery.motif}」` : "一個簡單的幾何符號"}當主視覺，開場與結尾都回到它。`,
-    "- 主歌讓歌詞退居幕後（小字幕或上方淡入），副歌才讓歌詞成為畫面主角。",
+    "- 每一句歌詞都是排好的構圖，不是字幕：主歌小而安靜，副歌才讓歌詞成為畫面主角。",
     "- 歌詞字重 700 以上、對比 4.5:1 以上、每次最多兩行，避開主唱 IMAG 與畫面下緣。",
     "",
     "## 參考來源",

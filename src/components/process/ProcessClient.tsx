@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
-import { ExportIcon, FileTextIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, SwatchesIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { ExportIcon, FileTextIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, SwatchesIcon, TextAaIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import { retryFrom } from "@/lib/process-runner";
 import type { PipelineEvent, Project } from "@/lib/types";
@@ -368,6 +368,11 @@ export function ProcessClient({
           <Button href={lyricsHref} transitionTypes={PUSH} variant="gray" icon={PencilSimpleIcon}>
             編輯歌詞
           </Button>
+          {plan && !running && (
+            <Button href={`/p/${encodeURIComponent(id)}/type`} transitionTypes={PUSH} variant="gray" icon={TextAaIcon} data-testid="open-type-editor">
+              排版
+            </Button>
+          )}
           {!running && (
             <Button href={hasDirections ? `/p/${encodeURIComponent(id)}/proposal` : "#directions"} transitionTypes={hasDirections ? PUSH : undefined} variant="gray" icon={hasDirections ? FileTextIcon : SwatchesIcon}>
               {hasDirections ? "一頁提案" : "設計方向"}

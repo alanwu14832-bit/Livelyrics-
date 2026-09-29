@@ -46,14 +46,15 @@ export interface LyricStyleInfo {
 }
 
 export const LYRIC_STYLES: Record<LyricStyleId, LyricStyleInfo> = {
-  karaoke: { label: "卡拉 OK 填色", description: "整行先出現，填色逐字掃過；群眾先看到字才能跟唱，適合大合唱副歌（需要準確時間）。" },
+  // karaoke and subtitle stay valid for old plans and the operator's own choice; no designer picks them (字體藝術)
+  karaoke: { label: "卡拉 OK 填色", description: "（舊版樣式，自動設計不再使用）整行先出現，填色逐字掃過。" },
   "line-fade": { label: "整行淡入", description: "整行模糊淡入、再淡出；最穩定、最好讀的預設，適合主歌與敘事句。" },
   "word-pop": { label: "逐字彈出", description: "詞語一個個帶縮放彈出；有能量與節奏感，適合快歌副歌、口號。" },
   typewriter: { label: "打字機", description: "字元依序出現；有敘事與懸念感，適合導歌、獨白、慢而有力的句子（不適合快歌）。" },
   stack: { label: "詩句堆疊", description: "歌詞像詩一樣一行行往上堆疊、舊行變暗；讓觀眾看見整段文字，適合抒情段落、橋段。" },
   vertical: { label: "直排", description: "中日文直排（writing-mode: vertical-rl），帶文學與海報感；只用在短而詩意的中文句子。" },
   impact: { label: "巨字衝擊", description: "巨大粗體字塞滿畫面、一次只出現幾個字；用在 hook、口號、全場一起喊的瞬間。" },
-  subtitle: { label: "字幕", description: "小而安靜的下方字幕，畫面為主；適合視覺主導的主歌、字很密的段落。" },
+  subtitle: { label: "字幕", description: "（舊版樣式，自動設計不再使用）小而安靜的下方字幕。" },
   hidden: { label: "不顯示", description: "不顯示歌詞；前奏、間奏、solo、純器樂段落，或讓畫面／燈光當主角的段落。" },
 };
 

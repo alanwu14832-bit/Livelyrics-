@@ -1,6 +1,12 @@
 // normalizePlan: turn any (possibly partial or slightly wrong) plan into a valid,
 // renderer-safe DesignPlan for this song. Every Claude and offline plan passes through
 // here. It never throws; unusable parts are replaced with deterministic defaults.
+//
+// 字體藝術 (phase 6): a design output always leaves with a type system — the engine's own,
+// repaired (numbers clamped, fonts in the right script, unknown recipes and emphasis dropped), with
+// the per-line hints it left out filled by the sequencer — and without the karaoke / subtitle
+// styles no automatic designer picks any more. A stored plan that is only shifted or kept (the show
+// arc, an offline instruction, the previous plan) keeps its type system, or its absence.
 
 import {
   FONT_IDS,
@@ -11,6 +17,7 @@ import {
   MEDIA_TREATMENTS,
   SCENE_IDS,
   SECTION_KINDS,
+  TYPE_VOICE_IDS,
   type CueNote,
   type DesignPlan,
   type FontId,
@@ -22,14 +29,20 @@ import {
   type SectionDesign,
   type SectionKind,
   type SectionMedia,
+  type TypeSystem,
 } from "@/lib/schema";
 import type { Asset, LyricLine } from "@/lib/types";
+import { normalizeTypeSystem } from "@/lib/type/normalize";
+import { voiceFonts } from "@/lib/type/vocab";
+import { activeBible } from "./bible-style";
 import { FONT_CATALOG, SECTION_KIND_LABELS } from "./catalog";
 import { colorName, contrastRatio, ensureContrast, hexToHsl, hsl, luminance, MIN_LYRIC_CONTRAST, normalizeHex } from "./color";
 import { capCues, MAX_CUES, MIN_CUES, suggestCues } from "./cues";
 import { buildPalette, darkestIndex, SCHEMES, type PaletteEntry } from "./palette";
-import { cjkShare, clamp, defaultKindEnergy, isFiniteNumber, meanEnvelope, resolveDuration, round3 } from "./structure";
+import { analyzeFindings, type Findings } from "./findings";
+import { analyzeStructure, cjkShare, clamp, defaultKindEnergy, isFiniteNumber, meanEnvelope, resolveDuration, round3 } from "./structure";
 import { generateMotifSvg, hashString, sanitizeSvg } from "./svg";
+import { chooseVoice, designTypeSystem, hookKeyOf, lineEmphasis, lineMotion, typePolicy } from "./type-design";
 import type { DesignerInput } from "./types";
 
 type Obj = Record<string, unknown>;
@@ -46,6 +59,19 @@ export interface NormalizeReport {
   /** human-readable (繁中) notes about what had to be repaired */
   repairs: string[];
 }
+
+export interface NormalizeOptions {
+  /**
+   * "fill" (a design output, the default): the plan leaves with a type system — the engine's,
+   * repaired and completed, or the rule-based one when it wrote none — and karaoke / subtitle are
+   * replaced (no automatic designer chooses them). "keep" (a stored plan shifted or kept): its type
+   * system is repaired when it has one; an old plan without one keeps its legacy lyric styles.
+   */
+  typeSystem?: "fill" | "keep";
+}
+
+/** What a design output uses instead of the legacy karaoke / subtitle styles. */
+const LEGACY_REPLACEMENT: Partial<Record<LyricStyleId, LyricStyleId>> = { karaoke: "word-pop", subtitle: "line-fade" };
 
 // ---------------------------------------------------------------------------
 // primitive coercion
@@ -259,7 +285,7 @@ interface Draft extends Omit<SectionDesign, "id"> {
 function defaultStyle(kind: SectionKind): LyricStyleId {
   switch (kind) {
     case "chorus":
-      return "karaoke";
+      return "word-pop";
     case "intro":
     case "outro":
     case "solo":
@@ -335,7 +361,12 @@ function draftSection(raw: unknown, order: number, ctx: SectionCtx): Draft | nul
   const envEnergy = meanEnvelope(ctx.input.analysis, "energy", clamp(lo, 0, ctx.duration), clamp(hi, 0, ctx.duration));
   const e = r2(clamp(energy ?? envEnergy ?? defaultKindEnergy(kind), 0, 1));
   const params = asObj(o.sceneParams) ?? {};
-  const lyricStyle = oneOf<LyricStyleId>(o.lyricStyle, LYRIC_STYLE_IDS) ?? defaultStyle(kind);
+  let lyricStyle = oneOf<LyricStyleId>(o.lyricStyle, LYRIC_STYLE_IDS) ?? defaultStyle(kind);
+  const replaced = ctx.fill ? LEGACY_REPLACEMENT[lyricStyle] : undefined;
+  if (replaced) {
+    lyricStyle = replaced;
+    ctx.legacyStyles++;
+  }
   const colorway = pickColorway(o.colorway, ctx.palette);
   const preferred = normalizeHex(o.lyricColor);
   const lyricColor = ensureContrast(preferred, colorway[0], ctx.palette);
@@ -379,6 +410,9 @@ interface SectionCtx {
   contrastFixes: number;
   assets: ReadonlyMap<string, Asset>;
   droppedMedia: number;
+  /** a design output: karaoke / subtitle are replaced */
+  fill: boolean;
+  legacyStyles: number;
 }
 
 function audioBoundaries(input: DesignerInput): number[] {
@@ -487,11 +521,12 @@ function finishSection(d: Draft, lines: readonly LyricLine[]): Omit<SectionDesig
 // lines & cues
 // ---------------------------------------------------------------------------
 
-function normalizeLines(raw: unknown, lyricsLines: readonly LyricLine[], repairs: string[]): LineDesign[] {
+function normalizeLines(raw: unknown, lyricsLines: readonly LyricLine[], repairs: string[], fill = false): LineDesign[] {
   const byId = new Map(lyricsLines.map((l, i) => [l.id, { line: l, index: i }]));
   const merged = new Map<string, LineDesign & { index: number }>();
   let unknown = 0;
   let badEmphasis = 0;
+  let legacy = 0;
   for (const item of asArray(raw)) {
     const o = asObj(item);
     const id = typeof o?.lineId === "string" ? o.lineId.trim() : "";
@@ -514,7 +549,11 @@ function normalizeLines(raw: unknown, lyricsLines: readonly LyricLine[], repairs
       if (!found) badEmphasis++;
       else if (!emphasis.includes(found)) emphasis.push(found);
     }
-    const styleOverride = oneOf<LyricStyleId>(o.styleOverride, LYRIC_STYLE_IDS);
+    let styleOverride = oneOf<LyricStyleId>(o.styleOverride, LYRIC_STYLE_IDS);
+    if (fill && styleOverride && LEGACY_REPLACEMENT[styleOverride]) {
+      styleOverride = null;
+      legacy++;
+    }
     const note = oneLine(o.note, "", 200);
     const prev = merged.get(id);
     if (prev) {
@@ -527,6 +566,7 @@ function normalizeLines(raw: unknown, lyricsLines: readonly LyricLine[], repairs
   }
   if (unknown) repairs.push(`略過 ${unknown} 個不存在的歌詞行設定`);
   if (badEmphasis) repairs.push(`略過 ${badEmphasis} 個不在歌詞中的強調字`);
+  if (legacy) repairs.push(`移除 ${legacy} 個卡拉 OK／字幕的單行樣式（每一句都依構圖排版）`);
   return [...merged.values()]
     .filter((l) => l.emphasis.length || l.styleOverride || l.note)
     .sort((a, b) => a.index - b.index)
@@ -556,12 +596,66 @@ function summaryNotes(plan: Pick<DesignPlan, "keyVisual" | "sections">): string 
 }
 
 // ---------------------------------------------------------------------------
+// 字體藝術: the type system
+// ---------------------------------------------------------------------------
+
+function normalizeTypeOf(root: Obj, input: DesignerInput, plan: { keyVisual: KeyVisual; sections: SectionDesign[]; lines: LineDesign[] }, duration: number, fill: boolean, repairs: string[]): TypeSystem | null {
+  const raw = asObj(root.typeSystem);
+  if (!raw && !fill) return null;
+  const lyricsLines = Array.isArray(input.lyrics?.lines) ? input.lyrics.lines.filter((l) => l && typeof l.id === "string" && typeof l.text === "string") : [];
+  const bible = activeBible(input.bible);
+  // the findings are only read when something has to be chosen or filled
+  let found: Findings | null = null;
+  let structure: ReturnType<typeof analyzeStructure> | null = null;
+  const st = () => (structure ??= analyzeStructure(input));
+  const findings = () => (found ??= analyzeFindings(input, st()));
+  const typo = plan.keyVisual.typography;
+  if (!raw) {
+    const { system } = designTypeSystem({
+      lines: lyricsLines,
+      sections: plan.sections,
+      duration,
+      findings: findings(),
+      cjk: st().cjk,
+      bible,
+      planFonts: { cjk: typo.cjkFont, latin: typo.latinFont },
+      lineDesigns: plan.lines,
+      bandName: input.bandName,
+      title: input.meta?.title,
+    });
+    if (lyricsLines.some((l) => l.text.trim())) repairs.push("補上字體語言與每一行歌詞的構圖（依曲風與歌詞自動排版，可以到「排版」頁調整）");
+    return system;
+  }
+  const given = oneOf(raw.voice, TYPE_VOICE_IDS);
+  const voice = given ?? chooseVoice(findings(), st().cjk).voice;
+  const ids = new Set(asArray(raw.lines).map((l) => (asObj(l)?.lineId as string | undefined) ?? ""));
+  const missing = lyricsLines.some((l) => l.text.trim() && !ids.has(l.id));
+  const emphasis = new Map(plan.lines.filter((l) => l.emphasis.length).map((l) => [l.lineId, l.emphasis] as const));
+  const fonts = bible ? voiceFonts(voice, { cjk: bible.fonts.cjkFont, latin: bible.fonts.latinFont }, true) : voiceFonts(voice, { cjk: typo.cjkFont, latin: typo.latinFont });
+  const { system, repairs: more } = normalizeTypeSystem(raw, {
+    lines: lyricsLines,
+    sections: plan.sections,
+    duration,
+    voice,
+    fonts,
+    emphasisFor: (line) => emphasis.get(line.id) ?? lineEmphasis(line, findings()),
+    motionFor: (line) => lineMotion(line, findings()),
+    policy: missing ? typePolicy(bible, bible ? null : findings()) : null,
+    hookKey: missing ? hookKeyOf(lyricsLines) : null,
+    keepEdits: true,
+  });
+  repairs.push(...more);
+  return system;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 /** Normalize and report what was repaired. */
-export function normalizePlanWithReport(raw: unknown, input: DesignerInput): NormalizeReport {
+export function normalizePlanWithReport(raw: unknown, input: DesignerInput, options: NormalizeOptions = {}): NormalizeReport {
   const repairs: string[] = [];
+  const fill = (options.typeSystem ?? "fill") === "fill";
   const root = asObj(raw) ?? {};
   const duration = round3(resolveDuration(input));
   const seed = hashString(`${input.meta?.title ?? ""}|${input.meta?.artist ?? ""}`);
@@ -570,12 +664,13 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput): Nor
   const lyricsLines = Array.isArray(input.lyrics?.lines) ? input.lyrics.lines : [];
 
   const assets = new Map((Array.isArray(input.assets) ? input.assets : []).filter((a) => a && typeof a.id === "string").map((a) => [a.id, a] as const));
-  const ctx: SectionCtx = { input, duration, palette, contrastFixes: 0, assets, droppedMedia: 0 };
+  const ctx: SectionCtx = { input, duration, palette, contrastFixes: 0, assets, droppedMedia: 0, fill, legacyStyles: 0 };
   const rawSections = asArray(root.sections);
   let drafts = rawSections.map((s, i) => draftSection(s, i, ctx)).filter((d): d is Draft => d != null);
   if (drafts.length < rawSections.length) repairs.push(`略過 ${rawSections.length - drafts.length} 個缺少時間的段落`);
   if (ctx.droppedMedia) repairs.push(`移除 ${ctx.droppedMedia} 個指向不存在素材的段落素材`);
   if (ctx.contrastFixes) repairs.push(`調整 ${ctx.contrastFixes} 段歌詞顏色以達到 4.5:1 對比`);
+  if (ctx.legacyStyles) repairs.push(`${ctx.legacyStyles} 段的卡拉 OK／字幕樣式改為其他樣式（每一句都依構圖排版）`);
   const before = drafts.map((d) => `${d.start}-${d.end}`).join(",");
   drafts = repairTimeline(drafts, duration, audioBoundaries(input));
   if (!drafts.length) {
@@ -586,7 +681,7 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput): Nor
   if (drafts.map((d) => `${d.start}-${d.end}`).join(",") !== before) repairs.push("段落時間已對齊到 0 至歌曲結尾、無縫銜接");
 
   const sections: SectionDesign[] = drafts.map((d, i) => ({ id: `s${i}`, ...finishSection(d, lyricsLines) }));
-  const lines = normalizeLines(root.lines, lyricsLines, repairs);
+  const lines = normalizeLines(root.lines, lyricsLines, repairs, fill);
 
   let cues = normalizeCues(root.cues, duration);
   if (cues.length < MIN_CUES) {
@@ -601,10 +696,13 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput): Nor
 
   const partial = { keyVisual, sections };
   const designerNotes = text(root.designerNotes, "", 6000) || summaryNotes(partial);
-  return { plan: { version: 1, keyVisual, sections, lines, cues, designerNotes }, repairs };
+  const typeSystem = normalizeTypeOf(root, input, { keyVisual, sections, lines }, duration, fill, repairs);
+  const plan: DesignPlan = { version: 1, keyVisual, sections, lines, cues, designerNotes };
+  if (typeSystem) plan.typeSystem = typeSystem;
+  return { plan, repairs };
 }
 
 /** Clamp, repair and complete a plan so it is valid and safe for this song. Never throws. */
-export function normalizePlan(raw: unknown, input: DesignerInput): DesignPlan {
-  return normalizePlanWithReport(raw, input).plan;
+export function normalizePlan(raw: unknown, input: DesignerInput, options: NormalizeOptions = {}): DesignPlan {
+  return normalizePlanWithReport(raw, input, options).plan;
 }
