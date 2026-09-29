@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { DesignPlanSchema, type DesignPlan } from "@/lib/schema";
 import {
+  clientOptions,
   createPlanProgress,
   designParams,
   FALLBACK_BETA,
@@ -11,6 +12,7 @@ import {
   researchParams,
   runWithContinuations,
   sdkTransport,
+  THINKING_BINDING_BETA,
   tidyBrief,
 } from "./claude";
 import { designSong, researchSong } from "./index";
@@ -19,6 +21,12 @@ import { cite, fakeTransport, fallbackBlock, message, refusalDetails, search, se
 import { demoInput } from "./testing/fixtures";
 
 const input = demoInput();
+/** adaptive thinking with summaries; a replayed block whose prefix changed is dropped, not a 400 */
+const THINKING = { type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } };
+/** the free research's sources are unreachable in these tests */
+const noNetwork = async (): Promise<Response> => {
+  throw new TypeError("fetch failed");
+};
 const BRIEF =
   "## 樂團視覺識別\n- 招牌色是深藍與燈火橘。\n\n## 歌曲意象與情緒\n- 夜晚的城市、燈火。\n\n## 現場表演觀察\n- 副歌大合唱。\n\n## 設計方向建議\n- 以燈火為母題。\n\n## 參考來源\n- [Live](https://band.example/live)";
 
@@ -76,8 +84,8 @@ describe("request parameters", () => {
     const p = researchParams(input, "claude-opus-5");
     expect(p.model).toBe("claude-opus-5");
     expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 8 }]);
-    expect(p.thinking).toEqual({ type: "adaptive", display: "summarized" });
-    expect(p.betas).toEqual([FALLBACK_BETA]);
+    expect(p.thinking).toEqual(THINKING);
+    expect(p.betas).toEqual([FALLBACK_BETA, THINKING_BINDING_BETA]);
     expect(p.fallbacks).toBe("default");
     const prompt = userText(p.messages[0]);
     expect(prompt).toContain("示範之歌");
@@ -90,7 +98,7 @@ describe("request parameters", () => {
     const p = designParams({ ...input, research: null }, "claude-opus-5");
     expect(p.output_config?.effort).toBe("high");
     expect(p.output_config?.format?.type).toBe("json_schema");
-    expect(p.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(p.thinking).toEqual(THINKING);
     expect(p.fallbacks).toBe("default");
     expect(p.tools).toBeUndefined();
     const prompt = userText(p.messages[0]);
@@ -141,11 +149,11 @@ describe("researchSong with Claude", () => {
     expect(research.brief).toContain("簡報未完成");
   });
 
-  it("falls back to offline research on refusal, discarding the partial output", async () => {
+  it("falls back to the free research on refusal, discarding the partial output", async () => {
     const t = fakeTransport([message([text("部分內容")], "refusal", { stop_details: refusalDetails("cyber") })]);
     const r = recorder();
-    const research = await researchSong(input, r.cb, { transport: t, configured: true });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { transport: t, configured: true, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(research.brief).not.toContain("部分內容");
     expect(r.logs.join("\n")).toContain("婉拒");
     expect(r.deltas.join("")).toContain("---");
@@ -154,10 +162,10 @@ describe("researchSong with Claude", () => {
   it("falls back on API errors and never throws", async () => {
     const t = fakeTransport([new Anthropic.RateLimitError(429, { type: "error" }, "rate limited", new Headers())]);
     const r = recorder();
-    const research = await researchSong(input, r.cb, { transport: t, configured: true });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { transport: t, configured: true, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(research.brief).toContain("429");
-    expect(r.logs.join("\n")).toContain("改用離線研究");
+    expect(r.logs.join("\n")).toContain("改用免費研究");
   });
 
   it("reports server-side fallbacks", async () => {
@@ -168,11 +176,12 @@ describe("researchSong with Claude", () => {
     expect(r.logs.join("\n")).toContain("claude-opus-4-8 接手");
   });
 
-  it("uses the offline designer without a credential", async () => {
+  it("uses the free research without a credential", async () => {
     const r = recorder();
-    const research = await researchSong(input, r.cb, { configured: false });
-    expect(research.engine).toBe("offline");
+    const research = await researchSong(input, r.cb, { configured: false, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(r.logs[0]).toContain("ANTHROPIC_API_KEY");
+    expect(r.deltas.join("")).toContain("查詢 MusicBrainz");
     expect(r.deltas.join("")).toContain("## 樂團視覺識別");
   });
 
@@ -311,12 +320,13 @@ describe("real SDK transport (fake fetch)", () => {
     const [first, second] = requests;
     expect(first.url).toContain("/v1/messages");
     expect(first.headers.get("anthropic-beta")).toContain(FALLBACK_BETA);
+    expect(first.headers.get("anthropic-beta")).toContain(THINKING_BINDING_BETA);
     expect(first.headers.get("x-api-key")).toBe("test-key");
     expect(first.body).toMatchObject({
       model: "claude-opus-5",
       stream: true,
       fallbacks: "default",
-      thinking: { type: "adaptive", display: "summarized" },
+      thinking: THINKING,
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
     });
     expect(first.body.betas).toBeUndefined();
@@ -331,5 +341,21 @@ describe("real SDK transport (fake fetch)", () => {
     expect(research.engine).toBe("claude");
     expect(research.brief).toContain("## 設計方向建議");
     expect(research.sources).toEqual([{ title: "Live", url: "https://band.example/live" }]);
+  });
+
+  it("names the workspace on every request only when ANTHROPIC_WORKSPACE_ID is set", async () => {
+    expect(clientOptions({})).toEqual({});
+    expect(clientOptions({ ANTHROPIC_WORKSPACE_ID: "  " })).toEqual({});
+    const sent: Array<string | null> = [];
+    const fakeFetch = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      sent.push(new Headers(init?.headers).get("anthropic-workspace-id"));
+      return new Response(sseBody(message([text("ok")], "end_turn")), { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+    const params = { model: "claude-opus-5", max_tokens: 16, messages: [{ role: "user" as const, content: "hi" }] };
+    for (const env of [{ ANTHROPIC_WORKSPACE_ID: " wrkspc_01test " }, {}]) {
+      const client = new Anthropic({ ...clientOptions(env), apiKey: "test-key", baseURL: "http://claude.test", fetch: fakeFetch, maxRetries: 0 });
+      await sdkTransport(client).stream(params, {});
+    }
+    expect(sent).toEqual(["wrkspc_01test", null]);
   });
 });

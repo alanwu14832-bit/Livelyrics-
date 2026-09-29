@@ -13,6 +13,7 @@ import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, Ski
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
+import { designStatusLabel } from "@/lib/research-labels";
 import { formatTime } from "@/lib/timeline";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { useStorageMode } from "@/components/home/use-storage-mode";
@@ -112,7 +113,7 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
   } else if (untimed > 0) {
     status = `${untimed} 行未對時`;
     tone = "orange";
-  } else if (project?.research) status = project.research.engine === "claude" ? "Claude 設計" : "離線設計";
+  } else if (project) status = designStatusLabel(project);
 
   const artist = project?.meta?.artist || "未知藝人";
   return (

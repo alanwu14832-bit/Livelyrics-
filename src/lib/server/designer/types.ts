@@ -1,6 +1,6 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, MoodImage, Research, SongArcDirective, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SongArcDirective, SongMeta } from "@/lib/types";
 import type { VisionImage } from "./moodboard";
 
 export interface DesignerInput {
@@ -16,6 +16,12 @@ export interface DesignerInput {
   moodboard?: MoodImage[];
   /** the mood board images the server could read, for Claude's vision input (ids match `moodboard`) */
   moodboardImages?: VisionImage[];
+  /**
+   * 免費研究: the public facts found about the song and artist (MusicBrainz, Wikipedia), cached on
+   * the project's research. The research step reuses it; the offline designer and directions read
+   * the genre from it. Absent / null = none (lyrics and audio only).
+   */
+  publicInfo?: PublicInfo | null;
 }
 
 export interface DesignerCallbacks {

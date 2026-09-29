@@ -153,6 +153,52 @@ describe("runPipeline", () => {
     expect(replay[replay.length - 1].type).toBe("done");
   });
 
+  it("free runs never call the Claude API; research reuses the stored public facts; the design step records who made the plan", async () => {
+    const p = await newProject("免費之歌");
+    const publicInfo = {
+      version: 1,
+      query: { title: "免費之歌", artist: "Livelyrics Band" },
+      fetchedAt: "2026-09-01T00:00:00.000Z",
+      musicbrainz: null,
+      wikipedia: null,
+      status: { musicbrainz: "none", wikipedia: "none" },
+      notes: [],
+    };
+    await updateProject(p.id, (d) => {
+      d.research = { ...research, engine: "free", publicInfo } as Research;
+      d.plan = plan("貼上的方案");
+      d.planSource = { engine: "manual-claude", at: "2026-09-01T00:00:00.000Z" };
+    });
+    const free: Research = { brief: "# 免費研究", sources: [], engine: "free", createdAt: "2026-09-29T00:00:00Z" };
+    designerMock.researchSong.mockImplementation(async (input) => {
+      expect(input.publicInfo).toEqual(publicInfo);
+      return free;
+    });
+    designerMock.designSong.mockImplementation(async (input) => {
+      expect(input.research).toEqual(free);
+      return plan("免費的方案");
+    });
+    const events = await collect(runPipeline(p.id, { steps: ["research", "design"], free: true }));
+    expect(events[events.length - 1].type).toBe("done");
+    expect(designerMock.researchSong.mock.calls[0][2]).toEqual({ configured: false });
+    expect(designerMock.designSong.mock.calls[0][2]).toEqual({ configured: false });
+    expect(events).toContainEqual({ type: "step", step: "research", status: "done", message: "研究完成：免費研究（公開資料＋歌詞與音訊分析）" });
+    const saved = (await getProject(p.id))!;
+    expect(saved.plan?.keyVisual.title).toBe("免費的方案");
+    expect(saved.planSource).toMatchObject({ engine: "free" });
+
+    // a Claude design names its model in its success log
+    designerMock.designSong.mockImplementation(async (_input, cb) => {
+      cb.onLog?.("設計完成（claude-test）：主視覺「x」，1 個段落、0 個操作提示");
+      return plan("Claude 的方案");
+    });
+    await collect(runPipeline(p.id, { steps: ["design"] }));
+    expect((await getProject(p.id))!.planSource).toMatchObject({ engine: "claude", model: "claude-test" });
+
+    // without the option the designer decides (no deps in local mode)
+    expect(designerMock.designSong.mock.calls[1]).toHaveLength(2);
+  });
+
   it("a throwing designer yields a clean error event and keeps earlier results", async () => {
     const p = await newProject();
     designerMock.researchSong.mockRejectedValue(new Error("researchSong: not implemented"));

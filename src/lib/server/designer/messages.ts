@@ -230,9 +230,24 @@ export function describeStop(reason: BetaStopReason | null): string {
   }
 }
 
+/** An identity-linked key that isn't bound to one workspace must name it on every request (see `clientOptions`). */
+function workspaceProblem(err: unknown): string | null {
+  if (err instanceof Anthropic.NotFoundError && /workspace\b.*\bnot found/i.test(err.message)) {
+    return "找不到 ANTHROPIC_WORKSPACE_ID 指定的 workspace，或這把金鑰沒有它的權限（404）";
+  }
+  if (!(err instanceof Anthropic.BadRequestError)) return null;
+  if (/valid workspace id/i.test(err.message)) return "ANTHROPIC_WORKSPACE_ID 格式不對，應該是 wrkspc_ 開頭的 workspace ID（400）";
+  if (/not scoped to a workspace|anthropic-workspace-id/i.test(err.message)) {
+    return "這把 API 金鑰沒有綁定 workspace（400）：到 Claude Console 建立綁定單一 workspace 的金鑰，或設定 ANTHROPIC_WORKSPACE_ID";
+  }
+  return null;
+}
+
 /** A short 繁中 explanation of an SDK / network error (never includes credentials). */
 export function describeError(err: unknown): string {
   if (err instanceof Anthropic.APIUserAbortError) return "已取消";
+  const workspace = workspaceProblem(err);
+  if (workspace) return workspace;
   if (err instanceof Anthropic.AuthenticationError) return "API 金鑰無效或已過期（401）";
   if (err instanceof Anthropic.PermissionDeniedError) return "這把金鑰沒有使用此模型的權限（403）";
   if (err instanceof Anthropic.NotFoundError) return "找不到指定的模型，請檢查 LIVELYRICS_MODEL（404）";

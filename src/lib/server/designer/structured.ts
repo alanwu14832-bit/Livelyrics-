@@ -4,7 +4,7 @@
 
 import type { z } from "zod";
 import type { BetaContentBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { ClaudeFailure, FALLBACK_BETA, parsePlanJson, runWithContinuations, type ClaudeOptions } from "./claude";
+import { adaptiveThinking, ClaudeFailure, FALLBACK_BETA, parsePlanJson, runWithContinuations, THINKING_BINDING_BETA, type ClaudeOptions } from "./claude";
 import { describeRefusal, describeStop, textAfterLastFallback, textOf } from "./messages";
 import { jsonOutputFormat } from "./output-schema";
 import type { DesignerCallbacks } from "./types";
@@ -33,9 +33,9 @@ export async function claudeStructured(
       max_tokens: job.maxTokens ?? 16_000,
       system: job.system,
       messages: [{ role: "user", content: job.before?.length ? [...job.before, { type: "text", text: job.prompt }] : job.prompt }],
-      thinking: { type: "adaptive", display: "summarized" },
+      thinking: adaptiveThinking(),
       output_config: { effort: job.effort ?? "high", format: jsonOutputFormat(job.schema) },
-      betas: [FALLBACK_BETA],
+      betas: [FALLBACK_BETA, THINKING_BINDING_BETA],
       fallbacks: "default",
     },
     {

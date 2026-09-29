@@ -16,6 +16,7 @@ import type {
   Band,
   BandSummary,
   DesignPlan,
+  DirectionEngine,
   Lyrics,
   MoodImage,
   MoodStats,
@@ -61,6 +62,8 @@ export interface ServerStatus {
     missing: string[];
     /** running on Vercel */
     onVercel: boolean;
+    /** unconfigured: a Blob store is connected (BLOB_STORE_ID, OIDC) but BLOB_READ_WRITE_TOKEN is not set */
+    blobStoreWithoutToken?: boolean;
   };
   /** LIVELYRICS_PASSWORD is set: pages and APIs need a login */
   auth: boolean;
@@ -280,8 +283,26 @@ export const api = {
   /** 提出設計方向 / 修改 / 採用 / 復原 / 退回 / 意見 (see /api/projects/[id]/directions) */
   directions: (id: string, body: DirectionsAction, signal?: AbortSignal) =>
     fetch(`/api/projects/${id}/directions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }).then((r) =>
-      json<{ project: Project; engine?: "claude" | "offline"; logs?: string[] }>(r),
+      json<{ project: Project; engine?: DirectionEngine; logs?: string[] }>(r),
     ),
+
+  // ---- 用 claude.ai 研究 (manual Claude mode) --------------------------------
+
+  /** The complete prompt to paste into claude.ai (plan or directions; 精簡版 with `compact`). */
+  manualPrompt: (id: string, body: { target: ManualTarget; compact?: boolean; instruction?: string }) =>
+    fetch(`/api/projects/${id}/manual`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "prompt", ...body }) }).then((r) =>
+      json<ManualPromptResult>(r),
+    ),
+
+  /**
+   * Apply a pasted claude.ai reply. Resolves with `{ ok: false, issues, fixPrompt }` when the reply
+   * cannot be used (HTTP 422); other failures reject like every other call.
+   */
+  async manualApply(id: string, body: { target: ManualTarget; reply: string; brief?: string }): Promise<ManualApplyResult> {
+    const res = await fetch(`/api/projects/${id}/manual`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "apply", ...body }) });
+    if (res.status === 422) return (await res.json()) as ManualApplyResult;
+    return json<ManualApplyResult>(res);
+  },
 
   // ---- bands ----------------------------------------------------------------
 
@@ -435,6 +456,55 @@ export type DirectionsAction =
   | { action: "uncomment"; directionId: string; commentId: string }
   | { action: "clear" };
 
+/** 用 claude.ai 研究: what the pasted reply becomes (the design plan, or 2–3 design directions). */
+export type ManualTarget = "plan" | "directions";
+
+/** Largest pasted reply the app accepts (UTF-8 bytes); the server checks again. */
+export const MANUAL_REPLY_MAX_BYTES = 200 * 1024;
+
+export interface ManualPromptResult {
+  prompt: string;
+  /** characters in the prompt */
+  chars: number;
+  compact: boolean;
+  /** long enough that the free claude.ai tier may cut it: offer 精簡版 */
+  long: boolean;
+  /** mood board images to attach in claude.ai, numbered like the prompt (圖 1…) */
+  images: Array<{ n: number; name: string; note?: string }>;
+  /** the free research findings were included as a head start */
+  findings: boolean;
+}
+
+export interface ManualIssue {
+  /** JSON path, e.g. "sections[2].scene" (absent for whole-reply problems) */
+  path?: string;
+  message: string;
+  severity: "error" | "warning";
+}
+
+export type ManualApplyResult =
+  | {
+      ok: true;
+      project: Project;
+      target: ManualTarget;
+      /** what was repaired automatically (clamping, contrast, timing, unknown ids…) */
+      notes: string[];
+      /** what LED 安全模式 will change on stage */
+      safety: string[];
+      /** the reply's research brief was saved (研究簡報) */
+      research: boolean;
+    }
+  | {
+      ok: false;
+      /** one-line summary (繁中) */
+      error: string;
+      issues: ManualIssue[];
+      /** paste this into the same claude.ai chat to get a corrected JSON */
+      fixPrompt: string;
+      /** the research brief found in this reply: send it back with the corrected JSON so it is kept */
+      brief?: string;
+    };
+
 export interface AssetUploadInput {
   [key: string]: unknown;
   file: File;
@@ -476,6 +546,8 @@ export interface ProcessRequest {
   attachOnly?: boolean;
   /** the song's place in a show arc: the designer follows it (整場弧線) */
   arc?: SongArcDirective;
+  /** do not call the Claude API in this run, even with a key: 免費研究 and the offline designer */
+  free?: boolean;
   /**
    * Cloud mode: this request is one step of a run the page drives (`steps` holds that step). The
    * server records the run on the project so a refreshed page can continue it.

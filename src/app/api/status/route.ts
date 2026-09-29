@@ -16,7 +16,13 @@ export const GET = handle(async () => {
     claude: isClaudeConfigured(),
     model: modelName(),
     dataDir: mode === "local" ? dataDir() : "",
-    storage: { mode, cloudConfigured: config.cloudConfigured, missing: mode === "unconfigured" ? config.missing : [], onVercel: config.onVercel },
+    storage: {
+      mode,
+      cloudConfigured: config.cloudConfigured,
+      missing: mode === "unconfigured" ? config.missing : [],
+      onVercel: config.onVercel,
+      blobStoreWithoutToken: mode === "unconfigured" && config.blobStoreWithoutToken,
+    },
     auth: authEnabled(),
   };
   return json(status);

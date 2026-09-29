@@ -5,7 +5,10 @@ Livelyrics is a **local web app** a band's visual operator runs on their own lap
 1. **Upload** an audio file → the browser analyses it (tempo, beats, energy, sections, waveform).
 2. The server **researches** the song & band with Claude (web search) acting as the band's
    dedicated stage-visual designer, then **designs** a `DesignPlan`: key visual (主視覺), palette,
-   motif, typography, per-section scene + lyric presentation, cue notes.
+   motif, typography, per-section scene + lyric presentation, cue notes. Without an API key the
+   research is **免費研究** (MusicBrainz + Wikipedia + a local lyric / audio analysis) and the offline
+   designer follows its findings; **用 claude.ai 研究** hands the whole job to the user's own
+   claude.ai chat by copy and paste (see "免費研究與手動 Claude 模式" below).
 3. The **operator console** (`/p/[id]`) shows everything (lyrics, timeline, design rationale, research,
    cue notes, controls, live preview) and lets the operator play/seek/jump lyrics/override.
 4. The **projection output** (`/p/[id]/output`, a second browser window on the projector) shows
@@ -47,7 +50,7 @@ show up in the product:
 
 | File | What |
 |---|---|
-| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet` |
+| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 5 `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource` |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
@@ -92,6 +95,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/moodboard` GET/POST, `/api/projects/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | 參考圖 (phase 4): `{ images }` / upload (the media-library contract, images only, ≤ 12, 8 MB, `meta.stats` = the colours measured in the browser) → `{ image, images }` / file / `{ note?, name? }` / delete |
 | `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
 | `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
+| `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 5) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call, no `maxDuration`) |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 | `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
 | `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
@@ -415,6 +419,98 @@ pipeline and 「重新設計」 are unchanged. Types in `src/lib/types.ts` (`Moo
   directions reflecting the mood board, non-blank style frames, select → console, undo, the proposal
   in print emulation and `page.pdf` = one A4 landscape page, revise, reject).
 
+### 免費研究與手動 Claude 模式 (phase 5)
+
+For bands that do not pay for API tokens. Without `ANTHROPIC_API_KEY` the research step is **免費研究**
+(the default; also after a Claude failure, and for a run with `ProcessRequest.free`, the
+「這次用免費研究」 switch of 重新設計 when a key is set). **用 claude.ai 研究** is a copy-and-paste round
+trip through the user's own claude.ai account. With a key the Claude API path keeps priority; both
+remain available.
+
+- **Public sources** (`src/lib/server/research/`). `http.ts`: `getJson` never throws (繁中 errors),
+  `User-Agent: Livelyrics/0.1 (contact: https://github.com/alanwu14832-bit/Livelyrics-)`, 6 s per
+  request, the platform `fetch` (so `NODE_USE_ENV_PROXY` applies), `RateGate` (MusicBrainz ≥ 1.1 s
+  apart, shared per process), `sourceConfig`: `LIVELYRICS_FREE_SOURCES=off` disables the lookups,
+  `LIVELYRICS_MUSICBRAINZ_URL` / `LIVELYRICS_WIKIPEDIA_URL` (with `{lang}`) point them elsewhere (the
+  e2e stub). `musicbrainz.ts`: `/ws/2/recording?query=` (title + artist credit, Lucene-escaped) →
+  the best studio take whose credit / sort name / alias matches (names compared with `nameKey`:
+  NFKC, lowercase, simplified → traditional via `src/lib/zh-variants.ts`) → `/artist/<id>?inc=
+  genres+tags+url-rels` (type, country, area, begin year, disambiguation, genres, tags, ≤ 6 useful
+  links); else an artist search. `wikipedia.ts`: REST `/w/rest.php/v1/search/page` + `/api/rest_v1/
+  page/summary` on zh (`Accept-Language: zh-TW`) then en; the artist page must look musical, a song
+  page must name the artist; 429 stops that language. `public-info.ts`: `lookupPublicInfo` runs both
+  in parallel inside a 15 s budget (far inside the cloud step's 300 s) and returns `PublicInfo`
+  (`status` per source: ok / none / failed / skipped, `notes`); it is cached as
+  `Project.research.publicInfo` and reused while fresh (same names, no failed source, < 30 days).
+- **Local analysis** (deterministic, `designer/`). `lexicon/imagery.ts` (54 image families: words,
+  scene family, hues, saturation, light, temperature, motion, emblem, a 繁中 colour phrase, how visual
+  the family is; stop words such as 上海 / 花錢), `lexicon/sentiment.ts` (≈ 270 zh / en words with
+  valence and arousal, negators, intensifiers, chants), `lexicon/genres.ts` (20 genre rules: MusicBrainz
+  tags and 繁中 keywords → palette tendency, scene family and avoided scenes, lyric density and verse /
+  chorus styles, motion energy, typography, motifs, the live habit and a one-line why).
+  `lyric-analysis.ts`: forward-maximum-matching tokenizer over the lexicons (code-point offsets,
+  simplified lyrics matched through the traditional map), imagery (the title counts double), emotion
+  (negation, intensifiers, chants, `!`, the hook weighted 40 %; labels 明亮激昂 / 溫柔明亮 / 痛苦掙扎 /
+  憂傷低迴 / 矛盾拉扯 / 平靜內斂), point of view (我們 / 我–你 / 你 / 我 / 他), sing-along phrases (repeated
+  token-bounded grams or chants, always shorter than their line). `audio-mood.ts`: BPM, energy,
+  section contrast, brightness, bass, onset → 爆發釋放 / 冷冽推進 / 溫暖律動 / 陰鬱緩慢 / 溫柔漂浮, the energy
+  shape and the peak. `genre.ts`: tag / Wikipedia matches, general words ("rock", 搖滾) weighted down.
+  `findings.ts`: `analyzeFindings` → `Findings` + `DesignHints` (hue, accent hues with the genre
+  leading and the strongest image as the accent, saturation, scheme, temperature, scene family minus
+  the genre's avoided scenes, motifs, typography, lyric density and styles, motion, sing-along, a
+  世界觀 sentence).
+- **Synthesis.** `free-research.ts`: `freeResearch` streams 「查詢 MusicBrainz…」「讀取維基百科…」「分析歌詞
+  意象…」 (and `onSearch` per source) and returns a `Research` (`engine: "free"`, the five research
+  headings, sources = the MusicBrainz / Wikipedia pages and official links, `publicInfo`), labelled
+  「免費研究（公開資料＋歌詞與音訊分析）」 (`src/lib/research-labels.ts`). Every source may fail: the brief then
+  says so and stands on the lyrics and the audio. `DesignerInput.publicInfo` carries the facts into
+  the design step and the directions: `offlineDesign` takes palette, scheme, saturation, fonts, scene
+  family, lyric styles, transitions (soft genres never flash), motifs, the concept sentence, the
+  「免費研究的發現」 notes, the sing-along emphasis and cues from the findings (the bible and the mood
+  board still come first); `offlineDirectionSpecs` keeps film / collage / minimal but takes each
+  direction's colours, scenes, motifs and wording from the song, and the genre's native axis takes
+  the genre's colours and lyric habit (folk → a warm earth-toned film, punk → the collage).
+- **用 claude.ai 研究** (`designer/manual.ts`, `designer/manual-reply.ts`, `src/lib/server/manual.ts`,
+  `src/components/manual/ManualClaudeSheet.tsx`). `buildManualPrompt` (plan or directions; 精簡版
+  abbreviates the lyrics, the findings and the catalogue and asks for shorter answers): the task
+  (research on the web first, the brief with the five headings, then exactly one ```json block), the
+  song, the lyrics marked by section 【a1 主歌一 0:08–0:24｜能量 0.43】 with line ids, the audio summary
+  and energy curve, the free findings, the bible, the mood board (the user attaches the images; notes
+  and measured colours listed), the band's material, the canvas, the lyric safe area and LED 安全模式,
+  `DESIGN_SYSTEM` / `DIRECTIONS_SYSTEM` (the API's own rules), a field reference generated from the
+  structured-output schema (`designPlanJsonSchema()` / `jsonOutputFormat(DirectionDraftSchema)`) and
+  a JSON template on the song's real section timings (valid against the zod schemas; （…） marks what
+  to write). `readManualReply` (never evaluates; ≤ 200 KB UTF-8): the best ```json / ~~~ fence or a
+  bare balanced object; `JSON.parse`, else `repairJson` (smart / single quotes as delimiters, stray
+  quotes inside strings, trailing commas, comments, fullwidth punctuation, unquoted keys, raw line
+  breaks, True / False / None, missing commas) and parse again; truncation vs unbalanced brackets;
+  errors with line, column and a snippet. Plans: `DesignPlanSchema` issues in 繁中 (auto-repaired and
+  listed when the plan is usable), refused when unusable, a directions JSON, ≥ 3 template
+  placeholders left, ≤ 2 sections for a song of ≥ 5, or > 15 schema problems; then
+  `normalizePlanWithReport` (repairs as notes) and `safetyReport` (what LED 安全模式 changes).
+  Directions: ≥ 2 distinct usable drafts via `normalizeDirectionDrafts` (no offline top-up) →
+  `buildDirections(engine "manual-claude")`. The brief is the text before the JSON (a JSON-first reply:
+  after it), tidied like Claude's, sources from its links (http(s) only, claude.ai skipped); a failed
+  reply returns it so a JSON-only fix still saves it. `fixPrompt` lists the problems for the same
+  chat. Applying saves `plan` (old one in `previousPlan` with its `source`, for 復原), `planSource
+  { engine: "manual-claude" }` and `research { engine: "manual-claude", publicInfo kept }`, or the
+  direction set.
+- **Who made the plan.** `Project.planSource` (`PlanSource`): the pipeline's design step (Claude with
+  its model, else `free` / `offline`), 用 claude.ai 研究, or 採用這個方向 (the direction's engine);
+  `PlanSnapshot.source` brings it back on 復原. The console top bar shows it (`designStatusLabel`).
+- **UI.** Home: 「免費研究模式」 (status button, line, connect sheet explaining the free mode, the
+  claude.ai option, then the API key steps). Design overview: a 「用 claude.ai 研究」 card under 重新設計,
+  the free-mode placeholders while the stream runs, the research panel / console tab labels and
+  footnotes per engine; 設計方向: 「用 claude.ai 提案」. The sheet: 完整版／精簡版, 「複製提示詞」, 「打開 claude.ai」
+  (https://claude.ai/new), the mood board images to attach (each opens in a tab), the paste area with
+  a byte counter, 「套用」, the error list with 「複製修正提示詞」, the success notes, 「進入控制台」 and 「復原」.
+- **Tests** never reach the network: `src/test-setup.ts` makes `fetch` to MusicBrainz / Wikipedia /
+  Wikidata throw; the lookups take a fake `fetch` serving the real responses saved in
+  `fixtures/research/` (`designer/testing/public-sources.ts`). `research/research.test.ts`,
+  `designer/analysis.test.ts`, `designer/free-research.test.ts`, `designer/manual.test.ts`,
+  `server/manual.test.ts`; E2E `scripts/e2e-free-research.cjs` (a local stub serving the fixtures,
+  then unreachable sources; the manual round trip with a good reply in prose and a broken one).
+
 ### Band media and the output canvas (phase 1a)
 
 - `Project.assets: Asset[]` (image / video / logo; size and video length measured in the browser by
@@ -563,18 +659,31 @@ keeps every contract above and changes only where things are kept and how long w
   Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`
-- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-opus-5`), server tool `web_search_20260209`,
+- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-sonnet-5-5`), server tool `web_search_20260209`,
   adaptive thinking, streaming, `pause_turn` continuation (≤ 5), refusal handling, server-side
   `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Writes a Traditional-Chinese Markdown
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
   colors, past stage shows), song meaning/imagery, mood/energy arc, reference live moments; returns
   sources. Must not reproduce full copyrighted lyrics in the brief.
+- Every Claude request (research, design, structured jobs) uses `adaptiveThinking()` in `claude.ts`:
+  adaptive thinking with summaries plus `block_binding.prefix_mismatch_behavior: "drop_block"`
+  (beta `thinking-binding-controls-2026-08-01`). Sonnet 5.5 binds thinking blocks to the conversation
+  prefix and, on accounts created from 2026-08-31, rejects a replayed block whose prefix changed; a
+  `pause_turn` continuation that isn't byte-identical therefore drops that block instead of failing.
+- One shared SDK client (`clientOptions()` in `claude.ts`): the SDK reads `ANTHROPIC_API_KEY` /
+  `ANTHROPIC_AUTH_TOKEN`; when `ANTHROPIC_WORKSPACE_ID` is set every request also sends the
+  `anthropic-workspace-id` header, which an identity-linked key that isn't bound to one workspace needs
+  (without it the API answers 400; `describeError` turns that and the invalid / unknown workspace
+  errors into a Traditional-Chinese hint).
 - `designSong`: a second Claude call with structured outputs (`DesignPlanSchema`) using the research,
   lyrics (with line ids + times), audio analysis summary (bpm, energy curve, section guesses), the
   closed scene/lyric-style vocabularies with descriptions, typography rules and the principles above;
   supports `instruction` + `previous` for re-design. Always passes the result through `normalizePlan`.
 - Offline designer (no credential or Claude failure): deterministic heuristic plan from analysis +
-  lyric repetition (chorus detection), palette from mood & a stable hash, generated geometric motif SVG.
+  lyric repetition (chorus detection) and the 免費研究 findings (genre grammar, imagery, emotion, audio
+  mood, sing-along), palette from them (else mood & a stable hash), generated geometric motif SVG.
+  Without a credential `researchSong` is 免費研究 (`free-research.ts`, see phase 5), also after a Claude
+  failure.
 - `normalizePlan`: clamp numbers, sort & cover `0..duration` with no gaps, colorway length 3, valid
   hex, WCAG contrast fix for `lyricColor`, CJK font must be CJK, drop unknown `lineId`s, sanitize
   `motifSvg` with a strict allowlist (fallback emblem).
@@ -632,8 +741,8 @@ keeps every contract above and changes only where things are kept and how long w
   streamed progress; then broadcast the new project.
 
 ### HOME — `src/app/page.tsx`, `src/app/p/[id]/process/**`, `src/app/p/[id]/lyrics/**`, `src/components/{home,upload,process,lyrics-editor}/**`
-- Home: brand header, server status (Claude connected vs offline designer + how to set
-  `ANTHROPIC_API_KEY` in `.env.local`), dropzone → metadata + analysis progress → editable song info
+- Home: brand header, server status (Claude connected vs 免費研究模式 + the claude.ai option + how to
+  set `ANTHROPIC_API_KEY` in `.env.local`), dropzone → metadata + analysis progress → editable song info
   + lyrics option (auto / paste) → create → `/p/[id]/process`. Library cards with accent, status,
   open / re-process / delete.
 - Process page: step timeline, streamed research (Markdown), search chips, logs, error + retry, and a

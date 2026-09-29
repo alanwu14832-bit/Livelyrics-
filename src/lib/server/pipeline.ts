@@ -10,7 +10,11 @@
 // Project.pipeline that also refuses a second run while one is fresh), then runs its step inline
 // while streaming the same events, and records the result and the step status on the project, so
 // a refreshed page can show the running step and continue from the next one. Claude gets a budget
-// inside the limit (then the offline designer takes over) and a step has a hard stop before it.
+// inside the limit (then 免費研究 / the offline designer take over) and a step has a hard stop before it.
+//
+// Without an API key (or with ProcessRequest.free) the research step is 免費研究: public facts from
+// MusicBrainz and Wikipedia (cached on Project.research.publicInfo and reused by later runs) plus
+// the local lyric and audio analysis; the design step's offline designer follows those findings.
 
 import { randomUUID } from "node:crypto";
 import type { ProcessRequest } from "@/lib/api-client";
@@ -22,6 +26,7 @@ import type { DesignerCallbacks, DesignerDeps } from "@/lib/server/designer";
 import { stageAssets } from "@/lib/asset-scope";
 import type { Asset, BandBible, Lyrics, MoodImage, PipelineEvent, PipelineRecord, PipelineStepId, Project } from "@/lib/types";
 import { mergedMoodboard } from "@/lib/moodboard";
+import { researchEngineLabel } from "@/lib/research-labels";
 import { loadVisionImages } from "./directions";
 import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
@@ -80,6 +85,8 @@ export interface CloudClaim {
   /** what the run was asked to do (this request's, else the recorded run's) */
   instruction?: string;
   arc?: ProcessRequest["arc"];
+  /** the run does not call the Claude API (免費研究 + the offline designer) */
+  free?: boolean;
 }
 
 interface RunInternal extends PipelineRun {
@@ -120,7 +127,7 @@ const registry: Registry = (g.__livelyricsPipeline ??= { runs: new Map() });
 // ---------------------------------------------------------------------------
 
 function requestKey(r: ProcessRequest): string {
-  return JSON.stringify([normalizeSteps(r.steps), r.lyricsText ?? "", r.instruction ?? "", r.arc ?? null]);
+  return JSON.stringify([normalizeSteps(r.steps), r.lyricsText ?? "", r.instruction ?? "", r.arc ?? null, Boolean(r.free)]);
 }
 
 export function normalizeSteps(steps: ProcessRequest["steps"]): PipelineStep[] {
@@ -287,6 +294,7 @@ export async function claimCloudRun(projectId: string, request: ProcessRequest, 
   const at = new Date(now).toISOString();
   let instruction: string | undefined;
   let arc: ProcessRequest["arc"];
+  let free = false;
   const project = await updateProject(projectId, (p) => {
     const record = p.pipeline;
     const fresh = p.status === "processing" && record?.status === "running" && !isStaleProcessing(p.updatedAt, now);
@@ -294,6 +302,7 @@ export async function claimCloudRun(projectId: string, request: ProcessRequest, 
     const same = record?.runId === runId ? record : undefined;
     instruction = request.instruction ?? same?.instruction;
     arc = request.arc ?? same?.arc;
+    free = Boolean(request.free || same?.free);
     p.status = "processing";
     delete p.error;
     p.pipeline = {
@@ -306,6 +315,7 @@ export async function claimCloudRun(projectId: string, request: ProcessRequest, 
       results: same?.results ?? {},
       ...(instruction ? { instruction } : {}),
       ...(arc ? { arc } : {}),
+      ...(free ? { free: true } : {}),
     };
   });
   return {
@@ -315,6 +325,7 @@ export async function claimCloudRun(projectId: string, request: ProcessRequest, 
     project,
     ...(instruction ? { instruction } : {}),
     ...(arc ? { arc } : {}),
+    ...(free ? { free: true } : {}),
   };
 }
 
@@ -536,9 +547,16 @@ function designerCallbacks(run: RunInternal, step: PipelineStepId, signal: Abort
   };
 }
 
-/** Cloud: Claude has a budget inside the request's time limit. */
+/** This run skips the Claude API (ProcessRequest.free; a cloud step keeps its recorded run's choice). */
+function isFreeRun(run: RunInternal): boolean {
+  return Boolean(run.cloud ? run.cloud.free : run.request.free);
+}
+
+/** Cloud: Claude has a budget inside the request's time limit. A free run never calls Claude. */
 function designerDeps(run: RunInternal): DesignerDeps | undefined {
-  return run.cloud ? { timeoutMs: CLOUD_DESIGNER_BUDGET_MS } : undefined;
+  const free = isFreeRun(run);
+  if (!run.cloud && !free) return undefined;
+  return { ...(run.cloud ? { timeoutMs: CLOUD_DESIGNER_BUDGET_MS } : {}), ...(free ? { configured: false } : {}) };
 }
 
 async function runStep(run: RunInternal, step: PipelineStep, project: Project, signal: AbortSignal): Promise<StepResult> {
@@ -547,12 +565,13 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       return lyricsStep(run, project, signal);
     case "research": {
       const band = await bandContext(project);
-      const input = { meta: project.meta, lyrics: project.lyrics, analysis: project.analysis, ...band };
+      // the public facts a previous 免費研究 found are reused while they are fresh (no new lookups)
+      const input = { meta: project.meta, lyrics: project.lyrics, analysis: project.analysis, ...band, publicInfo: project.research?.publicInfo ?? null };
       const cb = designerCallbacks(run, "research", signal);
       const deps = designerDeps(run);
       const research = await raceAbort(deps ? designer.researchSong(input, cb, deps) : designer.researchSong(input, cb), signal);
       if (!research || typeof research.brief !== "string") throw new Error("研究結果格式不正確");
-      const via = research.engine === "claude" ? `Claude${research.model ? `（${research.model}）` : ""}` : "離線模式";
+      const via = researchEngineLabel(research);
       const sources = Array.isArray(research.sources) ? research.sources.length : 0;
       return {
         apply: (p) => {
@@ -566,7 +585,7 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       // the mood board (phase 4): the band's, then the song's; Claude also gets the images themselves
       const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
       let moodboardImages: designer.VisionImage[] | undefined;
-      if (moodboard.length && designer.isClaudeConfigured()) {
+      if (moodboard.length && designer.isClaudeConfigured() && !isFreeRun(run)) {
         const loaded = await loadVisionImages(project, moodboard, { signal });
         moodboardImages = loaded.images;
         if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
@@ -582,19 +601,35 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         bible: band.bible,
         bandName: band.bandName,
         research: project.research,
+        // 免費研究's public facts drive the offline designer (genre grammar, the findings notes)
+        publicInfo: project.research?.publicInfo ?? null,
         // a cloud step of a recorded run keeps the run's instruction and arc
         instruction: run.cloud ? run.cloud.instruction : run.request.instruction,
         previous: project.plan,
         arc: (run.cloud ? run.cloud.arc : run.request.arc) ?? null,
       };
-      const cb = designerCallbacks(run, "design", signal);
+      const live = designerCallbacks(run, "design", signal);
+      // designSong's success log names Claude's model; every other path is the offline designer
+      let claudeModel: string | null = null;
+      const cb: DesignerCallbacks = {
+        ...live,
+        onLog: (message) => {
+          const hit = typeof message === "string" ? /^設計完成（([^）]+)）/.exec(message) : null;
+          if (hit) claudeModel = hit[1];
+          live.onLog?.(message);
+        },
+      };
       const deps = designerDeps(run);
       const plan = await raceAbort(deps ? designer.designSong(input, cb, deps) : designer.designSong(input, cb), signal);
       const checked = DesignPlanSchema.safeParse(plan);
       if (!checked.success) throw new Error("設計方案格式不正確");
+      const madeBy: string | null = claudeModel;
       return {
         apply: (p) => {
           p.plan = checked.data;
+          // who made it: Claude, or the offline designer (following 免費研究's findings when there are some)
+          const at = new Date().toISOString();
+          p.planSource = madeBy ? { engine: "claude", model: madeBy, at } : { engine: p.research?.engine === "free" ? "free" : "offline", at };
         },
         message: `主視覺「${checked.data.keyVisual.title}」，${checked.data.sections.length} 個段落、${checked.data.cues.length} 個操作提示`,
       };

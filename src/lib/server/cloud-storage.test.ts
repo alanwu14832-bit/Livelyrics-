@@ -285,7 +285,7 @@ describe("status", () => {
 describe("on Vercel without storage", () => {
   const saved = { ...process.env };
   afterEach(() => {
-    for (const k of ["VERCEL", "BLOB_READ_WRITE_TOKEN", "DATABASE_URL", "LIVELYRICS_STORAGE"]) {
+    for (const k of ["VERCEL", "BLOB_READ_WRITE_TOKEN", "BLOB_STORE_ID", "DATABASE_URL", "LIVELYRICS_STORAGE"]) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
@@ -295,12 +295,29 @@ describe("on Vercel without storage", () => {
     setStoresForTesting(null);
     process.env.VERCEL = "1";
     delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.BLOB_STORE_ID;
     delete process.env.DATABASE_URL;
     delete process.env.LIVELYRICS_STORAGE;
     const res = await listProjectsRoute(new Request("http://x/api/projects"), undefined as never);
     expect(res.status).toBe(503);
     expect((await res.json()).error).toMatch(/BLOB_READ_WRITE_TOKEN.*DATABASE_URL/);
     const status = await (await statusRoute(new Request("http://x/api/status"), undefined as never)).json();
-    expect(status.storage).toEqual({ mode: "unconfigured", cloudConfigured: false, missing: ["BLOB_READ_WRITE_TOKEN", "DATABASE_URL"], onVercel: true });
+    expect(status.storage).toEqual({ mode: "unconfigured", cloudConfigured: false, missing: ["BLOB_READ_WRITE_TOKEN", "DATABASE_URL"], onVercel: true, blobStoreWithoutToken: false });
+  });
+
+  it("names the missing read-write token when the Blob store is connected through OIDC only", async () => {
+    setStoresForTesting(null);
+    process.env.VERCEL = "1";
+    process.env.BLOB_STORE_ID = "store_abc123";
+    process.env.DATABASE_URL = "postgresql://u:p@ep-x.neon.tech/neondb";
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.LIVELYRICS_STORAGE;
+    const res = await listProjectsRoute(new Request("http://x/api/projects"), undefined as never);
+    expect(res.status).toBe(503);
+    const error = (await res.json()).error as string;
+    expect(error).toContain("Blob 已連接，但缺少讀寫金鑰");
+    expect(error).toContain(".env.local");
+    const status = await (await statusRoute(new Request("http://x/api/status"), undefined as never)).json();
+    expect(status.storage).toMatchObject({ mode: "unconfigured", missing: ["BLOB_READ_WRITE_TOKEN"], blobStoreWithoutToken: true });
   });
 });

@@ -1,12 +1,13 @@
 "use client";
 
-// Server status on the home page (UI-AUDIT §3.5 首頁, UI-14). Offline is a normal, supported mode,
-// so it is a quiet status and never a warning box:
-//   - header (right slot): a quiet text button, 「離線設計模式」 + Info, or 「Claude 已連線」 with the
+// Server status on the home page (UI-AUDIT §3.5 首頁, UI-14). Without an API key the app runs in
+// 免費研究模式 (public facts from MusicBrainz / Wikipedia + the lyric and audio analysis), a normal,
+// supported mode, so it is a quiet status and never a warning box:
+//   - header (right slot): a quiet text button, 「免費研究模式」 + Info, or 「Claude 已連線」 with the
 //     6 px green dot (the only green dot on the site); it opens the connect sheet / a model popover
 //   - under the hero subtitle: one 13 px label-2 line with a plain 「連接 Claude」 link
-//   - the connect sheet: the .env.local steps (code block) and 「重新檢查」, or on Vercel the
-//     Environment Variables + Redeploy steps
+//   - the connect sheet: what the free mode does, the no-cost 用 claude.ai 研究 alternative, then the
+//     .env.local steps (code block) and 「重新檢查」, or on Vercel the Environment Variables + Redeploy steps
 // A server that cannot be reached is a real error: a Banner with 「重試」. On Vercel without Blob /
 // Postgres the home page shows StorageSetupNotice instead of the upload flow.
 
@@ -52,7 +53,7 @@ export function ServerStatusButton({ state, onRetry, onConnect }: { state: Serve
     // holds the slot so the header does not shift when the status arrives
     return (
       <span aria-hidden="true" className="invisible inline-flex h-8 items-center px-3 text-[13px]">
-        離線設計模式
+        免費研究模式
       </span>
     );
   }
@@ -67,7 +68,7 @@ export function ServerStatusButton({ state, onRetry, onConnect }: { state: Serve
   if (!state.status.claude) {
     return (
       <Button variant="quiet" onClick={onConnect} trailingIcon={InfoIcon} className={appear} aria-haspopup="dialog">
-        離線設計模式
+        免費研究模式
       </Button>
     );
   }
@@ -88,6 +89,7 @@ export function ServerStatusButton({ state, onRetry, onConnect }: { state: Serve
       <p className="mt-1 text-[13px] leading-5 text-label-2-on-material">
         Claude 會以樂團專職舞台視覺設計師的身分上網研究樂團與歌曲，再設計主視覺與每一段的畫面。
       </p>
+      <p className="mt-2 text-[13px] leading-5 text-label-2-on-material">想省下 API 費用時，重新設計可以選「免費研究」，或在設計總覽用 claude.ai 研究。</p>
       <p className="mt-3 text-[12px] leading-4 text-label-2-on-material">
         模型 <span className="font-mono text-label">{model}</span>
       </p>
@@ -123,7 +125,7 @@ export function ServerStatusLine({ state, onRetry, onConnect, className }: { sta
     <p className={cx("min-h-5 text-[13px] leading-5 text-label-2", className)} aria-live="polite">
       {offline && (
         <span className="transition-opacity duration-(--dur-fast) ease-[ease] starting:opacity-0">
-          目前使用離線設計模式，不會上網研究樂團。
+          目前使用免費研究模式：公開資料加上歌詞與音訊分析，不需要 API 金鑰。
           <button type="button" onClick={onConnect} aria-haspopup="dialog" className="press-fade rounded-xs text-tint-text hover:underline hover:underline-offset-2">
             連接 Claude
           </button>
@@ -167,7 +169,7 @@ function StepNumber({ n }: { n: number }) {
   );
 }
 
-/** 「連接 Claude」: the three steps to switch from the offline designer to Claude. */
+/** 「連接 Claude」: what 免費研究模式 does, the claude.ai alternative, and the three steps to connect the Claude API. */
 export function ConnectClaudeSheet({ open, onClose, state, onRecheck }: { open: boolean; onClose: () => void; state: ServerStatusState; onRecheck: () => void }) {
   const [checked, setChecked] = useState(false);
   const [prevOpen, setPrevOpen] = useState(open);
@@ -204,10 +206,18 @@ export function ConnectClaudeSheet({ open, onClose, state, onRecheck }: { open: 
       }
     >
       <p className="text-[15px] leading-[22px] text-label">
-        目前由內建的離線設計師依音訊能量與歌詞重複段落產生方案，不會上網研究。連接 Claude 後，會以樂團專職舞台視覺設計師的身分研究樂團與歌曲，再設計主視覺。
+        目前是<span className="font-semibold">免費研究模式</span>：研究步驟會查詢 MusicBrainz 與維基百科的公開資料（曲風、發行年份、樂團介紹），再分析歌詞的意象與情緒、音訊的速度與能量，內建設計師依這些發現產生方案。不需要 API 金鑰，也不會產生費用。
       </p>
+      <div className="mt-3 rounded-lg bg-fill-4 px-4 py-3">
+        <p className="text-[15px] leading-[22px] font-semibold text-label">想要 Claude 上網深入研究，又不想付 API 費用？</p>
+        <p className="mt-0.5 text-[13px] leading-5 text-label-2">
+          在設計總覽按「用 claude.ai 研究」：把提示詞複製到你自己的 claude.ai 對話，再把 Claude 的回覆貼回來，就會套用成設計方案。
+        </p>
+      </div>
+      <h3 className="mt-5 text-[15px] leading-[22px] font-semibold text-label">連接 Claude API</h3>
+      <p className="mt-0.5 text-[13px] leading-5 text-label-2">需要 Anthropic 的 API 金鑰（依用量計費）。連接後，研究與設計會自動由 Claude 執行。</p>
       {vercel ? (
-        <ol className="mt-5 divide-y-hairline overflow-hidden rounded-lg bg-fill-4" aria-label="在 Vercel 設定">
+        <ol className="mt-3 divide-y-hairline overflow-hidden rounded-lg bg-fill-4" aria-label="在 Vercel 設定">
           <li className="flex gap-3 px-4 py-3">
             <StepNumber n={1} />
             <div className="min-w-0 flex-1">
@@ -229,7 +239,7 @@ export function ConnectClaudeSheet({ open, onClose, state, onRecheck }: { open: 
           </li>
         </ol>
       ) : (
-        <ol className="mt-5 divide-y-hairline overflow-hidden rounded-lg bg-fill-4" aria-label="在這台電腦設定">
+        <ol className="mt-3 divide-y-hairline overflow-hidden rounded-lg bg-fill-4" aria-label="在這台電腦設定">
           <li className="flex gap-3 px-4 py-3">
             <StepNumber n={1} />
             <div className="min-w-0 flex-1">
@@ -260,7 +270,7 @@ export function ConnectClaudeSheet({ open, onClose, state, onRecheck }: { open: 
           </span>
         )}
         {checked && state.kind === "ok" && !connected && (
-          <span className="text-label-2">{vercel ? "仍是離線設計模式。確認已加入 ANTHROPIC_API_KEY，並重新部署。" : "仍是離線設計模式。確認金鑰已存檔，並重新啟動伺服器。"}</span>
+          <span className="text-label-2">{vercel ? "仍是免費研究模式。確認已加入 ANTHROPIC_API_KEY，並重新部署。" : "仍是免費研究模式。確認金鑰已存檔，並重新啟動伺服器。"}</span>
         )}
         {checked && state.kind === "error" && <span className="text-red-text">{vercel ? "連不上伺服器" : "連不上本機伺服器"}：{state.message}</span>}
       </p>
@@ -282,12 +292,34 @@ function EnvName({ children }: { children: string }) {
   return <code className="font-mono text-[13px] whitespace-nowrap">{children}</code>;
 }
 
+/** What the home page's setup notice needs (from the server render, then /api/status). */
+export interface StorageSetup {
+  missing: string[];
+  /** a Blob store is connected through OIDC (BLOB_STORE_ID) but BLOB_READ_WRITE_TOKEN is not set */
+  blobStoreWithoutToken: boolean;
+}
+
 /**
  * On Vercel without Blob / Postgres (storage mode "unconfigured"): what to create in the dashboard,
- * in place of the upload flow. The API answers 503 with the same explanation meanwhile.
+ * in place of the upload flow. The API answers 503 with the same explanation meanwhile. A Blob store
+ * connected through OIDC only (newer connections inject BLOB_STORE_ID, not the read-write token the
+ * upload route signs with) gets the specific step: copy the token into the project's variables.
  */
-export function StorageSetupNotice({ missing, onRecheck, checking, className }: { missing: string[]; onRecheck: () => void; checking: boolean; className?: string }) {
+export function StorageSetupNotice({
+  missing,
+  blobStoreWithoutToken = false,
+  onRecheck,
+  checking,
+  className,
+}: {
+  missing: string[];
+  blobStoreWithoutToken?: boolean;
+  onRecheck: () => void;
+  checking: boolean;
+  className?: string;
+}) {
   const needBlob = missing.length === 0 || missing.includes("BLOB_READ_WRITE_TOKEN");
+  const tokenOnly = needBlob && blobStoreWithoutToken;
   const needDb = missing.length === 0 || missing.includes("DATABASE_URL");
   return (
     <section aria-labelledby="storage-setup-title" className={cx("mx-auto w-full max-w-[680px] rounded-2xl bg-surface p-6 text-left shadow-card max-sm:p-4", className)}>
@@ -303,10 +335,18 @@ export function StorageSetupNotice({ missing, onRecheck, checking, className }: 
       <ol className="mt-5 divide-y-hairline overflow-hidden rounded-lg bg-fill-4">
         <li className="flex gap-3 px-4 py-3">
           <StepNumber n={1} />
-          <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label">
-            <span className="font-semibold">Storage › Create › Blob</span>，存取權限選 <span className="font-semibold">Public</span>，連接到這個專案（會加入 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>）。
-            {!needBlob && <Done />}
-          </p>
+          {tokenOnly ? (
+            <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label" data-testid="blob-token-hint">
+              <span className="font-semibold">Blob 已連接，但缺少讀寫金鑰</span>：到 <span className="font-semibold">Vercel › Storage › 這個 Blob store</span> 的{" "}
+              <span className="font-semibold">.env.local</span> 分頁（或 <span className="font-semibold">Settings</span>）複製 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>，加到專案的{" "}
+              <span className="font-semibold">Environment Variables</span>（Production、Preview），再 Redeploy。
+            </p>
+          ) : (
+            <p className="min-w-0 flex-1 text-[15px] leading-[22px] text-label">
+              <span className="font-semibold">Storage › Create › Blob</span>，存取權限選 <span className="font-semibold">Public</span>，連接到這個專案（會加入 <EnvName>BLOB_READ_WRITE_TOKEN</EnvName>）。
+              {!needBlob && <Done />}
+            </p>
+          )}
         </li>
         <li className="flex gap-3 px-4 py-3">
           <StepNumber n={2} />

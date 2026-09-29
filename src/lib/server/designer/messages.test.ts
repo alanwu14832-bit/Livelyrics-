@@ -101,4 +101,22 @@ describe("descriptions", () => {
     expect(describeError(new Error("x".repeat(500))).length).toBeLessThanOrEqual(200);
     expect(describeError("weird")).toBe("未知錯誤");
   });
+
+  it("explains workspace problems of keys that aren't bound to one workspace", () => {
+    const headers = new Headers();
+    // the SDK's message for a real error body: `${status} ${JSON.stringify(body)}`
+    const apiError = (status: number, message: string) =>
+      Anthropic.APIError.generate(status, { type: "error", error: { type: status === 404 ? "not_found_error" : "invalid_request_error", message } }, undefined, headers);
+    const missing = describeError(
+      apiError(400, "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header."),
+    );
+    expect(missing).toContain("沒有綁定 workspace");
+    expect(missing).toContain("ANTHROPIC_WORKSPACE_ID");
+    expect(describeError(apiError(400, "anthropic-workspace-id is required when authenticating with an identity-linked API key; send the id of the workspace this request acts in."))).toBe(missing);
+    expect(describeError(apiError(400, "anthropic-workspace-id header must be a valid workspace ID."))).toContain("wrkspc_");
+    expect(describeError(apiError(404, "Workspace `wrkspc_01nope` not found."))).toContain("找不到 ANTHROPIC_WORKSPACE_ID");
+    // unrelated errors keep their usual explanation
+    expect(describeError(apiError(404, "model: claude-nope"))).toContain("LIVELYRICS_MODEL");
+    expect(describeError(apiError(400, "max_tokens: too large"))).toContain("請求被拒絕（400）");
+  });
 });

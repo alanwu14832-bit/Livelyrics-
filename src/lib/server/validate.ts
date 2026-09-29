@@ -317,6 +317,7 @@ const ProcessRequestSchema = z.object({
   lyricsText: z.string().max(500_000).optional(),
   instruction: z.string().max(4000).optional(),
   attachOnly: z.boolean().optional(),
+  free: z.boolean().optional(),
   arc: z
     .object({
       showName: z.string().max(200),
@@ -346,6 +347,7 @@ export function parseProcessRequest(raw: unknown): ProcessRequest {
   if (r.lyricsText && r.lyricsText.trim()) out.lyricsText = r.lyricsText;
   if (r.instruction && r.instruction.trim()) out.instruction = r.instruction.trim();
   if (r.arc) out.arc = { ...r.arc, showName: clean(r.arc.showName, 80), note: r.arc.note.trim().slice(0, 400) };
+  if (r.free) out.free = true;
   if (r.run) out.run = { id: r.run.id, steps: [...new Set(r.run.steps)] };
   return out;
 }

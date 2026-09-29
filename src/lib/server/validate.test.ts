@@ -96,4 +96,10 @@ describe("parseProcessRequest", () => {
     expect(() => parseProcessRequest({ steps: ["analyze"] })).toThrow(HttpError);
     expect(() => parseProcessRequest({ instruction: 5 })).toThrow(HttpError);
   });
+
+  it("keeps the free option only when set", () => {
+    expect(parseProcessRequest({ steps: ["research"], free: true })).toEqual({ steps: ["research"], free: true });
+    expect(parseProcessRequest({ free: false })).toEqual({});
+    expect(() => parseProcessRequest({ free: "yes" })).toThrow(HttpError);
+  });
 });

@@ -291,7 +291,7 @@ describe("Claude message construction with mood board images", () => {
     expect(call.output_config?.effort).toBe("medium");
     expect(call.output_config?.format?.type).toBe("json_schema");
     expect(call.fallbacks).toBe("default");
-    expect(call.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(call.thinking).toEqual({ type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } });
     const content = call.messages[0].content as BetaContentBlockParam[];
     expect(content.filter((b) => b.type === "image")).toHaveLength(2);
     expect((content.at(-1) as { text: string }).text).toMatch(/請提出 3 個（至少 2 個）設計方向/);

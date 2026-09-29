@@ -73,7 +73,7 @@ export function analysisSummary(input: DesignerInput, st: SongStructure): string
   return rows.join("\n");
 }
 
-function energyCurveBlock(input: DesignerInput, st: SongStructure): string {
+export function energyCurveBlock(input: DesignerInput, st: SongStructure): string {
   const curve = energyCurve(input.analysis, st.duration, 2);
   if (!curve.length) return "（沒有音訊分析）";
   const rows: string[] = [];
@@ -83,7 +83,7 @@ function energyCurveBlock(input: DesignerInput, st: SongStructure): string {
   return rows.join("\n");
 }
 
-function repetitionBlock(st: SongStructure): string {
+export function repetitionBlock(st: SongStructure): string {
   const groups = new Map<number, string[]>();
   for (const l of st.lines) {
     if (l.repeats < 2) continue;
@@ -138,7 +138,7 @@ export function bibleBlock(bible: BandBible | null | undefined, bandName?: strin
   return rows.join("\n");
 }
 
-const BIBLE_RULE =
+export const BIBLE_RULE =
   "這是樂團所有歌共用的視覺聖經，是硬性規範：這首歌必須活在同一個世界裡（同一套色盤、字體、母題與禁忌）。只有在這首歌真的需要時才偏離，並且在 designerNotes 與該段 rationale 寫明偏離的理由。";
 
 /** The song's place in the show arc (null without one). */
@@ -320,7 +320,9 @@ export function trimBrief(research: Research | null): string {
   const brief = research?.brief?.trim();
   if (!brief) return "（沒有研究簡報：請根據歌詞與音訊分析推論，並在 designerNotes 註明。）";
   const clipped = brief.length > MAX_BRIEF_CHARS ? `${brief.slice(0, MAX_BRIEF_CHARS)}\n…（簡報過長，已截斷）` : brief;
-  return research?.engine === "offline" ? `（以下是離線的啟發式簡報，沒有經過網路研究，僅供參考）\n\n${clipped}` : clipped;
+  if (research?.engine === "offline") return `（以下是離線的啟發式簡報，沒有經過網路研究，僅供參考）\n\n${clipped}`;
+  if (research?.engine === "free") return `（以下是免費研究的簡報：MusicBrainz／維基百科的公開資料加上歌詞與音訊的自動分析，沒有深入的網路研究，請查證後再採用）\n\n${clipped}`;
+  return clipped;
 }
 
 function previousBlock(previous: DesignPlan): string {

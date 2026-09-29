@@ -12,6 +12,7 @@ import { Banner, Button, Sheet, Spinner, Tag, TextArea, TextField, cx } from "@/
 import { ArrowCounterClockwiseIcon, CaretLeftIcon, CaretRightIcon, CheckIcon, CornersOutIcon, FileTextIcon, PencilSimpleIcon, SparkleIcon, XIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import { MoodBoard } from "@/components/moodboard/MoodBoard";
+import { ManualClaudeSheet } from "@/components/manual/ManualClaudeSheet";
 import { PUSH } from "@/components/home/transitions";
 import { api } from "@/lib/api-client";
 import { DIRECTION_STATUS_LABEL, specimenLine } from "@/lib/directions";
@@ -431,6 +432,8 @@ export function DirectionsSection({
   const [instruction, setInstruction] = useState("");
   const [revising, setRevising] = useState<DesignDirection | null>(null);
   const [note, setNote] = useState("");
+  // 用 claude.ai 提案 (manual Claude mode)
+  const [manualOpen, setManualOpen] = useState(false);
   const noteId = useId();
   const moodId = useId();
   const set = project.directions;
@@ -501,9 +504,14 @@ export function DirectionsSection({
   const generateRow = (
     <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
       <TextField value={instruction} onChange={(e) => setInstruction(e.target.value)} maxLength={600} placeholder="（選填）對提案的要求，例如：其中一個要很暗、很安靜" aria-label="對提案的要求" className="min-w-0 flex-1" disabled={disabled || busy != null} />
-      <Button variant={set ? "gray" : "tinted"} icon={SparkleIcon} onClick={generate} loading={generating} disabled={disabled || (busy != null && busy !== "generate") || jobRunning}>
-        {set ? "重新提案" : "提出設計方向"}
-      </Button>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <Button variant={set ? "gray" : "tinted"} icon={SparkleIcon} onClick={generate} loading={generating} disabled={disabled || (busy != null && busy !== "generate") || jobRunning}>
+          {set ? "重新提案" : "提出設計方向"}
+        </Button>
+        <Button variant="plain" onClick={() => setManualOpen(true)} disabled={disabled || busy != null || jobRunning} data-testid="directions-manual" title="用你自己的 claude.ai 帳號提出方向，不需要 API 金鑰">
+          用 claude.ai 提案
+        </Button>
+      </div>
     </div>
   );
 
@@ -516,7 +524,7 @@ export function DirectionsSection({
           </h2>
           <p className="mt-1 max-w-[46em] text-[15px] leading-[22px] text-label-2">
             {set
-              ? `${set.directions.length} 個方向${set.engine === "claude" ? `由 Claude${set.model ? `（${set.model}）` : ""}提出` : "由離線設計師提出"}。和樂團一起看，採用一個成為設計方案，或寫下意見請設計師修改。`
+              ? `${set.directions.length} 個方向${set.engine === "claude" ? `由 Claude${set.model ? `（${set.model}）` : ""}提出` : set.engine === "manual-claude" ? "由 claude.ai 提出（手動貼上）" : "由離線設計師提出"}。和樂團一起看，採用一個成為設計方案，或寫下意見請設計師修改。`
               : "先給樂團 2 到 3 個明顯不同的方向（例如冷調膠片、飽和拼貼、黑白極簡），選定後才進入製作。設計師會參考研究與參考圖。"}
           </p>
         </div>
@@ -565,7 +573,7 @@ export function DirectionsSection({
           <div className="rounded-lg bg-surface p-4">
             {generateRow}
             {generating && <p className="mt-3 text-[13px] leading-5 text-label-2">設計師正在構思 3 個方向{offline ? "" : "，Claude 大約需要一到三分鐘"}…</p>}
-            {offline && !generating && <p className="mt-3 text-[12px] leading-4 text-label-2">離線設計師會提出冷暖、飽和、黑白三個軸線的方向，並依參考圖量到的顏色調整配色。</p>}
+            {offline && !generating && <p className="mt-3 text-[12px] leading-4 text-label-2">離線設計師會提出冷暖、飽和、黑白三個軸線的方向，依免費研究的曲風、歌詞意象與參考圖量到的顏色調整；想要 Claude 的提案又不想付 API 費用，用「用 claude.ai 提案」。</p>}
           </div>
         </>
       )}
@@ -630,6 +638,18 @@ export function DirectionsSection({
           {offline && <p className="text-[12px] leading-4 text-label-2">離線設計師只看得懂簡單的意見，例如「更熱血」「更安靜」「藍一點」「直排」。</p>}
         </div>
       </Sheet>
+      <ManualClaudeSheet
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        project={project}
+        target="directions"
+        instruction={instruction}
+        onApplied={(p) => {
+          setNotice(null);
+          setError(null);
+          onProject(p);
+        }}
+      />
     </section>
   );
 }

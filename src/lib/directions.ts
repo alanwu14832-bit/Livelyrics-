@@ -7,12 +7,14 @@ import type {
   DesignDirection,
   DesignPlan,
   DirectionComment,
+  DirectionEngine,
   DirectionReference,
   DirectionSet,
   DirectionStatus,
   Lyrics,
   MoodImage,
   PlanSnapshot,
+  PlanSource,
   Project,
 } from "./types";
 
@@ -66,6 +68,9 @@ function coerceReferences(v: unknown): DirectionReference[] {
     .slice(0, 12);
 }
 
+const ENGINES: readonly DirectionEngine[] = ["claude", "offline", "manual-claude"];
+const engineOf = (v: unknown): DirectionEngine => (ENGINES.includes(v as DirectionEngine) ? (v as DirectionEngine) : "offline");
+
 /** One stored direction, or null when its plan no longer validates. */
 export function coerceDirection(raw: unknown, index: number): DesignDirection | null {
   if (!isRecord(raw)) return null;
@@ -84,7 +89,7 @@ export function coerceDirection(raw: unknown, index: number): DesignDirection | 
     plan: checked.data,
     status: STATUSES.includes(raw.status as DirectionStatus) ? (raw.status as DirectionStatus) : "proposed",
     comments: coerceComments(raw.comments),
-    engine: raw.engine === "claude" ? "claude" : "offline",
+    engine: engineOf(raw.engine),
     createdAt: str(raw.createdAt, 40),
     updatedAt: str(raw.updatedAt, 40),
   };
@@ -107,16 +112,27 @@ export function coerceDirectionSet(raw: unknown): DirectionSet | undefined {
     if (seen) d.status = "proposed";
     seen = true;
   }
-  const set: DirectionSet = { engine: raw.engine === "claude" ? "claude" : "offline", createdAt: str(raw.createdAt, 40), directions };
+  const set: DirectionSet = { engine: engineOf(raw.engine), createdAt: str(raw.createdAt, 40), directions };
   if (typeof raw.model === "string" && raw.model) set.model = raw.model.slice(0, 80);
   return set;
+}
+
+const PLAN_ENGINES: readonly PlanSource["engine"][] = ["claude", "offline", "free", "manual-claude"];
+
+/** Who made a plan (Project.planSource, PlanSnapshot.source), or undefined when unknown / malformed. */
+export function coercePlanSource(raw: unknown): PlanSource | undefined {
+  if (!isRecord(raw) || !PLAN_ENGINES.includes(raw.engine as PlanSource["engine"])) return undefined;
+  const source: PlanSource = { engine: raw.engine as PlanSource["engine"], at: str(raw.at, 40) };
+  if (typeof raw.model === "string" && raw.model) source.model = raw.model.slice(0, 120);
+  return source;
 }
 
 export function coercePlanSnapshot(raw: unknown): PlanSnapshot | undefined {
   if (!isRecord(raw)) return undefined;
   const checked = DesignPlanSchema.safeParse(raw.plan);
   if (!checked.success || !checked.data.sections.length) return undefined;
-  return { plan: checked.data, at: str(raw.at, 40), reason: str(raw.reason, 200) };
+  const source = coercePlanSource(raw.source);
+  return { plan: checked.data, at: str(raw.at, 40), reason: str(raw.reason, 200), ...(source ? { source } : {}) };
 }
 
 export function findDirection(project: Pick<Project, "directions">, id: string): DesignDirection | undefined {
@@ -140,9 +156,11 @@ export function applySelection(draft: Project, directionId: string, plan: Design
   const set = draft.directions;
   const chosen = set?.directions.find((d) => d.id === directionId);
   if (!set || !chosen) throw new Error("找不到這個設計方向");
-  if (draft.plan) draft.previousPlan = { plan: draft.plan, at: now, reason: `採用方向 ${chosen.letter}「${chosen.name}」` };
-  else delete draft.previousPlan;
+  if (draft.plan) {
+    draft.previousPlan = { plan: draft.plan, at: now, reason: `採用方向 ${chosen.letter}「${chosen.name}」`, ...(draft.planSource ? { source: draft.planSource } : {}) };
+  } else delete draft.previousPlan;
   draft.plan = plan;
+  draft.planSource = { engine: chosen.engine, ...(chosen.model ? { model: chosen.model } : {}), at: now };
   for (const d of set.directions) {
     if (d.id === directionId) {
       d.status = "selected";
@@ -157,6 +175,8 @@ export function applyUndo(draft: Project): boolean {
   const prev = draft.previousPlan;
   if (!prev) return false;
   draft.plan = prev.plan;
+  if (prev.source) draft.planSource = prev.source;
+  else delete draft.planSource;
   delete draft.previousPlan;
   for (const d of draft.directions?.directions ?? []) if (d.status === "selected") d.status = "proposed";
   return true;
@@ -290,7 +310,7 @@ export interface ProposalSheet {
   band: string;
   /** YYYY-MM-DD of the proposal */
   date: string;
-  engine: "claude" | "offline" | null;
+  engine: DirectionEngine | null;
   directions: ProposalDirection[];
   /** every mood board image, numbered like the prompt (圖 1…) */
   references: Array<{ id: string; index: number; name: string; note: string; palette: string[]; scope: "band" | "project" }>;

@@ -9,6 +9,7 @@ import {
   applyUndo,
   coerceDirectionSet,
   coercePlanSnapshot,
+  coercePlanSource,
   proposalSheet,
   removeComment,
   sanitizeComment,
@@ -61,6 +62,25 @@ describe("select / undo", () => {
     expect(p.previousPlan).toBeUndefined();
     expect(selectedDirection(p)).toBeUndefined();
     expect(applyUndo(p)).toBe(false);
+  });
+
+  it("records who made the plan, and 復原 brings the earlier source back", () => {
+    const p = project();
+    p.planSource = { engine: "manual-claude", at: "2026-09-28T00:00:00.000Z" };
+    const b = p.directions!.directions[1];
+    applySelection(p, b.id, b.plan, NOW);
+    expect(p.planSource).toEqual({ engine: "offline", at: NOW });
+    expect(p.previousPlan?.source).toEqual({ engine: "manual-claude", at: "2026-09-28T00:00:00.000Z" });
+    // the snapshot's source survives storage
+    expect(coercePlanSnapshot(JSON.parse(JSON.stringify(p.previousPlan)))?.source?.engine).toBe("manual-claude");
+    expect(coercePlanSource({ engine: "robot", at: "" })).toBeUndefined();
+    applyUndo(p);
+    expect(p.planSource).toEqual({ engine: "manual-claude", at: "2026-09-28T00:00:00.000Z" });
+    // a plan without a known source: undo leaves none
+    applySelection(p, b.id, b.plan, NOW);
+    delete p.previousPlan!.source;
+    applyUndo(p);
+    expect(p.planSource).toBeUndefined();
   });
 
   it("unknown directions throw; a project without a plan keeps no snapshot", () => {

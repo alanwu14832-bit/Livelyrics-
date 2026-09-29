@@ -1,8 +1,9 @@
 // The offline designer: a deterministic heuristic stage-visual designer used when no
 // Anthropic credential is configured or Claude fails. It reads the audio analysis
-// (energy, tempo, brightness), the lyric structure (repetition = chorus) and a small
-// imagery lexicon, and produces a tasteful, valid DesignPlan plus a research brief
-// that is honest about being a heuristic.
+// (energy, tempo, brightness), the lyric structure (repetition = chorus) and the free-research
+// findings (findings.ts: the genre's visual grammar from the public facts, the lyric imagery,
+// emotion, point of view and sing-along phrases, the audio mood), and produces a tasteful, valid
+// DesignPlan. The band's bible, the mood board palette and normalizePlan still have the last word.
 
 import { assignMedia } from "./media";
 import { activeBible, applyLyricPolicy, applyTreatments, avoidScene, biasScenes, biblePalette } from "./bible-style";
@@ -22,7 +23,8 @@ import type {
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { ensureContrast } from "./color";
-import { suggestCues } from "./cues";
+import { capCues, suggestCues } from "./cues";
+import { analyzeFindings, type DesignHints, type Findings } from "./findings";
 import { findImagery, type ImageryHit } from "./imagery";
 import { normalizePlan } from "./normalize";
 import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
@@ -83,18 +85,32 @@ const MOOD_SCHEMES: Record<MoodClass, [Scheme, Scheme]> = {
 };
 const MOOD_SATURATION: Record<MoodClass, number> = { calm: 0.55, warm: 0.7, driving: 0.85, explosive: 0.95 };
 
-function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverride?: number, mono = false): Palette {
+function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverride?: number, mono = false, hints?: DesignHints): Palette {
   const top = imagery[0]?.imagery;
   const jitter = ((seed >>> 8) % 21) - 10;
-  const hue = hueOverride ?? (top ? top.hue + jitter : seed % 360);
-  const scheme = MOOD_SCHEMES[mood.mood][(seed >>> 4) % 2] ?? SCHEMES[0];
-  const saturation = mono ? 0 : MOOD_SATURATION[mood.mood] * (top?.saturation ?? 1);
-  const entries = buildPalette({ hue, scheme, saturation, brightness: mood.brightness });
+  // the song's strongest image (or its genre's colour tendency) leads; the seed keeps songs apart
+  const base = hints?.hue ?? top?.hue ?? null;
+  const hue = hueOverride ?? (base != null ? base + jitter : seed % 360);
+  const scheme = hints?.scheme ?? MOOD_SCHEMES[mood.mood][(seed >>> 4) % 2] ?? SCHEMES[0];
+  const saturation = mono ? 0 : Math.min(1, MOOD_SATURATION[mood.mood] * (hints ? hints.saturation : (top?.saturation ?? 1)));
+  const jittered = hints?.accentHues && hueOverride == null ? ([hints.accentHues[0] + jitter / 2, hints.accentHues[1] + jitter / 2] as [number, number]) : undefined;
+  const entries = buildPalette({ hue, scheme, saturation, brightness: mood.brightness, ...(jittered && !mono ? { hues: jittered } : {}) });
   const at = (i: number) => entries[Math.min(i, entries.length - 1)].hex;
   return { entries, bg: at(0), primary: at(1), accent: at(2), lyric: at(3), highlight: at(4), bg2: at(5) };
 }
 
-function makeTypography(mood: Mood, seed: number, imagery: ImageryHit[]): DesignPlan["keyVisual"]["typography"] {
+function makeTypography(mood: Mood, seed: number, imagery: ImageryHit[], findings?: Findings): DesignPlan["keyVisual"]["typography"] {
+  const g = findings?.genre;
+  if (g) {
+    const t = g.typography;
+    return {
+      cjkFont: t.cjkFont,
+      latinFont: t.latinFont,
+      weight: Math.max(600, t.weight),
+      letterSpacing: t.letterSpacing,
+      rationale: `${FONT_CATALOG[t.cjkFont].label}＋${FONT_CATALOG[t.latinFont].label}：${t.note}（${g.label}的字體語法），字重 ${Math.max(600, t.weight)} 在 LED 上也清楚。`,
+    };
+  }
   const alt = (seed >>> 12) % 2 === 1;
   const nostalgic = imagery.some((h) => ["時光", "花", "筆墨"].includes(h.imagery.name));
   let cjkFont: FontId;
@@ -196,21 +212,35 @@ interface SectionPlanCtx {
   loudestLyricIndex: number;
   /** scenes the mood board's tone suggests (phase 4); [] without one */
   moodScenes: SceneId[];
+  /** the free-research findings (genre grammar, imagery families, sing-along phrases…) */
+  findings: Findings;
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
   return avoidScene(chooseSceneRaw(s, i, prev, ordinal, ctx), ctx.bible, prev, biasScenes(SCENE_CANDIDATES[s.kind], ctx.bible));
 }
 
+/** A kind's candidates: the bible's order first, then this song's scene family (genre + imagery), without what the genre avoids. */
+function songCandidates(kind: SectionKind, ctx: SectionPlanCtx): SceneId[] {
+  const hints = ctx.findings.hints;
+  const list = biasScenes(SCENE_CANDIDATES[kind], ctx.bible).filter((sc) => !hints.avoidScenes.includes(sc));
+  const base = list.length ? list : biasScenes(SCENE_CANDIDATES[kind], ctx.bible);
+  if (ctx.bible?.sceneAffinity.length || !ctx.findings.genre) return base;
+  const family = hints.scenes.slice(0, 4);
+  return [...base.filter((sc) => family.includes(sc)).sort((a, b) => family.indexOf(a) - family.indexOf(b)), ...base.filter((sc) => !family.includes(sc))];
+}
+
 function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
   const e = s.energy;
-  const cands = (k: SectionKind) => biasScenes(SCENE_CANDIDATES[k], ctx.bible);
+  const cands = (k: SectionKind) => songCandidates(k, ctx);
   if (s.kind === "chorus") {
     // choruses escalate: particles -> grid / shards -> tunnel on the last one (avoided scenes left out)
-    const avoided = new Set(ctx.bible?.sceneAvoid ?? []);
+    const avoided = new Set([...(ctx.bible?.sceneAvoid ?? []), ...ctx.findings.hints.avoidScenes]);
     const kept = SCENE_CANDIDATES.chorus.filter((sc) => !avoided.has(sc));
     const ladder = kept.length ? kept : cands("chorus");
-    const base = ctx.mood.mood === "explosive" ? 1 : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % 2;
+    // a genre that prefers one of the ladder's scenes starts its first chorus there
+    const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
+    const base = genreStart >= 0 ? Math.min(genreStart, Math.max(0, ladder.length - 2)) : ctx.mood.mood === "explosive" ? 1 : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % 2;
     let idx = Math.min(ladder.length - 1, base + ordinal);
     if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
     const pick = ladder[idx];
@@ -224,7 +254,8 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   // then what the mood board's tone suggests
   const moodPick = ctx.moodScenes.length && s.kind !== "intro" && s.kind !== "outro" ? kindList.find((sc) => ctx.moodScenes.includes(sc) && fits(sc, e) && sc !== prev) : undefined;
   if (moodPick && (s.kind === "verse" || s.kind === "bridge" || s.kind === "pre-chorus" || s.kind === "interlude")) return moodPick;
-  const lexScene = ctx.imagery.map((h) => h.imagery.scene).find((sc) => kindList.includes(sc) && fits(sc, e) && sc !== prev);
+  // the song's own scene family (its images, and its genre when known), most fitting first
+  const lexScene = ctx.findings.hints.scenes.find((sc) => kindList.includes(sc) && fits(sc, e) && sc !== prev);
   if (lexScene && (s.kind === "verse" || s.kind === "bridge" || s.kind === "breakdown")) return lexScene;
   const pool = kindList.filter((sc) => fits(sc, e) && sc !== prev);
   const list = pool.length ? pool : kindList.filter((sc) => sc !== prev);
@@ -237,16 +268,48 @@ function sectionLines(st: SongStructure, s: StructSection) {
   return st.lines.filter((l) => ids.has(l.id));
 }
 
-function chooseLyrics(
-  s: StructSection,
-  ordinal: number,
-  ctx: SectionPlanCtx,
-): { style: LyricStyleId; placement: LyricPlacement; scale: number } {
+type LyricPick = { style: LyricStyleId; placement: LyricPlacement; scale: number };
+
+const PLACEMENT_FOR: Partial<Record<LyricStyleId, LyricPlacement>> = { subtitle: "lower-third", vertical: "vertical-right", stack: "left", typewriter: "center", impact: "center", karaoke: "center", "word-pop": "center" };
+
+/**
+ * The genre's lyric grammar (free research), when a source named the genre: sparse genres
+ * (post-rock, ambient, electronic…) keep verses quiet, dense ones (hip hop, metal) give verses a
+ * subtitle and the hook the big letters; others follow the genre's verse / chorus styles.
+ */
+function genreLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx, pick: LyricPick, avgUnits: number, poetic: boolean): LyricPick {
+  const g = ctx.findings.genre;
+  if (!g || pick.style === "hidden") return pick;
+  const last = s.kind === "chorus" && ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1;
+  const style = (id: LyricStyleId, scale = pick.scale): LyricPick => {
+    const st: LyricStyleId = id === "vertical" && !(ctx.cjk && poetic) ? "stack" : id;
+    return { style: st, placement: st === "line-fade" ? (s.kind === "verse" ? "upper-third" : "center") : (PLACEMENT_FOR[st] ?? pick.placement), scale };
+  };
+  if (s.kind === "verse" || s.kind === "pre-chorus") {
+    if (g.lyrics.density === "sparse") return s.kind === "verse" ? style(g.lyrics.verse === "hidden" ? "hidden" : g.lyrics.verse, 0.9) : pick;
+    if (g.lyrics.density === "dense") return style("subtitle", 0.9);
+    if (s.kind === "verse" && ordinal === 0) return style(g.lyrics.verse, pick.scale);
+    return pick;
+  }
+  if (s.kind === "chorus") {
+    // the last chorus keeps the biggest treatment; the first follows the genre's chorus style
+    if (last) return g.lyrics.chorus === "impact" && avgUnits <= 9 ? style("impact", 1.25) : pick;
+    const target = g.lyrics.chorus === "impact" && avgUnits > 9 ? "karaoke" : g.lyrics.chorus;
+    return style(target, Math.max(pick.scale, target === "impact" ? 1.15 : 1.05));
+  }
+  return pick;
+}
+
+function chooseLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx): LyricPick {
   const lines = sectionLines(ctx.st, s);
   if (!lines.length) return { style: "hidden", placement: "center", scale: 1 };
   const avgUnits = lines.reduce((a, l) => a + readingUnits(l.text), 0) / lines.length;
-  const dense = s.density > 5;
   const poetic = ctx.cjk && avgUnits <= 10 && s.density < 3;
+  return genreLyrics(s, ordinal, ctx, baseLyrics(s, ordinal, ctx, avgUnits, poetic), avgUnits, poetic);
+}
+
+function baseLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx, avgUnits: number, poetic: boolean): LyricPick {
+  const dense = s.density > 5;
   switch (s.kind) {
     case "chorus": {
       if (dense) return { style: "karaoke", placement: "center", scale: 1.05 };
@@ -290,7 +353,15 @@ function colorwayFor(kind: SectionKind, last: boolean, p: Palette): [string, str
   }
 }
 
-function transitionFor(s: StructSection, prev: StructSection | undefined): SectionDesign["transitionIn"] {
+/** The genre's transition energy on top of the energy rules: soft genres never flash or cut, punchy ones cut into choruses. */
+function transitionFor(s: StructSection, prev: StructSection | undefined, motion: DesignHints["motion"] = "medium"): SectionDesign["transitionIn"] {
+  const t = transitionBase(s, prev);
+  if (motion === "soft") return t === "flash" ? "bloom" : t === "cut" ? "fade" : t;
+  if (motion === "punchy" && s.kind === "chorus" && t === "wipe") return "cut";
+  return t;
+}
+
+function transitionBase(s: StructSection, prev: StructSection | undefined): SectionDesign["transitionIn"] {
   if (!prev) return "fade";
   const rise = s.energy - prev.energy;
   if (s.kind === "chorus") return rise >= 0.25 ? "flash" : "wipe";
@@ -331,6 +402,12 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
     case "outro":
       return `回到「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
   }
+}
+
+/** A Latin name inside Chinese text gets a space on its Latin side(s): 「說 Livelyrics Band 是」. */
+function latinPad(name: string): string {
+  const head = /^[A-Za-z0-9]/.test(name) ? ` ${name}` : name;
+  return /[A-Za-z0-9.]$/.test(name) ? `${head} ` : head;
 }
 
 function sectionLabel(kind: SectionKind, n: number, total: number): string {
@@ -382,7 +459,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricPlacement: placement,
       lyricScale: scale,
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
-      transitionIn: transitionFor(s, st.sections[i - 1]),
+      transitionIn: transitionFor(s, st.sections[i - 1], ctx.findings.hints.motion),
       media: null,
       rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0),
     };
@@ -398,6 +475,7 @@ const CHANT = /\b(hey|oh+|yeah|woah|whoa|la+|na+|go)\b|嘿|喔|哦|啦啦/i;
 function buildLines(ctx: SectionPlanCtx, sections: SectionDesign[]): LineDesign[] {
   const out: LineDesign[] = [];
   const words = ctx.imagery.flatMap((h) => h.words).sort((a, b) => b.length - a.length);
+  const singalong = ctx.findings.hints.singalong;
   const sectionOf = (id: string) => {
     const idx = ctx.st.sections.findIndex((s) => s.lineIds.includes(id));
     return idx >= 0 ? sections[idx] : null;
@@ -410,6 +488,9 @@ function buildLines(ctx: SectionPlanCtx, sections: SectionDesign[]): LineDesign[
     const emphasis: string[] = [];
     const chant = CHANT.exec(l.text)?.[0];
     if (chant) emphasis.push(chant);
+    // the phrase the crowd sings back (free research), when it is only part of the line
+    const phrase = !chant ? singalong.find((p) => !p.chant && p.lineIds.includes(l.id) && Array.from(p.text).length <= Array.from(l.text).length * 0.6) : undefined;
+    if (phrase && l.text.includes(phrase.text)) emphasis.push(phrase.text);
     for (const w of words) {
       if (emphasis.length >= 2) break;
       if (l.text.includes(w) && !emphasis.some((e) => e.includes(w) || w.includes(e))) emphasis.push(w);
@@ -470,13 +551,54 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
           hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
         ]),
     "",
+    ...findingsNotes(ctx),
     "## 現場注意",
     "- 任何狀況先按 **B** 全黑；樂團即興延長或跳段時，切到現場模式手動 cue。",
     "- 歌詞放在上方或側邊，避開主唱 IMAG 與觀眾頭部遮擋的下緣。",
+    ...(ctx.findings.genre && ctx.st.lines.length > 0 ? [`- ${ctx.findings.genre.label}：${ctx.findings.genre.live}`] : []),
     "",
-    "> 這份方案由**離線設計師**依音訊能量、歌詞重複段落與意象關鍵字自動產生，沒有經過網路研究。設定 `ANTHROPIC_API_KEY` 後重新設計，即可取得 Claude 研究樂團視覺後的完整方案。",
+    ctx.findings.info?.status.musicbrainz === "ok" || ctx.findings.info?.status.wikipedia === "ok"
+      ? "> 這份方案由**離線設計師**依免費研究（MusicBrainz、維基百科的公開資料＋歌詞與音訊分析）自動產生，沒有使用 Claude。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或設定 `ANTHROPIC_API_KEY`。"
+      : "> 這份方案由**離線設計師**依音訊能量、歌詞意象與重複段落自動產生，沒有經過網路研究。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或設定 `ANTHROPIC_API_KEY`。",
   ];
   return lines.join("\n");
+}
+
+/** What the free research found and how the plan follows it (a notes section; none when there is nothing to say). */
+function findingsNotes(ctx: SectionPlanCtx): string[] {
+  const f = ctx.findings;
+  const rows: string[] = [];
+  const sung = ctx.st.lines.length > 0;
+  // an instrumental never hears about choruses and sing-alongs
+  if (f.genre) rows.push(`- 曲風「${f.genre.label}」（${f.genres[0].evidence[0] ?? "公開資料"}）：${sung ? f.genre.why : `${f.genre.palette.note}，${f.genre.motifs[0]}。`}`);
+  if (f.imagery.length) rows.push(`- 歌詞意象：${f.imagery.slice(0, 3).map((h) => `「${h.family.name}」→ ${h.family.colors}`).join("；")}。`);
+  if (ctx.st.lines.length && f.lyrics.emotion.hits > 0) rows.push(`- 情緒：${f.lyrics.emotion.label}；人稱 ${f.lyrics.pov.label}。`);
+  const phrases = f.hints.singalong.filter((p) => !p.chant).map((p) => `「${p.text}」`);
+  if (ctx.st.lines.length && phrases.length) rows.push(`- 大合唱重點：${phrases.join("、")}，這幾個字在畫面上加強。`);
+  rows.push(`- 音訊情緒：${f.audio.label}（${f.audio.why.split("；")[0]}）。`);
+  return rows.length ? ["## 免費研究的發現", ...rows, ""] : [];
+}
+
+/**
+ * Cue notes that use the free research: the phrase the crowd will sing in each chorus cue, and the
+ * genre's live habit (a long crescendo, a drop, a chant) before the peak.
+ */
+function findingsCues(cues: CueNote[], sections: readonly SectionDesign[], f: Findings, st: SongStructure): CueNote[] {
+  const phrases = f.hints.singalong;
+  const out = cues.map((c) => {
+    if (c.kind !== "singalong") return c;
+    const sec = sections.find((s) => Math.abs(s.start - c.time) < 0.6);
+    const ids = new Set(sec ? st.lines.filter((l) => l.start != null && l.start >= sec.start - 0.5 && l.start < sec.end).map((l) => l.id) : []);
+    // the words the crowd sings in this chorus (the chant and the phrase), else the song's first
+    const here = phrases.filter((x) => x.lineIds.some((id) => ids.has(id))).slice(0, 2);
+    const said = (here.length ? here : phrases.slice(0, 1)).map((x) => `「${x.text}」`).join("、");
+    return said ? { ...c, detail: `全場會一起唱${said}：${c.detail}`.slice(0, 240) } : c;
+  });
+  if (f.genre && st.lines.length > 0 && f.audio.peakAt != null) {
+    const time = Math.max(0, Math.round((f.audio.peakAt - 2) * 100) / 100);
+    out.push({ time, title: `${f.genre.label}的現場`, detail: f.genre.live.slice(0, 240), kind: "highlight" });
+  }
+  return capCues(out.sort((a, b) => a.time - b.time));
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +617,8 @@ export interface OfflineContext {
   mood: Mood;
   imagery: ImageryHit[];
   seed: number;
+  /** the free-research findings (genre grammar, lyric analysis, audio mood) */
+  findings: Findings;
 }
 
 export function offlineContext(input: DesignerInput): OfflineContext {
@@ -505,19 +629,20 @@ export function offlineContext(input: DesignerInput): OfflineContext {
     input.meta?.title ?? "",
   ).slice(0, 4);
   const seed = hashString(`${input.meta?.title ?? ""}|${input.meta?.artist ?? ""}`);
-  return { structure, mood, imagery, seed };
+  return { structure, mood, imagery, seed, findings: analyzeFindings(input, structure) };
 }
 
 /** Deterministic heuristic DesignPlan (already normalized). */
 export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}): DesignPlan {
-  const { structure: st, mood, imagery, seed } = offlineContext(input);
+  const { structure: st, mood, imagery, seed, findings } = offlineContext(input);
+  const hints = findings.hints;
   const bible = activeBible(input.bible);
   // the band's palette unless the operator asked for another hue / monochrome (a stated deviation)
   const fromBible = options.hue == null && !options.mono ? biblePalette(bible) : null;
   // then the mood board's colours (phase 4), measured in the browser at upload time
   const moodboard = inputMood(input.moodboard);
   const fromMood = !fromBible && options.hue == null && !options.mono ? moodPalette(moodboard) : null;
-  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono);
+  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono, hints);
   let loudestLyricIndex = -1;
   st.sections.forEach((s, i) => {
     if (s.lineIds.length && (loudestLyricIndex < 0 || s.energy > st.sections[loudestLyricIndex].energy)) loudestLyricIndex = i;
@@ -533,17 +658,23 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     bible,
     loudestLyricIndex,
     moodScenes: moodScenes(moodboard),
+    findings,
   };
   const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible, input.assets);
   const title = makeTitle(mood, imagery, seed);
-  const ownMotifs = [...imagery.slice(0, 3).map((h) => h.imagery.motif), MOOD_MOTIF[mood.mood]];
+  const ownMotifs = [...hints.motifs.slice(0, 3), MOOD_MOTIF[mood.mood]];
   const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...ownMotifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
-  const moodKeywords = [...MOOD_KEYWORDS[mood.mood], ...imagery.map((h) => h.imagery.name)].filter((k, i, a) => a.indexOf(k) === i).slice(0, 6);
-  const emblem = imagery[0]?.imagery.emblem ?? MOOD_EMBLEM[mood.mood];
-  const tempoText = mood.bpm ? `約 ${mood.bpm} BPM 的${MOOD_LABEL[mood.mood]}` : MOOD_LABEL[mood.mood];
+  const moodKeywords = [...hints.keywords, ...MOOD_KEYWORDS[mood.mood], ...imagery.map((h) => h.imagery.name)].filter((k, i, a) => a.indexOf(k) === i).slice(0, 6);
+  const emblem = hints.emblem ?? MOOD_EMBLEM[mood.mood];
+  const tempoText = mood.bpm ? `約 ${mood.bpm} BPM、${findings.audio.label}型` : `${findings.audio.label}型`;
   const imageryText = imagery.length ? `歌詞裡的${imagery.map((h) => `「${h.imagery.name}」`).join("")}` : "音樂本身的能量起伏";
+  const artist = findings.info?.musicbrainz?.artist;
+  const factText = findings.genre
+    ? `公開資料說${latinPad(input.meta?.artist?.trim() || "這個樂團")}是${artist?.country === "TW" ? "臺灣的" : ""}${findings.genre.label}${artist?.type === "Group" ? "樂團" : ""}，所以沿用${findings.genre.label}的視覺語法：${findings.genre.palette.note}。`
+    : "";
   const concept = [
-    `這首${tempoText}的歌，在舞台上是一個「${title}」的世界。`,
+    `這首${tempoText}的歌，在舞台上是「${title}」——${hints.world}`,
+    factText,
     `畫面從${imageryText}長出來，以${palette.entries[1].name}與${palette.entries[2].name}為主色，在${palette.entries[0].name}的深色背景上發光。`,
     st.lines.length > 0
       ? "主歌讓畫面退後、把空間留給主唱；副歌讓光與節拍一起爆開，邀請全場合唱。"
@@ -552,7 +683,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
     fromMood ? `配色取自參考圖量到的主色（${fromMood.primary}、${fromMood.accent}），場景也依參考圖的明暗與飽和度挑選。` : "",
   ].join("");
-  const baseTypography = makeTypography(mood, seed, imagery);
+  const baseTypography = makeTypography(mood, seed, imagery, findings);
   const typography = bible
     ? {
         ...baseTypography,
@@ -563,7 +694,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       }
     : baseTypography;
 
-  const cues: CueNote[] = suggestCues(sections, st.duration, input.lyrics?.lines ?? []);
+  const cues: CueNote[] = findingsCues(suggestCues(sections, st.duration, input.lyrics?.lines ?? []), sections, findings, st);
   const plan: DesignPlan = {
     version: 1,
     keyVisual: {

@@ -28,6 +28,7 @@ import {
 import type {
   DesignDirection,
   DesignPlan,
+  DirectionEngine,
   DirectionReference,
   KeyVisual,
   LyricPlacement,
@@ -43,9 +44,10 @@ import { formatTimeShort } from "@/lib/timeline";
 import { activeBible, applyLyricPolicy, biblePalette } from "./bible-style";
 import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { colorName, contrastRatio, ensureContrast, hexToHsl, hsl, hueDistance, luminance, normalizeHex } from "./color";
+import { analyzeFindings, type Findings } from "./findings";
 import { moodPalette, moodboardBlock } from "./moodboard";
 import { normalizePlan } from "./normalize";
-import { offlineContext, offlineDesign } from "./offline";
+import { offlineDesign } from "./offline";
 import { buildPalette, type PaletteEntry } from "./palette";
 import { analysisSummary, bibleBlock, catalogBlock, lyricExcerpt, songBlock, trimBrief } from "./prompts";
 import { analyzeStructure, clamp } from "./structure";
@@ -201,15 +203,15 @@ function entriesOf(roles: Array<[string, string]>): PaletteEntry[] {
   return out;
 }
 
-/** Warm or cool film look: analogous, desaturated; the mood board's own colours when there are any. */
-function filmPalette(mood: MoodSummary | null, warm: boolean): PaletteEntry[] {
+/** Warm or cool film look: analogous, desaturated; the mood board's own colours when there are any, else the song's warmest / coolest image. */
+function filmPalette(mood: MoodSummary | null, warm: boolean, songHue: number | null): PaletteEntry[] {
   const fromMood = moodPalette(mood);
   if (fromMood) return fromMood.entries;
-  return buildPalette({ hue: warm ? 28 : 208, scheme: "analogous", saturation: 0.48, brightness: 0.45 });
+  return buildPalette({ hue: songHue ?? (warm ? 28 : 208), scheme: "analogous", saturation: 0.48, brightness: 0.45 });
 }
 
-/** Saturated collage: the mood board's most vivid hue (else a hot red-orange), complementary, full saturation. */
-function collagePalette(mood: MoodSummary | null): PaletteEntry[] {
+/** Saturated collage: the mood board's most vivid hue (else the song's most vivid image, else a hot red-orange), complementary, full saturation. */
+function collagePalette(mood: MoodSummary | null, songHue: number | null = null): PaletteEntry[] {
   if (mood?.vivid) {
     const v = hexToHsl(mood.vivid);
     const primary = v.l >= 0.35 && v.l <= 0.7 ? mood.vivid : hsl(v.h, Math.max(0.75, v.s), 0.52);
@@ -225,12 +227,12 @@ function collagePalette(mood: MoodSummary | null): PaletteEntry[] {
       [hsl(v.h, 0.5, 0.08), "對比背景"],
     ]);
   }
-  return buildPalette({ hue: 12, scheme: "complementary", saturation: 0.98, brightness: 0.7 });
+  return buildPalette({ hue: songHue ?? 12, scheme: "complementary", saturation: 0.98, brightness: 0.7 });
 }
 
-/** Black and white with one accent: the mood board's vivid colour, else a single signal red. */
-function minimalPalette(mood: MoodSummary | null): PaletteEntry[] {
-  const accent = mood?.vivid && hexToHsl(mood.vivid).s >= 0.2 ? mood.vivid : "#e5483b";
+/** Black and white with one accent: the mood board's vivid colour, else the song's image colour, else a single signal red. */
+function minimalPalette(mood: MoodSummary | null, songHue: number | null = null): PaletteEntry[] {
+  const accent = mood?.vivid && hexToHsl(mood.vivid).s >= 0.2 ? mood.vivid : songHue != null ? hsl(songHue, 0.72, 0.56) : "#e5483b";
   return entriesOf([
     ["#060607", "背景"],
     ["#8a8a8f", "主色"],
@@ -259,26 +261,97 @@ function imageList(moodboard: readonly MoodImage[] | undefined, refs: readonly D
   return nums.length ? nums.map((n) => `圖 ${n}`).join("、") : "";
 }
 
+function isWarmHue(h: number): boolean {
+  const x = ((h % 360) + 360) % 360;
+  return x < 70 || x >= 300;
+}
+
+/** The hue of the song's first image family of this temperature (the palette follows the lyrics). */
+function imageHue(f: Findings, pick: (x: Findings["imagery"][number]) => boolean): number | null {
+  const hit = f.imagery.slice(0, 5).find(pick);
+  return hit ? hit.family.hues[0] : null;
+}
+
 /**
- * Three deterministic, clearly different directions (film / collage / minimal). Without a bible:
- * cool (or warm, after the mood board) desaturated film, a saturated complementary collage, and
- * black-and-white with one accent; the mood board's colours drive all three palettes. With a
- * bible: its palette and fonts for all three (a different role leads in each), avoided scenes
- * never used, its lyric policy applied on expansion.
+ * The first of the song's images (most vivid first, or most weight) whose colour is at least 40°
+ * from every hue taken; images of the `prefer` temperature first (a cool film gets a warm collage).
+ */
+function distinctImage(f: Findings, taken: ReadonlyArray<number | null>, order: "vivid" | "weight", prefer?: "warm" | "cool"): Findings["imagery"][number] | null {
+  const list = [...f.imagery.slice(0, 6)];
+  if (order === "vivid") list.sort((x, y) => y.family.saturation * y.weight - x.family.saturation * x.weight);
+  const ok = (h: Findings["imagery"][number]) => taken.every((t) => t == null || hueDistance(h.family.hues[0], t) >= 40);
+  return (prefer ? list.find((h) => h.family.temperature === prefer && ok(h)) : undefined) ?? list.find(ok) ?? null;
+}
+
+/** Song-specific scenes on an archetype's axis: the song's own scene family moves first where the axis allows it. */
+function tailorScenes(base: Record<SectionKind, SceneId[]>, f: Findings, allowed: readonly SceneId[]): Record<SectionKind, SceneId[]> {
+  const song = f.hints.scenes.filter((sc) => allowed.includes(sc) && !f.hints.avoidScenes.includes(sc)).slice(0, 2);
+  const out = { ...base };
+  for (const k of ["verse", "pre-chorus", "bridge", "interlude"] as const) {
+    const lead = song.find((sc) => base[k].includes(sc) || allowed.includes(sc));
+    if (lead) out[k] = [lead, ...base[k].filter((sc) => sc !== lead)].slice(0, 3);
+  }
+  return out;
+}
+
+const FILM_SCENES: readonly SceneId[] = ["nebula", "rain", "waves", "bokeh", "gradient", "particles"];
+const COLLAGE_SCENES: readonly SceneId[] = ["shards", "grid", "tunnel", "particles", "motif", "ink"];
+const MINIMAL_SCENES: readonly SceneId[] = ["gradient", "ink", "motif", "blackout"];
+
+/** The film axis's serif by genre: warmer hand-written kai for folk / city pop / dream pop, old-style for jazz. */
+function filmFont(f: Findings): Omit<KeyVisual["typography"], "rationale"> {
+  const id = f.genre?.id;
+  if (id === "folk" || id === "city-pop" || id === "dream-pop") return { ...FILM.typography, cjkFont: "lxgw-wenkai-tc" };
+  if (id === "jazz") return { ...FILM.typography, cjkFont: "cactus-classical-serif" };
+  return FILM.typography;
+}
+
+/**
+ * Three deterministic, clearly different directions (film / collage / minimal), made for this song
+ * from the free-research findings: the palettes take the song's own image colours (without a mood
+ * board), the scene families its imagery and genre, the pitch and rationale its genre, audio mood,
+ * emotion, point of view and sing-along phrase. Without a bible: cool (or warm, after the mood board
+ * or the song's warm imagery) desaturated film, a saturated complementary collage, and black-and-white
+ * with one accent. With a bible: its palette and fonts for all three (a different role leads in
+ * each), avoided scenes never used, its lyric policy applied on expansion.
  */
 export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   const bible = activeBible(req.bible);
   const bp = biblePalette(bible);
   const mood = moodSummary(req.moodboard ?? []);
-  const { mood: songMood, imagery } = offlineContext(req);
-  const warm = mood ? mood.warmth > 0.08 : false;
-  const briefHint = req.research?.engine === "claude" ? "延續研究簡報的方向，" : "";
-  const imageryText = imagery.length ? `歌詞裡的「${imagery[0].imagery.name}」` : "歌曲的能量起伏";
-  const avoid = new Set(bible?.sceneAvoid ?? []);
-  const scenesOf = (a: Archetype, preferBible: boolean): Partial<Record<SectionKind, SceneId[]>> => {
+  const f = analyzeFindings(req);
+  const genre = f.genre;
+  // the axis this genre's own grammar lives on: its direction takes the genre's colours and lyric habits
+  const nativeAxis: "film" | "collage" | "minimal" | null = !genre
+    ? null
+    : genre.motion === "soft"
+      ? "film"
+      : genre.motion === "punchy"
+        ? "collage"
+        : genre.lyrics.density === "sparse" || genre.id === "post-punk"
+          ? "minimal"
+          : null;
+  const genreColours = !!genre && !mood && !bp;
+  const warm = mood ? mood.warmth > 0.08 : nativeAxis === "film" && genre ? isWarmHue(genre.palette.hues[0]) : f.hints.temperature === "warm";
+  const briefHint = req.research?.engine === "claude" || req.research?.engine === "manual-claude" ? "延續研究簡報的方向，" : "";
+  const names = f.imagery.slice(0, 2).map((h) => `「${h.family.name}」`);
+  const imageryText = names.length ? `歌詞裡的${names.join("與")}` : "歌曲的能量起伏";
+  const phrase = f.hints.singalong.find((p) => !p.chant)?.text ?? f.hints.singalong[0]?.text ?? null;
+  const sung = (req.lyrics?.lines ?? []).some((l) => l.text.trim());
+  const genreLyrics = (axis: "film" | "collage" | "minimal") => (genre && axis === nativeAxis && sung ? `${genre.label}：${genre.lyrics.note}。` : "");
+  const native = (axis: "film" | "collage" | "minimal") => {
+    if (!genre) return "";
+    const soft = genre.motion === "soft";
+    const hit = axis === "film" ? soft : axis === "collage" ? genre.motion === "punchy" : genre.lyrics.density === "sparse" || genre.id === "post-punk";
+    return hit ? `這是最貼近${genre.label}的做法：${genre.why}` : `${genre.label}的歌用這個方向，是刻意的反差。`;
+  };
+  const findingsText = `免費研究：${genre ? `曲風「${genre.label}」（${f.genres[0].evidence[0] ?? "公開資料"}）、` : ""}音訊「${f.audio.label}」${sung && f.lyrics.emotion.hits ? `、歌詞情緒「${f.lyrics.emotion.label}」、人稱${f.lyrics.pov.label}` : ""}。`;
+  const avoid = new Set([...(bible?.sceneAvoid ?? []), ...f.hints.avoidScenes]);
+  const scenesOf = (a: Archetype, allowed: readonly SceneId[], preferBible: boolean): Partial<Record<SectionKind, SceneId[]>> => {
+    const tailored = bible?.sceneAffinity.length ? a.scenes : tailorScenes(a.scenes, f, allowed);
     const out: Partial<Record<SectionKind, SceneId[]>> = {};
     for (const k of KINDS) {
-      let list = a.scenes[k].filter((s) => !avoid.has(s));
+      let list = tailored[k].filter((s) => !avoid.has(s));
       if (preferBible && bible?.sceneAffinity.length) list = [...bible.sceneAffinity.filter((s) => !avoid.has(s) && (SCENES[s].energy[1] >= 0.5 || k !== "chorus")), ...list].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3);
       out[k] = list.length ? list : ["gradient"];
     }
@@ -287,31 +360,41 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   const bibleText = bp ? `配色與字體遵守${req.bandName ? `${req.bandName}的` : "樂團"}視覺聖經。` : "";
   const moodCue = (what: string) => (mood ? `參考圖量到的主色${mood.vivid ? ` ${mood.vivid}` : ""}：${what}` : "");
   const specs: DirectionSpec[] = [];
+  const title = req.meta?.title || "這首歌";
+  // the three palettes stay apart: film takes the song's image of its temperature, the collage
+  // the most vivid image of another colour, the minimal accent a third one
+  let filmHue: number | null = null;
+  let collageHue: number | null = null;
 
   // A: film
   {
     const refs = refsFor(req.moodboard, mood, "取了它的色溫與明暗當作底色與主色");
-    const palette = bp ? rolesFirst(bp.entries, "shadow") : filmPalette(mood, warm);
+    const songHue = nativeAxis === "film" && genreColours ? genre!.palette.hues[0] : imageHue(f, (h) => h.family.temperature === (warm ? "warm" : "cool"));
+    filmHue = songHue ?? (warm ? 28 : 208);
+    const palette = bp ? rolesFirst(bp.entries, "shadow") : filmPalette(mood, warm, songHue);
     const name = bp ? "暗房膠片" : warm ? "暖調膠片感" : "冷調膠片感";
     const imgs = imageList(req.moodboard, refs);
+    const typo = filmFont(f);
     specs.push({
       name,
-      pitch: `像一卷${warm ? "偏暖" : "偏冷"}的底片：低飽和、顆粒與雨絲，讓歌詞安靜地浮在畫面上。`,
+      pitch: `像一卷${warm ? "偏暖" : "偏冷"}的底片：${names.length ? `把${names.join("與")}拍成` : "拍成"}低飽和的顆粒與光斑，讓歌詞安靜地浮在畫面上。`,
       rationale: [
-        `${briefHint}從${imageryText}出發，把舞台當成一段${warm ? "泛黃" : "冷藍"}的膠片記憶；${songMood.mood === "calm" || songMood.mood === "warm" ? "歌曲的慢板與留白正適合這種節制的質地" : "用節制的畫面反襯歌曲的能量，副歌才顯得有力"}。`,
+        `${briefHint}從${imageryText}出發，把舞台當成一段${warm ? "泛黃" : "冷藍"}的膠片記憶；${f.audio.quadrant === "gentle-float" || f.audio.quadrant === "dark-slow" ? "歌曲的慢板與留白正適合這種節制的質地" : "用節制的畫面反襯歌曲的能量，副歌才顯得有力"}。`,
+        findingsText,
+        native("film"),
         imgs ? `${imgs}：${moodCue("取它的色溫與明暗當作底色與主色")}。` : "",
         bibleText,
       ].join(""),
       references: refs,
-      moodKeywords: warm ? ["懷舊", "顆粒", "溫度", "留白"] : ["冷調", "顆粒", "距離感", "留白"],
+      moodKeywords: [...(warm ? ["懷舊", "顆粒", "溫度"] : ["冷調", "顆粒", "距離感"]), ...f.imagery.slice(0, 2).map((h) => h.family.name), "留白"].filter((k, i, a) => a.indexOf(k) === i).slice(0, 5),
       palette,
-      typography: bible ? bibleFonts(bible, FILM.typography.letterSpacing, "沿用樂團視覺聖經的字體，字距放寬帶出電影字卡的呼吸感。") : withRationale(FILM.typography, "宋體與高對比襯線字像電影片頭字卡，字重 700 在 LED 上仍清楚。"),
-      motifs: ["底片顆粒", "雨絲光線", "柔焦光斑"],
+      typography: bible ? bibleFonts(bible, FILM.typography.letterSpacing, "沿用樂團視覺聖經的字體，字距放寬帶出電影字卡的呼吸感。") : withRationale(typo, typo.cjkFont === "noto-serif-tc" ? "宋體與高對比襯線字像電影片頭字卡，字重 700 在 LED 上仍清楚。" : "手寫與舊式的字，像底片邊上的字卡，字重 700 在 LED 上仍清楚。"),
+      motifs: ["底片顆粒", ...(f.imagery[0] ? [f.imagery[0].family.motif] : ["雨絲光線"]), ...(nativeAxis === "film" && genre ? genre.motifs.slice(0, 1) : []), "柔焦光斑"].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4),
       emblem: FILM.emblem,
-      scenes: scenesOf(FILM, true),
-      sceneTendency: "星雲、雨絲、波形與光斑：柔和、慢速、低飽和，副歌只把粒子密度拉高，不換成激烈的幾何。",
+      scenes: scenesOf(FILM, FILM_SCENES, true),
+      sceneTendency: `星雲、雨絲、波形與光斑${names.length ? `，${names[0]}的畫面放在主歌` : ""}：柔和、慢速、低飽和，副歌只把粒子密度拉高，不換成激烈的幾何。`,
       lyrics: FILM.lyrics,
-      lyricTreatment: "主歌上方淡入、導歌打字機、副歌整行 karaoke 讓觀眾跟唱，橋段直排；前奏與間奏留白。",
+      lyricTreatment: `主歌上方淡入、導歌打字機、副歌整行 karaoke，${phrase ? `讓觀眾跟唱「${phrase}」` : "讓觀眾跟唱"}，橋段直排；前奏與間奏留白。${genreLyrics("film")}`,
       treatments: bible?.treatments.length ? bible.treatments : FILM.treatments,
       energy: FILM.energy,
       motion: FILM.motion,
@@ -320,26 +403,32 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   // B: collage
   {
     const refs = refsFor(req.moodboard, mood, "取了它最飽和的顏色放大成撞色拼貼");
-    const palette = bp ? rolesFirst(bp.entries, "accent") : collagePalette(mood);
+    const vivid = distinctImage(f, [filmHue], "vivid", warm ? "cool" : "warm");
+    const genreHue = genre ? genre.palette.hues.find((h) => filmHue == null || hueDistance(h, filmHue) >= 40) ?? null : null;
+    const songHue = nativeAxis === "collage" && genreColours && genreHue != null ? genreHue : vivid ? vivid.family.hues[0] : genreHue;
+    collageHue = songHue ?? 12;
+    const palette = bp ? rolesFirst(bp.entries, "accent") : collagePalette(mood, songHue);
     const imgs = imageList(req.moodboard, refs);
     specs.push({
       name: bp ? "高彩拼貼" : "飽和拼貼",
-      pitch: "撞色、碎片與網格，像一張張貼上去的海報，副歌用巨字喊出來。",
+      pitch: `撞色、碎片與網格，像一張張貼上去的海報，副歌用巨字${phrase ? `喊出「${phrase}」` : "喊出來"}。`,
       rationale: [
-        `把〈${req.meta?.title || "這首歌"}〉做成一面會跳動的拼貼牆：飽和的撞色、碎片與網格隨節拍切換，副歌用巨字口號帶全場合唱。`,
+        `把〈${title}〉做成一面會跳動的拼貼牆：飽和的撞色、碎片與網格隨節拍切換，副歌用巨字口號帶全場合唱。`,
+        findingsText,
+        native("collage"),
         imgs ? `${imgs}：${moodCue("放大成撞色拼貼的主色")}。` : "",
         bibleText,
       ].join(""),
       references: refs,
-      moodKeywords: ["撞色", "拼貼", "能量", "口號"],
+      moodKeywords: ["撞色", "拼貼", "能量", ...(vivid ? [vivid.family.name] : []), "口號"].filter((k, i, a) => a.indexOf(k) === i).slice(0, 5),
       palette,
       typography: bible ? bibleFonts(bible, COLLAGE.typography.letterSpacing, "沿用樂團視覺聖經的字體，用最粗的字重做海報式的口號。") : withRationale(COLLAGE.typography, "粗黑體與窄體大寫像街頭海報，遠距離也一眼讀到口號。"),
-      motifs: ["撕貼紙片", "網點印刷", "放射線"],
-      emblem: COLLAGE.emblem,
-      scenes: scenesOf(COLLAGE, false),
+      motifs: [...(vivid ? [vivid.family.motif] : ["撕貼紙片"]), "網點印刷", ...(genre?.motifs.slice(0, 1) ?? ["放射線"])].filter((m, i, a) => a.indexOf(m) === i),
+      emblem: vivid?.family.emblem === "shard" || !vivid ? COLLAGE.emblem : vivid.family.emblem,
+      scenes: scenesOf(COLLAGE, COLLAGE_SCENES, false),
       sceneTendency: "碎片、網格、粒子到隧道：高飽和、快切、跟拍點反應，最後一次副歌衝進隧道。",
       lyrics: COLLAGE.lyrics,
-      lyricTreatment: "主歌逐字跳出、副歌 impact 巨字口號，橋段堆疊成詩句；器樂段不放歌詞。",
+      lyricTreatment: `主歌逐字跳出、副歌 impact 巨字口號${phrase ? `（「${phrase}」）` : ""}，橋段堆疊成詩句；器樂段不放歌詞。${genreLyrics("collage")}`,
       treatments: bible?.treatments.length ? bible.treatments : COLLAGE.treatments,
       energy: COLLAGE.energy,
       motion: COLLAGE.motion,
@@ -348,13 +437,23 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   // C: minimal
   {
     const refs = mood ? refsFor(req.moodboard, mood, "只取它的一個顏色當唯一的點綴") : [];
-    const palette = bp ? rolesFirst(bp.entries, "primary").slice(0, 4) : minimalPalette(mood);
+    const accentImage = distinctImage(f, [filmHue, collageHue], "weight");
+    const genreAccent = nativeAxis === "minimal" && genreColours ? genre!.palette.hues.find((h) => [filmHue, collageHue].every((t) => t == null || hueDistance(h, t) >= 40)) ?? null : null;
+    const accentHue = genreAccent ?? (accentImage ? accentImage.family.hues[0] : null);
+    const palette = bp ? rolesFirst(bp.entries, "primary").slice(0, 4) : minimalPalette(mood, accentHue);
     const imgs = imageList(req.moodboard, refs);
     specs.push({
       name: bp ? "留白極簡" : "黑白極簡",
-      pitch: "黑、白與一個點綴色：大量留白，讓字與主唱成為唯一的焦點。",
+      pitch: phrase ? `黑、白與一個點綴色：大量留白，讓「${phrase}」這幾個字與主唱成為唯一的焦點。` : "黑、白與一個點綴色：大量留白，讓字與主唱成為唯一的焦點。",
       rationale: [
         "把畫面減到只剩黑白、水墨與漸層，靠字體與留白說故事；螢幕像一張海報，把舞台燈光和主唱還給觀眾。",
+        genreAccent != null
+          ? `唯一的點綴色取自${genre!.label}的配色（${genre!.palette.note}）。`
+          : accentImage && !mood && !bp
+            ? `唯一的點綴色取自歌詞的「${accentImage.family.name}」（${accentImage.family.colors.split("、")[0]}）。`
+            : "",
+        findingsText,
+        native("minimal"),
         imgs ? `${imgs}：${moodCue("唯一的點綴色")}。` : "",
         bibleText,
       ].join(""),
@@ -362,12 +461,12 @@ export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
       moodKeywords: ["極簡", "留白", "黑白", "文字"],
       palette,
       typography: bible ? bibleFonts(bible, MINIMAL.typography.letterSpacing, "沿用樂團視覺聖經的字體，字距拉開像海報排版。") : withRationale(MINIMAL.typography, "中性的黑體加寬字距，像海報排版，極簡畫面裡字就是主角。"),
-      motifs: ["一條線", "黑白對比", "留白"],
+      motifs: ["一條線", "黑白對比", phrase ? `「${phrase}」的字` : "留白"],
       emblem: MINIMAL.emblem,
-      scenes: scenesOf(MINIMAL, false),
+      scenes: scenesOf(MINIMAL, MINIMAL_SCENES, false),
       sceneTendency: "漸層、水墨與主視覺符號：黑白為主、動得很少，breakdown 可以全黑。",
       lyrics: MINIMAL.lyrics,
-      lyricTreatment: "主歌下方小字幕、副歌詩句堆疊、橋段直排、尾奏打字機；字就是畫面。",
+      lyricTreatment: `主歌下方小字幕、副歌詩句堆疊${phrase ? `，「${phrase}」放大` : ""}、橋段直排、尾奏打字機；字就是畫面。${genreLyrics("minimal")}`,
       treatments: bible?.treatments.length ? bible.treatments : MINIMAL.treatments,
       energy: MINIMAL.energy,
       motion: MINIMAL.motion,
@@ -762,7 +861,7 @@ export function directionId(seed: string): string {
 }
 
 /** Stored directions from specs (letters A, B, C; ids unique within the set). */
-export function buildDirections(specs: readonly DirectionSpec[], req: DesignRequest, meta: { engine: "claude" | "offline"; model?: string; now: string }): DesignDirection[] {
+export function buildDirections(specs: readonly DirectionSpec[], req: DesignRequest, meta: { engine: DirectionEngine; model?: string; now: string }): DesignDirection[] {
   const used = new Set<string>();
   return specs.slice(0, MAX_DIRECTIONS).map((spec, i) => {
     const letter = DIRECTION_LETTERS[i];

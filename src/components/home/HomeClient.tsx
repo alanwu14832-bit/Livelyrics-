@@ -12,7 +12,7 @@ import { BandShelf } from "./BandShelf";
 import { Brand } from "./Brand";
 import { ProjectLibrary } from "./ProjectLibrary";
 import type { ProjectSummary } from "@/lib/types";
-import { ConnectClaudeSheet, ServerStatusButton, ServerStatusLine, StorageSetupNotice, useServerStatus } from "./ServerStatus";
+import { ConnectClaudeSheet, ServerStatusButton, ServerStatusLine, StorageSetupNotice, useServerStatus, type StorageSetup } from "./ServerStatus";
 
 /** Sign out of the password gate (a plain form post: works before hydration too). */
 function SignOutButton() {
@@ -40,7 +40,7 @@ export function HomeClient({
   serverNow?: number;
   initialBandId?: string;
   /** on Vercel without cloud storage: the variables still missing (the setup notice replaces the upload flow) */
-  initialSetup?: string[] | null;
+  initialSetup?: StorageSetup | null;
 }) {
   const { state, reload } = useServerStatus();
   const [connectOpen, setConnectOpen] = useState(false);
@@ -51,10 +51,11 @@ export function HomeClient({
   const motion = intro ? "move" : undefined;
   const openConnect = () => setConnectOpen(true);
   // on Vercel without Blob / Postgres: the setup steps take the upload flow's place
-  const [setup, setSetup] = useState<string[] | null>(initialSetup);
+  const [setup, setSetup] = useState<StorageSetup | null>(initialSetup);
   if (state.kind === "ok") {
-    const missing = state.status.storage?.mode === "unconfigured" ? state.status.storage.missing : null;
-    if (JSON.stringify(missing) !== JSON.stringify(setup)) setSetup(missing);
+    const storage = state.status.storage;
+    const next = storage?.mode === "unconfigured" ? { missing: storage.missing, blobStoreWithoutToken: Boolean(storage.blobStoreWithoutToken) } : null;
+    if (JSON.stringify(next) !== JSON.stringify(setup)) setSetup(next);
   }
   const signedIn = state.kind === "ok" && state.status.auth;
 
@@ -85,7 +86,11 @@ export function HomeClient({
             </div>
           </div>
           <div data-motion={motion} className={cx("mt-10", intro && reveal(3))}>
-            {setup ? <StorageSetupNotice missing={setup} onRecheck={reload} checking={state.kind === "loading"} /> : <UploadFlow defaultBandId={initialBandId} />}
+            {setup ? (
+              <StorageSetupNotice missing={setup.missing} blobStoreWithoutToken={setup.blobStoreWithoutToken} onRecheck={reload} checking={state.kind === "loading"} />
+            ) : (
+              <UploadFlow defaultBandId={initialBandId} />
+            )}
           </div>
         </section>
         {!setup && (

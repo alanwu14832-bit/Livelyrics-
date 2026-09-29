@@ -1,6 +1,7 @@
 // Pure reducer: PipelineEvents (SSE) -> what the process page shows.
 
 import type { PipelineEvent, PipelineStepId, Project } from "@/lib/types";
+import { researchEngineLabel } from "@/lib/research-labels";
 import { LYRICS_SOURCE_LABEL } from "./labels";
 import { PROCESS_STEPS, type ProcessStep } from "./steps";
 
@@ -199,7 +200,7 @@ export function stepsFromProject(project: Project): Record<ProcessStep, StepStat
     ? {
         status: "done",
         text: "",
-        message: `${r.engine === "claude" ? `Claude${r.model ? `（${r.model}）` : ""}` : "離線研究"}${r.sources.length ? `，${r.sources.length} 個來源` : ""}`,
+        message: `${researchEngineLabel(r)}${r.sources.length ? `，${r.sources.length} 個來源` : ""}`,
       }
     : { status: "pending", text: "", message: "尚未研究" };
   const plan = project.plan;

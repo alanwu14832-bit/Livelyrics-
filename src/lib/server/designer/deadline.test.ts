@@ -1,4 +1,4 @@
-// A Claude call with a time budget (cloud mode): when it runs out the offline designer takes over,
+// A Claude call with a time budget (cloud mode): when it runs out the free research / offline designer takes over,
 // like any other Claude failure; a real cancellation still cancels.
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -16,10 +16,13 @@ const silent: ClaudeTransport = {
 };
 
 describe("designer time budget", () => {
-  it("falls back to the offline research and design when Claude runs out of time", async () => {
+  it("falls back to the free research and the offline design when Claude runs out of time", async () => {
     const logs: string[] = [];
-    const research = await researchSong(demoInput(), { onLog: (m) => logs.push(m) }, { configured: true, transport: silent, timeoutMs: 60 });
-    expect(research.engine).toBe("offline");
+    const noNetwork = async (): Promise<Response> => {
+      throw new TypeError("fetch failed");
+    };
+    const research = await researchSong(demoInput(), { onLog: (m) => logs.push(m) }, { configured: true, transport: silent, timeoutMs: 60, fetch: noNetwork });
+    expect(research.engine).toBe("free");
     expect(logs.some((l) => /Claude 研究失敗：Claude 超過 1 秒還沒完成/.test(l))).toBe(true);
 
     const plan = await designSong({ ...demoInput(), research: null }, {}, { configured: true, transport: silent, timeoutMs: 60 });

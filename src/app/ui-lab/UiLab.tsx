@@ -890,7 +890,7 @@ function ToastDemo() {
           <Banner tone="success" title="設計完成" description="主視覺與 8 個段落的畫面都已準備好。" actions={<Button variant="filled">進入控制台</Button>} />
           <Banner tone="error" title="處理失敗" description="研究步驟逾時。已完成的步驟都已儲存。" actions={<Button variant="gray">重試</Button>} />
           <Banner tone="warning" title="發現未儲存的草稿" description="上次編輯到第 12 行。" actions={<Button variant="plain">還原</Button>} />
-          <Banner tone="info" title="離線設計模式" description="不會上網研究樂團，設計由本機規則產生。" />
+          <Banner tone="info" title="免費研究模式" description="查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞與音訊，不需要 API 金鑰。" />
         </div>
       </Block>
     </>
@@ -1008,7 +1008,7 @@ function HeaderDemo({ theme }: { theme: ThemeId }) {
             }
             actions={
               <Button variant="quiet" size="sm" icon={InfoIcon}>
-                離線設計模式
+                免費研究模式
               </Button>
             }
           />

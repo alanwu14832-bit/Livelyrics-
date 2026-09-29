@@ -213,7 +213,7 @@ export function ProposalClient({ id }: { id: string }) {
             </div>
             <div className="shrink-0 text-right text-[7pt] leading-[1.5] text-[#6e6e73]">
               <p>提案日期 {sheet.date}</p>
-              <p>{sheet.engine === "claude" ? "Claude 設計師提案" : "離線設計師提案"}，Livelyrics</p>
+              <p>{sheet.engine === "claude" ? "Claude 設計師提案" : sheet.engine === "manual-claude" ? "Claude（claude.ai）提案" : "離線設計師提案"}，Livelyrics</p>
             </div>
           </header>
 

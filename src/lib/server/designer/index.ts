@@ -6,8 +6,10 @@
 //                (key visual, per-section scene + lyric presentation, cue notes).
 //
 // Both never throw for Claude problems: without a credential, or on any Claude error,
-// refusal or unusable output, they fall back to the deterministic offline designer and
-// explain why through cb.onLog. Only cancellation (cb.signal) propagates.
+// refusal or unusable output, they fall back — research to 免費研究 (public facts from MusicBrainz
+// and Wikipedia plus the local lyric and audio analysis, free-research.ts), design to the
+// deterministic offline designer driven by those findings — and explain why through cb.onLog.
+// Only cancellation (cb.signal) propagates.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { formatTimeShort } from "@/lib/timeline";
@@ -20,16 +22,20 @@ import { buildDirections, buildDirectionsPrompt, DirectionDraftSchema, DIRECTION
 import { visionContent } from "./moodboard";
 import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
-import { claudeDesign, claudeResearch, sdkTransport, type ClaudeTransport } from "./claude";
+import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
 import { describeError } from "./messages";
 import { normalizePlan } from "./normalize";
-import { offlineDesign, offlineResearch } from "./offline";
+import { offlineDesign } from "./offline";
+import { freeResearch, type FreeResearchOptions } from "./free-research";
+import type { FetchLike } from "@/lib/server/research/http";
 import { safeCallbacks, type DesignerCallbacks, type DesignerInput, type DesignRequest } from "./types";
 
 export type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
 export { normalizePlan } from "./normalize";
 export { offlineDesign, offlineResearch } from "./offline";
+export { freeResearch, freeBrief, freeSources } from "./free-research";
+export { analyzeFindings, type Findings } from "./findings";
 export { sanitizeSvg, generateMotifSvg } from "./svg";
 export { offlineBible, type BibleInput, type BibleSong } from "./bible";
 export { offlineArc, applyArc, type ArcInput, type ArcSong } from "./arc";
@@ -42,7 +48,7 @@ export function isClaudeConfigured(): boolean {
 }
 
 export function modelName(): string {
-  return process.env.LIVELYRICS_MODEL?.trim() || "claude-opus-5";
+  return process.env.LIVELYRICS_MODEL?.trim() || "claude-sonnet-5-5";
 }
 
 /** Injection points for tests, and the time budget of a serverless request. */
@@ -58,6 +64,10 @@ export interface DesignerDeps {
    * always finishes (and saves) inside the platform's 300 s limit.
    */
   timeoutMs?: number;
+  /** the free research's HTTP (tests pass a fake: tests never reach MusicBrainz or Wikipedia) */
+  fetch?: FetchLike;
+  /** free-research lookup overrides (environment, budget, MusicBrainz spacing) */
+  lookup?: FreeResearchOptions["lookup"];
 }
 
 /** Claude did not finish inside DesignerDeps.timeoutMs (not a cancellation: the offline designer takes over). */
@@ -102,7 +112,7 @@ function isCancellation(err: unknown, signal?: AbortSignal): boolean {
 let sharedTransport: ClaudeTransport | null = null;
 function defaultTransport(): ClaudeTransport {
   // created lazily: the SDK reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the environment
-  sharedTransport ??= sdkTransport(new Anthropic());
+  sharedTransport ??= sdkTransport(new Anthropic(clientOptions()));
   return sharedTransport;
 }
 
@@ -110,18 +120,25 @@ function resolveDeps(deps: DesignerDeps) {
   const budget = deps.timeoutMs != null && deps.timeoutMs > 0 ? deps.timeoutMs : null;
   // the deadline starts with the designer call, so continuations share one budget
   const deadline = budget != null ? Date.now() + budget : null;
+  const configured = deps.configured ?? isClaudeConfigured();
   return {
-    configured: deps.configured ?? isClaudeConfigured(),
+    configured,
+    /** a key is set but this call was asked not to use it (免費研究 chosen for this run) */
+    optedOut: !configured && deps.configured === false && isClaudeConfigured(),
     model: deps.model ?? modelName(),
     transport: () => {
       const t = deps.transport ?? defaultTransport();
       return deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
     },
     now: deps.now,
+    free: { fetch: deps.fetch, now: deps.now, lookup: deps.lookup } satisfies FreeResearchOptions,
   };
 }
 
-/** Research the band and song as a dedicated stage-visual designer would. Never throws for Claude failures: falls back to offline. */
+/**
+ * Research the band and song as a dedicated stage-visual designer would: Claude with web search when
+ * configured, else 免費研究. Never throws for Claude failures: falls back to 免費研究.
+ */
 export async function researchSong(input: DesignerInput, cb: DesignerCallbacks = {}, deps: DesignerDeps = {}): Promise<Research> {
   const cbs = safeCallbacks(cb);
   throwIfAborted(cb.signal);
@@ -136,8 +153,10 @@ export async function researchSong(input: DesignerInput, cb: DesignerCallbacks =
   };
 
   if (!d.configured) {
-    cbs.onLog("未設定 Claude（ANTHROPIC_API_KEY），改用離線研究：依音訊分析與歌詞推論，不做網路搜尋。");
-    return emitOffline(offlineResearch(input), tracked, false);
+    cbs.onLog(
+      `${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude（ANTHROPIC_API_KEY）"}，改用免費研究：查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象與音訊，不使用 API。`,
+    );
+    return freeResearch(input, tracked, d.free);
   }
   try {
     cbs.onLog(`Claude（${d.model}）開始研究「${input.meta?.artist || "樂團"}」與〈${input.meta?.title || "這首歌"}〉…`);
@@ -145,14 +164,9 @@ export async function researchSong(input: DesignerInput, cb: DesignerCallbacks =
   } catch (err) {
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     const why = describeError(err);
-    cbs.onLog(`Claude 研究失敗：${why}。改用離線研究。`);
-    return emitOffline(offlineResearch(input, `Claude 研究失敗（${why}）`), tracked, streamed);
+    cbs.onLog(`Claude 研究失敗：${why}。改用免費研究。`);
+    return freeResearch(input, tracked, { ...d.free, reason: `Claude 研究失敗（${why}）`, afterPartial: streamed });
   }
-}
-
-function emitOffline(research: Research, cb: SafeCallbacks, afterPartial: boolean): Research {
-  cb.onDelta(afterPartial ? `\n\n---\n\n${research.brief}` : research.brief);
-  return research;
 }
 
 /** Markdown progress summary of a plan (what the Claude path streams while designing). */
@@ -222,7 +236,9 @@ export async function designSong(
   const req: DesignRequest = input;
 
   if (!d.configured) {
-    cbs.onLog("未設定 Claude（ANTHROPIC_API_KEY），使用離線設計師：依音訊能量、歌詞重複段落與意象關鍵字產生方案。");
+    cbs.onLog(
+      `${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude（ANTHROPIC_API_KEY）"}，使用離線設計師：依免費研究的發現（曲風的視覺語法、歌詞意象與情緒、音訊情緒）、段落結構與能量產生方案。`,
+    );
     return offlinePath(req, cbs, false);
   }
   try {
@@ -327,7 +343,7 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
     return { engine: "offline", createdAt: now, directions };
   };
   if (!d.configured) {
-    cbs.onLog("未設定 Claude，使用離線設計師提出三個方向：冷暖、飽和與黑白三個軸線各一個。");
+    cbs.onLog(`${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude"}，使用離線設計師提出三個方向：冷暖、飽和與黑白三個軸線各一個，並依這首歌的曲風、意象與情緒調整。`);
     return offlineSet();
   }
   try {
