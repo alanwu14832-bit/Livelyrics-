@@ -549,8 +549,16 @@ const OUT_SPY = () => {
     const ltcRate = await text("[data-lock-tile] [data-sync-rate]").catch(() => "");
     check("LTC locks on the audio input", ltcLocked >= 0, `${ltcLocked} ms`);
     check("LTC reads 01:00:1x at 25 fps", /^01:00:1[0-4]:\d\d$/.test(ltcTc) && /25 fps/.test(ltcRate), `${ltcTc} ${ltcRate}`);
-    const ltcSecs = Number(ltcSong.split(":")[1]);
-    check("the song is at ≈ 10 s", ltcSecs >= 9.8 && ltcSecs < 13, ltcSong);
+    // the chase relocates only after ~3 consistent frames (a single glitch never moves the song),
+    // so the song readout can lag the TC readout for a moment: wait for it to converge
+    const songSecs = (s) => Number(String(s).split(":")[1]);
+    let ltcSongNow = ltcSong;
+    await until(async () => {
+      ltcSongNow = await text("[data-lock-tile] [data-sync-song]");
+      return songSecs(ltcSongNow) >= 9.8 && songSecs(ltcSongNow) < 13;
+    }, 3000, 50);
+    const ltcSecs = songSecs(ltcSongNow);
+    check("the song is at ≈ 10 s", ltcSecs >= 9.8 && ltcSecs < 13, `${ltcSongNow} (first read ${ltcSong})`);
     const ltcLyric = await until(async () => shows(await outText(), lines[0].text) || shows(await outText(), lines[1].text), 4000);
     const ltcOut = await outLast();
     check("the projection shows the lyric at that time", ltcLyric >= 0 && ltcOut && ltcOut.t >= 9.8 && ltcOut.t < 14.5 && (ltcOut.lineIndex === 0 || ltcOut.lineIndex === 1), JSON.stringify(ltcOut && { t: ltcOut.t, line: ltcOut.lineIndex }));

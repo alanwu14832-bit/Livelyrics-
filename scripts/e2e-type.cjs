@@ -211,7 +211,13 @@ const notBlank = (page, selector) =>
     await editor.mouse.up();
     await editor.waitForTimeout(600);
     await waitSaved(editor, "line edits");
-    let after = (await api("GET", `/api/projects/${id}`)).plan.typeSystem.lines.find((l) => l.lineId === lineId);
+    // the drag's save is debounced and asynchronous: poll the project until the nudge lands
+    let after = null;
+    for (let i = 0; i < 25; i++) {
+      after = (await api("GET", `/api/projects/${id}`)).plan.typeSystem.lines.find((l) => l.lineId === lineId);
+      if ((after?.edit?.dx ?? 0) > 0.03) break;
+      await editor.waitForTimeout(200);
+    }
     check("reroll saved (another seed)", !!after?.edit?.seed && after.edit.seed !== (before?.edit?.seed ?? before?.seed), JSON.stringify(after?.edit));
     check("emphasis tap saved", Array.isArray(after?.edit?.emphasis) && after.edit.emphasis.length > 0 && lines[lineIdx].text.includes(after.edit.emphasis[0]), JSON.stringify(after?.edit?.emphasis));
     check("drag nudge saved", (after?.edit?.dx ?? 0) > 0.03 && (after?.edit?.dy ?? 0) < -0.01, `dx=${after?.edit?.dx} dy=${after?.edit?.dy}`);
