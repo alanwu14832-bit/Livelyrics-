@@ -12,6 +12,7 @@
 
 import { BlobNotFoundError, del, head } from "@vercel/blob";
 import { HttpError } from "../http";
+import { StorageError } from "./errors";
 import type { BlobInfo, FileStore, ServeOptions } from "./types";
 
 /** The part of the @vercel/blob API the store uses (an in-memory fake implements it in tests). */
@@ -177,6 +178,27 @@ export function createBlobFileStore(api: BlobApi, opts: BlobStoreOptions = {}): 
         throw new HttpError(502, "無法讀取上傳的檔案，請稍後再試");
       }
       return { blob: { url: meta.url, pathname }, size: meta.size, contentType: meta.contentType, head: first };
+    },
+
+    async read(file, { maxBytes, signal }) {
+      if (file.kind !== "blob") throw new StorageError("not_found", "找不到檔案");
+      const res = await api.fetch(file.blob.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(INSPECT_TIMEOUT_MS)]) : AbortSignal.timeout(INSPECT_TIMEOUT_MS) });
+      if (res.status === 404) {
+        discard(res.body);
+        throw new StorageError("not_found", "找不到檔案");
+      }
+      if (!res.ok || !res.body) {
+        discard(res.body);
+        throw new HttpError(502, "讀取雲端檔案失敗");
+      }
+      const declared = Number(res.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        discard(res.body);
+        throw new HttpError(413, "檔案太大");
+      }
+      const out = await readFirst(res.body, maxBytes + 1);
+      if (out.length > maxBytes) throw new HttpError(413, "檔案太大");
+      return out;
     },
   };
 }

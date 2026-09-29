@@ -1,6 +1,7 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, Research, SongArcDirective, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, MoodImage, Research, SongArcDirective, SongMeta } from "@/lib/types";
+import type { VisionImage } from "./moodboard";
 
 export interface DesignerInput {
   meta: SongMeta;
@@ -11,6 +12,10 @@ export interface DesignerInput {
   /** the band's visual bible: a hard constraint for research and design (stay in this world) */
   bible?: BandBible | null;
   bandName?: string;
+  /** mood board (參考圖): the band's, then the song's; never stage media */
+  moodboard?: MoodImage[];
+  /** the mood board images the server could read, for Claude's vision input (ids match `moodboard`) */
+  moodboardImages?: VisionImage[];
 }
 
 export interface DesignerCallbacks {

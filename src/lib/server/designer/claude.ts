@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   BetaContentBlock,
+  BetaContentBlockParam,
   BetaMessage,
   BetaMessageParam,
   BetaMessageStreamParams,
@@ -26,6 +27,7 @@ import {
 } from "./messages";
 import { normalizePlanWithReport } from "./normalize";
 import { designPlanOutputFormat } from "./output-schema";
+import { visionContent } from "./moodboard";
 import { buildDesignPrompt, buildResearchPrompt, DESIGN_SYSTEM, RESEARCH_HEADINGS, RESEARCH_SYSTEM } from "./prompts";
 import { analyzeStructure } from "./structure";
 import type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
@@ -324,13 +326,22 @@ export function isUsablePlan(raw: unknown): boolean {
   });
 }
 
+/**
+ * The user turn: the prompt text, preceded by the mood board images (vision blocks, each with its
+ * 圖 n label) when the server could load any. Without images it stays a plain string.
+ */
+export function userContent(input: DesignerInput, prompt: string): string | BetaContentBlockParam[] {
+  const images = visionContent(input.moodboard, input.moodboardImages);
+  return images.length ? [...images, { type: "text", text: prompt }] : prompt;
+}
+
 export function designParams(req: DesignRequest, model: string): BetaMessageStreamParams {
   const st = analyzeStructure(req);
   return {
     model,
     max_tokens: DESIGN_MAX_TOKENS,
     system: [{ type: "text", text: DESIGN_SYSTEM, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: buildDesignPrompt(req, st) }],
+    messages: [{ role: "user", content: userContent(req, buildDesignPrompt(req, st)) }],
     thinking: { type: "adaptive", display: "summarized" },
     output_config: { effort: "high", format: designPlanOutputFormat() },
     betas: [FALLBACK_BETA],

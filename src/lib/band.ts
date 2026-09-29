@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { coerceAssets } from "./assets";
 import { FONTS } from "./font-meta";
+import { coerceMoodboard } from "./moodboard";
 import { FONT_IDS, MEDIA_TREATMENTS, SCENE_IDS, type FontId, type MediaTreatment, type SceneId } from "./schema";
 import type { Band, BandBible, BandPaletteColor, JobState, LyricPolicyMode } from "./types";
 
@@ -172,6 +173,8 @@ export function coerceBand(raw: unknown, id: string, fallbackTime: string): Band
   };
   const job = coerceJob(raw.bibleJob);
   if (job) band.bibleJob = job;
+  const moodboard = coerceMoodboard(raw.moodboard, "band");
+  if (moodboard.length) band.moodboard = moodboard;
   return band;
 }
 

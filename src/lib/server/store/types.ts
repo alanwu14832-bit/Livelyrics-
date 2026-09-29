@@ -103,4 +103,10 @@ export interface FileStore {
    * size, type and first bytes. HttpError 400 when it is not a blob of ours or is missing.
    */
   inspect(blob: BlobRef, opts: { prefix: string; headBytes?: number }): Promise<BlobInfo>;
+  /**
+   * The whole file (small files only: mood board images the designer sends to Claude). Rejects
+   * with StorageError("not_found") when it is missing and HttpError 413 when it is larger than
+   * `maxBytes`.
+   */
+  read(file: StoredFile, opts: { maxBytes: number; signal?: AbortSignal }): Promise<Uint8Array>;
 }

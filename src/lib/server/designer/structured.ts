@@ -3,6 +3,7 @@
 // song designer; the caller validates / normalizes the JSON and falls back to its heuristic.
 
 import type { z } from "zod";
+import type { BetaContentBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { ClaudeFailure, FALLBACK_BETA, parsePlanJson, runWithContinuations, type ClaudeOptions } from "./claude";
 import { describeRefusal, describeStop, textAfterLastFallback, textOf } from "./messages";
 import { jsonOutputFormat } from "./output-schema";
@@ -11,7 +12,16 @@ import type { DesignerCallbacks } from "./types";
 type Callbacks = Required<Omit<DesignerCallbacks, "signal">> & { signal?: AbortSignal };
 
 export async function claudeStructured(
-  job: { system: string; prompt: string; schema: z.ZodType; maxTokens?: number; label: string },
+  job: {
+    system: string;
+    prompt: string;
+    schema: z.ZodType;
+    maxTokens?: number;
+    label: string;
+    /** content blocks before the prompt text (mood board images) */
+    before?: BetaContentBlockParam[];
+    effort?: "low" | "medium" | "high";
+  },
   cb: Callbacks,
   opts: ClaudeOptions,
 ): Promise<{ raw: unknown; model: string }> {
@@ -22,9 +32,9 @@ export async function claudeStructured(
       model: opts.model,
       max_tokens: job.maxTokens ?? 16_000,
       system: job.system,
-      messages: [{ role: "user", content: job.prompt }],
+      messages: [{ role: "user", content: job.before?.length ? [...job.before, { type: "text", text: job.prompt }] : job.prompt }],
       thinking: { type: "adaptive", display: "summarized" },
-      output_config: { effort: "high", format: jsonOutputFormat(job.schema) },
+      output_config: { effort: job.effort ?? "high", format: jsonOutputFormat(job.schema) },
       betas: [FALLBACK_BETA],
       fallbacks: "default",
     },

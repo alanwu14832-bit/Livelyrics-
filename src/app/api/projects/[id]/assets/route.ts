@@ -27,6 +27,8 @@ export const POST = handle(async (req: Request, ctx: Ctx) => {
   if (!existing) throw new HttpError(404, "找不到專案");
   const taken = await takenAssetIds(existing.bandId);
   for (const a of existing.assets) taken.add(a.id);
+  // mood board images share the assets folder
+  for (const m of existing.moodboard ?? []) taken.add(m.id);
   if (isCloudStorage()) {
     if (!isJsonRequest(req)) throw new HttpError(400, "雲端模式請先把檔案上傳到 Vercel Blob，再登記到這裡。");
     return receiveAssetRegistration(req, {

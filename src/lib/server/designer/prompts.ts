@@ -10,6 +10,7 @@ import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
+import { moodboardBlock } from "./moodboard";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
 
@@ -28,7 +29,7 @@ function clip(s: string, n: number): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
-function songBlock(input: DesignerInput, duration: number): string {
+export function songBlock(input: DesignerInput, duration: number): string {
   const m: Partial<SongMeta> = input.meta ?? {};
   const rows = [
     `- 歌名：${m.title?.trim() || "（未提供）"}`,
@@ -223,7 +224,7 @@ export function buildResearchPrompt(input: DesignerInput, st: SongStructure): st
 // design
 // ---------------------------------------------------------------------------
 
-function catalogBlock(): string {
+export function catalogBlock(): string {
   const scenes = SCENE_IDS.map((id) => `- ${id}（${SCENES[id].label}，適合能量 ${SCENES[id].energy[0]}–${SCENES[id].energy[1]}）：${SCENES[id].description}`);
   const styles = LYRIC_STYLE_IDS.map((id) => `- ${id}（${LYRIC_STYLES[id].label}）：${LYRIC_STYLES[id].description}`);
   const placements = LYRIC_PLACEMENTS.map((id) => `- ${id}：${LYRIC_PLACEMENTS_INFO[id]}`);
@@ -315,7 +316,7 @@ export function assetsBlock(assets: readonly Asset[] | undefined): string {
   return rows.join("\n");
 }
 
-function trimBrief(research: Research | null): string {
+export function trimBrief(research: Research | null): string {
   const brief = research?.brief?.trim();
   if (!brief) return "（沒有研究簡報：請根據歌詞與音訊分析推論，並在 designerNotes 註明。）";
   const clipped = brief.length > MAX_BRIEF_CHARS ? `${brief.slice(0, MAX_BRIEF_CHARS)}\n…（簡報過長，已截斷）` : brief;
@@ -354,6 +355,8 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
   ];
   const bible = bibleBlock(req.bible, req.bandName);
   if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", BIBLE_RULE, bible);
+  const mood = moodboardBlock(req.moodboard, req.moodboardImages);
+  if (mood) parts.push("", "# 參考圖（mood board）", mood, "把參考圖的線索寫進 keyVisual.concept 與相關段落的 rationale（註明圖號）。");
   const arc = arcBlock(req.arc);
   if (arc) parts.push("", "# 整場弧線中的位置", "這首歌是一整場演出的一部分，依它在弧線中的位置調整強度與配色重心：", arc);
   const instruction = req.instruction?.trim();

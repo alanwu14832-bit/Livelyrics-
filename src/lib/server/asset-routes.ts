@@ -28,6 +28,21 @@ export interface UploadTarget {
   store: (asset: Asset, tempPath: string) => Promise<Asset[]>;
   /** "素材" / "樂團素材" */
   label?: string;
+  /** mood board uploads: images only, a smaller limit, extra fields from the meta */
+  images?: ImageOnlyOptions;
+}
+
+/** Mood board (參考圖) uploads go through the same handlers with these rules. */
+export interface ImageOnlyOptions {
+  maxBytes: number;
+  /** add fields the browser measured (e.g. colour stats) to the new record */
+  extend?: (asset: Asset, meta: Record<string, unknown>) => Asset;
+}
+
+function checkImageOnly(type: { video: boolean }, bytes: number, label: string, images?: ImageOnlyOptions): void {
+  if (!images) return;
+  if (type.video) throw new HttpError(415, `${label}只接受圖片（PNG、JPG、WebP、GIF）`);
+  if (bytes > images.maxBytes) throw new HttpError(413, `${label}太大（上限 ${Math.round(images.maxBytes / 1024 / 1024)} MB）`);
 }
 
 function newUniqueAssetId(taken?: ReadonlySet<string>): string {
@@ -37,11 +52,11 @@ function newUniqueAssetId(taken?: ReadonlySet<string>): string {
 }
 
 /** The asset record for a file of `type`, from the browser's meta (dimensions, name, kind, note, tags). */
-function buildAsset(meta: Record<string, unknown>, fileName: string, type: { ext: string; mimeType: string; video: boolean }, bytes: number, taken?: ReadonlySet<string>): Asset {
+function buildAsset(meta: Record<string, unknown>, fileName: string, type: { ext: string; mimeType: string; video: boolean }, bytes: number, taken?: ReadonlySet<string>, imageOnly = false): Asset {
   const dims = validateDimensions(meta, type.video);
   if (!dims.ok) throw new HttpError(400, dims.error);
   let kind: AssetKind = type.video ? "video" : "image";
-  if (!type.video && isAssetKind(meta.kind) && meta.kind === "logo") kind = "logo";
+  if (!type.video && !imageOnly && isAssetKind(meta.kind) && meta.kind === "logo") kind = "logo";
   const assetId = newUniqueAssetId(taken);
   const asset: Asset = {
     id: assetId,
@@ -57,7 +72,7 @@ function buildAsset(meta: Record<string, unknown>, fileName: string, type: { ext
   if (dims.duration) asset.duration = dims.duration;
   const note = sanitizeNote(meta.note);
   if (note) asset.note = note;
-  const tags = sanitizeTags(meta.tags);
+  const tags = imageOnly ? undefined : sanitizeTags(meta.tags);
   if (tags) asset.tags = tags;
   return asset;
 }
@@ -71,6 +86,7 @@ export interface RegisterTarget {
   /** record the asset (with its blob); resolves with the new list */
   store: (asset: Asset) => Promise<Asset[]>;
   label?: string;
+  images?: ImageOnlyOptions;
 }
 
 /**
@@ -97,7 +113,9 @@ export async function receiveAssetRegistration(req: Request, target: RegisterTar
     const fileName = sanitizeFileName(typeof meta.fileName === "string" ? meta.fileName : "");
     const type = resolveAssetType(fileName, info.head);
     if (!type.ok) throw new HttpError(415, type.error);
-    const asset = buildAsset(meta, fileName, type, info.size, target.taken);
+    checkImageOnly(type, info.size, label, target.images);
+    let asset = buildAsset(meta, fileName, type, info.size, target.taken, !!target.images);
+    if (target.images?.extend) asset = target.images.extend(asset, meta);
     asset.blob = info.blob;
     const assets = await target.store(asset);
     return json({ asset: assets.find((a) => a.id === asset.id) ?? asset, assets }, { status: 201 });
@@ -142,7 +160,9 @@ export async function receiveAssetUpload(req: Request, target: UploadTarget): Pr
         throw new HttpError(400, "meta 不是有效的 JSON 物件");
       }
     }
-    const asset = buildAsset(meta, fileName, type, file.size, target.taken);
+    checkImageOnly(type, file.size, label, target.images);
+    let asset = buildAsset(meta, fileName, type, file.size, target.taken, !!target.images);
+    if (target.images?.extend) asset = target.images.extend(asset, meta);
     const assets = await target.store(asset, file.path);
     return json({ asset: assets.find((a) => a.id === asset.id) ?? asset, assets }, { status: 201 });
   } finally {

@@ -11,13 +11,17 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ASSET_FILE_RE, coerceAssets, coerceBlobRef, isAssetId } from "@/lib/assets";
+import { coerceDirectionSet, coercePlanSnapshot } from "@/lib/directions";
+import { coerceMoodboard } from "@/lib/moodboard";
 import { normalizeOutput } from "@/lib/output";
+import { coerceJob } from "@/lib/band";
 import type {
   Asset,
   AudioAnalysis,
   BlobRef,
   DesignPlan,
   Lyrics,
+  MoodImage,
   PipelineRecord,
   ProcessStepId,
   Project,
@@ -209,6 +213,15 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   if (audioBlob) project.audioBlob = audioBlob;
   const pipeline = coercePipeline(raw.pipeline);
   if (pipeline) project.pipeline = pipeline;
+  // phase 4: mood board, design directions, the plan a direction replaced (old files have none)
+  const moodboard = coerceMoodboard(raw.moodboard);
+  if (moodboard.length) project.moodboard = moodboard;
+  const directions = coerceDirectionSet(raw.directions);
+  if (directions) project.directions = directions;
+  const previousPlan = coercePlanSnapshot(raw.previousPlan);
+  if (previousPlan) project.previousPlan = previousPlan;
+  const job = coerceJob(raw.directionsJob);
+  if (job) project.directionsJob = job;
   return project;
 }
 
@@ -331,8 +344,10 @@ export async function getProject(id: string): Promise<Project | null> {
 function forWrite(project: Project): Project {
   const saved: Project = { ...project, updatedAt: new Date().toISOString() };
   if (saved.status !== "error") delete saved.error;
-  // the band library is attached on read, never stored with the project
+  // the band library and mood board are attached on read, never stored with the project
   delete saved.bandAssets;
+  delete saved.bandMoodboard;
+  if (saved.moodboard && !saved.moodboard.length) delete saved.moodboard;
   if (!saved.bandId) delete saved.bandId;
   return saved;
 }
@@ -408,6 +423,7 @@ function projectFiles(project: Project): StoredFile[] {
   const out: StoredFile[] = [];
   if (project.audioBlob) out.push({ kind: "blob", blob: project.audioBlob });
   for (const a of project.assets) if (a.blob) out.push({ kind: "blob", blob: a.blob });
+  for (const m of project.moodboard ?? []) if (m.blob) out.push({ kind: "blob", blob: m.blob });
   return out;
 }
 
@@ -476,5 +492,65 @@ export async function removeAsset(id: string, assetId: string): Promise<Project 
   const asset = removed as Asset | null;
   if (!asset) return null;
   await files().remove([assetFileOf(id, asset)]).catch(() => {});
+  return saved;
+}
+
+// ---------------------------------------------------------------------------
+// mood board (參考圖, phase 4): files next to the assets (<project>/assets/<id>.<ext>, or Blob)
+// ---------------------------------------------------------------------------
+
+/** Where one of the project's mood board images is (disk or Blob). */
+export function moodFileOf(projectId: string, image: MoodImage): StoredFile {
+  return assetFileOf(projectId, image);
+}
+
+/**
+ * Record a mood board image (same placement rules as addAsset). The id must not collide with an
+ * asset: both lists share the assets folder.
+ */
+export async function addMoodImage(id: string, image: MoodImage, tempPath: string | null, max: number): Promise<Project> {
+  assertId(id);
+  let placed: string | null = null;
+  try {
+    return await modifyProject(id, async (current) => {
+      const list = current.moodboard ?? [];
+      if (list.length >= max) throw new StorageError("conflict", `參考圖數量已達上限（${max} 張）`);
+      if (current.assets.some((a) => a.id === image.id) || list.some((m) => m.id === image.id)) throw new StorageError("conflict", "參考圖 ID 重複，請重新上傳");
+      if (image.blob && list.some((m) => m.blob?.url === image.blob!.url)) throw new StorageError("conflict", "這個檔案已經加入過了");
+      if (tempPath) {
+        const file = assetPath(id, image);
+        await files().place(tempPath, file);
+        placed = file;
+      }
+      const copy: MoodImage = { ...image, kind: "image" };
+      delete copy.scope;
+      return { ...current, moodboard: [...list, copy] };
+    });
+  } catch (err) {
+    if (placed) await fs.rm(placed, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/** Remove a mood board image and its file; directions that cited it drop the reference. Null when unknown. */
+export async function removeMoodImage(id: string, imageId: string): Promise<Project | null> {
+  assertId(id);
+  let removed: MoodImage | null = null;
+  const saved = await modifyProject(id, (current) => {
+    const image = (current.moodboard ?? []).find((m) => m.id === imageId);
+    removed = image ?? null;
+    if (!image) return null;
+    const next: Project = { ...current, moodboard: (current.moodboard ?? []).filter((m) => m.id !== imageId) };
+    if (current.directions) {
+      next.directions = {
+        ...current.directions,
+        directions: current.directions.directions.map((d) => ({ ...d, references: d.references.filter((r) => r.imageId !== imageId) })),
+      };
+    }
+    return next;
+  });
+  const image = removed as MoodImage | null;
+  if (!image) return null;
+  await files().remove([moodFileOf(id, image)]).catch(() => {});
   return saved;
 }

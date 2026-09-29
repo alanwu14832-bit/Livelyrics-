@@ -28,6 +28,7 @@ import { normalizePlan } from "./normalize";
 import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
 import { generateMotifSvg, hashString, type EmblemStyle } from "./svg";
+import { inputMood, moodPalette, moodScenes } from "./moodboard";
 import type { DesignerInput } from "./types";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
@@ -193,6 +194,8 @@ interface SectionPlanCtx {
   bible: BandBible | null;
   /** index of the loudest section that has lyrics (lyric policy without a chorus) */
   loudestLyricIndex: number;
+  /** scenes the mood board's tone suggests (phase 4); [] without one */
+  moodScenes: SceneId[];
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
@@ -218,6 +221,9 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   // a scene the band prefers wins over the lyric lexicon
   const preferred = ctx.bible?.sceneAffinity.length ? kindList.find((sc) => ctx.bible!.sceneAffinity.includes(sc) && fits(sc, e) && sc !== prev) : undefined;
   if (preferred && s.kind !== "intro" && s.kind !== "outro") return preferred;
+  // then what the mood board's tone suggests
+  const moodPick = ctx.moodScenes.length && s.kind !== "intro" && s.kind !== "outro" ? kindList.find((sc) => ctx.moodScenes.includes(sc) && fits(sc, e) && sc !== prev) : undefined;
+  if (moodPick && (s.kind === "verse" || s.kind === "bridge" || s.kind === "pre-chorus" || s.kind === "interlude")) return moodPick;
   const lexScene = ctx.imagery.map((h) => h.imagery.scene).find((sc) => kindList.includes(sc) && fits(sc, e) && sc !== prev);
   if (lexScene && (s.kind === "verse" || s.kind === "bridge" || s.kind === "breakdown")) return lexScene;
   const pool = kindList.filter((sc) => fits(sc, e) && sc !== prev);
@@ -508,7 +514,10 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const bible = activeBible(input.bible);
   // the band's palette unless the operator asked for another hue / monochrome (a stated deviation)
   const fromBible = options.hue == null && !options.mono ? biblePalette(bible) : null;
-  const palette: Palette = fromBible ?? makePalette(seed, mood, imagery, options.hue, options.mono);
+  // then the mood board's colours (phase 4), measured in the browser at upload time
+  const moodboard = inputMood(input.moodboard);
+  const fromMood = !fromBible && options.hue == null && !options.mono ? moodPalette(moodboard) : null;
+  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono);
   let loudestLyricIndex = -1;
   st.sections.forEach((s, i) => {
     if (s.lineIds.length && (loudestLyricIndex < 0 || s.energy > st.sections[loudestLyricIndex].energy)) loudestLyricIndex = i;
@@ -523,6 +532,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     chorusCount: st.sections.filter((s) => s.kind === "chorus").length,
     bible,
     loudestLyricIndex,
+    moodScenes: moodScenes(moodboard),
   };
   const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible, input.assets);
   const title = makeTitle(mood, imagery, seed);
@@ -540,6 +550,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       : "這首歌不放歌詞：安靜的段落讓畫面退後，能量高的段落讓光與節拍一起爆開。",
     "視覺始終是配角：它是樂團背後的一道牆，托起表演而不搶戲。",
     bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
+    fromMood ? `配色取自參考圖量到的主色（${fromMood.primary}、${fromMood.accent}），場景也依參考圖的明暗與飽和度挑選。` : "",
   ].join("");
   const baseTypography = makeTypography(mood, seed, imagery);
   const typography = bible

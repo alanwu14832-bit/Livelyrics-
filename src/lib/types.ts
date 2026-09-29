@@ -178,6 +178,101 @@ export interface Asset {
   blob?: BlobRef;
 }
 
+// ---------------------------------------------------------------------------
+// Mood board (phase 4): reference images the band gives the designer. Never stage media.
+// ---------------------------------------------------------------------------
+
+/**
+ * Colours and tone of one reference image, measured in the browser at upload time (k-means over
+ * the downscaled pixels, src/lib/moodboard.ts). The offline designer reads these; Claude sees the
+ * image itself.
+ */
+export interface MoodStats {
+  /** dominant colours, most frequent first (2 to 6, lowercase #rrggbb) */
+  palette: string[];
+  /** share of the image each palette colour covers (same order, sums to about 1) */
+  weights: number[];
+  /** mean perceived lightness 0..1 */
+  luma: number;
+  /** mean saturation 0..1 */
+  saturation: number;
+  /** mean (red − blue) balance, -1 (cool) .. 1 (warm) */
+  warmth: number;
+}
+
+/**
+ * A mood board image (參考圖). Stored like an asset (same folder / Blob prefix, ids unique across
+ * both), kept in its own list (`Project.moodboard`, `Band.moodboard`) so it is never shown on
+ * stage. `note` is the operator's cue for the designer, e.g. 「喜歡這個顏色」「這種顆粒感」.
+ * Uploads are downscaled in the browser to at most MOOD_MAX_EDGE px (WebP / JPEG).
+ */
+export interface MoodImage extends Asset {
+  stats?: MoodStats;
+}
+
+// ---------------------------------------------------------------------------
+// Design directions (phase 4): 2–3 pitched looks the band chooses from
+// ---------------------------------------------------------------------------
+
+/** 提案中 / 已選定 / 已退回 */
+export type DirectionStatus = "proposed" | "selected" | "rejected";
+
+export interface DirectionComment {
+  id: string;
+  text: string;
+  at: string;
+  /** "comment" = the band's / operator's note; "revision" = the note a revision followed */
+  kind: "comment" | "revision";
+}
+
+/** Which mood board image informed what (Claude cites them; the offline designer names the palette source). */
+export interface DirectionReference {
+  imageId: string;
+  /** 繁中, e.g. 「取了它的橘紅與顆粒感」 */
+  cue: string;
+}
+
+export interface DesignDirection {
+  /** short id, unique within the project ("d" + 8 hex) */
+  id: string;
+  /** "A" | "B" | "C" */
+  letter: string;
+  /** 方向名稱, e.g. 「冷調膠片感」 */
+  name: string;
+  /** one-line pitch */
+  pitch: string;
+  /** 繁中 Markdown: mood and reference rationale, citing the research and the mood board */
+  rationale: string;
+  references: DirectionReference[];
+  /** 場景傾向 in words */
+  sceneTendency: string;
+  /** 歌詞處理 in words */
+  lyricTreatment: string;
+  /** the full plan this direction expands to (palette and typography live in plan.keyVisual) */
+  plan: DesignPlan;
+  status: DirectionStatus;
+  comments: DirectionComment[];
+  engine: "claude" | "offline";
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DirectionSet {
+  engine: "claude" | "offline";
+  model?: string;
+  createdAt: string;
+  directions: DesignDirection[];
+}
+
+/** The plan a direction replaced, so 「復原」 can bring it back. */
+export interface PlanSnapshot {
+  plan: DesignPlan;
+  at: string;
+  /** 繁中, what replaced it, e.g. 「採用方向 B「飽和拼貼」」 */
+  reason: string;
+}
+
 /** Fractions (0..0.3) of the canvas kept free of lyrics on each side. */
 export interface LyricSafeArea {
   top: number;
@@ -247,6 +342,16 @@ export interface Project {
   audioBlob?: BlobRef;
   /** cloud mode: the client-driven pipeline run, so a refreshed page can pick it up */
   pipeline?: PipelineRecord;
+  /** the song's mood board (phase 4); absent = none */
+  moodboard?: MoodImage[];
+  /** the band's mood board (scope "band"), attached on read like `bandAssets`; never stored */
+  bandMoodboard?: MoodImage[];
+  /** 設計方向提案 (phase 4); absent = none proposed yet */
+  directions?: DirectionSet;
+  /** the plan before the last 「採用這個方向」, for 復原 */
+  previousPlan?: PlanSnapshot;
+  /** cloud mode: 提出設計方向 / 修改方向 in progress (or its last failure) */
+  directionsJob?: JobState;
 }
 
 export type ProcessStepId = "lyrics" | "research" | "design";
@@ -346,6 +451,8 @@ export interface Band {
   assets: Asset[];
   /** cloud mode: 從作品產生視覺聖經 in progress (or its last failure) */
   bibleJob?: JobState;
+  /** the band's mood board (phase 4): applies to all its songs; absent = none */
+  moodboard?: MoodImage[];
 }
 
 export interface BandSummary {
