@@ -25,11 +25,12 @@ import { files } from "./store";
 export async function loadVisionImages(
   project: Pick<Project, "id" | "bandId">,
   moodboard: readonly MoodImage[],
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; budgetUsed?: readonly VisionImage[] } = {},
 ): Promise<{ images: VisionImage[]; skipped: string[] }> {
   const images: VisionImage[] = [];
   const skipped: string[] = [];
-  let total = 0;
+  // images already in the request (the mood board, before the collected material) share the total
+  let total = (opts.budgetUsed ?? []).reduce((a, v) => a + Math.ceil((v.data.length * 3) / 4), 0);
   for (const m of moodboard) {
     if (!isVisionMediaType(m.mimeType) || m.bytes > MAX_VISION_IMAGE_BYTES || total + m.bytes > MAX_VISION_TOTAL_BYTES) {
       skipped.push(m.name);
@@ -63,12 +64,15 @@ export async function designRequestFor(project: Project, opts: { vision: boolean
     publicInfo: project.research?.publicInfo ?? null,
     previous: project.plan,
     moodboard,
+    // phase 8: 研究找到的素材 (all of them are references; those on stage are in `assets` too)
+    collected: project.collected ?? [],
   };
   if (opts.vision && moodboard.length) {
     const { images, skipped } = await loadVisionImages(project, moodboard, { signal: opts.signal });
     req.moodboardImages = images;
     if (skipped.length) opts.onLog?.(`有 ${skipped.length} 張參考圖無法附給 Claude（${skipped.slice(0, 3).join("、")}），只提供說明與色票。`);
   }
+  if (opts.vision && req.collected?.length) req.collectedImages = (await loadVisionImages(project, req.collected, { signal: opts.signal, budgetUsed: req.moodboardImages })).images;
   return req;
 }
 

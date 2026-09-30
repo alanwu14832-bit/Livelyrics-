@@ -25,6 +25,7 @@ import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
 import { moodboardBlock } from "./moodboard";
+import { collectedBlock } from "./collected";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
 
@@ -446,6 +447,8 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
   if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", BIBLE_RULE, bible);
   const mood = moodboardBlock(req.moodboard, req.moodboardImages);
   if (mood) parts.push("", "# 參考圖（mood board）", mood, "把參考圖的線索寫進 keyVisual.concept 與相關段落的 rationale（註明圖號）。");
+  const found = collectedBlock(req.collected, req.collectedImages);
+  if (found) parts.push("", "# 研究找到的素材（樂團真實的封面、MV、主視覺）", found);
   const arc = arcBlock(req.arc);
   if (arc) parts.push("", "# 整場弧線中的位置", "這首歌是一整場演出的一部分，依它在弧線中的位置調整強度與配色重心：", arc);
   const instruction = req.instruction?.trim();

@@ -595,14 +595,23 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       // the mood board (phase 4): the band's, then the song's; Claude also gets the images themselves
       const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
       let moodboardImages: designer.VisionImage[] | undefined;
-      if (moodboard.length && designer.isClaudeConfigured() && !isFreeRun(run)) {
-        const loaded = await loadVisionImages(project, moodboard, { signal });
-        moodboardImages = loaded.images;
-        if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
+      // phase 8: the research's collected material (the band's real cover, MV stills, key visual)
+      const collected = project.collected ?? [];
+      let collectedImages: designer.VisionImage[] | undefined;
+      if (designer.isClaudeConfigured() && !isFreeRun(run)) {
+        if (moodboard.length) {
+          const loaded = await loadVisionImages(project, moodboard, { signal });
+          moodboardImages = loaded.images;
+          if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
+        }
+        if (collected.length) collectedImages = (await loadVisionImages(project, collected, { signal, budgetUsed: moodboardImages })).images;
       }
+      if (collected.length) emit(run, { type: "log", step: "design", message: `設計參考研究找到的素材：${collectedSummary(collected)?.replace(/^找到/, "") ?? ""}${collected.some((c) => c.use === "stage") ? `（${collected.filter((c) => c.use === "stage").length} 張可以上台）` : "（都只當參考）"}` });
       const input = {
         moodboard,
         moodboardImages,
+        collected,
+        collectedImages,
         meta: project.meta,
         lyrics: project.lyrics,
         analysis: project.analysis,
@@ -667,6 +676,14 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
   }
   const band = await bandContext(project);
   const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
+  // phase 8: Claude sees the band's real material (and the mood board) while it writes the program
+  const collected = project.collected ?? [];
+  let moodboardImages: designer.VisionImage[] | undefined;
+  let collectedImages: designer.VisionImage[] | undefined;
+  if (claude) {
+    if (moodboard.length) moodboardImages = (await loadVisionImages(project, moodboard, { signal })).images;
+    if (collected.length) collectedImages = (await loadVisionImages(project, collected, { signal, budgetUsed: moodboardImages })).images;
+  }
   const req = {
     meta: project.meta,
     lyrics: project.lyrics,
@@ -674,6 +691,9 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
     bible: band.bible,
     bandName: band.bandName,
     moodboard,
+    moodboardImages,
+    collected,
+    collectedImages,
     research: project.research,
     publicInfo: project.research?.publicInfo ?? null,
     instruction,

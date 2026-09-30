@@ -22,6 +22,7 @@ import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hashString } from "./svg";
 import { analyzeFindings, type Findings } from "./findings";
 import { bibleBlock, energyCurveBlock, songBlock, trimBrief } from "./prompts";
+import { collectedBlock, leadPalette, leadTemperature } from "./collected";
 import { analyzeStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
 
@@ -89,7 +90,8 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
     forms: sceneForms(f),
     sections: plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy })),
     voice: plan.typeSystem?.voice ?? null,
-    temperature: f.hints.temperature,
+    // phase 8: the band's real cover sets the temperature of the picture when it has one
+    temperature: leadTemperature(req.collected) ?? f.hints.temperature,
     arousal: f.audio.arousal,
     title: req.meta?.title,
     salt,
@@ -256,6 +258,17 @@ export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { e
   if (bible) parts.push("", "# 樂團視覺聖經（硬性限制：留在這個世界裡）", bible);
   const mood = (req.moodboard ?? []).filter((m) => m.note?.trim() || m.stats?.palette?.length);
   if (mood.length) parts.push("", "# 參考圖（說明與量到的顏色）", ...mood.slice(0, 10).map((m, i) => `- 圖 ${i + 1}：${m.note?.trim() || "（沒有說明）"}${m.stats?.palette?.length ? `｜${m.stats.palette.slice(0, 4).join(" ")}` : ""}`));
+  const found = collectedBlock(req.collected, req.collectedImages, { media: false });
+  if (found) {
+    const lead = leadPalette(req.collected);
+    parts.push(
+      "",
+      "# 研究找到的素材（這首歌真正的封面、MV、主視覺）",
+      found,
+      "- 專屬畫面要看得出和這些素材是同一個世界：形狀、構圖、光線與材質從它們取（例如封面的大色塊與留白、MV 的光線方向、主視覺的幾何），顏色一律用色票 uniform（uPal0…uPal5、uBg／uPri／uAcc），程式不能讀這些圖片。",
+      ...(lead ? [`- ${lead.item.provenance.kind === "cover" ? "封面" : "主視覺"}量到的配色（依份量）：${lead.palette.slice(0, 6).join("、")}；方案的色票已經依它調整，畫面的明暗比例也參考它。`] : []),
+    );
+  }
   if (req.arc) parts.push("", "# 整場弧線", `- 第 ${req.arc.position + 1}／${req.arc.total} 首，角色 ${req.arc.role}，目標能量 ${req.arc.energy.toFixed(2)}：${req.arc.note}`);
   parts.push("", "# uniform 合約（逐字）", PROGRAM_CONTRACT_DOC, "", "# 參考", exampleBlock());
   if (opts.previous) parts.push("", "# 目前的專屬畫面（要修改它，不是從頭再做，除非指示要求）", `「${opts.previous.title}」：${opts.previous.concept}`, "```glsl", opts.previous.source.slice(0, 9000), "```");

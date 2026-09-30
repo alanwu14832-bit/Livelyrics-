@@ -29,6 +29,7 @@ import {
 import { normalizePlanWithReport } from "./normalize";
 import { designPlanOutputFormat } from "./output-schema";
 import { visionContent } from "./moodboard";
+import { collectedVisionContent } from "./collected";
 import { buildDesignPrompt, buildResearchPrompt, DESIGN_SYSTEM, RESEARCH_HEADINGS, RESEARCH_SYSTEM, RESEARCH_VISUALS_RULES } from "./prompts";
 import { splitVisuals, visualsStreamFilter } from "./visual-candidates";
 import { analyzeStructure } from "./structure";
@@ -377,7 +378,7 @@ export function isUsablePlan(raw: unknown): boolean {
  * 圖 n label) when the server could load any. Without images it stays a plain string.
  */
 export function userContent(input: DesignerInput, prompt: string): string | BetaContentBlockParam[] {
-  const images = visionContent(input.moodboard, input.moodboardImages);
+  const images = [...visionContent(input.moodboard, input.moodboardImages), ...collectedVisionContent(input.collected, input.collectedImages)];
   return images.length ? [...images, { type: "text", text: prompt }] : prompt;
 }
 
