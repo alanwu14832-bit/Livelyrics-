@@ -83,7 +83,7 @@ describe("request parameters", () => {
   it("research uses web search, adaptive summarized thinking and default server-side fallbacks", () => {
     const p = researchParams(input, "claude-opus-5");
     expect(p.model).toBe("claude-opus-5");
-    expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 8 }]);
+    expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 8 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }]);
     expect(p.thinking).toEqual(THINKING);
     expect(p.betas).toEqual([FALLBACK_BETA, THINKING_BINDING_BETA]);
     expect(p.fallbacks).toBe("default");
@@ -327,7 +327,7 @@ describe("real SDK transport (fake fetch)", () => {
       stream: true,
       fallbacks: "default",
       thinking: THINKING,
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }],
     });
     expect(first.body.betas).toBeUndefined();
     const msgs = second.body.messages as Array<{ role: string; content: unknown }>;
