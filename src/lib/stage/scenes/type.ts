@@ -46,6 +46,7 @@ export const TYPE_UNIFORMS = [
   "uSoften",
   "uGain",
   "uRelation",
+  "uTypeArea",
 ] as const;
 
 export const TYPE_FRAGMENT = /* glsl */ `
@@ -77,6 +78,7 @@ uniform float uPx;        // canvas px per output px (effect radii follow the de
 uniform float uSoften;    // layer mode: the safety pass' soften and cap
 uniform float uGain;
 uniform float uRelation;  // 專屬畫面: 0 plain, 1 knockout, 2 behind, 3 lit (how the words meet the image)
+uniform vec4 uTypeArea;   // where the type can be (uv, y up, padded): the legibility taps run only there
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
@@ -225,14 +227,15 @@ void main() {
     inkC = mix(uInk, mix(uInk, hueC, 0.55) * (0.82 + 0.3 * lightK), 0.35 + 0.45 * lightK);
     inkC = mix(inkC, vec3(1.0), 0.12 * lightK);
   }
-  inkC = legibleInk(inkC, uSoften, uGain);
+  bool inArea = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
+  if (inArea) inkC = legibleInk(inkC, uSoften, uGain);
   // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
   // where the picture is bright (light type on a light scene still reads from the back of the hall)
   float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, sl)), 0.0, 0.96) * haloScale;
   col = mix(col, uFill * 0.55 + col * 0.12, halo * haloK * (1.0 - uGlow));
   // the legibility guarantee: whatever the picture does under the words, the ink reads against it
   // (every relation: plain, lit, the uncovered part of behind, knockout)
-  vec2 covers = legibleCover(tuv, haloRaw) * a * keepF;
+  vec2 covers = inArea ? legibleCover(tuv, haloRaw) * a * keepF : vec2(0.0);
   float cover = covers.x;
   // knockout: the words cut a clean window out of the image's shapes — around the letters the
   // picture gives way to the background tone (a printed knockout), the letters keep the lyric colour

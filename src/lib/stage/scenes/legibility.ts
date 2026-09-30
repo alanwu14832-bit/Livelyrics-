@@ -156,15 +156,15 @@ vec2 legibleCover(vec2 uv, float halo) {
   vec2 px = 1.0 / uRes;
   float m = 0.0;
   float mi = 0.0;
-  // 8 taps on the inner ring, 12 on the outer (so a thin stroke between two outer taps is not missed)
-  for (int i = 0; i < 8; i++) {
-    float an = float(i) * 0.785398;
+  // 6 taps on the inner ring, 10 on the outer (so a thin stroke between two outer taps is not missed)
+  for (int i = 0; i < 6; i++) {
+    float an = float(i) * 1.047198;
     vec4 t1 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r1 * px, 0.0, 1.0));
     m = max(m, max(t1.r, t1.g));
     mi = max(mi, t1.r);
   }
-  for (int i = 0; i < 12; i++) {
-    float an = float(i) * 0.523599 + 0.26;
+  for (int i = 0; i < 10; i++) {
+    float an = float(i) * 0.628319 + 0.31;
     vec4 t2 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r2 * px, 0.0, 1.0));
     m = max(m, max(t2.r, t2.g) * 0.85);
     mi = max(mi, t2.r * 0.85);

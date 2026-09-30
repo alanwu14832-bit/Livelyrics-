@@ -186,6 +186,8 @@ export interface TypeDraw {
   time: number;
   /** 專屬畫面: how the words meet the image (0 plain, 1 knockout, 2 behind, 3 lit) */
   relation?: number;
+  /** where the type can be (GL uv x0, y0, x1, y1, padded); the legibility taps run only there */
+  area?: [number, number, number, number];
 }
 
 export interface RenderRequest {
@@ -1092,6 +1094,9 @@ export class StageRenderer {
     f1("uSoften", soften);
     f1("uGain", gain);
     f1("uRelation", t.relation ?? 0);
+    const ua = L.get("uTypeArea");
+    const area = t.area ?? [0, 0, 1, 1];
+    if (ua) gl.uniform4f(ua, area[0], area[1], area[2], area[3]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     for (const unit of [3, 6]) {
       gl.activeTexture(gl.TEXTURE0 + unit);
