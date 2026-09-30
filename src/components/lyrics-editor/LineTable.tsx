@@ -27,7 +27,9 @@ export interface RowHandlers {
 }
 
 /** # | − time + | lyric | translation | actions */
-const GRID = "grid grid-cols-[2.25rem_auto_minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-x-2";
+// md+: # · time · lyric · translation · actions on one line. Phone: # · time · (space) · actions on
+// the first line, the lyric and the translation full width under it (a 390 px row has no room for both).
+const GRID = "grid grid-cols-[2.25rem_auto_minmax(0,1fr)_auto] items-center gap-x-2 md:grid-cols-[2.25rem_auto_minmax(0,1.4fr)_minmax(0,1fr)_auto]";
 
 // borderless inline fields: hover fill-4, focused = fill-4 + the inset 2 px tint ring (radius 8)
 const FIELD =
@@ -105,7 +107,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
         />
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行延後 0.1 秒`} icon={<PlusIcon size={14} />} onClick={() => h.nudge(index, 0.1)} disabled={line.start == null} />
       </div>
-      <div role="cell" className="relative flex min-w-0 items-center gap-1">
+      <div role="cell" className="relative flex min-w-0 items-center gap-1 max-md:col-span-full max-md:row-start-2 max-md:pl-9">
         {outOfOrder && (
           <span title="時間早於前一行：儲存時會依時間重新排序" className="flex shrink-0 text-red">
             <WarningCircleIcon size={16} weight="fill" aria-label="時間早於前一行" />
@@ -124,7 +126,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
           className={cx(FIELD, dim ? "text-label-2" : "text-label", !line.text.trim() && "bg-fill-4")}
         />
       </div>
-      <div role="cell" className="min-w-0">
+      <div role="cell" className="min-w-0 max-md:col-span-full max-md:row-start-3 max-md:pb-1 max-md:pl-9">
         <input
           value={line.translation}
           data-row={index}
@@ -141,7 +143,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
           )}
         />
       </div>
-      <div role="cell" className="flex items-center gap-0.5">
+      <div role="cell" className="flex items-center gap-0.5 max-md:col-start-4 max-md:row-start-1 max-md:justify-self-end">
         <Tooltip content="從這行播放">
           <Button variant="quiet" size="icon-sm" aria-label={`從第 ${n} 行播放`} icon={<PlayIcon size={16} />} onClick={() => h.playFrom(index)} disabled={line.start == null} />
         </Tooltip>
@@ -235,7 +237,8 @@ export function LineTable({
     <div role="table" aria-label="歌詞行" aria-rowcount={lines.length}>
       <div role="rowgroup" className="sticky top-0 z-10 bg-bg pt-4 pb-1.5">
         {summary && <div className="mb-2 px-4">{summary}</div>}
-        <div role="row" className={cx(GRID, "pr-2 pl-2 text-[13px] leading-5 text-label-2")}>
+        {/* the column captions only line up with the one-line rows (md+) */}
+        <div role="row" className={cx(GRID, "pr-2 pl-2 text-[13px] leading-5 text-label-2 max-md:hidden")}>
           <span role="columnheader" className="pl-1.5">
             #
           </span>

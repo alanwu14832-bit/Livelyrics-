@@ -390,8 +390,9 @@ export function ProcessClient({
       )}
 
       <div className={cx(pageContainerClass, "grid items-start gap-x-10 gap-y-8 pt-6 pb-24 lg:grid-cols-[360px_minmax(0,1fr)]")}>
-        {hasDirections && directions && <div className="min-w-0 lg:col-span-2">{directions}</div>}
-        <aside className="min-w-0 space-y-8 lg:sticky lg:top-[68px]">
+        {hasDirections && directions && <div className="min-w-0 max-lg:order-2 lg:col-span-2">{directions}</div>}
+        {/* narrow screens stack the columns: the design (key visual, banners) first, the steps and tools after it */}
+        <aside className="min-w-0 space-y-8 max-lg:order-3 lg:sticky lg:top-[68px]">
           <StepTimeline
             analysis={project.analysis}
             steps={stepStates}
@@ -406,7 +407,7 @@ export function ProcessClient({
           {runState.logs.length > 0 && <LogPanel logs={runState.logs} startedAt={runState.startedAt ?? 0} />}
         </aside>
 
-        <main className="min-w-0 space-y-8">
+        <main className="min-w-0 space-y-8 max-lg:order-1">
           {error && (
             <Banner
               tone="error"

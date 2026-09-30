@@ -5,8 +5,8 @@ import { isValidBandId } from "@/lib/band";
 import { getBand, withBandAssets } from "@/lib/server/band-storage";
 import { withLiveProjectJob } from "@/lib/server/jobs";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
-import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch, parseTimecodePatch } from "@/lib/server/validate";
-import type { DesignPlan, Lyrics, ProjectOutput, SongMeta, SongTimecode } from "@/lib/types";
+import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch, parseThumbPatch, parseTimecodePatch } from "@/lib/server/validate";
+import type { DesignPlan, Lyrics, ProjectOutput, ProjectThumb, SongMeta, SongTimecode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const body = await readJson(req, MAX_PATCH_BYTES);
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output?, timecode? }");
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output?, timecode?, thumb? }");
   const patch = body as Record<string, unknown>;
 
   // validate everything before touching the file
@@ -42,6 +42,9 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   // phase 5a: the song's start timecode (null = the default 01:00:00:00)
   let timecode: SongTimecode | null | undefined;
   if (patch.timecode !== undefined) timecode = parseTimecodePatch(patch.timecode);
+  // the library card's picture (a small key still), saved by the design overview
+  let thumb: ProjectThumb | null | undefined;
+  if (patch.thumb !== undefined) thumb = parseThumbPatch(patch.thumb);
   let bandId: string | null | undefined;
   if (patch.bandId !== undefined) {
     if (patch.bandId === null || patch.bandId === "") bandId = null;
@@ -55,7 +58,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.meta !== undefined) meta = applyMetaPatch(existing.meta, patch.meta);
   let output: ProjectOutput | undefined;
   if (patch.output !== undefined) output = applyOutputPatch(existing.output, patch.output);
-  if (!meta && !lyrics && !plan && !output && bandId === undefined && timecode === undefined) return json(withLiveStatus(await withBandAssets(existing)));
+  if (!meta && !lyrics && !plan && !output && bandId === undefined && timecode === undefined && thumb === undefined) return json(withLiveStatus(await withBandAssets(existing)));
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
@@ -69,6 +72,10 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     if (timecode !== undefined) {
       if (timecode) p.timecode = timecode;
       else delete p.timecode;
+    }
+    if (thumb !== undefined) {
+      if (thumb) p.thumb = thumb;
+      else delete p.thumb;
     }
     if (bandId !== undefined && bandId !== (p.bandId ?? null)) {
       // leaving a band: sections that showed the old band's material fall back to the scene

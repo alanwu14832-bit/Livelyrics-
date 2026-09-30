@@ -8,7 +8,7 @@ import { validateProgram } from "@/lib/stage/program/validate";
 import { MAX_NAME, MAX_NOTE, MAX_TAGS, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags } from "@/lib/assets";
 import { OUTPUT_MAX_PX, OUTPUT_MIN_PX, SAFE_MAX, patchOutput } from "@/lib/output";
 import { TimecodeStringSchema, coerceTcString } from "@/lib/sync/timecode";
-import type { Asset, AudioAnalysis, AudioSectionGuess, DesignPlan, Lyrics, ProjectOutput, SongMeta, SongTimecode } from "@/lib/types";
+import { THUMB_MAX_CHARS, type Asset, type AudioAnalysis, type AudioSectionGuess, type DesignPlan, type Lyrics, type ProjectOutput, type ProjectThumb, type SongMeta, type SongTimecode } from "@/lib/types";
 import { HttpError } from "./http";
 
 const MAX_TEXT = 300;
@@ -292,6 +292,19 @@ export function parseTimecodePatch(raw: unknown): SongTimecode | null {
   const parsed = TimecodePatchSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(400, `時間碼格式錯誤：${issuesText(parsed.error)}`);
   return parsed.data ? { start: coerceTcString(parsed.data.start)! } : null;
+}
+
+/** A PATCH `thumb` value: `{ url: "data:image/jpeg;base64,…", plan }` (the library card's picture), or null to drop it. */
+export function parseThumbPatch(raw: unknown): ProjectThumb | null {
+  if (raw === null) return null;
+  const t = raw as Record<string, unknown> | undefined;
+  const url = t && typeof t === "object" ? t.url : undefined;
+  const plan = t && typeof t === "object" ? t.plan : undefined;
+  if (typeof url !== "string" || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(url) || url.length > THUMB_MAX_CHARS) {
+    throw new HttpError(400, "thumb.url 必須是 JPEG 的 data URL，而且不能太大");
+  }
+  if (typeof plan !== "string" || !/^[a-z0-9]{1,16}$/.test(plan)) throw new HttpError(400, "thumb.plan 格式錯誤");
+  return { url, plan };
 }
 
 // ---------------------------------------------------------------------------

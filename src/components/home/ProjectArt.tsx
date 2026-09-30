@@ -39,6 +39,7 @@ export function ProjectArt({
   className,
   placeholderIconSize = 44,
   title,
+  thumb,
 }: {
   id: string;
   palette?: readonly (string | null | undefined)[];
@@ -47,10 +48,22 @@ export function ProjectArt({
   placeholderIconSize?: number;
   /** accessible name; decorative when omitted */
   title?: string;
+  /** the song's key still (ProjectSummary.thumb): shown instead of the drawn artwork */
+  thumb?: string;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const colors = validPalette(palette);
   const a11y = title ? { role: "img" as const, "aria-label": title } : { "aria-hidden": true as const };
+
+  if (thumb && thumb.startsWith("data:image/jpeg;base64,")) {
+    return (
+      <div {...a11y} className={cx("relative overflow-hidden bg-black", className)}>
+        {/* a data URL: next/image has nothing to optimize */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={thumb} alt="" className="absolute inset-0 size-full object-cover" draggable={false} />
+      </div>
+    );
+  }
 
   if (colors.length === 0) {
     return (

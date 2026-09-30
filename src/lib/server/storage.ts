@@ -30,10 +30,12 @@ import type {
   ProjectSummary,
   SongMeta,
 } from "@/lib/types";
+import { THUMB_MAX_CHARS } from "@/lib/types";
 import { docs, files, type DocWrite, type StoredDoc, type StoredFile } from "./store";
 import { StorageError } from "./store/errors";
 import { DOC_ID_RE, isValidDocId, newDocId } from "./store/ids";
 import { dataDir } from "./store/local-fs";
+import { planHash } from "@/lib/plan-hash";
 
 export { StorageError, type StorageErrorCode } from "./store/errors";
 export { dataDir, isNodeError, moveFile, withLock, writeJsonAtomic } from "./store/local-fs";
@@ -45,7 +47,7 @@ const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const STATUSES: readonly ProjectStatus[] = ["new", "processing", "ready", "error"];
 const STALE_TEMP_MS = 12 * 60 * 60 * 1000;
 /** bump when summarize() changes: stored cloud summaries of another version are recomputed */
-const SUMMARY_VERSION = 1;
+const SUMMARY_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // paths (local mode)
@@ -230,6 +232,10 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   // phase 5a: the start timecode (old files have none: 01:00:00:00)
   const tcStart = isRecord(raw.timecode) ? coerceTcString(raw.timecode.start) : null;
   if (tcStart) project.timecode = { start: tcStart };
+  // the library card's picture (a small key still of some plan)
+  if (isRecord(raw.thumb) && typeof raw.thumb.url === "string" && raw.thumb.url.startsWith("data:image/jpeg;base64,") && raw.thumb.url.length <= THUMB_MAX_CHARS && typeof raw.thumb.plan === "string") {
+    project.thumb = { url: raw.thumb.url, plan: raw.thumb.plan };
+  }
   return project;
 }
 
@@ -263,6 +269,8 @@ function summarize(project: Project): ProjectSummary {
     .slice(0, 4);
   if (colors.length) summary.palette = colors;
   if (project.status === "error" && project.error) summary.error = project.error;
+  // only a still of the current plan: after a re-design the card falls back to the drawn artwork
+  if (project.thumb && project.plan && project.thumb.plan === planHash(project.plan)) summary.thumb = project.thumb.url;
   return summary;
 }
 

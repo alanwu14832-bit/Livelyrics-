@@ -132,20 +132,26 @@ export function AppHeader({
       <header
         data-scrolled={isScrolled || undefined}
         className={cx(
-          "sticky top-0 z-20 h-[52px] transition-[background-color,box-shadow] duration-200 ease-[ease]",
+          "sticky top-0 z-20 min-h-[52px] transition-[background-color,box-shadow] duration-200 ease-[ease] md:h-[52px]",
           "data-scrolled:scroll-edge data-scrolled:material-regular",
           className,
         )}
         style={style}
       >
-        <div className={cx("flex h-full min-w-0 items-center gap-4", width === "page" ? pageContainerClass : "px-(--header-gutter)")}>
+        {/* phone: actions that do not fit next to the title wrap to a second row (scrolling sideways
+            when still too wide), so they never cover the back link and the title; from md one row */}
+        <div className={cx("flex h-full min-w-0 flex-wrap items-center gap-x-4 md:flex-nowrap", width === "page" ? pageContainerClass : "px-(--header-gutter)")}>
           {/* back and title keep one geometry on every full-width page (and in the console) */}
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-[52px] min-w-0 flex-1 items-center gap-3 max-md:min-w-[11rem]">
             {(leading ?? backNode) && <div className="flex shrink-0 items-center">{leading ?? backNode}</div>}
             <div className="min-w-0 flex-1">{titleBlock}</div>
           </div>
           {center}
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && (
+            <div className="flex shrink-0 items-center gap-2 max-md:max-w-full max-md:overflow-x-auto max-md:[scrollbar-width:none] max-md:py-2 max-md:[&::-webkit-scrollbar]:hidden">
+              {actions}
+            </div>
+          )}
         </div>
       </header>
     </>

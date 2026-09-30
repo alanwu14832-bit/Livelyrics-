@@ -30,6 +30,7 @@ import type {
   SongArcDirective,
   SongMeta,
   SongTimecode,
+  ProjectThumb,
 } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
@@ -189,6 +190,8 @@ export const api = {
       bandId: string | null;
       /** phase 5a: the song's start timecode (null = the default 01:00:00:00) */
       timecode: SongTimecode | null;
+      /** the library card's picture: a small key still of the current plan */
+      thumb: ProjectThumb | null;
     }>,
   ) =>
     fetch(`/api/projects/${id}`, {

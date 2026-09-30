@@ -328,7 +328,7 @@ function ProjectCard({ project: p, now, onDelete, onReprocess, onAssign }: { pro
               "group-active/link:scale-[.98] group-active/link:duration-(--dur-press) motion-reduce:transition-[box-shadow] motion-reduce:group-hover/card:scale-100"
             }
           >
-            <ProjectArt id={p.id} palette={p.palette} className="aspect-[16/10] rounded-xl" />
+            <ProjectArt id={p.id} palette={p.palette} thumb={p.thumb} className="aspect-[16/10] rounded-xl" />
           </div>
         </ViewTransition>
         <div className="mt-3 min-w-0 pr-9">
