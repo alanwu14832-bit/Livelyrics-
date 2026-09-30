@@ -228,6 +228,7 @@ void main() {
   }
   float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   col += (ign - 0.5) * (1.5 / 255.0);
-  FRAG = vec4(clamp(col, 0.0, 1.0), 1.0);
+  // the scene program's foreground mask (alpha) passes through (the type pass reads it)
+  FRAG = vec4(clamp(col, 0.0, 1.0), TEX(uScene, suv).a);
 }
 `;

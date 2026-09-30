@@ -12,6 +12,11 @@ vi.mock("@/lib/server/designer", () => ({
   modelName: () => "test-model",
   researchSong: designerMock.researchSong,
   designSong: designerMock.designSong,
+  composerSalt: () => 0,
+  designSceneProgram: async () => ({
+    engine: "offline",
+    program: { version: 1, engine: "offline", title: "測試畫面", concept: "", source: "vec3 scene(vec2 fc) { return uBg; }", sections: [], keyMoment: null, enabled: true },
+  }),
 }));
 vi.mock("./lrclib", () => ({ findBestLyrics: lrclibMock.findBestLyrics }));
 

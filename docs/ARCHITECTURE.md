@@ -51,7 +51,8 @@ show up in the product:
 | File | What |
 |---|---|
 | `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 4b `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource`, phase 5a `SongTimecode` (`Project.timecode`, song `SetItem.timecode`) |
-| `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS` |
+| `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS`; phase 7 `SceneProgramSchema` (`DesignPlan.sceneProgram`), `TYPE_RELATIONS`, `ZoneSchema` |
+| `src/lib/stage/program/contract.ts` | phase 7: the scene program uniform contract (`PROGRAM_UNIFORMS`, the prelude / epilogue, `PROGRAM_CONTRACT_DOC`); `validate.ts` the program validator |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `LiveAudioFeatures.clock` (phase 5a), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
 | `src/lib/moodboard.ts`, `src/lib/directions.ts` | phase 4: mood board limits, colour extraction, coercion, summary; directions coercion, select / undo / comment transforms, style-frame moments, the sign-off sheet data |
@@ -82,7 +83,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
 | `/p/[id]/proposal` | HOME | 一頁提案 (phase 4): the band sign-off sheet of the design directions, A4 landscape print layout, 「列印／存成 PDF」 |
 | `/p/[id]/type` | HOME | 排版 (phase 6): the song's 字體語言 and every line's composition, desktop and phone (edits live on the projection) |
-| `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan (`?voice=&aspect=&project=`: 字體藝術 in a voice on a canvas) |
+| `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan (`?voice=&aspect=&project=`: 字體藝術 in a voice on a canvas; `?program=`: 專屬畫面) |
 | `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
 | `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
 | `/api/auth/login` POST, `/api/auth/logout` POST | SERVER | password gate: JSON `{ password, next? }` or a plain form post → session cookie / clear it |
@@ -92,7 +93,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/audio` GET | SERVER | stored audio with **HTTP Range** support (seeking); cloud: 307 to the blob |
 | `/api/projects/[id]/assets` GET/POST | SERVER | band media list / upload (multipart `file` + `meta` JSON `{width,height,duration?,name?,kind?,note?,tags?}` measured in the browser; magic-byte sniffed PNG/JPG/WebP/GIF/MP4/MOV/WebM, SVG rejected, 500 MB) → `{asset, assets}` |
 | `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
-| `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` (cloud: one step per request with `run`, `maxDuration` 300) |
+| `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` (steps lyrics / research / design / scene; cloud: one step per request with `run`, `maxDuration` 300) |
 | `/api/projects/[id]/moodboard` GET/POST, `/api/projects/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | 參考圖 (phase 4): `{ images }` / upload (the media-library contract, images only, ≤ 12, 8 MB, `meta.stats` = the colours measured in the browser) → `{ image, images }` / file / `{ note?, name? }` / delete |
 | `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
 | `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
@@ -782,6 +783,263 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   normalizePlan on the new fields, the output schema accepting a full plan, the manual reply), plus
   protocol, remap and console adoption tests; E2E `scripts/e2e-type.cjs`.
 
+### 專屬畫面與字的構圖 (phase 7)
+
+Every song gets its own generative scene program — one GLSL fragment program written for that song
+(by Claude, or by the offline composer) — and its typography is composed *with* the image: the words
+sit in the image's negative space and meet it (cut out of it, behind a foreground shape, lit by it).
+Plans without a program (every plan before this phase, and any plan whose operator switched it off)
+render exactly as before: the built-in scene of each section and the whole readable area for type.
+
+- **Data** (`src/lib/schema.ts`, re-exported in `types.ts`). `DesignPlan.sceneProgram` (nullable,
+  optional): `SceneProgram { version 1, engine claude | offline | example | manual, model?, title,
+  concept, source, sections, keyMoment?, enabled, createdAt?, instruction?, recipe? }`. `source` is a
+  GLSL function body (helpers + `vec3 scene(vec2 fc)`). `sections[]` = `{ sectionId, mode 0–3, params
+  [4 × 0–1], zone { x, y, w, h } (fractions, y down), relation plain | knockout | behind | lit, note }`.
+  `enabled: false` = 「改用內建場景」 (the program is kept). The 排版 editor's per-section override
+  `TypeSection.zone / .relation` (in the type system, so it rides the editor's undo, save and channel)
+  wins over the program's; `TypeLineEdit.key` marks / unmarks a 重點句. `DesignPlanDraftSchema` (the
+  design call's output) does not contain the program: it has its own step.
+- **Model** (`src/lib/stage/program/model.ts`, pure, server and browser): `normalizeSceneProgram`
+  (validator first; unknown sections dropped, missing ones filled from `KIND_DEFAULTS` by kind —
+  verse sparse, chorus open, bridge mode 3 —, values clamped, zones ≥ 30 % × 24 % inside the frame),
+  `activeProgram`, `programSection` / `planSection` (the section's state, a section the program does
+  not know takes its kind's defaults, so a re-designed plan keeps working), `canvasZone` (zones are
+  written for a landscape frame; on a tall canvas a left zone becomes the upper band and a right zone
+  the lower band, so the words alternate top / bottom across the song and the program's focal form
+  takes the other half), `sectionComposition` (what the type engine reads), `programCode` (validated
+  code + a cache key), `keyMomentOf` (the key still: the program's moment, else 60 % into the first
+  chorus), `programModeKey`.
+- **Uniform contract** (`src/lib/stage/program/contract.ts`): the renderer wraps the body between its
+  own prelude — version / precision header, every uniform below, a helper library, the type-mask and
+  emblem samplers only behind helper functions, `#line 1` so logs point at the program's lines — and
+  epilogue (`main()`: the operator's master intensity, dither, clamp; alpha = 1 − `gFront`, the
+  foreground mask the type pass reads). `PROGRAM_UNIFORMS` lists the names; the same text is given to
+  Claude verbatim (`PROGRAM_CONTRACT_DOC`):
+
+```text
+你寫的是一段 GLSL 函式本體（GLSL ES 1.00 與 3.00 的共同子集），必須定義：
+
+  vec3 scene(vec2 fc)   // fc = gl_FragCoord.xy（像素，左下為原點），回傳 0–1 的顯示色（sRGB）
+
+可以另外寫輔助函式與 const 常數。系統會在前面加上版本、精度、下列所有 uniform 與輔助函式，在後面加上 main()（總亮度、抖色、限制在 0–1），之後畫面還會經過素材層、歌詞排版層與 LED 安全模式（亮度上限、柔化、閃爍限制器、紅閃保護），所以你不需要、也不能自己處理安全。
+
+uniform（全部由系統提供，不能自己宣告）：
+  vec2  uRes              畫布像素（寬, 高）
+  float uTime             場景時鐘（秒，依段落速度與能量累積，凍結時停止）
+  float uClock            牆上時鐘（秒，給顆粒用）
+  float uSongTime         歌曲時間（秒）
+  float uSongProgress     整首歌進度 0–1
+  float uSeed             這首歌固定的種子 0–1000
+  float uBeat             拍內相位 0–1（拍點時歸零）
+  float uBeatN            拍數計數（每拍 +1）
+  float uBar              小節內相位 0–1（四拍一小節）
+  float uTempo            每秒幾拍（BPM / 60；未知時 2.0）
+  float uPulse            拍點衝擊 0–1（已經過 LED 安全的速率限制）
+  float uEnergy           分析出的此刻能量 0–1
+  float uLevel, uBass, uOnset   即時音訊：音量、低頻、起音 0–1
+  float uIntensity        段落強度 × 操作員總強度（0–1.5，供參考；總強度會在 main() 再乘一次 uMaster）
+  float uMaster           操作員總強度（0–1.5）
+  float uReact            音樂反應程度 0–1（安全模式會壓低）
+  float uSection          目前段落索引（0, 1, 2…）
+  float uSectionKind      段落種類：0 intro 1 verse 2 pre-chorus 3 chorus 4 bridge 5 solo 6 breakdown 7 outro 8 interlude
+  float uSectionEnergy    段落能量 0–1
+  float uSectionProgress  段落內進度 0–1
+  float uMode             這一段的模式（整數 0–3，由你在 sections 裡指定）
+  vec4  uParams           這一段的四個參數 0–1（由你在 sections 裡指定）
+  vec3  uBg, uPri, uAcc   這一段的配色：背景、主色、點綴
+  vec3  uInk              這一段的歌詞色
+  vec3  uPal0, uPal1, uPal2, uPal3, uPal4, uPal5   整首歌的色票（uPal0 最深；不足六色時重複）
+  vec4  uZone             這一段的文字區（uv：x0, y0, x1, y1，y 向上，0–1）
+  float uRelation         字與畫面的關係：0 plain 1 knockout 2 behind 3 lit
+  vec4  uTypeBox          目前歌詞實際的範圍（uv：x0, y0, x1, y1；沒有歌詞時全為 0）
+  float uTypeAmt          歌詞可見程度 0–1
+  sampler2D uType, uMotif 歌詞字形與主視覺符號的貼圖：只能透過下面的 typeMask／typeGlow／motifMask 讀
+
+輔助（已定義，直接用，不能重新定義）：
+  PI, TAU; sat(x); rot(a) → mat2; hash11(p), hash12(p), hash22(p); vnoise(p); fbm(p)（5 階）; fbm3(p)（3 階）
+  centered(fc) → 以短邊為 1、中心為原點的座標; aspect() → 寬/高; luma(c); ramp(t) → uBg→uPri→uAcc
+  palette(t) → 沿 uPal0…uPal5 的漸層; px() → 一個像素在 centered 座標裡的大小（抗鋸齒）
+  fill(d) / stroke(d, w) → 由距離場得到覆蓋率; sdCircle(p, r), sdBox(p, b), sdSegment(p, a, b)
+  grain(fc, amount) → 顆粒; kick() → uPulse × uReact; isSection(k) → 目前段落種類是否為 k（1 或 0）
+  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1; zoneCenter() → 文字區中心（uv）
+  typeMask(uv) → 此刻歌詞字形的覆蓋率 0–1（字的形狀）; typeGlow(uv, r) → 字形周圍 r（uv）內的柔光 0–1
+  motifMask(uv, bias) → 主視覺符號（白底透明）的覆蓋率
+
+全域變數：
+  float gFront            前景遮擋 0–1：你在 scene() 裡把它設成前景形狀的覆蓋率，
+                          關係是 behind 的段落，字會從這個形狀後面經過（其他關係不影響）
+
+規則（驗證器會拒絕違反的程式）：
+  - 不能有 # 開頭的任何前處理指令（#extension、#define、#version…）
+  - 不能宣告 uniform / attribute / varying / in / out / precision / sampler，不能用 texture 系列函式（只能用上面的輔助）
+  - 不能定義 main，不能用 gl_ 開頭的名稱、discard、while、do、switch
+  - 只能用 for 迴圈，而且必須是 for (int i = 常數; i < 常數; i++) 的形式，每個迴圈最多 48 次、巢狀相乘最多 256 次
+  - 不能用 ES 3.00 才有的函式（round、trunc、tanh、sinh、cosh、inverse、transpose、determinant、isnan、isinf…）、uint、位元運算或 %
+  - 整段程式不超過 16000 字元（不含註解），註解以外只能有 ASCII
+  - 每個畫素的成本要合理：避免在迴圈裡再疊 fbm，5 階 fbm 一個畫面最多用六、七次
+```
+
+- **Validator** (`src/lib/stage/program/validate.ts`, run on the server before a program is stored —
+  `normalizePlan`, PATCH `/api/projects/[id]` (400 in 繁中), the scene step — and again in the browser
+  before it is compiled, because a program also arrives over the BroadcastChannel): source ≤ 24 000
+  characters, code ≤ 16 000 after comments are stripped (comments are removed before compiling; GLSL
+  ES 1.00 allows only ASCII), no `#` at all, no backslashes, a tokenizer with an allowed operator set
+  (no bit operations, no `%`), forbidden identifiers (uniform / attribute / varying / precision
+  qualifiers / sampler types / every texture function / `main` / `discard` / `while` / `do` /
+  `switch` / ES 3.00-only builtins such as round, tanh, inverse, isnan / uint / derivatives /
+  reserved words), reserved prefixes (`gl_`, `webgl_`, `__`, `ll_`), `in` / `out` only inside
+  parameter lists, no redefinition of a prelude name, exactly one `vec3 scene(vec2 …)`, balanced
+  braces, and loops only as `for (int i = A; i < B; i++ | i += k)` with integer literals: at most
+  48 iterations each, 3 levels, 256 nested iterations. What it cannot know (a type error, a slow
+  program) the renderer handles.
+- **Rendering** (`src/lib/stage/gl/renderer.ts`, `src/lib/stage/program/runtime.ts`). `SceneDraw.program`
+  (`ProgramDraw`: the validated code and this frame's contract values) is drawn instead of the
+  section's built-in scene once compiled (`prewarmProgram` puts it first in the compile queue; while
+  it compiles, or when it failed, the built-in scene is drawn). This frame's type plates are uploaded
+  before the scene when a program reads them (`typeMask` / `typeGlow`); otherwise an empty 1 × 1
+  texture is bound. The director carries the outgoing slot's last program values through a section
+  transition; the offline frame (`offlineSceneFrame`) transitions when the program's mode changes too.
+  The media pass and the transition compositor pass the foreground alpha through. `programFrame`
+  builds the values from the project, the look and the clock (section index / kind / energy /
+  progress, bar phase, tempo, palette ×6, the section colourway and lyric colour, the zone in GL uv,
+  the lyric's measured box); an operator scene override (1–9) or a blackout scene shows the built-in
+  scene. Everywhere the stage renders: the projection, the console preview, the stage lab, the style
+  frames and 一頁提案 (directions carry programs), the key still and the video export (`OfflineStage`:
+  `ensureReady(…, program)`, a warning when it does not compile, the background variant gets no type
+  mask).
+- **Fallback and budget** (`StageEngine`). A program that fails to link is switched off on that stage
+  (the section's built-in scene; `console.warn`); a program still over `PROGRAM_SLOW_DT` (1/18 s) per
+  frame for `PROGRAM_SLOW_SECONDS` (5 s) after the adaptive resolution has reached its floor gets a
+  probe: the built-in scene draws for `PROGRAM_PROBE_MS` (2.5 s); only when that is clearly faster
+  (< 0.5 × the program's frame time; logged with console.info, the preview shows the notice) is the program switched off, otherwise the machine itself is
+  slow, the program comes back and no probe runs for 30 s. `StageStats.program` (`pending | ready | failed | slow | override`, the title, the
+  compiler's log) and `data-scene-program` on the stage root report it; the console preview shows
+  「專屬畫面無法編譯／太耗效能，已改用內建場景」 (`[data-program-notice]`). The export and the key still
+  report `OfflineStage.program`.
+- **LED 安全模式: no bypass.** A program only produces the scene layer: its output goes through the
+  media pass, the type pass and then the same safety chain as every built-in scene (soften, the
+  brightness cap, the flash limiter's measured grid and low-pass, red protection); the audio
+  uniforms it receives are the safe ones (`uPulse` rate-limited, `uReact` clamped). `e2e-scene`
+  measures a program that strobes the whole field 4 × a second: > 3 flashes / s with safe mode off,
+  ≤ 3 and the limiter engaged with it on.
+- **Type composed with the scene** (`src/lib/type/`). `LineContext.zone` (from `sectionComposition`)
+  narrows the readable area to the zone (`makeFrame(canvas, params, zone)`: the grid, margins and the
+  recipes' sides / bands then live inside it; the size reference stays the canvas', so a small zone
+  means smaller type, not a new scale; the ultra-wide view is not used with a zone); `fitInto` keeps
+  readable text inside it. The type pass (`scenes/type.ts`, `uRelation`): knockout = the words cut a
+  clean window out of the image's shapes: under the dilated glyph mask the picture gives way to the
+  background tone (a printed knockout) and the letters keep the lyric colour (an earlier version
+  flipped the letters to the background tone over bright shapes; over busy stripes that left words
+  half dark, half light and unreadable); behind = the program's `gFront` hides the words where the
+  foreground covers them; lit = the letters take the hue and light of the image behind them, with a
+  little glow; plain = as before. The program can react to the words through `typeMask` /
+  `typeGlow` / `uTypeBox`.
+- **Legibility guarantee** (`scenes/legibility.ts`, in the type pass for every relation and every
+  scene, built-in or program). A dilated mask of the readable glyphs (two rings of ink / accent taps
+  at 0.6 % and 1.4 % of the output's shorter side, plus the painter's halo) marks the picture around
+  the letters; there the picture is attenuated in linear light until the lyric colour meets
+  `LEGIBLE_TARGET` (5.4 : 1 WCAG, margin over the required 4.5 for the mask's soft edge and grain) as
+  it leaves the wall — the LED safety pass that follows (soften shoulder, brightness cap) is part of
+  the computation (`uSoften` / `uGain` in the type pass): light ink darkens it, dark ink lifts it; an
+  ink that could reach the target over neither black nor the capped white (a mid-grey, a mid pink) is
+  lifted first (`legibleInk`). The RGB
+  split stays a fringe: the base glyph keeps ≥ 88 % of the ink in every channel. The TypeScript
+  mirror is unit-tested over a colour grid; `e2e-scene` measures rendered frames of a hostile
+  full-bleed stripe program (`scripts/legibility.cjs`: with vs without the lyrics, the median glyph
+  against the 90th-percentile picture pixel in a ring around the glyphs; light the type itself adds —
+  glow, echo, fringe — is not counted as picture). The composer and the examples also keep busy forms
+  out of the zone: bars are cut clean at the zone per pixel (a few thin segments run through in the
+  chorus), orbits and brush strokes fade there, a circle closes around the words only when its inner
+  edge clears the block's corners (else it closes beside them), the slab stands clear of the words.
+- **Line breaking between words** (`type/text.ts`). Rows never break inside a known compound or next
+  to a bound character (`splitsWord`: the lexicon, now with 之間 / 時間 / 開往 / 前往 … and 之 bound to
+  both sides) and never leave a one-character fragment of a phrase (`leavesFragment`): such a split
+  only wins when nothing else fits, and a slightly overflowing row (the type set a little smaller)
+  beats it. The featured word (`keySpan`) is a whole word: an emphasized run one character over the
+  limit stays whole (潮汐之間), otherwise it is cut between words; pair windows that halve a compound
+  lose. `linebreak.test.ts` checks the fixture lines on both canvases.
+- **Restraint.** `key-lines.ts`: a small budget of 重點句 per song (≈ one in ten distinct lines, 1–3),
+  chosen for meaning — the line that names the song, the chorus hook (repeated in the choruses, the
+  first line of the first chorus), then very strong lines —; `ResolvedHint.key`. Every other line is
+  small-to-medium: the body size is 5.2–7.8 % of the size reference (was 6.8–11 %), the display word
+  of 巨字＋小字 at most 1.6–2.3 × the body, poster / 撕裂 / grid sizes capped at 1.7 × the body; 出血 and
+  鏤空窗 (large only) become 巨字＋小字 unless the editor chose them. Key lines keep the full display
+  scale. Lines keep the grid, the sequencer's alternation of sides and recipes, and the reading order.
+- **Pipeline** (`src/lib/server/pipeline.ts`): the steps are `lyrics → research → design → scene`
+  (`ProcessStepId`, `ALL_STEPS`, the process page's steps). The scene step has its own request in cloud
+  mode (its own 300 s, the Claude budget `CLOUD_DESIGNER_BUDGET_MS`), so the design step stays inside
+  its budget. With Claude it calls `designSceneProgram`; without Claude a run that designed skips it
+  (the design step already composed one), and a run of only this step (「重新產生畫面」) draws the
+  composer's next composition (`recipe` ends in `#<salt>`). Every designed plan carries a program:
+  `ensureSceneProgram` (design step, claude.ai apply) keeps the plan's own Claude / claude.ai program,
+  else the previous plan's (it adapts to new sections by kind), else composes one; the operator's
+  switch-off is kept.
+- **Claude** (`src/lib/server/designer/scene-program.ts`, `designSceneProgram` in `index.ts`): one
+  `claudeStructured` call (`SceneProgramDraftSchema` via `jsonOutputFormat`, effort high, 32 k tokens,
+  adaptive thinking with `drop_block`, `fallbacks: "default"`, continuations, the deadline) with
+  `SCENE_SYSTEM` (a designed image, not effects: composition before effect, one focal form, clear
+  negative space, restraint on an LED wall, a reason rooted in this song and band, one world evolving
+  with `uMode` / `uParams`, type and image composed together, the tall canvas, palette uniforms only,
+  cost) and `buildScenePrompt` (song, research brief, the plan's key visual, palette, sections with
+  times / energy / colourways, lyrics by section, the energy curve, the bible, mood board notes, the
+  arc, the contract verbatim, one complete example with its section states plus the other examples'
+  concepts, the current program when an instruction edits it, the instruction). A program the
+  validator refuses gets one repair turn with the errors; then (or on any failure / timeout) the
+  offline composer.
+- **Offline composer** (`src/lib/stage/program/composer.ts`). A layered generative composer: form ×
+  texture × composition × motion. Forms are hand-written GLSL modules with their own parameter spaces
+  — `horizon` (a disc over a horizon: size, banding, a city line, a reflection), `pillars` (1–3 back-lit
+  slabs in fog, the foreground for "behind"), `orbits` (tilted rings, a planet, moons), `strata`
+  (receding ridges, roughness, a low sun, a mirror in the bridge), `bars` (printed diagonal bars that
+  jump on the beat by position only), `brush` (a dry-brush circle or sweep drawn across the section),
+  `ribbons` (silk bands), `threads` (falling light threads with ripples, a clear window for the words);
+  textures `film` / `halftone` / `paper` / `scan` (by the type voice); motions `drift` / `breathe` /
+  `rise` / `orbit` / `sweep`; the composition puts the form at least a fifth of the frame away from the
+  words, on the other side (or half, on a tall canvas), and alternates the words' side when the song
+  turns a page (verse after chorus, pre-chorus, bridge). The form comes from the 免費研究 findings
+  (`sceneForms`: the genre's forms, then the lyric imagery's scene family, then the audio mood), the
+  rest from the song's seed; the chorus takes the form's relation (horizon / orbits / ribbons lit,
+  pillars behind, bars / brush knockout). Why this and not templates with colour swaps: the old
+  problem was "the same effect in another colour"; here the structure of the picture (what stands
+  where, what surface, how it moves, how the words meet it) changes with the song, while each module
+  is still hand-designed and safe. Directions get one per direction (`directionSceneProgram`: forms
+  from the direction's scene families, seeded by its letter), so the three style-frame sets show three
+  worlds.
+- **Examples** (`src/lib/stage/program/examples/`): five hand-written programs of the quality the
+  prompt asks for — 夜航 (city pop: a setting sun, a city line, its reflection; the bridge an eclipse),
+  潮間帶 (folk: a tidal flat under a low moon; the chorus floods it; the bridge a mirror), 碑 (post-rock:
+  a slab in fog beside the words, light leaking, rays that light them; the bridge splits it), 圓相 (ink ballad:
+  a dry-brush circle drawn across each section; the chorus closes it around the words and cuts them
+  out), 訊號 (post-punk / electronic: printed bars that jump on the beat; the chorus runs them through
+  the words). `instantiateExample` lays one onto a plan by section kind. They are the prompt's
+  few-shot example, test fixtures and the visual check (`/stage-lab?program=<id>`).
+- **UI.** Design overview (`src/components/process/SceneProgramPanel.tsx` in `KeyVisualSummary`):
+  「專屬畫面「title」」 with who wrote it, the concept, the **key still** (`key-still.ts`: `OfflineStage` at
+  `keyMomentOf`, the output aspect at 960 px, queued with the style frames, cached), what each section
+  does, 「使用專屬畫面」 (PATCH `plan.sceneProgram.enabled`), 「重新產生畫面…」 (a sheet with an optional
+  繁中 instruction and suggestions → the process page runs `steps: ["scene"]`), and when this computer
+  cannot compile it the log with 「請 Claude 修正」. The process page's step list has 專屬畫面; 重新設計
+  runs design + scene. 排版 editor: the section panel's 「和畫面一起構圖」 (the text zone presets 左 / 右 /
+  中 / 橫幅, its height, the relation, 「回到畫面設計的構圖」). Console: the preview's notice (the only
+  console change besides a label map and two dedupe comparisons). Stage lab: `?program=plan | off |
+  <example id> | composer:<form>[:<salt>]`.
+- **Tests**: `src/lib/stage/program/program.test.ts` (validator: preprocessor, interface, texture,
+  main, loops, WebGL1 subset, ASCII, sizes; the contract and prelude; the examples; normalization,
+  zones, the key moment, `programFrame`), `designer/scene-program.test.ts` (every form × voice × seed
+  validates, determinism, salt, zones alternate; five contrasting fixtures `testing/songs.ts` get ≥ 4
+  forms and 5 different programs; the Claude step: the output schema, the prompt with the contract,
+  a kept program, one repair turn, the offline fallback), `src/lib/type/zone.test.ts` (every recipe
+  inside the zone on 16:9 and in the band on 9:16, restraint, the key-line budget, the editor's key
+  mark, the example's zones across the demo song). E2E `scripts/e2e-scene.cjs`.
+- **Known limits.** GLSL type errors are only found by compiling in a browser (the server has no GL);
+  the console notice reflects the preview's own compile (the projection window reports its state on its
+  stage root, not over the channel). The frame-time watchdog is a heuristic on the page's frame
+  interval (it cannot separate the program's cost from the rest of the frame) and only acts at the
+  adaptive-resolution floor. Programs have no access to the band's media textures. The composer's
+  forms are eight hand-written families: songs of the same genre and imagery share a form (their
+  seed still changes the parameters, texture, motion and composition).
+
 ### Band media and the output canvas (phase 1a)
 
 - `Project.assets: Asset[]` (image / video / logo; size and video length measured in the browser by
@@ -909,7 +1167,7 @@ keeps every contract above and changes only where things are kept and how long w
 - LRC/plain parsing & serialization, `distributeLines`, `normalizeLyrics` (ids `l0..`, `synced`).
 - LRCLIB client (`https://lrclib.net/api/search`, `/api/get`), `User-Agent: Livelyrics/0.1 (+https://github.com/alanwu14832-bit/Livelyrics-)`,
   prefer synced results whose duration is within ±3 s; timeout + graceful failure.
-- Pipeline `lyrics → research → design`, saving the project after each step; status
+- Pipeline `lyrics → research → design → scene` (phase 7: the song's scene program), saving the project after each step; status
   `processing` → `ready` | `error`. Local mode: per-project **in-memory run registry** (cloud mode records
   the run on the project instead, see "Cloud mode"): a POST while a run is active
   attaches to it (replays past events, then streams live) — survives page refresh / React StrictMode.
@@ -978,7 +1236,7 @@ keeps every contract above and changes only where things are kept and how long w
   — connect analyser → destination), `createMicAnalyser()`, tap tempo; features 0..1.
 - Unit tests with synthetic signals (click track tempo, loud/quiet section boundaries).
 
-### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts), `src/lib/type/**` (字體藝術), `src/app/p/[id]/output/**`, `src/app/s/[id]/output/**`, `src/app/stage-lab/**`
+### STAGE — `src/components/stage/**`, `src/lib/stage/**` (except protocol.ts; `src/lib/stage/program/**` = 專屬畫面), `src/lib/type/**` (字體藝術), `src/app/p/[id]/output/**`, `src/app/s/[id]/output/**`, `src/app/stage-lab/**`
 - `<StageView project store showGuides renderScale />`: WebGL scene layer + DOM lyric layer +
   blackout/transition overlay + optional test pattern & safe-area guides. Reads `store.get()` in a
   rAF loop (no React re-render per frame). Extrapolates time with `stageTime()`.

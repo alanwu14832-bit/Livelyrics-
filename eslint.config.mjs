@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Agent worktrees (other branches checked out under .claude/worktrees) are not this tree's code.
     ".claude/**",
+    // Local, git-ignored visual-check scratch files.
+    "scratch/**",
   ]),
   // Node scripts (e2e, fixtures) are CommonJS and load Playwright with require().
   {

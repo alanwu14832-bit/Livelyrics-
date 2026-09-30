@@ -8,7 +8,7 @@ import type { ProcessRequest } from "@/lib/api-client";
 
 export type ProcessStep = NonNullable<ProcessRequest["steps"]>[number];
 
-export const PROCESS_STEPS: readonly ProcessStep[] = ["lyrics", "research", "design"];
+export const PROCESS_STEPS: readonly ProcessStep[] = ["lyrics", "research", "design", "scene"];
 
 type ParamValue = string | string[] | undefined | null;
 

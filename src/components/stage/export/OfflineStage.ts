@@ -25,7 +25,7 @@ import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, type RGB } from "@/lib/stage/color";
 import type { SceneSlot } from "@/lib/stage/director";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
-import { StageRenderer, type MediaDraw, type MediaLayerDraw, type SceneDraw, type TypeDraw } from "@/lib/stage/gl/renderer";
+import { StageRenderer, type MediaDraw, type MediaLayerDraw, type ProgramDraw, type SceneDraw, type TypeDraw } from "@/lib/stage/gl/renderer";
 import { FlashLimiter, LYRIC_INK, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
 import { mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media/draw";
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo } from "@/lib/stage/media/model";
@@ -36,6 +36,9 @@ import { resolveLineDesign } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
 import { FONTS } from "@/lib/font-meta";
 import { hasTypeSystem } from "@/lib/type/resolve";
+import { activeProgram, programCode } from "@/lib/stage/program/model";
+import { programFrame } from "@/lib/stage/program/runtime";
+import type { StageLook } from "@/lib/stage/resolve";
 import { DEFAULT_OUTPUT, outputAspect } from "@/lib/output";
 import type { Asset, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { LyricLayer } from "../lyrics/LyricLayer";
@@ -222,6 +225,36 @@ export class OfflineStage {
     return this.rendererError;
   }
 
+  /**
+   * 專屬畫面: the song's program on this renderer after prepare(): "none" (the plan has none or it is
+   * switched off), "ready", or "failed" with the compiler's log (the built-in scenes are drawn).
+   */
+  get program(): { state: "none" | "ready" | "failed"; log?: string } {
+    const program = activeProgram(this.project.plan);
+    const code = program ? programCode(program) : null;
+    if (!program) return { state: "none" };
+    if (!code) return { state: "failed", log: "程式沒有通過檢查" };
+    const st = this.renderer?.programState(code.key);
+    if (st?.state === "ready") return { state: "ready" };
+    return { state: "failed", ...(st?.log ? { log: st.log } : {}) };
+  }
+
+  /** The program's draw for a look at song time t (null = the built-in scene). */
+  private programDraw(look: StageLook | null | undefined, t: number, audio: StageAudioFrame, beatIndex: number): ProgramDraw | null {
+    if (!look) return null;
+    return programFrame({
+      project: this.project,
+      look,
+      t,
+      beat: audio.beat,
+      beatIndex,
+      master: 1,
+      typeBox: this.typeMode ? this.type.textBounds(this.output) : null,
+      typeAmt: this.typeMode ? this.lyricAmt : 0,
+      color: (hex) => this.color(hex),
+    });
+  }
+
   /** Fonts, motif texture, every shader the plan uses and the band media. */
   async prepare(): Promise<PrepareReport> {
     const warnings: string[] = [];
@@ -267,7 +300,10 @@ export class OfflineStage {
     if (this.renderer) {
       const scenes = new Set<SceneId>(["gradient"]);
       for (const s of project.plan?.sections ?? []) if ((SCENE_IDS as readonly string[]).includes(s.scene)) scenes.add(s.scene);
-      const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on, this.typeMode);
+      const program = activeProgram(project.plan);
+      const code = program ? programCode(program) : null;
+      const bad = await this.renderer.ensureReady([...scenes], used.size > 0, 20000, this.safety.on, this.typeMode, code);
+      if (program && this.program.state === "failed") warnings.push(`專屬畫面「${program.title}」無法在這台電腦編譯，影片會改用每段的內建場景。`);
       if (this.typeMode && this.renderer.typeState() !== "ready") warnings.push("歌詞排版的著色器無法在這台電腦編譯：影片裡不會有排版的歌詞，請換一台電腦匯出。");
       if (this.safety.on && this.renderer.safetyState() !== "ready") warnings.push("LED 安全模式的著色器無法在這台電腦編譯：影片不會套用場景的亮度上限與閃爍限制，請換一台電腦匯出。");
       const sceneBad = bad.filter((k) => !k.startsWith("safety-"));
@@ -376,14 +412,20 @@ export class OfflineStage {
     const beatIndex = beatIndexAt(this.project, t);
     const s = this.safety;
     const limiter = chain === 1 ? this.bgLimiter : this.limiter;
+    // 專屬畫面: the program for the section (and the outgoing one during a transition)
+    const pd = this.programDraw(frame.look, t, audio, beatIndex);
+    const prevPd = frame.previous ? this.programDraw(frame.previousLook, t, audio, beatIndex) : null;
+    const typeDraw = this.typeMode && chain === 0 && this.typeDraw ? { ...this.typeDraw, relation: pd ? pd.relation : 0 } : null;
+    // the background variant (chain 1) has no lyric: the program sees no type mask either
+    const noType = (d: ProgramDraw | null) => (d && chain === 1 ? { ...d, typeAmt: 0 } : d);
     const ok = r.render({
-      current: this.slotDraw(frame.current, audio, t, beatIndex),
-      previous: frame.previous ? this.slotDraw(frame.previous, audio, t, beatIndex) : null,
+      current: { ...this.slotDraw(frame.current, audio, t, beatIndex), program: noType(pd) },
+      previous: frame.previous ? { ...this.slotDraw(frame.previous, audio, t, beatIndex), program: noType(prevPd) } : null,
       transition: frame.transition,
       clock: t % 3600,
       media,
       safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: true } : null, chain } : null,
-      type: this.typeMode && chain === 0 ? this.typeDraw : null,
+      type: typeDraw,
     });
     if (!ok) throw new Error(this.rendererError ?? "WebGL 繪製失敗");
     if (limiter) {

@@ -214,6 +214,7 @@ const STEP_LABELS: Record<PipelineStepId, string> = {
   lyrics: "歌詞",
   research: "研究",
   design: "設計",
+  scene: "畫面",
   done: "完成",
 };
 

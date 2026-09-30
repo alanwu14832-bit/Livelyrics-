@@ -48,7 +48,39 @@ function frac(v: unknown, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) ? clamp(v, 0, 0.3) : fallback;
 }
 
-export function makeFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColumns" | "gridMargin">): Frame {
+/** A zone smaller than this (fractions of the canvas) after clipping to the readable area is ignored. */
+const MIN_ZONE_W = 0.2;
+const MIN_ZONE_H = 0.16;
+
+/**
+ * The frame, with the readable area narrowed to `zone` (fractions of this canvas; the scene
+ * program's negative space) when one is given: the recipes then lay the line out inside it. The
+ * size reference stays the canvas', so a small zone gives smaller type, never a new scale.
+ */
+export function makeFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColumns" | "gridMargin">, zone?: { x: number; y: number; w: number; h: number } | null): Frame {
+  const f = makeFullFrame(canvas, params, zone ? 0.35 : 1);
+  if (!zone) return f;
+  const zx = zone.x * f.W;
+  const zy = zone.y * f.H;
+  const x0 = Math.max(f.read.x, zx);
+  const y0 = Math.max(f.read.y, zy);
+  const x1 = Math.min(f.read.x + f.read.w, zx + zone.w * f.W);
+  const y1 = Math.min(f.read.y + f.read.h, zy + zone.h * f.H);
+  if (x1 - x0 < MIN_ZONE_W * f.W || y1 - y0 < MIN_ZONE_H * f.H) return makeFullFrame(canvas, params, 1);
+  const read: Box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  return { ...f, read, grid: gridOf(read, params, f.short, 0.35) };
+}
+
+function gridOf(read: Box, params: Pick<TypeParams, "gridColumns" | "gridMargin">, short: number, marginK: number): Grid {
+  const margin = clamp(params.gridMargin ?? 0.4, 0, 1) * 0.06 * short * marginK;
+  const cols = Math.round(clamp(params.gridColumns ?? 6, 2, 12));
+  const gbox: Box = { x: read.x + margin, y: read.y + margin * 0.6, w: Math.max(32, read.w - 2 * margin), h: Math.max(32, read.h - margin * 1.2) };
+  const gutter = Math.min(gbox.w * 0.02, short * 0.02);
+  const colW = (gbox.w - gutter * (cols - 1)) / cols;
+  return { cols, box: gbox, colW, gutter };
+}
+
+function makeFullFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColumns" | "gridMargin">, marginK: number): Frame {
   const W = Math.max(64, canvas.width || 1920);
   const H = Math.max(64, canvas.height || 1080);
   const s = canvas.safe ?? DEFAULT_LYRIC_SAFE;
@@ -60,11 +92,6 @@ export function makeFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColu
   const short = Math.min(W, H);
   const band = Math.min(BOTTOM_BAND * H, safe.h * 0.2);
   const read: Box = { x: safe.x, y: safe.y, w: safe.w, h: Math.max(32, safe.h - band) };
-  const margin = clamp(params.gridMargin ?? 0.4, 0, 1) * 0.06 * short;
-  const cols = Math.round(clamp(params.gridColumns ?? 6, 2, 12));
-  const gbox: Box = { x: read.x + margin, y: read.y + margin * 0.6, w: Math.max(32, read.w - 2 * margin), h: Math.max(32, read.h - margin * 1.2) };
-  const gutter = Math.min(gbox.w * 0.02, short * 0.02);
-  const colW = (gbox.w - gutter * (cols - 1)) / cols;
   return {
     W,
     H,
@@ -73,7 +100,7 @@ export function makeFrame(canvas: CanvasSpec, params: Pick<TypeParams, "gridColu
     short,
     safe,
     read,
-    grid: { cols, box: gbox, colW, gutter },
+    grid: gridOf(read, params, short, marginK),
     minRead: Math.max(MIN_READ_PX, MIN_READ_FRACTION * short),
   };
 }

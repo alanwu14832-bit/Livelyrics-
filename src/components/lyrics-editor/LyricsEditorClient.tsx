@@ -635,7 +635,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   }
 
   const tapActive = session != null;
-  const redesignHref = processHref(id, { run: true, steps: project.research ? ["design"] : ["research", "design"] });
+  const redesignHref = processHref(id, { run: true, steps: project.research ? ["design", "scene"] : ["research", "design", "scene"] });
   const analysisPeaks = project.analysis?.peaks ?? [];
   const canSave = dirty || !!saveError;
   const untimed = lines.length - timed;

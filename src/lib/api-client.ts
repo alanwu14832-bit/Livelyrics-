@@ -535,8 +535,8 @@ export interface LyricsSearchResult {
 }
 
 export interface ProcessRequest {
-  /** which steps to run; default all: ["lyrics", "research", "design"] */
-  steps?: Array<"lyrics" | "research" | "design">;
+  /** which steps to run; default all: ["lyrics", "research", "design", "scene"] */
+  steps?: Array<"lyrics" | "research" | "design" | "scene">;
   /** if provided, use these lyrics (plain text or LRC) instead of searching */
   lyricsText?: string;
   /** free-form art-direction instruction for a re-design, e.g. "副歌更熱血一點" */
@@ -555,5 +555,5 @@ export interface ProcessRequest {
    * Cloud mode: this request is one step of a run the page drives (`steps` holds that step). The
    * server records the run on the project so a refreshed page can continue it.
    */
-  run?: { id: string; steps: Array<"lyrics" | "research" | "design"> };
+  run?: { id: string; steps: Array<"lyrics" | "research" | "design" | "scene"> };
 }

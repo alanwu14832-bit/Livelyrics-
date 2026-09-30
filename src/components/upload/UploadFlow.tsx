@@ -174,7 +174,7 @@ export function UploadFlow({ defaultBandId }: { defaultBandId?: string } = {}) {
         let lyricsText: string | null = null;
         if (input.lyricsMode === "paste") lyricsText = input.pasteText;
         else if (input.lyricsMode === "auto" && input.pick) lyricsText = resultToLyricsText(input.pick.result, input.pick.useTiming);
-        else steps = ["research", "design"]; // "later", or none of the search results fit
+        else steps = ["research", "design", "scene"]; // "later", or none of the search results fit
 
         if (lyricsText && !storeLyricsHandoff(project.id, lyricsText)) {
           // sessionStorage unavailable: save the lyrics on the project instead (roughly timed when

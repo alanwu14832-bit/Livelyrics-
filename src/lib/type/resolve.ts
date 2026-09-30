@@ -12,6 +12,8 @@ import type { LineContext, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { findMotionWord } from "./motion-words";
 import { autoHint, textKey } from "./sequence";
 import { VOICES } from "./vocab";
+import { keyLineKeys } from "./key-lines";
+import { sectionComposition } from "../stage/program/model";
 import type { StageOverrides } from "../stage/protocol";
 
 const clamp = (x: unknown, lo: number, hi: number, fallback: number) => (typeof x === "number" && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : fallback);
@@ -69,13 +71,15 @@ interface LineTable {
   /** chorus sections in order, the last one's index */
   lastChorus: number | null;
   chorusKeys: Set<string>;
+  /** the song's key lines (text keys): the only ones set large */
+  keys: Set<string>;
 }
 
-const tables = new WeakMap<object, { lines: readonly LyricLine[]; table: LineTable }>();
+const tables = new WeakMap<object, { lines: readonly LyricLine[]; title: string; table: LineTable }>();
 
-function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonly LyricLine[], duration: number): LineTable {
+function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonly LyricLine[], duration: number, title = ""): LineTable {
   const cached = tables.get(plan.typeSystem);
-  if (cached && cached.lines === lines) return cached.table;
+  if (cached && cached.lines === lines && cached.title === title) return cached.table;
   const byId = new Map<string, TypeLine>();
   for (const l of plan.typeSystem.lines) if (l && typeof l.lineId === "string" && !byId.has(l.lineId)) byId.set(l.lineId, l);
   const firstIndex = new Map<string, number>();
@@ -97,8 +101,8 @@ function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonl
     const si = sectionIndexForLine(plan, lines as LyricLine[], i, duration);
     if (si != null && plan.sections[si]?.kind === "chorus" && si !== lastChorus) chorusKeys.add(textKey(l.text));
   });
-  const table = { byId, firstIndex, lastChorus, chorusKeys };
-  tables.set(plan.typeSystem, { lines, table });
+  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title) };
+  tables.set(plan.typeSystem, { lines, title, table });
   return table;
 }
 
@@ -133,7 +137,7 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
   const line = lines[index];
   if (!line || typeof line.text !== "string" || !line.text.trim()) return null;
   const ts = plan.typeSystem;
-  const table = lineTable(plan, lines, opts.duration);
+  const table = lineTable(plan, lines, opts.duration, opts.songTitle ?? "");
   const key = textKey(line.text);
   const firstIdx = table.firstIndex.get(key) ?? index;
   const own = table.byId.get(line.id) ?? null;
@@ -174,6 +178,8 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     escalate,
     motion: override?.motion != null ? clamp(override.motion, 0, 1, 0.5) : null,
     orientationFixed: edit?.orientation != null || override?.orientation != null,
+    recipeFixed: edit?.recipe != null || override?.recipe != null,
+    key: typeof edit?.key === "boolean" ? edit.key : table.keys.has(key),
   };
   // the first lyric line of its section carries the section's label and number
   let first0 = true;
@@ -190,6 +196,7 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     sectionLabel: section?.label ?? "",
     songTitle: opts.songTitle ?? "",
     first: first0,
+    zone: sectionComposition(plan, sectionIndex)?.zone ?? null,
   };
   return { hint, ctx, source: base, sourceIndex };
 }

@@ -19,12 +19,14 @@ const STEP_TITLE: Record<ProcessStep | "analyze", string> = {
   lyrics: "取得歌詞",
   research: "研究樂團與歌曲",
   design: "設計主視覺",
+  scene: "專屬畫面",
 };
 
 const STEP_HINT: Record<ProcessStep, string> = {
   lyrics: "貼上的歌詞、既有同步歌詞或 LRCLIB",
   research: "樂團視覺史、歌曲意象、情緒弧線",
   design: "色票、符號、字體、每段畫面與歌詞呈現",
+  scene: "為這首歌寫的生成畫面：構圖、留白與字的位置",
 };
 
 const STATUS_TEXT: Record<StepStatus, string> = {
@@ -36,7 +38,7 @@ const STATUS_TEXT: Record<StepStatus, string> = {
   kept: "沿用",
 };
 
-const ORDER: ProcessStep[] = ["lyrics", "research", "design"];
+const ORDER: ProcessStep[] = ["lyrics", "research", "design", "scene"];
 
 type RowStatus = StepStatus | "warn";
 

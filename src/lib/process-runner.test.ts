@@ -57,9 +57,10 @@ describe("runStepwise", () => {
     const project = await runStepwise("p1", { lyricsText: "[00:01.00]a", instruction: "更熱血" }, (e) => events.push(e), undefined, deps);
     expect(project.status).toBe("ready");
     expect(deps.requests).toEqual([
-      { steps: ["lyrics"], run: { id: "run-new", steps: ["lyrics", "research", "design"] }, lyricsText: "[00:01.00]a", instruction: "更熱血" },
-      { steps: ["research"], run: { id: "run-new", steps: ["lyrics", "research", "design"] }, instruction: "更熱血" },
-      { steps: ["design"], run: { id: "run-new", steps: ["lyrics", "research", "design"] }, instruction: "更熱血" },
+      { steps: ["lyrics"], run: { id: "run-new", steps: ["lyrics", "research", "design", "scene"] }, lyricsText: "[00:01.00]a", instruction: "更熱血" },
+      { steps: ["research"], run: { id: "run-new", steps: ["lyrics", "research", "design", "scene"] }, instruction: "更熱血" },
+      { steps: ["design"], run: { id: "run-new", steps: ["lyrics", "research", "design", "scene"] }, instruction: "更熱血" },
+      { steps: ["scene"], run: { id: "run-new", steps: ["lyrics", "research", "design", "scene"] }, instruction: "更熱血" },
     ]);
     // the intermediate `done` events stay inside the runner
     expect(events.filter((e) => e.type === "done")).toHaveLength(1);
@@ -70,6 +71,8 @@ describe("runStepwise", () => {
       "research:done",
       "design:start",
       "design:done",
+      "scene:start",
+      "scene:done",
     ]);
   });
 

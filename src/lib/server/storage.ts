@@ -139,7 +139,7 @@ function coercePlan(raw: Record<string, unknown>): DesignPlan {
   return changed ? { ...plan, sections } : plan;
 }
 
-const STEP_IDS: readonly ProcessStepId[] = ["lyrics", "research", "design"];
+const STEP_IDS: readonly ProcessStepId[] = ["lyrics", "research", "design", "scene"];
 const isStep = (v: unknown): v is ProcessStepId => typeof v === "string" && (STEP_IDS as readonly string[]).includes(v);
 
 /** The cloud pipeline record, or undefined when missing / malformed. */

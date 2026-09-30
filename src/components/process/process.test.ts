@@ -27,11 +27,11 @@ describe("steps params", () => {
     expect(processHref("abc", { run: true, steps: ["design"] })).toBe("/p/abc/process?run=1&steps=design");
     expect(processHref("abc", { run: true, steps: ["design", "research"] })).toBe("/p/abc/process?run=1&steps=research%2Cdesign");
     // the full pipeline needs no steps param
-    expect(processHref("abc", { run: true, steps: ["lyrics", "research", "design"] })).toBe("/p/abc/process?run=1");
+    expect(processHref("abc", { run: true, steps: ["lyrics", "research", "design", "scene"] })).toBe("/p/abc/process?run=1");
   });
 
   it("computes retry steps", () => {
-    expect(stepsFrom(undefined, "research")).toEqual(["research", "design"]);
+    expect(stepsFrom(undefined, "research")).toEqual(["research", "design", "scene"]);
     expect(stepsFrom(["design"], "design")).toEqual(["design"]);
     expect(stepsFrom(["lyrics", "design"], "research")).toEqual(["lyrics", "design"]);
   });

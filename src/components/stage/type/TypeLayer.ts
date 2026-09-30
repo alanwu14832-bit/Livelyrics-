@@ -382,7 +382,24 @@ export class TypeLayer {
     this.staticKey = staticKey;
     const u = mergeUniforms(uniforms);
     const rgb = (hex: string): RGB => parseHex(hex);
+    // where the type can be this frame (GL uv, y up), padded for motion, echoes and glitch slices:
+    // the legibility guarantee's taps run only there
+    let x0 = 1;
+    let y0 = 1;
+    let x1 = 0;
+    let y1 = 0;
+    for (const it of items) {
+      const b = it.comp.bounds;
+      if (!(b.w > 0 && b.h > 0)) continue;
+      x0 = Math.min(x0, b.x / canvas.width);
+      x1 = Math.max(x1, (b.x + b.w) / canvas.width);
+      y0 = Math.min(y0, 1 - (b.y + b.h) / canvas.height);
+      y1 = Math.max(y1, 1 - b.y / canvas.height);
+    }
+    const pad = 0.08;
+    const area: [number, number, number, number] = x1 > x0 ? [x0 - pad, y0 - pad * (W / H), x1 + pad, y1 + pad * (W / H)] : [0, 0, 1, 1];
     return {
+      area,
       source: this.painter.canvas,
       version: this.version,
       width: W,

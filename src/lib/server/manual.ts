@@ -5,6 +5,7 @@
 // with the reply's research brief, all marked manual-claude.
 
 import type { ManualApplyResult, ManualPromptResult, ManualTarget } from "@/lib/api-client";
+import { ensureSceneProgram } from "@/lib/server/designer/scene-program";
 import { buildManualPrompt } from "@/lib/server/designer/manual";
 import { extractBrief, MAX_BRIEF_CHARS, readManualReply } from "@/lib/server/designer/manual-reply";
 import { DesignPlanSchema } from "@/lib/schema";
@@ -50,7 +51,8 @@ export async function manualApplyForProject(id: string, input: { target: ManualT
     if (plan) {
       if (p.plan) p.previousPlan = { plan: p.plan, at: now, reason: "套用 claude.ai 的設計方案", ...(p.planSource ? { source: p.planSource } : {}) };
       else delete p.previousPlan;
-      p.plan = plan;
+      // 專屬畫面: the song keeps its program (a Claude one adapts to the pasted sections), else the composer's
+      p.plan = ensureSceneProgram({ ...req, previous: p.plan }, plan);
       p.planSource = { engine: "manual-claude", at: now };
       // the pasted plan replaces an adopted direction
       for (const d of p.directions?.directions ?? []) if (d.status === "selected") d.status = "proposed";

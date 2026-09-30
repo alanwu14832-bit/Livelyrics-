@@ -250,7 +250,10 @@ describe("type engine: CJK rules", () => {
       expect("「『（").not.toContain(last);
       expect("，、。").not.toContain(last);
     }
-    expect(rows.flat().map((i) => units[i].text).join("")).toBe("我們「一起」唱直到天亮再見！好嗎？");
+    // (the words stay whole — 「一起」 is not split — so the comma sits inside a row and is kept;
+    // the full stop at a row end is dropped)
+    expect(rows.flat().map((i) => units[i].text).join("")).toBe("我們「一起」唱，直到天亮再見！好嗎？");
+    expect(rows.map((r) => r.map((i) => units[i].text).join(""))).toContain("「一起」");
   });
 
   it("no orphan: a row of a single character is avoided when the text can balance", () => {

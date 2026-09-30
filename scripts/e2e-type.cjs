@@ -261,7 +261,9 @@ const notBlank = (page, selector) =>
     await exp.waitForSelector("#preview-time", { timeout: 60000 });
     const previewAt = async (time) => {
       await exp.locator("#preview-time").fill(time);
-      await exp.getByRole("button", { name: "單格預覽" }).click();
+      // (the page stays busy after a preview while the pre-roll's frames finish — ~30–40 s on a
+      // software GL renderer — so the second click waits longer than Playwright's default)
+      await exp.getByRole("button", { name: "單格預覽" }).click({ timeout: 120000 });
       await exp.waitForSelector('button[aria-busy="true"]', { timeout: 5000 }).catch(() => {});
       await exp.waitForFunction(() => document.querySelector("img[data-export-preview]") && !document.querySelector('button[aria-busy="true"]'), null, { timeout: 180000 });
       await exp.waitForTimeout(500);
