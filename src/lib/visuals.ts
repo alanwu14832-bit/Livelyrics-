@@ -204,7 +204,8 @@ export function collectedSummary(list: ReadonlyArray<{ provenance: { kind: Visua
   const parts = VISUAL_KINDS.filter((k) => counts.has(k)).map((k) => {
     const n = counts.get(k)!;
     const unit = k === "logo" ? "個" : "張";
-    return n === 1 && (k === "cover" || k === "logo") ? VISUAL_KIND_LABEL[k] : `${n} ${unit}${VISUAL_KIND_LABEL[k]}`;
+    const label = VISUAL_KIND_LABEL[k];
+    return n === 1 && (k === "cover" || k === "logo") ? label : `${n} ${unit}${/^[A-Za-z]/.test(label) ? " " : ""}${label}`;
   });
   return `找到${parts.join("、")}`;
 }
