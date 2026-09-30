@@ -9,7 +9,7 @@
 
 import type { RefObject } from "react";
 import { BackLink, Button, SegmentedControl, cx } from "@/components/ui";
-import { MoonIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, SkipBackIcon, SkipForwardIcon, SubtitlesIcon, SubtitlesSlashIcon } from "@/components/ui/Icon";
+import { MoonIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, SkipBackIcon, SkipForwardIcon, SpeakerHighIcon, SpeakerSlashIcon, SubtitlesIcon, SubtitlesSlashIcon } from "@/components/ui/Icon";
 import type { HudHandle } from "@/components/ui/HUD";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { selectLineIndex, selectOverrides, useStageValue } from "@/lib/console/hooks";
@@ -97,6 +97,20 @@ export function PhoneConsole({
             {ov.lyricsVisible ? "隱藏歌詞" : "顯示歌詞"}
           </Button>
         </div>
+
+        {live && (
+          <Button
+            variant={snap.liveAudio ? "tinted" : "gray"}
+            icon={snap.liveAudio ? SpeakerHighIcon : SpeakerSlashIcon}
+            aria-pressed={snap.liveAudio}
+            onClick={() => {
+              controller.setLiveAudio(!snap.liveAudio);
+              if (!snap.liveAudio) void controller.play();
+            }}
+          >
+            {snap.liveAudio ? "音檔播放中（歌詞仍由你切）" : "同時播放音檔"}
+          </Button>
+        )}
 
         <div className={cx("flex min-h-[360px] flex-col")}>
           <LyricsList controller={controller} project={project} mode={snap.mode} selectedIndex={snap.selectedIndex} duration={snap.duration} />

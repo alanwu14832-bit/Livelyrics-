@@ -107,7 +107,7 @@ function SyncTabImpl({ controller, snap, project, onOpenControllers }: { control
           className="mt-1"
           options={[
             { value: "track", label: "跟音檔", ariaLabel: "跟音檔", caption: "跟著控制台播放的音檔時間自動換句，適合跟 click 或伴奏軌的演出與彩排。隨時可切到手動接手。" },
-            { value: "live", label: "手動切換", ariaLabel: "手動切換", caption: "樂團現場演出時用：由你逐句切換，歌詞會停在畫面上直到你送出下一句。Space、→ 或簡報遙控器的翻頁鍵送出下一句，← 回上一句，點清單可直接跳到任一句；在投影視窗按也可以。可接麥克風讓畫面跟著現場律動。你選的模式會成為之後開啟新歌時的預設。" },
+            { value: "live", label: "手動切換", ariaLabel: "手動切換", caption: "樂團現場演出時用：由你逐句切換，歌詞會停在畫面上直到你送出下一句。Space、→ 或簡報遙控器的翻頁鍵送出下一句，← 回上一句，點清單可直接跳到任一句；在投影視窗按也可以。可接麥克風讓畫面跟著現場律動；用伴奏帶或彩排時，按頂列的喇叭按鈕讓音檔同時播放。你選的模式會成為之後開啟新歌時的預設。" },
           ]}
         />
       </section>

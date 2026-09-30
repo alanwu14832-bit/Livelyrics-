@@ -16,13 +16,15 @@ export interface ConsoleSettings {
   micDeviceId: string;
   /** 同步 (phase 5a): the sync source, the LTC input and the freewheel time for this song */
   sync: SyncSettings;
+  /** 手動切換 with the track playing (a backing track or rehearsal): the audio runs, the lyrics wait for cues */
+  liveAudio: boolean;
 }
 
 export const OFFSET_LIMIT = 10;
 export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25] as const;
 
 export function defaultSettings(mode: PlaybackMode = "track"): ConsoleSettings {
-  return { mode, offset: 0, playbackRate: 1, volume: 1, muted: false, micDeviceId: "", sync: { ...DEFAULT_SYNC_SETTINGS } };
+  return { mode, offset: 0, playbackRate: 1, volume: 1, muted: false, micDeviceId: "", sync: { ...DEFAULT_SYNC_SETTINGS }, liveAudio: false };
 }
 
 export function settingsKey(projectId: string): string {
@@ -59,6 +61,7 @@ export function parseSettings(raw: string | null | undefined, defaults: ConsoleS
     muted: typeof d.muted === "boolean" ? d.muted : defaults.muted,
     micDeviceId: typeof d.micDeviceId === "string" && d.micDeviceId.length < 512 ? d.micDeviceId : defaults.micDeviceId,
     sync: d.sync !== undefined ? parseSyncSettings(d.sync) : { ...defaults.sync },
+    liveAudio: typeof d.liveAudio === "boolean" ? d.liveAudio : defaults.liveAudio,
   };
 }
 

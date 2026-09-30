@@ -93,7 +93,7 @@ export function HelpOverlay({
               <span className="font-semibold text-label">跟音檔</span>：跟著控制台播放的音檔時間自動換句。
             </p>
             <p>
-              <span className="font-semibold text-label">手動</span>：由你逐句送出，歌詞停在畫面上直到下一句。簡報遙控器的翻頁鍵也能切換，在投影視窗按也可以。
+              <span className="font-semibold text-label">手動</span>：由你逐句送出，歌詞停在畫面上直到下一句。簡報遙控器的翻頁鍵也能切換，在投影視窗按也可以。要同時聽到音檔（伴奏帶、彩排），按頂列的喇叭按鈕。
             </p>
             <p>任何時候按 B 都能立刻淡出為全黑；投影視窗只顯示動畫與歌詞，所有資訊都留在這台電腦上。</p>
           </>
