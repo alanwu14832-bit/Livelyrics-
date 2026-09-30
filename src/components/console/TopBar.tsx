@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
-import { ExportIcon, MoonIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
+import { ExportIcon, MoonIcon, PauseIcon, SpeakerHighIcon, SpeakerSlashIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
@@ -261,11 +261,25 @@ export function TopBar({
           </span>
         </Tooltip>
 
+        {live && (
+          <Tooltip content={snap.liveAudio ? "手動切換時也播放音檔（伴奏帶、彩排）：再按一次改回靜音" : "手動切換時播放音檔：歌詞仍由你逐句送出"} placement="bottom">
+            <Button
+              variant={snap.liveAudio ? "tinted" : "quiet"}
+              size="icon"
+              aria-label="手動切換時播放音檔"
+              aria-pressed={snap.liveAudio}
+              icon={snap.liveAudio ? SpeakerHighIcon : SpeakerSlashIcon}
+              onClick={() => controller.setLiveAudio(!snap.liveAudio)}
+              data-testid="live-audio"
+            />
+          </Tooltip>
+        )}
+
         <div className="flex items-center gap-1" role="group" aria-label="播放控制">
           <Tooltip content="上一句" shortcut="ArrowLeft">
             <Button variant="quiet" size="icon" aria-label="上一句" icon={SkipBackIcon} className="text-label!" onClick={() => controller.prev()} />
           </Tooltip>
-          <Tooltip content={live ? (snap.playing ? "停止手動時脈" : "啟動手動時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
+          <Tooltip content={live ? (snap.liveAudio ? (snap.playing ? "暫停音檔" : "播放音檔（歌詞仍由你切）") : snap.playing ? "停止手動時脈" : "啟動手動時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
             <Button
               size="circle"
               aria-label={snap.playing ? "暫停" : "播放"}

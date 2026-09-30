@@ -271,6 +271,35 @@ describe("ConsoleController", () => {
     c.detach();
   });
 
+  it("手動切換 with the track on: the audio plays, the lyrics still wait for cues", async () => {
+    const c = await ready();
+    c.chooseMode("live");
+    const el = FakeAudio.last!;
+    expect(el.paused).toBe(true);
+    c.setLiveAudio(true);
+    await c.play();
+    await flush();
+    expect(el.paused).toBe(false);
+    expect(c.getSnapshot().liveAudio).toBe(true);
+    // the track moves on, the line on stage does not
+    el.currentTime = 30;
+    c.cueLine(1);
+    await flush();
+    expect(lastState().lineIndex).toBe(1);
+    el.currentTime = 35;
+    await flush(60);
+    expect(lastState().lineIndex).toBe(1);
+    // back to a silent 手動切換 (a live band)
+    c.setLiveAudio(false);
+    await flush();
+    expect(el.paused).toBe(true);
+    // without the option the track never starts in LIVE
+    await c.play();
+    await flush();
+    expect(el.paused).toBe(true);
+    c.detach();
+  });
+
   it("overrides are broadcast immediately and survive a re-attach", async () => {
     const c = await ready();
     c.toggleBlackout();

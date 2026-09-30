@@ -1270,6 +1270,11 @@ keeps every contract above and changes only where things are kept and how long w
   `track` / `live`). The mode the operator picks by hand (`chooseMode`: the switch, M) is also stored as
   `livelyrics:console:preferred-mode` and is the starting mode of any song opened without its own
   settings (untimed lyrics still start in LIVE).
+- 手動切換 with the track (`settings.liveAudio`, the speaker toggle next to the mode switch; off by
+  default because a live band plays the song): in LIVE the audio element plays from where it is while the
+  lyrics still wait for cues; play / pause drive both the virtual clock and the audio, the beat comes from
+  the track (its analyser and beat grid at the audio's own time). Switching back to TRACK keeps the running
+  track (the lyrics follow it from there).
 - Remote keys (phase 7): the projection window forwards every key except F (its fullscreen), Esc, Tab and
   modifier chords as `{ type: "key", outputId, id, key: { key, code, shiftKey, repeat } }` (output ->
   console). `ProjectionLink` hands it once per console window (`id` de-duplicated) to

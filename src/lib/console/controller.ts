@@ -130,6 +130,8 @@ export interface ConsoleSnapshot {
   playing: boolean;
   /** LIVE: the clock reached the next line's start and waits for a cue */
   liveHeld: boolean;
+  /** LIVE (手動切換): the track plays too while the lyrics wait for cues */
+  liveAudio: boolean;
   offset: number;
   playbackRate: number;
   volume: number;
@@ -371,6 +373,7 @@ export class ConsoleController {
       mode: this.settings.mode,
       playing: false,
       liveHeld: false,
+      liveAudio: false,
       offset: 0,
       playbackRate: 1,
       volume: 1,
@@ -431,6 +434,7 @@ export class ConsoleController {
       playbackRate: this.settings.playbackRate,
       volume: this.settings.volume,
       muted: this.settings.muted,
+      liveAudio: this.settings.liveAudio,
       mic: { ...this.snapshot.mic, deviceId: this.settings.micDeviceId },
     });
     this.restoreSession();
@@ -844,9 +848,15 @@ export class ConsoleController {
       const r = this.sync.timecode();
       return !!r && r.running && r.direction > 0;
     }
-    if (this.settings.mode === "live") return this.clock.isRunning;
+    if (this.settings.mode === "live") return this.clock.isRunning || this.liveAudioPlaying();
     const el = this.audio;
     return !!el && !el.paused && !el.ended;
+  }
+
+  /** 手動切換 with the track on: the audio element is playing (it never drives the lyrics then). */
+  private liveAudioPlaying(): boolean {
+    const el = this.audio;
+    return this.settings.mode === "live" && this.settings.liveAudio && !!el && !el.paused && !el.ended;
   }
 
   private duration(): number {
@@ -926,6 +936,14 @@ export class ConsoleController {
     // a locked MIDI clock (the band's tempo) wins over the microphone and tap tempo
     const clock = this.clockPhase();
     if (this.settings.mode === "live") {
+      // 手動切換 over the track: the stage pulses with the track (its own clock, not the cued line's)
+      if (this.liveAudioPlaying() && this.audio) {
+        const at = this.audio.currentTime;
+        const hasGrid = !!analysis && ((analysis.beats?.length ?? 0) > 1 || analysis.bpm > 0);
+        const f = this.elementAnalyser?.getFeatures() ?? NO_AUDIO;
+        if (clock != null) return { ...f, beatPhase: clock, clock: true };
+        return { ...f, beatPhase: hasGrid ? beatPhaseAt(analysis, at) : f.beatPhase };
+      }
       // the mic analyser follows taps itself (and phase-locks them to detected onsets)
       if (this.micAnalyser) {
         const f = this.micAnalyser.getFeatures();
@@ -1130,8 +1148,14 @@ export class ConsoleController {
     if (this.settings.mode === "live") {
       this.clock.start(Date.now());
       this.afterClockChange();
+      if (this.settings.liveAudio && !this.following) await this.playElement();
       return;
     }
+    await this.playElement();
+  }
+
+  /** Start the audio element (TRACK, or 手動切換 with the track on). */
+  private async playElement(): Promise<void> {
     const el = this.audio;
     if (!el) return;
     if (this.snapshot.audio.status === "error") {
@@ -1155,10 +1179,26 @@ export class ConsoleController {
     if (this.heldByTimecode()) return;
     if (this.settings.mode === "live") {
       this.clock.stop(Date.now());
+      this.audio?.pause();
       this.afterClockChange();
       return;
     }
     this.audio?.pause();
+  }
+
+  /**
+   * 手動切換 with the track (a backing track, rehearsal): the audio plays from where it is and the
+   * lyrics still wait for cues. Off (the default, a live band): the track stays silent in LIVE.
+   */
+  setLiveAudio(on: boolean): void {
+    if (on === this.settings.liveAudio) return;
+    this.updateSettings({ liveAudio: on });
+    this.set({ liveAudio: on });
+    if (this.settings.mode === "live") {
+      if (!on) this.audio?.pause();
+      else if (this.clock.isRunning && !this.following) void this.playElement();
+    }
+    this.afterClockChange();
   }
 
   togglePlay(): void {
@@ -1515,8 +1555,10 @@ export class ConsoleController {
     const now = Date.now();
     const t = this.songTime(now);
     this.sectionPin = null;
+    // the track keeps playing into 手動切換 when the operator asked for it (a backing track)
+    const keepTrack = mode === "live" ? this.settings.liveAudio : this.liveAudioPlaying();
     if (mode === "live") {
-      this.audio?.pause();
+      if (!this.settings.liveAudio) this.audio?.pause();
       const current = this.lineIndex;
       const next = nextTimedLineAfter(lines, t);
       const hold = current != null ? liveHoldTime(lines, current, t) : next != null ? lines[next].start : null;
@@ -1530,7 +1572,8 @@ export class ConsoleController {
       this.clock.stop(now);
       this.liveLine = null;
       const el = this.audio;
-      if (el) {
+      // back to 跟音檔 with the track already running: the lyrics follow it from where it is
+      if (el && !keepTrack) {
         try {
           el.currentTime = Math.max(0, t - this.settings.offset);
         } catch {
