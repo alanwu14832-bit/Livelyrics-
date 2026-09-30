@@ -68,7 +68,8 @@ node scripts/seed-demo.mjs
    | `LIVELYRICS_BACKUP_MODEL` | 選用：Claude 暫時無法使用（503、529 過載）時，先等 3 秒、8 秒重試兩次，再改用這個備用模型試一次（預設 `claude-opus-5-5`，只在出錯時才用；填 `off` 關閉） |
    | `LIVELYRICS_BLOB_DELIVERY` | 選用：設成 `proxy` 時音檔與素材經由函式轉送，預設 `redirect` 直接從 Blob 讀取（見下方） |
    | `LIVELYRICS_STORAGE` | 選用：`cloud` 或 `local` 強制指定模式；一般不需要 |
-   | `LIVELYRICS_FREE_SOURCES` | 選用：設成 `off` 時免費研究不查 MusicBrainz 與維基百科，只分析歌詞與音訊 |
+   | `LIVELYRICS_FREE_SOURCES` | 選用：設成 `off` 時免費研究不查 MusicBrainz 與維基百科（也不查 Cover Art Archive 的封面），只分析歌詞與音訊 |
+   | `LIVELYRICS_VISUALS` | 選用：設成 `off` 時研究不下載樂團的封面、MV 截圖與主視覺（見「研究找到的素材」） |
 
 4. 每次新增或修改環境變數後都要重新部署（**Deployments › ⋯ › Redeploy**）才會生效。
 
@@ -181,9 +182,22 @@ node scripts/seed-demo.mjs
 
 貼上的內容只會被當成文字檢查，不會被執行，上限 200 KB。
 
-免費研究做不到的：它不會看 MV、專輯封面或現場影片，也不會讀樂評與樂迷討論；公開資料只有曲風、年份、專輯與百科摘要，冷門樂團常常查不到；歌詞分析是詞庫比對，讀不出反諷、隱喻與上下文；設計是規則推導，只看得懂簡單的指示。需要這些時用「用 claude.ai 研究」或設定 API 金鑰。
+免費研究做不到的：它不會看 MV 或現場影片（專輯封面會從 Cover Art Archive 下載，見下方「研究找到的素材」），也不會讀樂評與樂迷討論；公開資料只有曲風、年份、專輯與百科摘要，冷門樂團常常查不到；歌詞分析是詞庫比對，讀不出反諷、隱喻與上下文；設計是規則推導，只看得懂簡單的指示。需要這些時用「用 claude.ai 研究」或設定 API 金鑰。
 
-選用的環境變數：`LIVELYRICS_FREE_SOURCES=off`（不查公開資料）、`LIVELYRICS_MUSICBRAINZ_URL`、`LIVELYRICS_WIKIPEDIA_URL`（改用自架或測試用的端點，後者可含 `{lang}`）。
+選用的環境變數：`LIVELYRICS_FREE_SOURCES=off`（不查公開資料，也不查 Cover Art Archive）、`LIVELYRICS_MUSICBRAINZ_URL`、`LIVELYRICS_WIKIPEDIA_URL`（改用自架或測試用的端點，後者可含 `{lang}`）、`LIVELYRICS_COVERART_URL`（Cover Art Archive 的替代端點，預設 `https://coverartarchive.org`）、`LIVELYRICS_VISUALS=off`（研究時完全不下載樂團素材）。
+
+## 研究找到的素材
+
+設計要看得出是**這個樂團、這張專輯、這支 MV**，所以研究時會順便把樂團真實的視覺素材找回來：
+
+- **專輯／單曲封面**：從 MusicBrainz 找到這首歌所在的專輯，再到 [Cover Art Archive](https://coverartarchive.org) 下載正面封面（免費研究與 Claude 都會做）。
+- **有 Claude（API 金鑰）時**：Claude 在研究簡報之外另外列出官方 MV、主視覺／巡演海報、標誌與過去的現場照片，可以用網頁擷取打開官方網站找到真正的圖片網址。YouTube 的 MV 會取影片的高解析截圖（`maxresdefault.jpg`，沒有時用 `hqdefault.jpg`）；只有網頁沒有圖片網址時，讀那一頁的分享圖（og:image）。
+- **設計會用它們**：每一張都是設計參考——Claude 設計主視覺、設計方向與專屬畫面時會真的看到這些圖（連同參考圖），並被要求從封面、MV、主視覺取配色、母題、構圖與材質；離線設計師用伺服器量出的顏色（封面最重）決定配色。標「可以上台」的素材還能成為段落的素材（例如開場讓封面以雙色調浮現、橋段用印刷網點回到封面），有節制地只放在一兩個段落。
+- **設計總覽的「研究找到的素材」**（控制台的「研究」分頁也有）：每張圖顯示種類、來源連結與量到的顏色，可以切換「可以上台」／「只當參考」或「移除」。移除會同時從設計參考與舞台上拿掉（用到它的段落改回只用場景），重新研究也不會再加回來；重新研究時已有的素材保留你的選擇，不會重複下載。
+
+**授權**：素材是樂團自己的作品，要先按一次「確認樂團授權…」（存在樂團上，樂團的每一首歌都適用；沒有樂團的歌存在這首歌上）。確認之前，收集照常進行，但每一張都預設「只當參考」、不會上台；確認之後新找到的素材預設「可以上台」，每一張仍然可以改。每張素材都記錄來源頁面、圖片網址、由誰找到、下載時間與當時的授權狀態。
+
+**下載的安全規則**（網址來自網路與 Claude 的回覆，一律當成不可信）：只接受 https（443 埠、不能帶帳號密碼）；先解析 DNS，任何一個位址是內部網路、本機、link-local（含雲端 metadata 169.254.169.254）、CGNAT、多播、保留或文件用的 IPv4／IPv6（包括 IPv4-mapped、NAT64、6to4 內嵌的位址）就拒絕，`localhost`、`*.local`、`*.internal` 與沒有點的主機名稱連查都不查；連線使用檢查過的位址（避免 DNS rebinding）；最多轉址 3 次，每一次都重新檢查；每張圖 8 秒逾時、8 MB 上限（宣告的長度與實際下載都檢查）；回應必須是圖片類型，而且檔頭必須是 JPEG／PNG／WebP／GIF（SVG 一律拒絕、不會被執行或顯示）；太小的圖（圖示、預留圖）略過；同一個網址或同樣內容的圖只收一次，每首歌最多 8 張；整個收集最多 30 秒，雲端模式還會留時間給研究步驟存檔（每個步驟 300 秒內）。收集失敗只會記在處理紀錄裡，研究照常完成。設定的測試端點（`LIVELYRICS_COVERART_URL`）是唯一可以用 http 與本機位址的例外。
 
 ## 設計方向與樂團確認
 
@@ -276,12 +290,13 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-scene.cjs       # �
 
 `e2e-sync.cjs` 不需要實體裝置：它在頁面裡裝一個假的 Web MIDI 輸入，並把自己產生的 LTC 音檔（25 fps，從 01:00:10:00 開始）當成 Chromium 的假麥克風。改了 `src/lib/sync/ltc.ts` 或 `ltc-worklet.ts` 後，執行 `node scripts/build-worklets.mjs` 重新產生 `public/worklets/ltc-decoder.js`（`--check` 只檢查是否過期；單元測試也會檢查）。
 
-免費研究與「用 claude.ai 研究」的測試不連外部網站：伺服器改查腳本內建的測試資料來源（`fixtures/research/` 的真實回應），所以要這樣啟動：
+免費研究、研究找到的素材與「用 claude.ai 研究」的測試不連外部網站：伺服器改查腳本內建的測試資料來源（`fixtures/research/` 的真實回應、Cover Art Archive 的清單與 `fixtures/visuals/cover.jpg`），所以要這樣啟動：
 
 ```bash
 LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e \
   LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
-  LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' npx next start -p 3100
+  LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' \
+  LIVELYRICS_COVERART_URL=http://127.0.0.1:3199/coverart npx next start -p 3100
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 ```
 

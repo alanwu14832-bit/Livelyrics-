@@ -55,6 +55,7 @@ show up in the product:
 | `src/lib/stage/program/contract.ts` | phase 7: the scene program uniform contract (`PROGRAM_UNIFORMS`, the prelude / epilogue, `PROGRAM_CONTRACT_DOC`); `validate.ts` the program validator |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `LiveAudioFeatures.clock` (phase 5a), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
 | `src/lib/stage/safety.ts` | LED 安全模式 (phase 3): settings, cap / soften maths, source-level rules, `FlashDetector`, `FlashLimiter` |
+| `src/lib/visuals.ts` | phase 8 (研究找到的素材): limits, kind labels, coercion of `Project.collected` / Claude's candidate list, `stageCollected`, `mergeCollection`, the authorization note, the log line (`collectedSummary`) |
 | `src/lib/moodboard.ts`, `src/lib/directions.ts` | phase 4: mood board limits, colour extraction, coercion, summary; directions coercion, select / undo / comment transforms, style-frame moments, the sign-off sheet data |
 | `src/lib/timeline.ts` | `lineIndexAt`, `lineSpan`, `lineProgress`, `sectionIndexAt`, `envelopeAt`, `beatPhaseAt`, `formatTime` (rounds to 1/100 s) |
 | `src/lib/fonts.ts` | next/font loading (`fontVariables`); re-exports `src/lib/font-meta.ts` |
@@ -95,6 +96,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/assets/[assetId]` GET/HEAD/PATCH/DELETE | SERVER | file with HTTP Range / edit `{name?,note?,tags?,kind?}` / delete (also clears plan sections that showed it) |
 | `/api/projects/[id]/process` POST | SERVER | SSE stream of `PipelineEvent`, body `ProcessRequest` (steps lyrics / research / design / scene; cloud: one step per request with `run`, `maxDuration` 300) |
 | `/api/projects/[id]/moodboard` GET/POST, `/api/projects/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | 參考圖 (phase 4): `{ images }` / upload (the media-library contract, images only, ≤ 12, 8 MB, `meta.stats` = the colours measured in the browser) → `{ image, images }` / file / `{ note?, name? }` / delete |
+| `/api/projects/[id]/collected` GET/POST, `/api/projects/[id]/collected/[itemId]` GET/HEAD/PATCH/DELETE | SERVER | 研究找到的素材 (phase 8): `{ items, authorization }` / `{ action: "authorize", note? }` (the band's one-time acknowledgement) → `{ items, authorization, project }` / file with Range / `{ use?: "stage" \| "reference", stats? }` → `{ item, items, plan }` / 移除 → `{ ok, items, plan }`. An item with `use: "stage"` is also served by the project's asset route |
 | `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
 | `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
 | `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 4b) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call, no `maxDuration`) |
@@ -1039,6 +1041,119 @@ uniform（全部由系統提供，不能自己宣告）：
   adaptive-resolution floor. Programs have no access to the band's media textures. The composer's
   forms are eight hand-written families: songs of the same genre and imagery share a form (their
   seed still changes the parameters, texture, motion and composition).
+
+### 研究找到的素材 (phase 8)
+
+The research collects the band's real visual material for the song — album / single cover, official
+MV stills, key visual / tour poster, logo, past live photos — and the design is built from it: every
+item is a design reference, and an item the operator lets on stage (可以上台) may be a section's
+`media` with the existing treatments. The owner has the bands' authorization; the app still records a
+one-time acknowledgement before anything goes on stage.
+
+- **Data** (`src/lib/types.ts`, pure helpers in `src/lib/visuals.ts`). `Project.collected?:
+  CollectedVisual[]` — a `MoodImage` (Asset + measured `stats`) plus `provenance { kind cover | mv |
+  keyvisual | logo | live, sourceUrl?, imageUrl, foundBy cover-art-archive | claude | youtube | page,
+  fetchedAt, why?, title?, authorization }` (the 繁中 authorization text at download time), `use stage |
+  reference`, `useSetBy auto | user`, `hash` (sha256, 16 hex). `Project.collectedDismissed` (hashes and
+  image URLs of removed items), `Band.materialAuthorization` / `Project.materialAuthorization` (a
+  band-less song) `{ at, note }`. `Research.visualCandidates?` (Claude's list). ≤ 8 items a song, 8 MB
+  each. Files sit next to the assets (`<project>/assets/<id>.<ext>`; cloud: a public blob
+  `projects/<id>/collected-<suffix>.<ext>` written by the server through the new `FileStore.write`
+  (local: atomic write; Blob: `put` with a random suffix, `BlobApi.upload`); ids unique across assets,
+  mood board and this list (`takenAssetIds`).
+- **Collection** (`src/lib/server/research/visuals.ts`, run at the end of the pipeline's research step,
+  `collectStep` in `pipeline.ts`). The cover: the release group of 免費研究's MusicBrainz lookup, or —
+  for a Claude research, which has none — `findReleaseGroup` (the recording search through the shared
+  MusicBrainz gate, started in parallel with Claude) → `GET <coverart>/release-group/<mbid>` →
+  `parseCoverArt` (the front image's 1200 px thumbnail, then large / 500, else the original; http links
+  of the archive hosts upgraded to https). Claude: `RESEARCH_VISUALS_RULES` (appended to the research
+  system prompt only; the brief is unchanged) asks for a fenced ```` ```visuals ```` JSON list after the
+  brief (kind, pageUrl, imageUrl when actually seen, title, why); the research request also offers
+  `web_fetch_20260209` (max 5) so Claude can open official pages; `splitVisuals` strips and parses the
+  list (tolerant; a cut-off or broken list yields nothing), `visualsStreamFilter` keeps it out of the
+  streamed brief, `coerceCandidates` validates it. `planJobs`: YouTube links → `i.ytimg.com/vi/<id>/
+  maxresdefault.jpg`, then `hqdefault.jpg` (`youtubeId`: watch, youtu.be, embed, shorts, live, m.,
+  music., nocookie); a page without an image → its og:image (`pageImage`, ≤ 4 pages, 1.5 MB of HTML);
+  direct image URLs as given. Priority cover → key visual → MV → logo → live; 3 downloads at a time;
+  dedupe by URL before and by content hash after the download; the stored and removed items are
+  skipped; min edge per kind (icons and placeholders dropped). Budget `VISUALS_BUDGET_MS` (30 s); cloud:
+  also ≤ the step's hard stop minus 15 s (the research step stays within its 300 s). Nothing throws:
+  failures are 繁中 log lines, the research is saved either way. Log / step message:
+  「找到專輯封面、2 張 MV 畫面、1 張主視覺」 (`collectedSummary`).
+- **Safety** (`src/lib/server/research/safe-fetch.ts`, `safeGet`, never throws). https on 443 only, no
+  credentials in the URL; host names `localhost`, `*.local`, `*.internal`, `*.localdomain`, `*.lan`,
+  `*.home`, `*.corp`, `*.arpa`, `*.test`, `*.invalid`, `*.example`, `metadata(.google.internal)` and
+  single-label names refused before any lookup; IP literals (the WHATWG parser normalizes decimal /
+  hex / short forms first) and every DNS answer (`dns.lookup` all, verbatim) must be public:
+  `isPrivateV4` (0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24,
+  192.88.99/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, ≥ 224), `isPrivateV6` (::, ::1,
+  IPv4-mapped / -compatible / NAT64 / 6to4 with the embedded IPv4 checked, Teredo, 2001:db8::/32,
+  100::/64, fc00::/7, fe80::/10, fec0::/10, ff00::/8, anything outside 2000::/3); one private answer
+  refuses the name. The connection (`node:http(s)` with a pinned `lookup`) only uses the checked
+  addresses, so a DNS answer that changes after the check (rebinding) cannot reach inside. Redirects are
+  followed by hand, ≤ 3, every hop checked again. 8 s per request, Content-Length and the streamed size
+  capped, the content type must match (an image type, never SVG; HTML for pages; JSON for the archive),
+  and the bytes must sniff as JPEG / PNG / WebP / GIF (`sniffImage` on `sniffMedia`); SVG and HTML are
+  never stored, rendered or executed. The origin of a configured `LIVELYRICS_COVERART_URL` is the only
+  place http and loopback are allowed (the e2e stub). `LIVELYRICS_VISUALS=off` disables collection;
+  `LIVELYRICS_FREE_SOURCES=off` also skips MusicBrainz / the Cover Art Archive.
+- **Colours on the server** (`src/lib/server/research/image-decode.ts`, no dependency): `imageSize`
+  (PNG IHDR, GIF, JPEG SOF, WebP VP8 / VP8L / VP8X) and `decodeSample` → an RGBA sample (≤ 96 × 96)
+  for `extractMoodStats` (the browser's mood board palette code): JPEG from the DC coefficients only
+  (baseline and progressive first DC scans, a 1/8-scale picture, YCbCr / Adobe RGB / grey), PNG through
+  node:zlib and the row filters (1–16 bit, grey / RGB / palette / alpha; not interlaced), GIF's first
+  frame (LZW). WebP is sized but not decoded: the UI measures it in the browser once and PATCHes
+  `stats`. Bounded pixel counts and inflate output; any surprise returns null.
+- **Storage** (`src/lib/server/collected-storage.ts`): `storeCollected` (writes only new items; a
+  refresh merges by hash / image URL, keeps ids, files and the operator's choice, may add a missing
+  `why` / palette; removed items stay out), `setCollectedUse` (只當參考 also clears the sections that
+  showed it), `setCollectedStats`, `removeCollected` (file + entry + sections, remembered in
+  `collectedDismissed`), `authorizationFor` (the band's, else the song's), `acknowledgeAuthorization`
+  (stored on the band or the band-less song; items still on their automatic default go on stage).
+  Deleting a project removes the files (local folder; cloud blobs via `projectFiles`).
+- **Stage.** `stageAssets(project)` = own uploads, then collected items with `use: "stage"` (served
+  like project assets: the project asset route falls back to them), then the band library — so the
+  stage, the export, the console media picker, the directions and the designer's `assets` see them
+  with no other change. `ConsoleController.applyCollected(items, plan)` re-broadcasts after a toggle
+  in the console.
+- **Design.** `DesignerInput.collected` / `collectedImages` (loaded with `loadVisionImages`, sharing
+  the mood board's size budget). Claude (design, directions, scene program): `collectedVisionContent`
+  puts each image after the mood board's with 「素材 n：研究找到的專輯封面「…」（Cover Art Archive，
+  host）｜可以上台（素材 id …）／只當參考」; `collectedBlock` tells the designer to derive palette, motifs,
+  composition and texture from this real material, cite 「素材 n」, and (design only) that 可以上台 items
+  may be a section's media with a suitable treatment in one or two sections, with restraint; the scene
+  program prompt adds the lead image's measured palette (`leadPalette`) and that colours stay palette
+  uniforms (programs cannot sample images). Offline: `combinedMood` (mood board + collected, the cover
+  weighted 3, key visual 2, MV 1.5, live 1, logo 0.5; `moodSummary`'s new `weight`) feeds
+  `moodPalette` after the bible; the concept says the colours come from the band's material;
+  `placeCollected` (uploads keep `assignMedia`) puts the cover in the opening (duotone) and the
+  bridge / breakdown (halftone), a key visual / MV still in a quiet verse (grain-film), a logo at the
+  end — at most three sections, only where nothing is placed; the offline composer takes the lead
+  image's temperature. Directions: the same palette reading and the block (no media rule).
+- **UI** (`src/components/process/CollectedVisuals.tsx`): 「研究找到的素材」 on the design overview (after
+  the key visual) and, compact, in the console's 研究 tab: per item the picture, kind, name, why,
+  measured colours, a source link (who found it, host), 「可以上台／只當參考」 and 移除 (an Alert says
+  both uses go and a refresh will not bring it back). The authorization strip: 「還沒確認樂團授權：素材先
+  只當設計參考，不會上台。」 + 「確認樂團授權…」 (an Alert with the note; choosing 可以上台 before it asks
+  for it too), afterwards 「樂團已授權使用自己的素材（date 確認）」. Phone: one row per item.
+- **Tests**: `research/visuals.test.ts` (IPv4 / IPv6 ranges, mapped / NAT64 / 6to4, URL rules, pinned
+  addresses, a name answering public + private, redirects to the metadata service and to an internal
+  name, ≤ 3 redirects, content types, declared and streamed size caps, timeouts; magic bytes and sizes;
+  the palette of the fixture cover from JPEG and PNG; the archive listing, YouTube ids, og:image, job
+  planning; the collection with a fake network: provenance, measured stats, the hqdefault fallback, an
+  SVG served as PNG refused, duplicates, the skip list, room, the switches; merge / coercion),
+  `designer/collected.test.ts` (the list split and the stream filter, `researchSong` with a mocked
+  transport: candidates, web fetch offered; the vision blocks and prompt; reference-only items never as
+  media; the scene prompt's palette; the offline designer's cover palette and 1–3 cover sections),
+  `collected-storage.test.ts` (local round trip, refresh dedupe, toggles clearing sections, removal and
+  its dismissal, the band's authorization, the routes, cloud Blob writes / deletes). E2E: section 2b of
+  `scripts/e2e-free-research.cjs` (a Cover Art Archive stub and `fixtures/visuals/cover.jpg`).
+- **Known limits.** Only the cover works without a Claude key (MV stills, key visuals, logos and live
+  photos come from Claude's list, which needs the API research; the claude.ai round trip does not
+  collect). Claude's image URLs can be stale or hotlink-protected (then only the og:image path or
+  nothing); YouTube stills are the video's thumbnail, not a chosen frame. WebP colours need the
+  browser once. Items are per song (a band-level library of collected material is future work); the
+  acknowledgement is recorded, not verified.
 
 ### Band media and the output canvas (phase 1a)
 
