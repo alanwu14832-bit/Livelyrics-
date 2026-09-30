@@ -2002,7 +2002,7 @@ export class ConsoleController {
   applyAssets(assets: Asset[], plan?: DesignPlan | null): void {
     const project = this.snapshot.project;
     if (!project) return;
-    const ids = new Set(stageAssets({ assets, bandAssets: project.bandAssets }).map((a) => a.id));
+    const ids = new Set(stageAssets({ assets, bandAssets: project.bandAssets, collected: project.collected }).map((a) => a.id));
     const strip = (p: DesignPlan): DesignPlan =>
       p.sections.some((s) => s.media && !ids.has(s.media.assetId))
         ? { ...p, sections: p.sections.map((s) => (s.media && !ids.has(s.media.assetId) ? { ...s, media: null } : s)) }

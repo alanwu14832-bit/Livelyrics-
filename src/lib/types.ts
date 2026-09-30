@@ -162,6 +162,69 @@ export interface Research {
    * does not ask again (kept when a claude.ai reply replaces the brief). Absent for Claude briefs.
    */
   publicInfo?: PublicInfo;
+  /**
+   * phase 8: the images Claude listed after its web research (official cover, MV links, key visual /
+   * poster, logo, live photos). The research step downloads what it can into `Project.collected`.
+   */
+  visualCandidates?: VisualCandidate[];
+}
+
+// ---------------------------------------------------------------------------
+// 研究找到的素材 (phase 8): the band's real visual material, collected during research
+// ---------------------------------------------------------------------------
+
+/** cover = album / single cover; mv = an official MV still; keyvisual = key visual / tour poster; logo; live = a past live-show photo */
+export type VisualKind = "cover" | "mv" | "keyvisual" | "logo" | "live";
+
+/** An image Claude found while researching (before anything is downloaded). */
+export interface VisualCandidate {
+  kind: VisualKind;
+  /** the page it was found on (official site, YouTube, a news article…) */
+  pageUrl?: string;
+  /** a direct image URL when Claude found one */
+  imageUrl?: string;
+  /** 繁中: why it matters for the stage design */
+  why?: string;
+  title?: string;
+}
+
+/** Who found a collected image. */
+export type VisualFinder = "cover-art-archive" | "claude" | "youtube" | "page";
+
+export interface VisualProvenance {
+  kind: VisualKind;
+  /** the page the image belongs to (release page, MV page, official site) */
+  sourceUrl?: string;
+  /** the image URL that was downloaded */
+  imageUrl: string;
+  foundBy: VisualFinder;
+  fetchedAt: string;
+  why?: string;
+  title?: string;
+  /** 繁中: the authorization the item was collected under (the band's acknowledgement, or its absence) */
+  authorization: string;
+}
+
+/**
+ * One collected image: stored like a mood board image (the project's assets folder / Blob prefix,
+ * ids unique across assets, mood board and this list), usable as a design reference (Claude's vision
+ * input, the offline palette) and, with `use: "stage"`, as stage material (a section's `media`).
+ */
+export interface CollectedVisual extends MoodImage {
+  provenance: VisualProvenance;
+  /** stage = 可以上台 (reference too); reference = 只當參考 */
+  use: "stage" | "reference";
+  /** "auto" = the default the collection chose; "user" = the operator's toggle (kept on a refresh) */
+  useSetBy: "auto" | "user";
+  /** sha256 of the file (first 16 hex): dedupe across refreshes */
+  hash: string;
+}
+
+/** The band's (or a band-less song's) one-time acknowledgement that its material may be used. */
+export interface MaterialAuthorization {
+  at: string;
+  /** 繁中 note shown with it */
+  note: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,6 +531,12 @@ export interface Project {
   timecode?: SongTimecode;
   /** the library card's picture: a small JPEG of the key still, saved by the design overview */
   thumb?: ProjectThumb;
+  /** 研究找到的素材 (phase 8); absent = none */
+  collected?: CollectedVisual[];
+  /** hashes / image URLs of collected items the operator removed (a refresh does not bring them back) */
+  collectedDismissed?: string[];
+  /** a band-less song's material authorization (a song of a band uses the band's) */
+  materialAuthorization?: MaterialAuthorization;
 }
 
 /** A small key still (data:image/jpeg, ≤ THUMB_MAX_CHARS) and the plan it shows (planHash). */
@@ -589,6 +658,8 @@ export interface Band {
   bibleJob?: JobState;
   /** the band's mood board (phase 4): applies to all its songs; absent = none */
   moodboard?: MoodImage[];
+  /** phase 8: the band authorized using its material (collected images default to 可以上台) */
+  materialAuthorization?: MaterialAuthorization;
 }
 
 export interface BandSummary {

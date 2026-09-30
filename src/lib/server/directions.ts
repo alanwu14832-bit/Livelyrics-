@@ -55,7 +55,7 @@ export async function designRequestFor(project: Project, opts: { vision: boolean
     meta: project.meta,
     lyrics: project.lyrics,
     analysis: project.analysis,
-    assets: stageAssets({ assets: project.assets ?? [], bandAssets: band?.assets ?? [] }),
+    assets: stageAssets({ assets: project.assets ?? [], bandAssets: band?.assets ?? [], collected: project.collected }),
     bible: band?.bible ?? null,
     bandName: band?.name,
     research: project.research,

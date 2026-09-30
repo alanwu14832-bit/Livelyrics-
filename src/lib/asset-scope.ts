@@ -7,6 +7,7 @@
 // ever repeats one, the project's own asset wins.
 
 import type { Asset, Project } from "./types";
+import { stageCollected } from "./visuals";
 
 export const projectAssetUrl = (projectId: string, assetId: string) => `/api/projects/${projectId}/assets/${assetId}`;
 export const bandAssetUrl = (bandId: string, assetId: string) => `/api/bands/${bandId}/assets/${assetId}`;
@@ -21,12 +22,14 @@ export function asBandAssets(assets: readonly Asset[] | null | undefined): Asset
 }
 
 /**
- * Every asset a project's plan may use: its own first, then the band's (scope "band"), without
- * duplicate ids.
+ * Every asset a project's plan may use: its own first, then the research's collected images the
+ * operator lets on stage (可以上台, served like the project's own), then the band's (scope "band"),
+ * without duplicate ids.
  */
-export function stageAssets(project: Pick<Project, "assets" | "bandAssets"> | null | undefined): Asset[] {
+export function stageAssets(project: (Pick<Project, "assets" | "bandAssets"> & Partial<Pick<Project, "collected">>) | null | undefined): Asset[] {
   if (!project) return [];
-  const own = Array.isArray(project.assets) ? project.assets.filter((a) => a && typeof a.id === "string") : [];
+  const uploaded = Array.isArray(project.assets) ? project.assets.filter((a) => a && typeof a.id === "string") : [];
+  const own = [...uploaded, ...stageCollected(Array.isArray(project.collected) ? project.collected : []).filter((a) => a && typeof a.id === "string" && !uploaded.some((u) => u.id === a.id))];
   const seen = new Set(own.map((a) => a.id));
   const out: Asset[] = own.map((a) => (a.scope === "band" ? { ...a, scope: "project" as const } : a));
   for (const a of asBandAssets(Array.isArray(project.bandAssets) ? project.bandAssets : [])) {
@@ -38,7 +41,7 @@ export function stageAssets(project: Pick<Project, "assets" | "bandAssets"> | nu
 }
 
 /** The asset an id names in the project's merged view, or undefined. */
-export function resolveAsset(project: Pick<Project, "assets" | "bandAssets"> | null | undefined, assetId: string | null | undefined): Asset | undefined {
+export function resolveAsset(project: (Pick<Project, "assets" | "bandAssets"> & Partial<Pick<Project, "collected">>) | null | undefined, assetId: string | null | undefined): Asset | undefined {
   if (!assetId) return undefined;
   return stageAssets(project).find((a) => a.id === assetId);
 }

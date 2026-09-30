@@ -599,7 +599,7 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         lyrics: project.lyrics,
         analysis: project.analysis,
         // the song's own material and the band's shared library
-        assets: stageAssets({ assets: project.assets ?? [], bandAssets: band.bandAssets }),
+        assets: stageAssets({ assets: project.assets ?? [], bandAssets: band.bandAssets, collected: project.collected }),
         bible: band.bible,
         bandName: band.bandName,
         research: project.research,
