@@ -20,6 +20,7 @@ import { BIBLE_SYSTEM, BibleDraftSchema, buildBiblePrompt, offlineBible, type Bi
 import { bibleBlock } from "./prompts";
 import { buildDirections, buildDirectionsPrompt, DirectionDraftSchema, DIRECTIONS_SYSTEM, directionsSummary, normalizeDirectionDrafts, offlineDirectionSpecs } from "./directions";
 import { visionContent } from "./moodboard";
+import { collectedVisionContent } from "./collected";
 import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
@@ -358,8 +359,11 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
     return offlineSet();
   }
   try {
-    const images = visionContent(req.moodboard, req.moodboardImages);
-    cbs.onLog(`Claude（${d.model}）開始提出設計方向${images.length ? `，參考 ${images.length / 2} 張參考圖` : ""}…`);
+    const mood = visionContent(req.moodboard, req.moodboardImages);
+    const found = collectedVisionContent(req.collected, req.collectedImages);
+    const images = [...mood, ...found];
+    const seen = [mood.length ? `${mood.length / 2} 張參考圖` : "", found.length ? `${found.length / 2} 張研究找到的素材` : ""].filter(Boolean).join("與");
+    cbs.onLog(`Claude（${d.model}）開始提出設計方向${seen ? `，參考 ${seen}` : ""}…`);
     const { raw, model } = await claudeStructured(
       { system: DIRECTIONS_SYSTEM, prompt: buildDirectionsPrompt(req), schema: DirectionDraftSchema, label: "設計方向", before: images, effort: "medium", maxTokens: 16_000 },
       cbs,
@@ -410,9 +414,11 @@ export async function designSceneProgram(req: DesignRequest, plan: DesignPlan, c
   try {
     cbs.onLog(`Claude（${d.model}）開始寫這首歌的專屬畫面${instruction ? "（依指示）" : ""}…`);
     const editing = previous && (previous.engine === "claude" || previous.engine === "manual") && instruction ? previous : null;
+    // phase 8: the band's real material (cover, MV stills, key visual) as vision input
+    const images = [...visionContent(req.moodboard, req.moodboardImages), ...collectedVisionContent(req.collected, req.collectedImages)];
     const run = async (errors?: string[]) =>
       claudeStructured(
-        { system: SCENE_SYSTEM, prompt: buildScenePrompt(req, plan, { errors, previous: editing }), schema: SceneProgramDraftSchema, label: "專屬畫面", effort: "high", maxTokens: 32_000 },
+        { system: SCENE_SYSTEM, prompt: buildScenePrompt(req, plan, { errors, previous: editing }), schema: SceneProgramDraftSchema, label: "專屬畫面", effort: "high", maxTokens: 32_000, ...(images.length ? { before: images } : {}) },
         cbs,
         { transport: d.transport(), model: d.model, now: d.now },
       );

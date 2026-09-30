@@ -275,7 +275,7 @@ export interface MoodSummary {
  * One reading of the whole mood board: every image's palette weighted by its share (images whose
  * note says the colour is the point, 「顏色」「色」, count double). Null without measured images.
  */
-export function moodSummary(images: readonly MoodImage[] | null | undefined): MoodSummary | null {
+export function moodSummary(images: readonly MoodImage[] | null | undefined, weight?: (image: MoodImage) => number | null): MoodSummary | null {
   const measured = (images ?? []).filter((m) => m.stats && m.stats.palette.length);
   if (!measured.length) return null;
   const pts: Rgb3[] = [];
@@ -286,7 +286,8 @@ export function moodSummary(images: readonly MoodImage[] | null | undefined): Mo
   let total = 0;
   for (const m of measured) {
     const s = m.stats!;
-    const boost = m.note && /顏色|色調|配色|色彩|colou?r/i.test(m.note) ? 2 : 1;
+    // a caller's weight (phase 8: the research's cover counts most), else a note about colour counts double
+    const boost = weight?.(m) ?? (m.note && /顏色|色調|配色|色彩|colou?r/i.test(m.note) ? 2 : 1);
     s.palette.forEach((hex, i) => {
       const rgb = hexRgb(hex);
       if (!rgb) return;

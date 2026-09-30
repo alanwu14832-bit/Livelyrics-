@@ -15,6 +15,8 @@ import type {
   AudioAnalysis,
   Band,
   BandSummary,
+  CollectedVisual,
+  MaterialAuthorization,
   DesignPlan,
   DirectionEngine,
   Lyrics,
@@ -263,6 +265,23 @@ export const api = {
   // ---- mood board (參考圖, phase 4) -------------------------------------------
 
   /** a song's or a band's mood board */
+  // 研究找到的素材 (phase 8)
+  listCollected: (id: string) =>
+    fetch(`/api/projects/${id}/collected`).then((r) => json<{ items: CollectedVisual[]; authorization: MaterialAuthorization | null }>(r)),
+  /** the band's one-time acknowledgement that its material may be used on stage */
+  authorizeMaterial: (id: string, note?: string) =>
+    fetch(`/api/projects/${id}/collected`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "authorize", ...(note ? { note } : {}) }) }).then((r) =>
+      json<{ items: CollectedVisual[]; authorization: MaterialAuthorization; project: Project }>(r),
+    ),
+  /** 可以上台 / 只當參考, or the colours the browser measured */
+  updateCollected: (id: string, itemId: string, patch: { use?: "stage" | "reference"; stats?: MoodStats }) =>
+    fetch(`/api/projects/${id}/collected/${itemId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).then((r) =>
+      json<{ item: CollectedVisual; items: CollectedVisual[]; plan: DesignPlan | null }>(r),
+    ),
+  /** 移除: the file and both uses */
+  deleteCollected: (id: string, itemId: string) =>
+    fetch(`/api/projects/${id}/collected/${itemId}`, { method: "DELETE" }).then((r) => json<{ ok: true; items: CollectedVisual[]; plan: DesignPlan | null }>(r)),
+  collectedUrl: (id: string, itemId: string) => `/api/projects/${id}/collected/${itemId}`,
   listMoodboard: (owner: AssetOwner) => fetch(moodBase(owner)).then((r) => json<{ images: MoodImage[] }>(r)),
 
   moodImageUrl: (owner: AssetOwner, imageId: string) => `${moodBase(owner)}/${imageId}`,

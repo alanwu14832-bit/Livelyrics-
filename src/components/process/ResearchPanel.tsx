@@ -34,7 +34,7 @@ export function ResearchPanel({ research, defaultOpen = false }: { research: Res
             <Tag className="min-w-0">
               <span className="truncate">{engine}</span>
             </Tag>
-            {research.sources.length > 0 && <span className="shrink-0 text-[13px] font-normal text-label-2">{research.sources.length} 個來源</span>}
+            {research.sources.length > 0 && <span className="shrink-0 text-[13px] font-normal text-label-2 max-sm:hidden">{research.sources.length} 個來源</span>}
             <span className="ml-auto shrink-0 text-[13px] font-normal text-label-2 tabular max-sm:hidden">{formatAbsoluteTime(research.createdAt)}</span>
           </span>
         }

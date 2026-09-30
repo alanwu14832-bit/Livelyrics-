@@ -14,7 +14,7 @@
 
 import { z } from "zod";
 import { paletteRoles } from "@/lib/show";
-import { moodSummary, type MoodSummary } from "@/lib/moodboard";
+import type { MoodSummary } from "@/lib/moodboard";
 import {
   AUTO_LYRIC_STYLE_IDS,
   AutoLyricStyleIdSchema,
@@ -53,6 +53,7 @@ import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catal
 import { colorName, contrastRatio, ensureContrast, hexToHsl, hsl, hueDistance, luminance, normalizeHex } from "./color";
 import { analyzeFindings, type Findings } from "./findings";
 import { moodPalette, moodboardBlock } from "./moodboard";
+import { collectedBlock, combinedMood } from "./collected";
 import { normalizePlan } from "./normalize";
 import { offlineDesign } from "./offline";
 import { buildPalette, type PaletteEntry } from "./palette";
@@ -375,7 +376,8 @@ function filmFont(f: Findings): Omit<KeyVisual["typography"], "rationale"> {
 export function offlineDirectionSpecs(req: DesignRequest): DirectionSpec[] {
   const bible = activeBible(req.bible);
   const bp = biblePalette(bible);
-  const mood = moodSummary(req.moodboard ?? []);
+  // phase 8: the research's collected material joins the mood board (the cover counts most)
+  const mood = combinedMood(req.moodboard, req.collected);
   const f = analyzeFindings(req);
   const genre = f.genre;
   // the axis this genre's own grammar lives on: its direction takes the genre's colours and lyric habits
@@ -823,6 +825,8 @@ export function buildDirectionsPrompt(req: DesignRequest): string {
   if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", bible);
   const mood = moodboardBlock(req.moodboard, req.moodboardImages);
   if (mood) parts.push("", "# 參考圖（mood board）", mood);
+  const found = collectedBlock(req.collected, req.collectedImages, { media: false });
+  if (found) parts.push("", "# 研究找到的素材（樂團真實的封面、MV、主視覺）", found, "- 每個方向都要說明它怎麼延續或轉化這些真實素材。");
   const assets = (req.assets ?? []).length;
   if (assets) parts.push("", `# 樂團素材\n- 有 ${assets} 個素材（專輯封面、照片、MV、logo）；方向可以用 treatments 說明怎麼處理它們。`);
   if (req.previous) parts.push("", `# 目前的方案\n- 主視覺「${req.previous.keyVisual.title}」，${req.previous.sections.length} 段。新的方向可以有一個延續它，其他要拉開距離。`);

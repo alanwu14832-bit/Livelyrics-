@@ -1,6 +1,6 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, BandBible, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SongArcDirective, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, BandBible, CollectedVisual, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SongArcDirective, SongMeta } from "@/lib/types";
 import type { VisionImage } from "./moodboard";
 
 export interface DesignerInput {
@@ -16,6 +16,13 @@ export interface DesignerInput {
   moodboard?: MoodImage[];
   /** the mood board images the server could read, for Claude's vision input (ids match `moodboard`) */
   moodboardImages?: VisionImage[];
+  /**
+   * 研究找到的素材 (phase 8): the band's real cover, MV stills, key visual, logo, live photos. All are
+   * design references; those with `use: "stage"` are also in `assets` (a section may show them).
+   */
+  collected?: CollectedVisual[];
+  /** the collected images the server could read, for Claude's vision input (ids match `collected`) */
+  collectedImages?: VisionImage[];
   /**
    * 免費研究: the public facts found about the song and artist (MusicBrainz, Wikipedia), cached on
    * the project's research. The research step reuses it; the offline designer and directions read

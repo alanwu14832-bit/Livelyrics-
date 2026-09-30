@@ -34,6 +34,9 @@ export function createFakeBlob(host = FAKE_STORE_HOST): FakeBlob {
       store.set(url, { pathname: finalPath, bytes: typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes, contentType });
       return { url, pathname: finalPath };
     },
+    async upload(pathname, bytes, contentType) {
+      return this.put(pathname, bytes, contentType);
+    },
     has: (url) => store.has(url),
     urls: () => [...store.keys()],
     async head(url) {

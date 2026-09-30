@@ -13,6 +13,7 @@ import path from "node:path";
 import { ASSET_FILE_RE, coerceAssets, coerceBlobRef, isAssetId } from "@/lib/assets";
 import { coerceDirectionSet, coercePlanSnapshot, coercePlanSource } from "@/lib/directions";
 import { coerceMoodboard } from "@/lib/moodboard";
+import { coerceAuthorization, coerceCollected, coerceDismissed } from "@/lib/visuals";
 import { coerceTcString } from "@/lib/sync/timecode";
 import { normalizeOutput } from "@/lib/output";
 import { coerceJob } from "@/lib/band";
@@ -221,6 +222,13 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   // phase 4: mood board, design directions, the plan a direction replaced (old files have none)
   const moodboard = coerceMoodboard(raw.moodboard);
   if (moodboard.length) project.moodboard = moodboard;
+  // phase 8: 研究找到的素材 and the band-less song's authorization
+  const collected = coerceCollected(raw.collected);
+  if (collected.length) project.collected = collected;
+  const dismissed = coerceDismissed(raw.collectedDismissed);
+  if (dismissed.length) project.collectedDismissed = dismissed;
+  const auth = coerceAuthorization(raw.materialAuthorization);
+  if (auth) project.materialAuthorization = auth;
   const directions = coerceDirectionSet(raw.directions);
   if (directions) project.directions = directions;
   const previousPlan = coercePlanSnapshot(raw.previousPlan);
@@ -364,6 +372,8 @@ function forWrite(project: Project): Project {
   delete saved.bandAssets;
   delete saved.bandMoodboard;
   if (saved.moodboard && !saved.moodboard.length) delete saved.moodboard;
+  if (saved.collected && !saved.collected.length) delete saved.collected;
+  if (saved.collectedDismissed && !saved.collectedDismissed.length) delete saved.collectedDismissed;
   if (!saved.bandId) delete saved.bandId;
   return saved;
 }
@@ -440,6 +450,7 @@ function projectFiles(project: Project): StoredFile[] {
   if (project.audioBlob) out.push({ kind: "blob", blob: project.audioBlob });
   for (const a of project.assets) if (a.blob) out.push({ kind: "blob", blob: a.blob });
   for (const m of project.moodboard ?? []) if (m.blob) out.push({ kind: "blob", blob: m.blob });
+  for (const c of project.collected ?? []) if (c.blob) out.push({ kind: "blob", blob: c.blob });
   return out;
 }
 

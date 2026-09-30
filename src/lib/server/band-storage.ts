@@ -262,6 +262,7 @@ export async function takenAssetIds(bandId: string | undefined): Promise<Set<str
   for (const p of await bandProjects(bandId).catch(() => [] as Project[])) {
     for (const a of p.assets) out.add(a.id);
     for (const m of p.moodboard ?? []) out.add(m.id);
+    for (const c of p.collected ?? []) out.add(c.id);
   }
   return out;
 }
