@@ -217,13 +217,20 @@ export function CollectedVisuals({ projectId, items, onChange, compact = false, 
         </p>
       )}
 
-      <ul className={cx("mt-3 grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4")}>
+      {/* phone and the console's narrow tab: one row per item (picture beside its controls); wider: a grid of cards */}
+      <ul className={cx("mt-3 grid gap-3", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-3 xl:grid-cols-4")}>
         {items.map((item) => {
           const source = item.provenance.sourceUrl ?? item.provenance.imageUrl;
           const kind = VISUAL_KIND_LABEL[item.provenance.kind];
           return (
-            <li key={item.id} className="flex min-w-0 flex-col overflow-hidden rounded-md bg-surface-2" data-testid="collected-card" data-kind={item.provenance.kind} data-use={item.use}>
-              <span className="relative block aspect-square w-full overflow-hidden">
+            <li
+              key={item.id}
+              className={cx("flex min-w-0 overflow-hidden rounded-md bg-surface-2", compact ? "flex-row" : "max-sm:flex-row sm:flex-col")}
+              data-testid="collected-card"
+              data-kind={item.provenance.kind}
+              data-use={item.use}
+            >
+              <span className={cx("relative block aspect-square shrink-0 overflow-hidden", compact ? "w-24 self-start" : "max-sm:w-28 max-sm:self-start sm:w-full")}>
                 <Thumb url={api.collectedUrl(projectId, item.id)} alt={item.name} />
                 <span className="absolute top-1.5 left-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white">{kind}</span>
                 {item.use === "stage" && <span className="absolute top-1.5 right-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-medium text-white">上台</span>}
