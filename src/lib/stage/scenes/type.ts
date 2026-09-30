@@ -261,9 +261,8 @@ void main() {
   }
   col = mix(col, uAccent, acc);
   // the type's own accent layers (a glitch echo stack, an overprint) behind the readable letters
-  // meet the same contrast (further out they keep their colour); solid accents — labels, numbers,
-  // rules, brackets — are type to read themselves and are left alone
-  float ghost = covers.y * min(1.0, acc * 3.0) * (1.0 - smoothstep(0.7, 0.95, acc));
+  // meet the same contrast right around the letters (further out they keep their colour)
+  float ghost = covers.y * min(1.0, acc * 3.0);
   if (ghost > 0.001) col = mix(col, legibleBg(col, inkC, uSoften, uGain), ghost);
   // the RGB split stays a fringe: the base glyph keeps (most of) the ink in every channel
   vec3 inkM = vec3(max(inkR, ink * 0.88), ink, max(inkB, ink * 0.88));

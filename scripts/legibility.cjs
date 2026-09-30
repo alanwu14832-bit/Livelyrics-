@@ -5,8 +5,8 @@
 // out the same in both (the layout does not depend on the picture), so the probe tells where the
 // glyphs are: over flat grey the letters are the pixels that stand out furthest from the grey, in
 // the ink's direction (the darkened pocket around light ink goes the other way); other pixels that
-// move in the ink's direction are the type's own light (glow, glitch echo, RGB fringe, labels) and
-// are not counted as picture. In `frame`, the ratio is the WCAG contrast of the median glyph pixel
+// move in the ink's direction, or take a colour over the grey, are the type's own (glow, glitch
+// echo, RGB-split fringe, labels) and are not counted as picture. In `frame`, the ratio is the WCAG contrast of the median glyph pixel
 // against the 90th-percentile picture pixel in a ring 3 px – 1.2 % of the short side around the
 // glyphs (light ink; the 10th percentile for dark ink). Returns { ratio, ink, ring, glyphs, ringPx,
 // decor, dark }. Runs in the page (a 2D canvas decodes the PNGs), so it needs no dependency.
@@ -74,6 +74,13 @@ async function measureContrast(page, frame, probe) {
         const d = (Sp[p] - grey) * sgn;
         if (d > inkDev * 0.72) glyph[p] = 1;
         else if (d > 0.03) decor[p] = 1;
+        // a coloured pixel over the grey probe is the type's own colour too (an RGB-split fringe,
+        // an accent echo that happens to match the grey's luminance)
+        else {
+          const i = p * 4;
+          const chroma = Math.max(P[i], P[i + 1], P[i + 2]) - Math.min(P[i], P[i + 1], P[i + 2]);
+          if (chroma > 36) decor[p] = 1;
+        }
       }
       const gl = [];
       for (let p = 0; p < N; p++) if (glyph[p]) gl.push(La[p]);
