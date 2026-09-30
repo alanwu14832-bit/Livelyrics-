@@ -218,7 +218,7 @@ export function CollectedVisuals({ projectId, items, onChange, compact = false, 
       )}
 
       {/* phone and the console's narrow tab: one row per item (picture beside its controls); wider: a grid of cards */}
-      <ul className={cx("mt-3 grid gap-3", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-3 xl:grid-cols-4")}>
+      <ul className={cx("mt-3 grid gap-3", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3")}>
         {items.map((item) => {
           const source = item.provenance.sourceUrl ?? item.provenance.imageUrl;
           const kind = VISUAL_KIND_LABEL[item.provenance.kind];
