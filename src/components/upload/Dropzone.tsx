@@ -14,7 +14,8 @@ import { DownloadSimpleIcon, MusicNotesPlusIcon } from "@/components/ui/Icon";
 import { AUDIO_ACCEPT, AUDIO_FORMATS_LABEL, formatBytes, MAX_UPLOAD_BYTES } from "./accept";
 
 /** The shared hero tile: idle, analysing and failed use the same frame, so nothing jumps. */
-export const heroTileClass = "relative flex min-h-[400px] min-w-0 flex-col items-center justify-center overflow-hidden rounded-3xl bg-surface px-8 py-12 text-center";
+// 280 px on a phone, 320 px from md: the library below stays within reach of the first screen
+export const heroTileClass = "relative flex min-h-[280px] min-w-0 flex-col items-center justify-center overflow-hidden rounded-3xl bg-surface px-8 py-10 text-center md:min-h-[320px]";
 
 /** Phase content enters with opacity + translateY(8px) on the spring (opacity only with reduced motion). */
 export const phaseEnterClass = "transition-[opacity,translate] duration-(--dur-spring) ease-spring starting:translate-y-2 starting:opacity-0";

@@ -71,7 +71,7 @@ export function HomeClient({
         }
       />
       <main className={cx(pageContainerClass, "pb-32")}>
-        <section aria-labelledby="new-song-title" className="pt-[72px]">
+        <section aria-labelledby="new-song-title" className="pt-14 md:pt-[72px]">
           <div className="text-center">
             <h1 id="new-song-title" data-motion={motion} className={cx("text-hero text-label max-md:text-[40px] max-md:leading-[48px]", intro && reveal(0))}>
               讓歌詞退居幕後，讓視覺托起樂團
@@ -95,8 +95,8 @@ export function HomeClient({
         </section>
         {!setup && (
           <>
-            <BandShelf className="mt-24" />
-            <ProjectLibrary className="mt-20" initialProjects={initialProjects} serverNow={serverNow} />
+            <BandShelf className="mt-16 md:mt-20" />
+            <ProjectLibrary className="mt-16" initialProjects={initialProjects} serverNow={serverNow} />
           </>
         )}
       </main>

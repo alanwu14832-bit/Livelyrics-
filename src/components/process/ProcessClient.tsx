@@ -505,7 +505,9 @@ export function ProcessClient({
             />
           )}
 
-          {!hasDirections && directions}
+          {/* before a design exists the directions are a way to start; once it exists, the key visual
+              leads the page and the directions (a way to try another look) follow it */}
+          {!hasDirections && !showSummary && directions}
 
           {showSummary && (
             <KeyVisualSummary
@@ -515,6 +517,8 @@ export function ProcessClient({
               scene={{ disabled: running, offline, onRegenerate: (instruction) => execute({ steps: ["scene"], instruction: instruction || undefined }), onProject: setProject }}
             />
           )}
+
+          {!hasDirections && showSummary && directions}
 
           {!running && (
             <AssetLibrary
