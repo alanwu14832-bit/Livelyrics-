@@ -34,6 +34,7 @@ import {
 } from "./pipeline-state";
 import { RedesignBox } from "./RedesignBox";
 import { ResearchPanel } from "./ResearchPanel";
+import { CollectedVisuals } from "./CollectedVisuals";
 import { StepTimeline } from "./StepTimeline";
 import { PROCESS_STEPS, processHref, stepsFrom, type ProcessStep } from "./steps";
 import { StreamPanel } from "./StreamPanel";
@@ -520,6 +521,14 @@ export function ProcessClient({
           )}
 
           {!hasDirections && showSummary && directions}
+
+          {!running && (project.collected?.length ?? 0) > 0 && (
+            <CollectedVisuals
+              projectId={project.id}
+              items={project.collected!}
+              onChange={(collected, nextPlan) => setProject((p) => (p ? { ...p, collected, ...(nextPlan !== undefined ? { plan: nextPlan } : {}) } : p))}
+            />
+          )}
 
           {!running && (
             <AssetLibrary

@@ -8,7 +8,8 @@ import { ArrowSquareOutIcon, BooksIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import { hostOf } from "@/lib/console/format";
 import { FREE_RESEARCH_LABEL, isClaudeResearch } from "@/lib/research-labels";
-import type { Project, Research } from "@/lib/types";
+import type { CollectedVisual, DesignPlan, Project, Research } from "@/lib/types";
+import { CollectedVisuals } from "@/components/process/CollectedVisuals";
 import { Footnote, Group, GroupTitle } from "./ui";
 
 function formatDate(iso: string): string {
@@ -35,7 +36,7 @@ const FOOTNOTE: Partial<Record<Research["engine"], string>> = {
   offline: "這份簡報由離線設計師依音訊分析與歌詞產生，沒有查詢網路資料。重新處理會改用免費研究（MusicBrainz、維基百科），也可以到設計總覽用 claude.ai 研究。",
 };
 
-function ResearchTabImpl({ project }: { project: Project }) {
+function ResearchTabImpl({ project, onCollected }: { project: Project; onCollected?: (items: CollectedVisual[], plan?: DesignPlan | null) => void }) {
   const research = project.research;
   if (!research) {
     return (
@@ -63,6 +64,7 @@ function ResearchTabImpl({ project }: { project: Project }) {
         </div>
         {FOOTNOTE[research.engine] && <Footnote className="mt-1">{FOOTNOTE[research.engine]}</Footnote>}
       </div>
+      {(project.collected?.length ?? 0) > 0 && onCollected && <CollectedVisuals compact projectId={project.id} items={project.collected!} onChange={onCollected} />}
       <Group className="px-3 py-1">{research.brief.trim() ? <Markdown>{research.brief}</Markdown> : <p className="py-3 text-c-body text-label-2">研究內容是空的。</p>}</Group>
       {sources.length > 0 && (
         <section aria-labelledby="research-sources">
