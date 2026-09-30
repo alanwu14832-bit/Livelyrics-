@@ -3,7 +3,11 @@
 // pass their own fetch (the free research and its lookups take one).
 
 const realFetch = globalThis.fetch;
-const BLOCKED = /(^|\.)(musicbrainz\.org|wikipedia\.org|wikimedia\.org|wikidata\.org)$/i;
+const BLOCKED = /(^|\.)(musicbrainz\.org|wikipedia\.org|wikimedia\.org|wikidata\.org|coverartarchive\.org|archive\.org|ytimg\.com|youtube\.com)$/i;
+
+// phase 8: the research step's collection of the band's images is off unless a test turns it on
+// (those tests pass a fake network: the collector never reaches the internet in tests)
+process.env.LIVELYRICS_VISUALS ??= "off";
 
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;

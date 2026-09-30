@@ -4,7 +4,8 @@
 //
 //   LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e \
 //   LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
-//   LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' npx next start -p 3100
+//   LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' \
+//   LIVELYRICS_COVERART_URL=http://127.0.0.1:3199/coverart npx next start -p 3100
 //   BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 //
 //   1. The sources unreachable (the stub is not listening yet): the pipeline still finishes with a
@@ -12,6 +13,12 @@
 //   2. The sources stubbed: 〈大風吹〉 by 草東沒有派對 (uploaded through the page, so the audio is
 //      analysed): the stream shows 查詢 MusicBrainz… / 讀取維基百科… / 分析歌詞意象…, the brief names the
 //      album and the genre and cites the pages; the requests carry the Livelyrics User-Agent.
+//   2b. 研究找到的素材 (phase 8): the stub also serves a Cover Art Archive listing for 《醜奴兒》 and its
+//      image (fixtures/visuals/cover.jpg: a teal field, an orange sun, a magenta band). The research
+//      collects the cover (measured, 只當參考 without the band's authorization), the design takes its
+//      palette from it, the design overview shows it under 「研究找到的素材」; 確認樂團授權 puts it on
+//      stage and a re-design shows it in a section; 只當參考 takes it off; 移除 removes it for good
+//      (a new research does not bring it back).
 //   3. 用 claude.ai 研究: copy the prompt (clipboard), paste a good reply wrapped in prose → the plan is
 //      applied and shows in the console; paste a broken reply → the error and 複製修正提示詞; the
 //      JSON-only fix applies and keeps the brief. 用 claude.ai 提案 builds the directions prompt.
@@ -39,6 +46,8 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const WAV = fs.readFileSync(path.join(REPO, "fixtures/demo-song.wav"));
 const LRC = fs.readFileSync(path.join(REPO, "fixtures/demo-lyrics.lrc"), "utf8");
 const FIX = path.join(REPO, "fixtures/research");
+const COVER_JPG = fs.readFileSync(path.join(REPO, "fixtures/visuals/cover.jpg"));
+const RELEASE_GROUP = "0436f306-0993-4e12-acfa-4b725163b9bd";
 const USER_AGENT = "Livelyrics/0.1 (contact: https://github.com/alanwu14832-bit/Livelyrics-)";
 
 const problems = [];
@@ -80,6 +89,16 @@ function stubHandler(req, res) {
     res.end(fs.readFileSync(path.join(FIX, file)));
   };
   const p = url.pathname;
+  // phase 8: the Cover Art Archive (the listing links to images on the same stub)
+  if (p === `/coverart/release-group/${RELEASE_GROUP}`) {
+    const img = `http://127.0.0.1:${STUB_PORT}/coverart/img/cover-1200.jpg`;
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ images: [{ approved: true, front: true, types: ["Front"], image: img, thumbnails: { "1200": img, "500": img } }], release: "https://musicbrainz.org/release/7e1d1a0c-0000-4000-8000-000000000001" }));
+  }
+  if (p === "/coverart/img/cover-1200.jpg") {
+    res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(COVER_JPG.length) });
+    return res.end(COVER_JPG);
+  }
   if (p === "/musicbrainz/ws/2/recording") return send("musicbrainz-recording-caodong.json");
   if (p.startsWith("/musicbrainz/ws/2/artist/1636f82a")) return send("musicbrainz-artist-caodong.json");
   if (p === "/musicbrainz/ws/2/artist") return send("musicbrainz-artist-search-empty.json");
@@ -254,6 +273,84 @@ async function clipboard(page) {
     await shot(page, "free-process-dark");
     await page.emulateMedia({ colorScheme: "light" });
     await page.waitForTimeout(300);
+
+    // ----------------------------------------------- 2b. 研究找到的素材
+    {
+      const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      const near = (h, t, d = 30) => hexRgb(h).every((c, i) => Math.abs(c - t[i]) < d);
+      const collected = song.collected ?? [];
+      const cover = collected[0];
+      check("research collected the album cover from the Cover Art Archive", collected.length === 1 && cover?.provenance?.kind === "cover" && cover?.provenance?.foundBy === "cover-art-archive" && cover?.name === "專輯封面《醜奴兒》", JSON.stringify(collected.map((c) => c.name)));
+      check("the stub served the listing and the image (with the Livelyrics User-Agent)", stubRequests.some((r) => r.path === `/coverart/release-group/${RELEASE_GROUP}`) && stubRequests.some((r) => r.path === "/coverart/img/cover-1200.jpg" && r.ua === USER_AGENT));
+      check("the cover was measured on the server (teal field, orange sun)", !!cover?.stats && near(cover.stats.palette[0], [0x0b, 0x3b, 0x3f]) && cover.stats.palette.some((h) => near(h, [0xff, 0x7a, 0x1a])), JSON.stringify(cover?.stats?.palette));
+      check("provenance: source page, image URL, fetched time, the authorization note", /^https:\/\/musicbrainz\.org\/release\//.test(cover?.provenance?.sourceUrl ?? "") && /cover-1200\.jpg$/.test(cover?.provenance?.imageUrl ?? "") && !!cover?.provenance?.fetchedAt && /尚未確認/.test(cover?.provenance?.authorization ?? ""));
+      check("without the band's authorization it is 只當參考", cover?.use === "reference" && !(song.plan?.sections ?? []).some((s) => s.media?.assetId === cover?.id));
+      const hexes = (song.plan?.keyVisual?.palette ?? []).map((c) => c.hex);
+      check("the design took its palette from the cover", hexes.some((h) => near(h, [0xfa, 0x7a, 0x1d], 12)) && /研究找到的樂團素材/.test(song.plan?.keyVisual?.concept ?? ""), hexes.join(" "));
+      check("the step log said what was found", (await page.locator("body").innerText()).includes("找到專輯封面"));
+      const section = page.getByTestId("collected-visuals");
+      await section.waitFor({ timeout: 20000 });
+      const sectionText = await section.innerText();
+      check("「研究找到的素材」 shows the cover with its kind and source", sectionText.includes("研究找到的素材") && sectionText.includes("專輯封面") && sectionText.includes("Cover Art Archive") && sectionText.includes("還沒確認樂團授權"), sectionText.replace(/\s+/g, " ").slice(0, 160));
+      const card = section.getByTestId("collected-card").first();
+      await card.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => {
+        const img = document.querySelector('[data-testid="collected-card"] img');
+        return img && img.complete && img.naturalWidth > 0;
+      }, null, { timeout: 15000 });
+      await page.waitForTimeout(400);
+      await section.screenshot({ path: path.join(SHOTS, "collected-reference.png") });
+      // 可以上台 is locked until the band's authorization: it asks for it
+      await card.getByRole("radio", { name: "可以上台" }).click();
+      const ask = page.locator("dialog[open]").filter({ hasText: "確認樂團授權" });
+      await ask.waitFor({ timeout: 10000 });
+      await ask.getByRole("button", { name: "樂團已授權" }).click();
+      await page.locator('[data-testid="collected-card"][data-use="stage"]').waitFor({ timeout: 15000 });
+      const authorized = await api("GET", `/api/projects/${id}/collected`);
+      check("確認樂團授權 stores the acknowledgement and puts the cover on stage", !!authorized.authorization?.at && authorized.items[0]?.use === "stage");
+      await page.waitForTimeout(400);
+      await section.screenshot({ path: path.join(SHOTS, "collected-stage.png") });
+      // a re-design (the offline designer): the cover appears in a section with a treatment
+      const redesign = await fetch(`${BASE}/api/projects/${id}/process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ steps: ["design"] }) }).then((r) => r.text());
+      const staged = await api("GET", `/api/projects/${id}`);
+      const shown = (staged.plan?.sections ?? []).filter((s) => s.media?.assetId === cover.id);
+      check("re-designed: the cover is a section's media, with restraint", /"type":"done"/.test(redesign) && shown.length >= 1 && shown.length <= 3 && shown.every((s) => ["duotone", "halftone", "slow-drift", "grain-film"].includes(s.media.treatment)), shown.map((s) => `${s.label}:${s.media.treatment}`).join("、"));
+      const assetFile = await fetch(`${BASE}/api/projects/${id}/assets/${cover.id}`);
+      check("an item on stage is served by the asset route (the stage and the export load it)", assetFile.status === 200 && (assetFile.headers.get("content-type") ?? "").startsWith("image/jpeg"));
+      await page.goto(`${BASE}/p/${id}/process`, { waitUntil: "networkidle" });
+      await page.getByTestId("collected-visuals").waitFor({ timeout: 20000 });
+      await page.getByTestId("collected-visuals").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(800);
+      await shot(page, "collected-process-light");
+      // 只當參考: off the stage, the sections go back to the scene
+      await page.getByTestId("collected-card").first().getByRole("radio", { name: "只當參考" }).click();
+      await page.locator('[data-testid="collected-card"][data-use="reference"]').waitFor({ timeout: 15000 });
+      const reference = await api("GET", `/api/projects/${id}`);
+      check("只當參考 clears the sections that showed it", reference.collected[0].use === "reference" && !(reference.plan?.sections ?? []).some((s) => s.media?.assetId === cover.id));
+      check("…and the asset route no longer serves it", (await fetch(`${BASE}/api/projects/${id}/assets/${cover.id}`)).status === 404);
+      // phone
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(600);
+      await page.getByTestId("collected-visuals").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      await shot(page, "collected-phone");
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      check("the section fits a phone (no sideways scroll)", overflow <= 1, `${overflow}px`);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.waitForTimeout(400);
+      // 移除: gone for good
+      await page.getByTestId("collected-card").first().getByRole("button", { name: /移除/ }).click();
+      const confirmRemove = page.locator("dialog[open]").filter({ hasText: "移除這個素材" });
+      await confirmRemove.waitFor({ timeout: 10000 });
+      await confirmRemove.getByRole("button", { name: "移除" }).click();
+      await page.getByTestId("collected-visuals").waitFor({ state: "detached", timeout: 15000 });
+      const removed = await api("GET", `/api/projects/${id}`);
+      check("移除 removes the item and its file", (removed.collected ?? []).length === 0 && (await fetch(`${BASE}/api/projects/${id}/collected/${cover.id}`)).status === 404);
+      const rerun = await fetch(`${BASE}/api/projects/${id}/process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ steps: ["research"] }) }).then((r) => r.text());
+      const after = await api("GET", `/api/projects/${id}`);
+      check("a new research does not bring a removed item back", /"type":"done"/.test(rerun) && (after.collected ?? []).length === 0);
+      await page.goto(`${BASE}/p/${id}/process`, { waitUntil: "networkidle" });
+    }
 
     // ----------------------------------------------- 3. 用 claude.ai 研究
     await page.getByTestId("manual-open").click();

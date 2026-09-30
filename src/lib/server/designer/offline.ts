@@ -32,7 +32,8 @@ import { normalizePlan } from "./normalize";
 import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
 import { generateMotifSvg, hashString, type EmblemStyle } from "./svg";
-import { inputMood, moodPalette, moodScenes } from "./moodboard";
+import { moodPalette, moodScenes } from "./moodboard";
+import { combinedMood, placeCollected } from "./collected";
 import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./type-design";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
@@ -657,7 +658,9 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   // the band's palette unless the operator asked for another hue / monochrome (a stated deviation)
   const fromBible = options.hue == null && !options.mono ? biblePalette(bible) : null;
   // then the mood board's colours (phase 4), measured in the browser at upload time
-  const moodboard = inputMood(input.moodboard);
+  // phase 8: with the research's collected material (the cover counts most)
+  const moodboard = combinedMood(input.moodboard, input.collected);
+  const collectedColours = (input.collected ?? []).some((c) => c.stats?.palette.length);
   const fromMood = !fromBible && options.hue == null && !options.mono ? moodPalette(moodboard) : null;
   const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono, hints);
   let loudestLyricIndex = -1;
@@ -678,7 +681,10 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     findings,
     voice: chooseVoice(findings, st.cjk),
   };
-  const sections = applyTreatments(assignMedia(buildSections(ctx), input.assets), bible, input.assets);
+  // the band's uploads as before; the research's collected material with restraint (one or two sections)
+  const collectedIds = new Set((input.collected ?? []).map((c) => c.id));
+  const uploaded = (input.assets ?? []).filter((a) => !collectedIds.has(a.id));
+  const sections = applyTreatments(placeCollected(assignMedia(buildSections(ctx), uploaded), input.collected), bible, input.assets);
   const title = makeTitle(mood, imagery, seed);
   const ownMotifs = [...hints.motifs.slice(0, 3), MOOD_MOTIF[mood.mood]];
   const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...ownMotifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
@@ -699,7 +705,11 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       : "這首歌不放歌詞：安靜的段落讓畫面退後，能量高的段落讓光與節拍一起爆開。",
     "視覺始終是配角：它是樂團背後的一道牆，托起表演而不搶戲。",
     bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
-    fromMood ? `配色取自參考圖量到的主色（${fromMood.primary}、${fromMood.accent}），場景也依參考圖的明暗與飽和度挑選。` : "",
+    fromMood
+      ? collectedColours
+        ? `配色取自研究找到的樂團素材${(input.collected ?? []).some((c) => c.provenance.kind === "cover") ? "（專輯封面）" : ""}${input.moodboard?.length ? "與參考圖" : ""}量到的主色（${fromMood.primary}、${fromMood.accent}），場景也依它們的明暗與飽和度挑選。`
+        : `配色取自參考圖量到的主色（${fromMood.primary}、${fromMood.accent}），場景也依參考圖的明暗與飽和度挑選。`
+      : "",
   ].join("");
   const baseTypography = makeTypography(mood, seed, imagery, findings);
   const typography = bible

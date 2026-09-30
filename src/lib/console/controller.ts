@@ -42,7 +42,7 @@ import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
 import { patchOutput, type OutputPatch } from "@/lib/output";
 import { MANUAL_KEY } from "./hotkeys";
 import type { SafetyPatch } from "@/lib/stage/safety";
-import type { Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
+import type { CollectedVisual, Asset, DesignPlan, LyricLine, PipelineEvent, PipelineStepId, Project, ProjectOutput, SceneId } from "@/lib/types";
 import { DISCONNECTED, HEARTBEAT_MS, openProjectionWindow, ProjectionLink, randomId, type OutputStatus, type OutputTarget } from "./link";
 import { LiveClock } from "./live-clock";
 import {
@@ -2042,10 +2042,30 @@ export class ConsoleController {
    * delete (sections that showed the asset are cleared); without it, sections pointing at
    * assets that are gone are cleared locally. The projection gets the new project at once.
    */
+  /**
+   * 研究找到的素材 changed (phase 8: 可以上台 / 只當參考 / 移除). `plan` is the server's plan (sections
+   * that showed an item no longer on stage are cleared); the projection gets the new project at once.
+   */
+  applyCollected(collected: CollectedVisual[], plan?: DesignPlan | null): void {
+    const project = this.snapshot.project;
+    if (!project) return;
+    const ids = new Set(stageAssets({ assets: project.assets, bandAssets: project.bandAssets, collected }).map((a) => a.id));
+    const strip = (p: DesignPlan): DesignPlan =>
+      p.sections.some((s) => s.media && !ids.has(s.media.assetId))
+        ? { ...p, sections: p.sections.map((s) => (s.media && !ids.has(s.media.assetId) ? { ...s, media: null } : s)) }
+        : p;
+    let nextPlan = project.plan;
+    if (plan !== undefined && !this.pendingPlan) nextPlan = plan;
+    else if (nextPlan) nextPlan = strip(nextPlan);
+    if (this.pendingPlan) this.pendingPlan = strip(this.pendingPlan);
+    this.set({ project: { ...project, collected, plan: nextPlan } });
+    this.broadcastProject(true);
+  }
+
   applyAssets(assets: Asset[], plan?: DesignPlan | null): void {
     const project = this.snapshot.project;
     if (!project) return;
-    const ids = new Set(stageAssets({ assets, bandAssets: project.bandAssets }).map((a) => a.id));
+    const ids = new Set(stageAssets({ assets, bandAssets: project.bandAssets, collected: project.collected }).map((a) => a.id));
     const strip = (p: DesignPlan): DesignPlan =>
       p.sections.some((s) => s.media && !ids.has(s.media.assetId))
         ? { ...p, sections: p.sections.map((s) => (s.media && !ids.has(s.media.assetId) ? { ...s, media: null } : s)) }

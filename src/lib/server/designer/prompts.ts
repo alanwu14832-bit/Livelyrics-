@@ -25,6 +25,7 @@ import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
 import { moodboardBlock } from "./moodboard";
+import { collectedBlock } from "./collected";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
 
@@ -198,6 +199,31 @@ ${RESEARCH_HEADINGS.map((h) => `  ## ${h}`).join("\n")}
 - 版權：不要重製歌詞。提到歌詞時只用幾個字的意象短語，絕不整句或整段抄錄。
 - 「參考來源」列出實際用到的網址（標題＋連結）。
 - 回覆中不要包含任何內部或系統用的 XML 標籤。`;
+
+/** The fence tag of the image list Claude appends after the brief (phase 8). */
+export const VISUALS_FENCE = "visuals";
+
+const FENCE = "```";
+
+/**
+ * Phase 8 (研究找到的素材): after the brief, a machine-readable list of the band's real visual
+ * material, so the server can download it (design reference, and stage material the band authorized).
+ * Appended to RESEARCH_SYSTEM for the API research only; the brief itself stays as it was.
+ */
+export const RESEARCH_VISUALS_RULES = [
+  "",
+  "",
+  "## 視覺素材清單（寫在簡報之後）",
+  "樂團已授權使用自己的視覺素材。研究時順便找出這首歌與樂團真實的視覺素材，讓系統下載給設計師參考、必要時放上舞台：",
+  "- 種類：cover（這首歌所在的專輯或單曲的官方封面）、mv（這首歌的官方 MV，給 YouTube 連結即可）、keyvisual（官方主視覺、巡演海報）、logo（樂團標誌）、live（過去演出的現場照片）。",
+  "- 可以用 web_fetch 打開官方網站、唱片公司頁面、串流平台或新聞稿，找到真的圖片網址（例如頁面的 og:image）。imageUrl 只寫你在搜尋結果或打開的頁面裡實際看到的網址，不要猜測或拼湊；找不到直接圖片時只給 pageUrl。",
+  "- 只列這個樂團、這首歌的官方或可信素材，最多 8 筆，封面與 MV 優先；同名的其他樂團要排除。",
+  `- 簡報寫完後，在最後另起一行輸出一個程式碼區塊，語言標記為 ${VISUALS_FENCE}，內容是 JSON（不要放進簡報的任何標題下）：`,
+  `${FENCE}${VISUALS_FENCE}`,
+  '{"images":[{"kind":"cover","title":"專輯名稱","pageUrl":"https://…","imageUrl":"https://…","why":"一句話：它對舞台設計有什麼用"}]}',
+  FENCE,
+  '- 找不到任何素材時輸出 {"images":[]}。',
+].join("\n");
 
 /** Short lyric context for research: counts, the opening and the hook (a few characters each), imagery words. */
 export function lyricExcerpt(input: DesignerInput, st: SongStructure): string {
@@ -421,6 +447,8 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
   if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", BIBLE_RULE, bible);
   const mood = moodboardBlock(req.moodboard, req.moodboardImages);
   if (mood) parts.push("", "# 參考圖（mood board）", mood, "把參考圖的線索寫進 keyVisual.concept 與相關段落的 rationale（註明圖號）。");
+  const found = collectedBlock(req.collected, req.collectedImages);
+  if (found) parts.push("", "# 研究找到的素材（樂團真實的封面、MV、主視覺）", found);
   const arc = arcBlock(req.arc);
   if (arc) parts.push("", "# 整場弧線中的位置", "這首歌是一整場演出的一部分，依它在弧線中的位置調整強度與配色重心：", arc);
   const instruction = req.instruction?.trim();

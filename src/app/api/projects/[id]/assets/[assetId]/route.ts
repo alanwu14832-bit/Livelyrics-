@@ -20,7 +20,8 @@ async function serve(req: Request, ctx: Ctx, withBody: boolean): Promise<Respons
   const { id, assetId } = await ids(ctx);
   const project = await getProject(id);
   if (!project) throw new HttpError(404, "找不到專案");
-  const asset = project.assets.find((a) => a.id === assetId);
+  // an uploaded asset, else a collected image on stage (研究找到的素材, phase 8: stageAssets serves it from here)
+  const asset = project.assets.find((a) => a.id === assetId) ?? (project.collected ?? []).find((c) => c.id === assetId && c.use === "stage");
   if (!asset) throw new HttpError(404, "找不到素材");
   return serveAsset(req, assetFileOf(id, asset), asset, withBody);
 }

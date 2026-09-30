@@ -26,7 +26,7 @@ import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
 import type { DesignerCallbacks, DesignerDeps } from "@/lib/server/designer";
 import { stageAssets } from "@/lib/asset-scope";
-import type { Asset, BandBible, Lyrics, MoodImage, PipelineEvent, PipelineRecord, PipelineStepId, Project } from "@/lib/types";
+import type { Asset, BandBible, Lyrics, MoodImage, PipelineEvent, PipelineRecord, PipelineStepId, Project, Research } from "@/lib/types";
 import { mergedMoodboard } from "@/lib/moodboard";
 import { researchEngineLabel } from "@/lib/research-labels";
 import { loadVisionImages } from "./directions";
@@ -34,6 +34,9 @@ import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
 import { getProject, updateProject } from "./storage";
+import { authorizationFor, storeCollected } from "./collected-storage";
+import { collectVisuals, findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
+import { collectedSummary, MAX_COLLECTED } from "@/lib/visuals";
 import { isCloudStorage } from "./store";
 
 export type PipelineStep = "lyrics" | "research" | "design" | "scene";
@@ -571,15 +574,20 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       const input = { meta: project.meta, lyrics: project.lyrics, analysis: project.analysis, ...band, publicInfo: project.research?.publicInfo ?? null };
       const cb = designerCallbacks(run, "research", signal);
       const deps = designerDeps(run);
+      const startedAt = Date.now();
+      // phase 8: Claude's research has no MusicBrainz lookup of its own; find the album for its cover meanwhile
+      const claudeRun = designer.isClaudeConfigured() && !isFreeRun(run) && visualsConfig().enabled;
+      const releaseGroup = claudeRun ? findReleaseGroup(project.meta, project.research?.publicInfo?.musicbrainz?.recording, { signal }).catch(() => null) : null;
       const research = await raceAbort(deps ? designer.researchSong(input, cb, deps) : designer.researchSong(input, cb), signal);
       if (!research || typeof research.brief !== "string") throw new Error("研究結果格式不正確");
       const via = researchEngineLabel(research);
       const sources = Array.isArray(research.sources) ? research.sources.length : 0;
+      const found = await collectStep(run, project, research, releaseGroup, signal, startedAt);
       return {
         apply: (p) => {
           p.research = research;
         },
-        message: `研究完成：${via}${sources ? `，${sources} 個來源` : ""}`,
+        message: `研究完成：${via}${sources ? `，${sources} 個來源` : ""}${found ? `；${found}` : ""}`,
       };
     }
     case "design": {
@@ -587,19 +595,28 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       // the mood board (phase 4): the band's, then the song's; Claude also gets the images themselves
       const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
       let moodboardImages: designer.VisionImage[] | undefined;
-      if (moodboard.length && designer.isClaudeConfigured() && !isFreeRun(run)) {
-        const loaded = await loadVisionImages(project, moodboard, { signal });
-        moodboardImages = loaded.images;
-        if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
+      // phase 8: the research's collected material (the band's real cover, MV stills, key visual)
+      const collected = project.collected ?? [];
+      let collectedImages: designer.VisionImage[] | undefined;
+      if (designer.isClaudeConfigured() && !isFreeRun(run)) {
+        if (moodboard.length) {
+          const loaded = await loadVisionImages(project, moodboard, { signal });
+          moodboardImages = loaded.images;
+          if (loaded.skipped.length) emit(run, { type: "log", step: "design", message: `有 ${loaded.skipped.length} 張參考圖無法附給 Claude，只提供說明與色票。` });
+        }
+        if (collected.length) collectedImages = (await loadVisionImages(project, collected, { signal, budgetUsed: moodboardImages })).images;
       }
+      if (collected.length) emit(run, { type: "log", step: "design", message: `設計參考研究找到的素材：${collectedSummary(collected)?.replace(/^找到/, "") ?? ""}${collected.some((c) => c.use === "stage") ? `（${collected.filter((c) => c.use === "stage").length} 張可以上台）` : "（都只當參考）"}` });
       const input = {
         moodboard,
         moodboardImages,
+        collected,
+        collectedImages,
         meta: project.meta,
         lyrics: project.lyrics,
         analysis: project.analysis,
         // the song's own material and the band's shared library
-        assets: stageAssets({ assets: project.assets ?? [], bandAssets: band.bandAssets }),
+        assets: stageAssets({ assets: project.assets ?? [], bandAssets: band.bandAssets, collected: project.collected }),
         bible: band.bible,
         bandName: band.bandName,
         research: project.research,
@@ -659,6 +676,14 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
   }
   const band = await bandContext(project);
   const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
+  // phase 8: Claude sees the band's real material (and the mood board) while it writes the program
+  const collected = project.collected ?? [];
+  let moodboardImages: designer.VisionImage[] | undefined;
+  let collectedImages: designer.VisionImage[] | undefined;
+  if (claude) {
+    if (moodboard.length) moodboardImages = (await loadVisionImages(project, moodboard, { signal })).images;
+    if (collected.length) collectedImages = (await loadVisionImages(project, collected, { signal, budgetUsed: moodboardImages })).images;
+  }
   const req = {
     meta: project.meta,
     lyrics: project.lyrics,
@@ -666,6 +691,9 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
     bible: band.bible,
     bandName: band.bandName,
     moodboard,
+    moodboardImages,
+    collected,
+    collectedImages,
     research: project.research,
     publicInfo: project.research?.publicInfo ?? null,
     instruction,
@@ -684,6 +712,64 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
     },
     message: `專屬畫面「${program.title}」（${result.engine === "claude" ? `Claude${result.model ? `，${result.model}` : ""}` : "離線作曲器"}）`,
   };
+}
+
+/**
+ * 研究找到的素材 (phase 8): download the band's real material the research pointed at (the Cover Art
+ * Archive front of the song's album, Claude's list) and merge it into the project's collection.
+ * Bounded by the research step's time (cloud: well inside the request's 300 s); a failure is logged,
+ * never a failed research. Returns the step message's addition (「找到專輯封面、2 張 MV 畫面」) or "".
+ */
+async function collectStep(
+  run: RunInternal,
+  project: Project,
+  research: Research,
+  releaseGroup: Promise<{ id: string; title: string } | null> | null,
+  signal: AbortSignal,
+  startedAt: number,
+): Promise<string> {
+  const log = (message: string) => emit(run, { type: "log", step: "research", message });
+  if (!visualsConfig().enabled) return "";
+  try {
+    const current = project.collected ?? [];
+    const room = MAX_COLLECTED - current.length;
+    const known = research.publicInfo?.musicbrainz?.recording?.releaseGroup;
+    const rg = known?.id ? { id: known.id, title: known.title } : releaseGroup ? await raceAbort(releaseGroup, signal) : null;
+    const candidates = Array.isArray(research.visualCandidates) ? research.visualCandidates : [];
+    if (!rg && !candidates.length) return "";
+    if (room <= 0) {
+      log(`研究找到的素材已經有 ${current.length} 張（上限 ${MAX_COLLECTED}），這次不再下載新的。`);
+      return "";
+    }
+    // cloud: the step has a hard stop; leave room to save
+    const left = run.cloud ? CLOUD_STEP_TIMEOUT_MS - 15_000 - (Date.now() - startedAt) : VISUALS_BUDGET_MS;
+    const budgetMs = Math.min(VISUALS_BUDGET_MS, left);
+    if (budgetMs < 3000) {
+      log("研究用完了這個步驟的時間，這次不收集視覺素材（重新研究時會再試）。");
+      return "";
+    }
+    log(`收集樂團的視覺素材：${[rg ? `《${rg.title}》的封面（Cover Art Archive）` : "", candidates.length ? `Claude 列出的 ${candidates.length} 個素材` : ""].filter(Boolean).join("、")}…`);
+    const authorization = await authorizationFor(project);
+    const skip = {
+      urls: new Set([...current.map((c) => c.provenance.imageUrl), ...(project.collectedDismissed ?? [])]),
+      hashes: new Set([...current.map((c) => c.hash), ...(project.collectedDismissed ?? [])]),
+    };
+    const got = await collectVisuals({ meta: project.meta, releaseGroup: rg, candidates, authorization, skip, room }, { signal, budgetMs, onLog: log });
+    for (const note of got.notes.slice(0, 4)) log(note);
+    if (!got.downloads.length) {
+      log(got.tried ? "沒有下載到可用的視覺素材。" : "沒有新的視覺素材。");
+      return "";
+    }
+    const { added } = await storeCollected(project.id, got.downloads);
+    const line = collectedSummary(added);
+    if (!line) return "";
+    log(`${line}${authorization ? "（樂團已授權，可以上台）" : "（尚未確認樂團授權：先只當參考）"}`);
+    return line;
+  } catch (err) {
+    if (signal.aborted) throw err;
+    log(`收集視覺素材失敗：${describeError(err)}（研究結果不受影響）`);
+    return "";
+  }
 }
 
 /** The band's bible and library for a project's research / design (empty without a band). */

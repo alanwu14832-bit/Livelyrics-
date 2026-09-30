@@ -29,7 +29,9 @@ import {
 import { normalizePlanWithReport } from "./normalize";
 import { designPlanOutputFormat } from "./output-schema";
 import { visionContent } from "./moodboard";
-import { buildDesignPrompt, buildResearchPrompt, DESIGN_SYSTEM, RESEARCH_HEADINGS, RESEARCH_SYSTEM } from "./prompts";
+import { collectedVisionContent } from "./collected";
+import { buildDesignPrompt, buildResearchPrompt, DESIGN_SYSTEM, RESEARCH_HEADINGS, RESEARCH_SYSTEM, RESEARCH_VISUALS_RULES } from "./prompts";
+import { splitVisuals, visualsStreamFilter } from "./visual-candidates";
 import { analyzeStructure } from "./structure";
 import type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
 
@@ -41,6 +43,8 @@ export const MAX_CONTINUATIONS = 5;
 export const RESEARCH_MAX_TOKENS = 24_000;
 export const DESIGN_MAX_TOKENS = 48_000;
 export const WEB_SEARCH_MAX_USES = 8;
+/** phase 8: pages Claude may open to find the band's real images (official site, release pages) */
+export const WEB_FETCH_MAX_USES = 5;
 
 // ---------------------------------------------------------------------------
 // transport
@@ -147,6 +151,18 @@ export interface ClaudeOptions {
   now?: () => Date;
 }
 
+/** The host of a page Claude opened with web_fetch, or null. */
+function fetchUrlOf(block: BetaContentBlock): string | null {
+  if (block.type !== "server_tool_use" || block.name !== "web_fetch") return null;
+  const url = (block.input as { url?: unknown } | null)?.url;
+  if (typeof url !== "string") return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 function logFallback(block: BetaContentBlock, cb: Callbacks) {
   if (block.type === "fallback") cb.onLog(`${block.from.model} 婉拒了這個請求，已由 ${block.to.model} 接手`);
 }
@@ -179,9 +195,12 @@ export function researchParams(input: DesignerInput, model: string): BetaMessage
   return {
     model,
     max_tokens: RESEARCH_MAX_TOKENS,
-    system: RESEARCH_SYSTEM,
+    system: RESEARCH_SYSTEM + RESEARCH_VISUALS_RULES,
     messages: [{ role: "user", content: buildResearchPrompt(input, st) }],
-    tools: [{ type: "web_search_20260209", name: "web_search", max_uses: WEB_SEARCH_MAX_USES }],
+    tools: [
+      { type: "web_search_20260209", name: "web_search", max_uses: WEB_SEARCH_MAX_USES },
+      { type: "web_fetch_20260209", name: "web_fetch", max_uses: WEB_FETCH_MAX_USES },
+    ],
     thinking: adaptiveThinking(),
     betas: [FALLBACK_BETA, THINKING_BINDING_BETA],
     fallbacks: "default",
@@ -193,6 +212,8 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
   let thinking = false;
   let writing = false;
   let searches = 0;
+  // the image list after the brief is data for the server, not part of the streamed brief
+  const shown = visualsStreamFilter((delta) => cb.onDelta(delta));
   const handlers: StreamHandlers = {
     onThinking: () => {
       if (!thinking) {
@@ -205,7 +226,7 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
         writing = true;
         cb.onLog("開始撰寫研究簡報…");
       }
-      cb.onDelta(delta);
+      shown.push(delta);
     },
     onBlock: (block) => {
       const q = searchQueryOf(block);
@@ -216,6 +237,8 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
       if (block.type === "web_search_tool_result" && !Array.isArray(block.content)) {
         cb.onLog(`一次網路搜尋失敗（${block.content.error_code}）`);
       }
+      const opened = fetchUrlOf(block);
+      if (opened) cb.onLog(`打開 ${opened} 找官方的圖片…`);
       logFallback(block, cb);
     },
   };
@@ -224,9 +247,11 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
     onContinue: (n) => cb.onLog(`研究還在進行，接續第 ${n} 次…`),
   });
 
+  shown.flush();
   if (result.stopReason === "refusal") throw new ClaudeFailure(describeRefusal(result.message.stop_details));
   const sources = extractSources(result.content);
-  let brief = tidyBrief(textOf(result.content));
+  const split = splitVisuals(textOf(result.content));
+  let brief = tidyBrief(split.brief);
   const truncated = result.stopReason === "max_tokens" || result.stopReason === "model_context_window_exceeded" || result.stopReason === "pause_turn";
   if (brief.length < 80) throw new ClaudeFailure(`研究沒有產生內容（${describeStop(result.stopReason)}）`);
   if (truncated) {
@@ -235,10 +260,11 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
   }
   brief = appendSources(brief, sources);
   const failed = searchErrors(result.content).length;
-  cb.onLog(`研究完成：${searches} 次搜尋${failed ? `（${failed} 次失敗）` : ""}、${sources.length} 個來源`);
+  cb.onLog(`研究完成：${searches} 次搜尋${failed ? `（${failed} 次失敗）` : ""}、${sources.length} 個來源${split.candidates.length ? `、列出 ${split.candidates.length} 個視覺素材` : ""}`);
   return {
     brief,
     sources,
+    ...(split.candidates.length ? { visualCandidates: split.candidates } : {}),
     engine: "claude",
     model: String(result.message.model || opts.model),
     createdAt: (opts.now?.() ?? new Date()).toISOString(),
@@ -352,7 +378,7 @@ export function isUsablePlan(raw: unknown): boolean {
  * 圖 n label) when the server could load any. Without images it stays a plain string.
  */
 export function userContent(input: DesignerInput, prompt: string): string | BetaContentBlockParam[] {
-  const images = visionContent(input.moodboard, input.moodboardImages);
+  const images = [...visionContent(input.moodboard, input.moodboardImages), ...collectedVisionContent(input.collected, input.collectedImages)];
   return images.length ? [...images, { type: "text", text: prompt }] : prompt;
 }
 

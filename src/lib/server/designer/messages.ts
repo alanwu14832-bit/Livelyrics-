@@ -150,6 +150,26 @@ export function toBlockParam(b: BetaContentBlock): BetaContentBlockParam | null 
           : { type: "web_search_tool_result_error", error_code: b.content.error_code },
         ...(b.caller ? { caller: b.caller } : {}),
       };
+    case "web_fetch_tool_result":
+      return {
+        type: "web_fetch_tool_result",
+        tool_use_id: b.tool_use_id,
+        content:
+          b.content.type === "web_fetch_tool_result_error"
+            ? { type: "web_fetch_tool_result_error", error_code: b.content.error_code }
+            : {
+                type: "web_fetch_result",
+                url: b.content.url,
+                retrieved_at: b.content.retrieved_at,
+                content: {
+                  type: "document",
+                  source: b.content.content.source,
+                  ...(b.content.content.title ? { title: b.content.content.title } : {}),
+                  ...(b.content.content.citations ? { citations: { enabled: b.content.content.citations.enabled } } : {}),
+                },
+              },
+        ...(b.caller ? { caller: b.caller } : {}),
+      };
     case "fallback":
       return { type: "fallback", from: { model: b.from.model }, to: { model: b.to.model } };
     default:

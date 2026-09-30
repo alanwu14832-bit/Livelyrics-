@@ -6,12 +6,12 @@
 // switch cross-fades the new view in with a 12 px drift from the side it came from; keyboard
 // switches are instant.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SegmentedControl, cx } from "@/components/ui";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { useStageValue } from "@/lib/console/hooks";
 import type { StageState } from "@/lib/stage/protocol";
-import type { Project } from "@/lib/types";
+import type { CollectedVisual, DesignPlan, Project } from "@/lib/types";
 import { ControlTab } from "./ControlTab";
 import { DesignTab } from "./DesignTab";
 import { ResearchTab } from "./ResearchTab";
@@ -72,6 +72,8 @@ export function SidePanel({
 }) {
   // only rendered on the client once the project has loaded, so reading storage here is safe
   const [tab, setTab] = useState<TabId>(readTab);
+  // 研究找到的素材 toggled in the research tab (a stable callback: the tab is memoized)
+  const onCollected = useCallback((items: CollectedVisual[], plan?: DesignPlan | null) => controller.applyCollected(items, plan), [controller]);
   const [enter, setEnter] = useState<"none" | "forward" | "back">("none");
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollTops = useRef<Record<TabId, number>>({ design: 0, research: 0, control: 0, sync: 0 });
@@ -166,7 +168,7 @@ export function SidePanel({
         )}
       >
         {tab === "design" && <DesignTab controller={controller} project={project} redesigning={snap.redesign.running} onRedesign={onRedesign} />}
-        {tab === "research" && <ResearchTab project={project} />}
+        {tab === "research" && <ResearchTab project={project} onCollected={onCollected} />}
         {tab === "control" && <ControlTab controller={controller} project={project} output={snap.output} />}
         {tab === "sync" && <SyncTab controller={controller} snap={snap} project={project} onOpenControllers={onOpenControllers} />}
       </div>

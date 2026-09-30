@@ -109,4 +109,9 @@ export interface FileStore {
    * `maxBytes`.
    */
   read(file: StoredFile, opts: { maxBytes: number; signal?: AbortSignal }): Promise<Uint8Array>;
+  /**
+   * Store bytes the server itself produced (phase 8: images the research downloaded). Local: an
+   * atomic write to `diskPath`. Cloud: a public blob at `blobPathname` (plus Blob's random suffix).
+   */
+  write(target: { diskPath: string; blobPathname: string }, bytes: Uint8Array, contentType: string): Promise<StoredFile>;
 }
