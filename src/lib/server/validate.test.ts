@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SongMeta } from "@/lib/types";
 import { HttpError } from "./http";
-import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, parseTimecodePatch, sanitizeAnalysis } from "./validate";
+import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, parseThumbPatch, parseTimecodePatch, sanitizeAnalysis } from "./validate";
 
 const file = { fileName: "告五人 - 愛人錯過.mp3", mimeType: "audio/mpeg" };
 
@@ -116,5 +116,18 @@ describe("parseTimecodePatch (phase 5a)", () => {
     for (const bad of [{ start: "2" }, { start: "24:00:00:00" }, { start: "01:00:00:30" }, { start: 5 }, "01:00:00:00", { start: "01:00:00:00", extra: 1 }, {}]) {
       expect(() => parseTimecodePatch(bad), JSON.stringify(bad)).toThrow(HttpError);
     }
+  });
+});
+
+describe("parseThumbPatch", () => {
+  it("accepts a small JPEG data URL with its plan fingerprint, or null", () => {
+    expect(parseThumbPatch({ url: "data:image/jpeg;base64,/9j/4AAQ", plan: "abc123" })).toEqual({ url: "data:image/jpeg;base64,/9j/4AAQ", plan: "abc123" });
+    expect(parseThumbPatch(null)).toBeNull();
+  });
+  it("rejects other images, scripts, huge data and bad fingerprints", () => {
+    expect(() => parseThumbPatch({ url: "data:image/png;base64,AAAA", plan: "a" })).toThrow();
+    expect(() => parseThumbPatch({ url: "javascript:alert(1)", plan: "a" })).toThrow();
+    expect(() => parseThumbPatch({ url: "data:image/jpeg;base64," + "A".repeat(60_000), plan: "a" })).toThrow();
+    expect(() => parseThumbPatch({ url: "data:image/jpeg;base64,AAAA", plan: "../x" })).toThrow();
   });
 });

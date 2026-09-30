@@ -7,13 +7,13 @@
 // composition) and 「使用專屬畫面」 (off = the built-in scenes of each section; the program is kept).
 // A program this computer cannot compile says so, with 「請 Claude 修正」.
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Banner, Button, InsetGroup, ListRow, Sheet, Switch, Tag, TextArea } from "@/components/ui";
 import { SparkleIcon } from "@/components/ui/Icon";
 import { api } from "@/lib/api-client";
 import { formatTimeShort } from "@/lib/timeline";
 import type { Project, SceneProgram, TypeRelation } from "@/lib/types";
-import { useKeyStill } from "./key-still";
+import { saveThumb, useKeyStill } from "./key-still";
 
 const ENGINE_LABEL: Record<SceneProgram["engine"], string> = { claude: "Claude 撰寫", offline: "離線作曲器", example: "範例程式", manual: "手動貼上" };
 const RELATION_LABEL: Record<TypeRelation, string> = { plain: "字在留白裡", knockout: "字切開畫面", behind: "字從形狀後面經過", lit: "畫面照亮字" };
@@ -34,6 +34,11 @@ export function SceneProgramPanel({ project, actions }: { project: Project; acti
   const plan = project.plan;
   const program = plan?.sceneProgram ?? null;
   const still = useKeyStill(program ? project : null);
+  // the rendered key still also becomes the song's picture in the library
+  const readyStill = still.status === "ready" && still.still.program.state !== "failed" ? still.still : null;
+  useEffect(() => {
+    if (readyStill) void saveThumb(project, readyStill);
+  }, [project, readyStill]);
   const [sheet, setSheet] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);

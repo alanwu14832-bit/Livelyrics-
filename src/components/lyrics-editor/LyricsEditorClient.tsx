@@ -788,7 +788,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
                 </Button>
               </Tooltip>
             ) : (
-              <span className="inline-flex h-8 min-w-[4.5rem] items-center justify-center gap-1 px-2 text-[13px] leading-[18px] font-medium text-label-2" role="status">
+              <span className="inline-flex h-8 min-w-[4.5rem] shrink-0 items-center justify-center gap-1 px-2 text-[13px] leading-[18px] font-medium whitespace-nowrap text-label-2" role="status">
                 <CheckIcon size={14} />
                 已儲存
               </span>
@@ -838,11 +838,16 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
               </span>
             )}
             <label htmlFor="lyrics-follow" className="flex cursor-pointer items-center gap-2.5 text-[13px] leading-5 text-label select-none">
-              表格跟著播放捲動
+              <span>
+                <span className="max-md:hidden">表格</span>跟著播放捲動
+              </span>
               <Switch id="lyrics-follow" checked={follow} onChange={setFollow} />
             </label>
             {!tapActive && <TapSyncStart onStart={() => startTap(0)} latency={latency} onLatency={changeLatency} disabled={!!audioError || lines.length === 0} />}
-            <ShortcutsPopover />
+            {/* keyboard shortcuts: nothing to show on a phone */}
+            <span className="contents max-md:hidden">
+              <ShortcutsPopover />
+            </span>
           </div>
         </div>
         <Timeline

@@ -32,7 +32,7 @@ export function Transport({ playhead, duration, disabled }: { playhead: Playhead
     if (e.detail > 0) e.currentTarget.blur();
   };
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-1 gap-y-2">
       <Tooltip content="倒退 5 秒" shortcut="Shift+ArrowLeft">
         <Button variant="quiet" size="icon" aria-label="倒退 5 秒" icon={RewindIcon} disabled={disabled} onClick={(e) => (playhead.seek(playhead.getTime() - 5), blur(e))} />
       </Tooltip>
@@ -51,11 +51,12 @@ export function Transport({ playhead, duration, disabled }: { playhead: Playhead
       <Tooltip content="快轉 5 秒" shortcut="Shift+ArrowRight">
         <Button variant="quiet" size="icon" aria-label="快轉 5 秒" icon={FastForwardIcon} disabled={disabled} onClick={(e) => (playhead.seek(playhead.getTime() + 5), blur(e))} />
       </Tooltip>
-      <span className="ml-3 min-w-[10.5rem]">
+      <span className="ml-3 whitespace-nowrap md:min-w-[10.5rem]">
         <TimeReadout playhead={playhead} duration={duration} />
       </span>
       <SegmentedControl
         label="播放速度"
+        className="shrink-0"
         value={nearestRate(rate)}
         onChange={(r) => playhead.setRate(Number(r))}
         blurOnPointer

@@ -466,7 +466,18 @@ export interface Project {
   planSource?: PlanSource;
   /** 時間碼 (phase 5a): where the song starts on the playback rig's timecode; absent = 01:00:00:00 */
   timecode?: SongTimecode;
+  /** the library card's picture: a small JPEG of the key still, saved by the design overview */
+  thumb?: ProjectThumb;
 }
+
+/** A small key still (data:image/jpeg, ≤ THUMB_MAX_CHARS) and the plan it shows (planHash). */
+export interface ProjectThumb {
+  url: string;
+  plan: string;
+}
+
+/** data URL length cap for Project.thumb (≈ 36 KB of JPEG) */
+export const THUMB_MAX_CHARS = 48_000;
 
 /** A song's place on the playback rig's timecode (phase 5a, one song per hour by default). */
 export interface SongTimecode {
@@ -529,6 +540,8 @@ export interface ProjectSummary {
   lyricsSynced?: boolean;
   /** true when a design plan exists */
   hasPlan?: boolean;
+  /** the key still of the current plan (data URL), when the design overview has saved one */
+  thumb?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cx } from "@/components/ui";
+import { useSceneBackdrop } from "@/components/process/key-still";
 import { TypePainter } from "@/components/stage/type/TypePainter";
 import { loadFaces, resolveFamilies } from "@/components/stage/type/fonts";
 import { ensureContrast, isHex } from "@/lib/stage/color";
@@ -49,6 +50,25 @@ export function RecipeThumbs({
   const refs = useRef(new Map<TypeRecipeId, HTMLCanvasElement>());
   const painter = useRef<TypePainter | null>(null);
   const [fontsReady, setFontsReady] = useState(0);
+  // the song's own scene at this line, behind every tile: type and image are composed together
+  const backdropUrl = useSceneBackdrop(project, line?.start ?? null);
+  const [decoded, setDecoded] = useState<{ url: string; img: HTMLImageElement } | null>(null);
+  useEffect(() => {
+    if (!backdropUrl) return;
+    let live = true;
+    const img = new Image();
+    img.src = backdropUrl;
+    img.decode().then(
+      () => live && setDecoded({ url: backdropUrl, img }),
+      () => {
+        /* the tiles keep their flat background */
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [backdropUrl]);
+  const backdrop = decoded && decoded.url === backdropUrl ? decoded.img : null;
 
   const sys = resolveSystem(system);
   const fontsKey = `${sys.fonts.cjk}|${sys.fonts.latin}|${sys.weight}`;
@@ -95,6 +115,12 @@ export function RecipeThumbs({
       c2.setTransform(1, 0, 0, 1, 0, 0);
       c2.fillStyle = bg;
       c2.fillRect(0, 0, W, H);
+      if (backdrop) {
+        c2.drawImage(backdrop, 0, 0, W, H);
+        // the stage keeps words legible by dimming around them; a tile this small just dims the picture
+        c2.fillStyle = "rgba(0,0,0,0.45)";
+        c2.fillRect(0, 0, W, H);
+      }
       const variant = setRecipe(system, line.id, id, ctx);
       let composed = null;
       try {
@@ -107,7 +133,7 @@ export function RecipeThumbs({
       p.paint([{ comp: composed.comp, clock: HOLD, alpha: 1 }], W / output.width, "color", { ink, accent, spot: SEAL_COLOR });
       c2.drawImage(p.canvas, 0, 0);
     }
-  }, [project, system, lineIndex, line, recipes, ctx, output.width, output.height, output.lyricSafe, tileW, tileH, fontsReady]);
+  }, [project, system, lineIndex, line, recipes, ctx, output.width, output.height, output.lyricSafe, tileW, tileH, fontsReady, backdrop]);
 
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="構圖">

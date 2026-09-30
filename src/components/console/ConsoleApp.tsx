@@ -15,11 +15,12 @@
 // MIDI controllers (phase 5a) run the same actions as the keys, through the same dispatch and HUD
 // (plus the faders, the ProPresenter-style line notes and the section notes); X is 回到手動.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Banner, Button, EmptyState, Spinner, ToastStack, type HudHandle, type ToastItem } from "@/components/ui";
 import { MusicNotesIcon, WarningCircleIcon, type UiIcon } from "@/components/ui/Icon";
 import type { ConsoleController } from "@/lib/console/controller";
 import { useConsoleController, useConsoleSnapshot } from "@/lib/console/hooks";
+import { PhoneConsole } from "./PhoneConsole";
 import { hotkeyAction, type ConsoleAction, type HotkeyAction, type HotkeyHelpGroup } from "@/lib/console/hotkeys";
 import { commandAction } from "@/lib/midi/actions";
 import type { MidiCommand } from "@/lib/midi/mapping";
@@ -60,6 +61,22 @@ export interface ShowSlots {
 /** Hotkeys that also work while the shortcut help sheet is open (it only explains them). */
 const HELP_PASSTHROUGH = new Set<HotkeyAction["type"]>(["blackout", "lyrics", "freeze", "scene", "followPlan", "offset", "tap", "mode", "hold", "loop", "manual"]);
 
+const PHONE_QUERY = "(max-width: 899px)";
+function subscribePhone(cb: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const mq = window.matchMedia(PHONE_QUERY);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+/** narrower than the desktop console can be laid out in (live; false on the server) */
+function usePhoneWidth(): boolean {
+  return useSyncExternalStore(
+    subscribePhone,
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(PHONE_QUERY).matches,
+    () => false,
+  );
+}
+
 export function ConsoleApp({ id, intro }: { id: string; intro?: ConsoleIntro | null }) {
   const controller = useConsoleController(id);
   return <SongConsole controller={controller} intro={intro} />;
@@ -82,6 +99,7 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
   const [controllersOpen, setControllersOpen] = useState(false);
   const [openAnyway, setOpenAnyway] = useState(false);
   const hud = useRef<HudHandle>(null);
+  const phone = usePhoneWidth();
 
   const project = snap.project;
   // the show goes on: a song taken on stage opens even when it is not designed yet
@@ -298,6 +316,16 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
   }
 
   const openRedesign = () => setRedesignOpen(true);
+
+  // a phone: the one-hand console (the desktop grid needs 1280 px); the keys above still work
+  if (!show && phone) {
+    return (
+      <>
+        <PhoneConsole controller={controller} snap={snap} project={project} hudRef={hud} />
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
 
   return (
     <div className={show ? "flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-label" : "flex h-screen min-w-[1280px] flex-col overflow-hidden bg-bg text-label"}>

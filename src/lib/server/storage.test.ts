@@ -20,6 +20,7 @@ import {
   StorageError,
   updateProject,
 } from "./storage";
+import { planHash } from "@/lib/plan-hash";
 
 let root: string;
 const previousEnv = process.env.LIVELYRICS_DATA_DIR;
@@ -125,6 +126,28 @@ describe("projects", () => {
       (d as unknown as { timecode: unknown }).timecode = { start: "99:00" };
     });
     expect((await getProject(p.id))!.timecode).toBeUndefined();
+  });
+
+  it("keeps the library thumbnail and lists it only while it shows the current plan", async () => {
+    const p = await createProject({ meta, analysis: null, audio: { tempPath: await upload(), ext: "wav" } });
+    const plan = planWithPalette(["#101010", "#ff3366"]);
+    const url = "data:image/jpeg;base64,/9j/4AAQ";
+    await updateProject(p.id, (d) => {
+      d.plan = plan;
+      d.thumb = { url, plan: planHash(plan) };
+    });
+    expect((await getProject(p.id))!.thumb).toEqual({ url, plan: planHash(plan) });
+    expect((await listProjects()).find((s) => s.id === p.id)!.thumb).toBe(url);
+    // a re-design: the stored still shows the old plan, the card falls back to the drawn artwork
+    await updateProject(p.id, (d) => {
+      d.plan = planWithPalette(["#202020", "#33ff66"]);
+    });
+    expect((await listProjects()).find((s) => s.id === p.id)!.thumb).toBeUndefined();
+    // anything else than a small JPEG data URL is dropped on read
+    await updateProject(p.id, (d) => {
+      (d as unknown as { thumb: unknown }).thumb = { url: "javascript:alert(1)", plan: "x" };
+    });
+    expect((await getProject(p.id))!.thumb).toBeUndefined();
   });
 
   it("does not recreate a deleted project on save / update", async () => {
