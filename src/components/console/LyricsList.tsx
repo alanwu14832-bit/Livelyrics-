@@ -266,7 +266,7 @@ function LyricsListImpl({
           <>
             <span className="tabular">{lines.length} 行</span>
             {untimed > 0 && (
-              <Tooltip content="這些行沒有時間碼：TRACK 模式不會自動顯示，LIVE 模式可手動送出">
+              <Tooltip content="這些行沒有時間碼：跟音檔模式不會自動顯示，手動模式可以送出">
                 <Tag tone="orange" tabIndex={0} className="relative before:absolute before:-inset-y-1 before:inset-x-0 before:content-['']">
                   {untimed} 行未對時
                 </Tag>

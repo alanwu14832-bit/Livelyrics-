@@ -135,3 +135,22 @@ describe("the 排版 editor's plan message (字體藝術)", () => {
     expect(parseStageMessage({ type: "plan", projectId: "p1", plan: { sections: "x" } })).toBeNull();
   });
 });
+
+describe("a key pressed in the projection window", () => {
+  const key = { key: "PageDown", code: "PageDown", shiftKey: false, repeat: false };
+  it("parses the key and nothing else", () => {
+    expect(parseStageMessage({ type: "key", outputId: "o", id: "k1", key: { ...key, extra: "x" } })).toEqual({ type: "key", outputId: "o", id: "k1", key });
+    expect(parseStageMessage({ type: "key", outputId: "o", id: "k1", key: { key: "b", code: "KeyB", shiftKey: "yes" } })).toEqual({
+      type: "key",
+      outputId: "o",
+      id: "k1",
+      key: { key: "b", code: "KeyB", shiftKey: false, repeat: false },
+    });
+  });
+  it("drops malformed keys", () => {
+    expect(parseStageMessage({ type: "key", outputId: "o", id: "", key })).toBeNull();
+    expect(parseStageMessage({ type: "key", id: "k", key })).toBeNull();
+    expect(parseStageMessage({ type: "key", outputId: "o", id: "k", key: { key: 1, code: "KeyB" } })).toBeNull();
+    expect(parseStageMessage({ type: "key", outputId: "o", id: "k", key: { key: "x".repeat(40), code: "KeyB" } })).toBeNull();
+  });
+});

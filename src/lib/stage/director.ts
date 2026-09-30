@@ -10,6 +10,11 @@ export interface SceneTarget {
   params: SceneParams;
   colorway: [string, string, string];
   lookKey: string;
+  /**
+   * 專屬畫面: the scene program's last values for this slot (the renderer's ProgramDraw); the
+   * engine refreshes it every frame for the current slot, an outgoing slot keeps its last one
+   */
+  program?: unknown;
 }
 
 export interface SceneSlot {

@@ -27,7 +27,7 @@ export interface RunnerDeps {
   pollMs?: number;
 }
 
-const ALL: readonly ProcessStepId[] = ["lyrics", "research", "design"];
+const ALL: readonly ProcessStepId[] = ["lyrics", "research", "design", "scene"];
 
 export function normalizeRunSteps(steps: readonly ProcessStepId[] | undefined): ProcessStepId[] {
   return steps && steps.length ? ALL.filter((s) => steps.includes(s)) : [...ALL];

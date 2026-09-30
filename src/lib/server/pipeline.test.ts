@@ -13,6 +13,12 @@ vi.mock("@/lib/server/designer", () => ({
   modelName: () => "test-model",
   researchSong: designerMock.researchSong,
   designSong: designerMock.designSong,
+  // 專屬畫面: the scene step (the plans of these tests carry no program, so it runs)
+  composerSalt: () => 0,
+  designSceneProgram: async () => ({
+    engine: "offline",
+    program: { version: 1, engine: "offline", title: "測試畫面", concept: "", source: "vec3 scene(vec2 fc) { return uBg; }", sections: [], keyMoment: null, enabled: true },
+  }),
 }));
 vi.mock("./lrclib", () => ({ findBestLyrics: lrclibMock.findBestLyrics }));
 
@@ -131,7 +137,7 @@ describe("runPipeline", () => {
     const events = await collect(handle);
 
     const steps = events.filter((e) => e.type === "step").map((e) => e.type === "step" && `${e.step}:${e.status}`);
-    expect(steps).toEqual(["lyrics:start", "lyrics:done", "research:start", "research:done", "design:start", "design:done"]);
+    expect(steps).toEqual(["lyrics:start", "lyrics:done", "research:start", "research:done", "design:start", "design:done", "scene:start", "scene:done"]);
     expect(events).toContainEqual({ type: "search", query: "Livelyrics Band 示範之歌" });
     expect(events).toContainEqual({ type: "log", step: "research", message: "正在研究" });
     const done = events[events.length - 1];

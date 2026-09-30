@@ -8,6 +8,7 @@
 // styles no automatic designer picks any more. A stored plan that is only shifted or kept (the show
 // arc, an offline instruction, the previous plan) keeps its type system, or its absence.
 
+import { normalizeSceneProgram } from "@/lib/stage/program/model";
 import {
   FONT_IDS,
   LYRIC_PLACEMENTS,
@@ -699,6 +700,11 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput, opti
   const typeSystem = normalizeTypeOf(root, input, { keyVisual, sections, lines }, duration, fill, repairs);
   const plan: DesignPlan = { version: 1, keyVisual, sections, lines, cues, designerNotes };
   if (typeSystem) plan.typeSystem = typeSystem;
+  // 專屬畫面: validated again (it is code), re-pointed at these sections
+  if (root.sceneProgram != null) {
+    const sceneProgram = normalizeSceneProgram(root.sceneProgram, { sections, repairs });
+    if (sceneProgram) plan.sceneProgram = sceneProgram;
+  }
   return { plan, repairs };
 }
 

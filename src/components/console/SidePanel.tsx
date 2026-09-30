@@ -6,7 +6,7 @@
 // switch cross-fades the new view in with a 12 px drift from the side it came from; keyboard
 // switches are instant.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SegmentedControl, cx } from "@/components/ui";
 import type { ConsoleController, ConsoleSnapshot } from "@/lib/console/controller";
 import { useStageValue } from "@/lib/console/hooks";
@@ -84,6 +84,19 @@ export function SidePanel({
     const el = panelRef.current;
     if (el) el.scrollTop = tab === "control" ? 0 : scrollTops.current[tab];
   }, [tab]);
+
+  // Going on air (a projection window connects): the show needs 控制, not the design notes. Once
+  // per connection, and only from the reading tabs; 同步 and a tab chosen afterwards stay put.
+  const connected = snap.output.connected;
+  const wasConnected = useRef(connected);
+  useEffect(() => {
+    if (connected && !wasConnected.current && (tab === "design" || tab === "research")) {
+      if (panelRef.current) scrollTops.current[tab] = panelRef.current.scrollTop;
+      setEnter("none");
+      setTab("control");
+    }
+    wasConnected.current = connected;
+  }, [connected, tab]);
 
   const choose = (id: TabId) => {
     if (id === tab) return;

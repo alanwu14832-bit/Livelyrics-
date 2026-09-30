@@ -71,6 +71,7 @@ void main() {
   }
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col += (hash12(gl_FragCoord.xy + fract(uClock) * 97.0) - 0.5) * (1.5 / 255.0) * step(0.003, l);
-  FRAG = vec4(clamp(col, 0.0, 1.0), 1.0);
+  // the foreground mask (a scene program's alpha) cross-fades with the pictures
+  FRAG = vec4(clamp(col, 0.0, 1.0), mix(TEX(uB, uv).a, TEX(uA, uv).a, clamp(uP, 0.0, 1.0)));
 }
 `;

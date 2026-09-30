@@ -62,7 +62,7 @@ export function isProcessStep(step: unknown): step is ProcessStep {
 export function initialRunState(): RunState {
   return {
     phase: "idle",
-    steps: { lyrics: emptyStep("kept"), research: emptyStep("kept"), design: emptyStep("kept") },
+    steps: { lyrics: emptyStep("kept"), research: emptyStep("kept"), design: emptyStep("kept"), scene: emptyStep("kept") },
     requested: [],
     searches: [],
     logs: [],
@@ -207,5 +207,9 @@ export function stepsFromProject(project: Project): Record<ProcessStep, StepStat
   const design: StepState = plan
     ? { status: "done", text: "", message: `主視覺「${plan.keyVisual.title}」，${plan.sections.length} 個段落` }
     : { status: "pending", text: "", message: "尚未設計" };
-  return { lyrics, research, design };
+  const program = plan?.sceneProgram;
+  const scene: StepState = program
+    ? { status: "done", text: "", message: `專屬畫面「${program.title}」${program.enabled === false ? "（目前改用內建場景）" : ""}` }
+    : { status: "pending", text: "", message: plan ? "這個方案用內建場景" : "尚未設計" };
+  return { lyrics, research, design, scene };
 }

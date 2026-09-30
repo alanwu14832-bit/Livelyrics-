@@ -99,3 +99,25 @@ export function hasStoredSettings(projectId: string, store: StorageLike | null =
     return false;
   }
 }
+
+/** The mode the operator last chose by hand, across songs: a song opened for the first time starts in it. */
+export const PREFERRED_MODE_KEY = "livelyrics:console:preferred-mode";
+
+export function loadPreferredMode(store: StorageLike | null = storage()): PlaybackMode | null {
+  if (!store) return null;
+  try {
+    const v = store.getItem(PREFERRED_MODE_KEY);
+    return v === "live" || v === "track" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePreferredMode(mode: PlaybackMode, store: StorageLike | null = storage()): void {
+  if (!store) return;
+  try {
+    store.setItem(PREFERRED_MODE_KEY, mode);
+  } catch {
+    /* a convenience */
+  }
+}

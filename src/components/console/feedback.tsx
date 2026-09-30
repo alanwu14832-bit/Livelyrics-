@@ -73,7 +73,7 @@ export function hudForAction(action: ConsoleAction, controller: ConsoleControlle
       return { icon: MetronomeIcon, label: "拍速", value: bpm ? `${bpm} BPM` : "再點幾下" };
     }
     case "mode":
-      return snap.mode === "live" ? { icon: RecordIcon, label: "LIVE 模式", tone: "red" } : { icon: WaveformIcon, label: "TRACK 模式" };
+      return snap.mode === "live" ? { icon: RecordIcon, label: "手動切換", tone: "red" } : { icon: WaveformIcon, label: "跟著音檔" };
     case "openOutput":
       return { icon: ProjectorScreenIcon, label: snap.output.connected ? "已聚焦投影視窗" : "已開啟投影視窗" };
     case "hold": {
@@ -84,6 +84,10 @@ export function hudForAction(action: ConsoleAction, controller: ConsoleControlle
       const section = snap.sectionLoop != null ? snap.project?.plan?.sections[snap.sectionLoop] : null;
       return { icon: RepeatIcon, label: "循環段落", value: section ? sectionTitle(section) : "關" };
     }
+    case "page":
+      // 手動切換: the line itself shows in the preview
+      if (snap.mode === "live") return null;
+    // falls through: 跟著音檔 pages through the sections
     case "section": {
       const index = controller.store.get().sectionIndex;
       const section = index != null ? snap.project?.plan?.sections[index] : null;
@@ -124,6 +128,9 @@ export function heldHud(action: ConsoleAction, controller: ConsoleController): H
       break;
     case "escape":
       kind = live && controller.store.get().lineIndex != null ? "line" : null;
+      break;
+    case "page":
+      kind = live ? "line" : "time";
       break;
     case "section":
     case "jumpSection":

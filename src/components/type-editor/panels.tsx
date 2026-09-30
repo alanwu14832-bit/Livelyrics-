@@ -20,14 +20,14 @@ import {
   SparkleIcon,
 } from "@/components/ui/Icon";
 import { FONTS } from "@/lib/font-meta";
-import { FONT_IDS, TYPE_COLOR_ROLES, TYPE_COLOR_TREATMENTS, TYPE_ENTER_IDS, TYPE_EXIT_IDS, TYPE_ORNAMENT_IDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "@/lib/schema";
+import { FONT_IDS, TYPE_COLOR_ROLES, TYPE_COLOR_TREATMENTS, TYPE_ENTER_IDS, TYPE_EXIT_IDS, TYPE_ORNAMENT_IDS, TYPE_RECIPE_IDS, TYPE_RELATIONS, TYPE_VOICE_IDS } from "@/lib/schema";
 import { formatTimeShort } from "@/lib/timeline";
 import { effectiveOrientation } from "@/lib/type/compose";
 import { emphasizedUnits, tapUnits, type EditContext } from "@/lib/type/edit";
 import type { LineResolution } from "@/lib/type/resolve";
 import { findMotionWord, motionKindOf } from "@/lib/type/motion-words";
 import { COLOR_ROLES, COLOR_TREATMENTS, ENTERS, EXITS, MOTION_LABELS, ORNAMENTS, PARAM_INFO, RECIPES, VOICES } from "@/lib/type/vocab";
-import type { FontId, Project, SectionDesign, TypeColorRole, TypeColorTreatment, TypeEnterId, TypeExitId, TypeOrientation, TypeParams, TypeRecipeId, TypeSection, TypeSystem, TypeVoiceId } from "@/lib/types";
+import type { FontId, Project, SectionDesign, TypeColorRole, TypeColorTreatment, TypeEnterId, TypeExitId, TypeOrientation, TypeParams, TypeRecipeId, TypeRelation, TypeSection, TypeSystem, TypeVoiceId, Zone } from "@/lib/types";
 import { RecipeThumbs } from "./RecipeThumbs";
 
 const PARAM_KEYS = Object.keys(PARAM_INFO) as Array<keyof TypeParams>;
@@ -196,18 +196,42 @@ export function SongPanel({ system, actions }: { system: TypeSystem; actions: So
 // 段落
 // ---------------------------------------------------------------------------
 
+const RELATION_LABEL: Record<TypeRelation, string> = { plain: "留白", knockout: "切開", behind: "穿過後方", lit: "被照亮" };
+const ZONE_PRESETS: Record<string, { label: string; zone: Zone }> = {
+  left: { label: "左", zone: { x: 0.07, y: 0.12, w: 0.42, h: 0.58 } },
+  right: { label: "右", zone: { x: 0.51, y: 0.12, w: 0.42, h: 0.58 } },
+  center: { label: "中", zone: { x: 0.25, y: 0.2, w: 0.5, h: 0.5 } },
+  wide: { label: "橫幅", zone: { x: 0.07, y: 0.14, w: 0.86, h: 0.36 } },
+};
+
+function presetOf(z: Zone): string {
+  let best = "left";
+  let bestD = Infinity;
+  for (const [k, p] of Object.entries(ZONE_PRESETS)) {
+    const d = Math.abs(p.zone.x - z.x) + Math.abs(p.zone.w - z.w);
+    if (d < bestD) {
+      bestD = d;
+      best = k;
+    }
+  }
+  return best;
+}
+
 export function SectionPanel({
   sections,
   selected,
   onSelect,
   override,
   onChange,
+  composition,
 }: {
   sections: readonly SectionDesign[];
   selected: string | null;
   onSelect: (id: string) => void;
   override: TypeSection | null;
   onChange: (patch: Partial<Omit<TypeSection, "sectionId">>, done: boolean) => void;
+  /** 專屬畫面: the section's text zone and relation now (null = the plan has no active program) */
+  composition?: { zone: Zone; relation: TypeRelation } | null;
 }) {
   const sec = sections.find((s) => s.id === selected) ?? null;
   return (
@@ -250,6 +274,46 @@ export function SectionPanel({
           </label>
           {override?.motion != null && (
             <Slider touch label="動態幅度" value={override.motion} min={0} max={1} step={0.01} onChange={(v) => onChange({ motion: v }, false)} format={(v) => `${Math.round(v * 100)}`} resetValue={0.5} />
+          )}
+        </Group>
+      )}
+      {sec && composition && (
+        <Group
+          title="和畫面一起構圖"
+          footer="文字區是專屬畫面在這一段留下的空白，歌詞只排在裡面；直式畫面會自動改成上下的帶狀區。關係決定字怎麼碰到畫面。"
+          className="[&_[data-zone]]:touch-manipulation"
+        >
+          <SegmentedControl
+            touch
+            label="文字區"
+            value={presetOf(composition.zone)}
+            onChange={(v) => onChange({ zone: ZONE_PRESETS[v]?.zone ?? null }, true)}
+            options={Object.entries(ZONE_PRESETS).map(([value, p]) => ({ value, label: p.label }))}
+            fullWidth
+          />
+          <Slider
+            touch
+            label="文字區高度位置"
+            value={composition.zone.y}
+            min={0.04}
+            max={Math.max(0.05, 0.94 - composition.zone.h)}
+            step={0.01}
+            onChange={(v) => onChange({ zone: { ...composition.zone, y: v } }, false)}
+            format={(v) => `${Math.round(v * 100)}%`}
+          />
+          <SegmentedControl
+            touch
+            label="字與畫面的關係"
+            value={composition.relation}
+            onChange={(v) => onChange({ relation: v as TypeRelation }, true)}
+            options={TYPE_RELATIONS.map((r) => ({ value: r, label: RELATION_LABEL[r] }))}
+            fullWidth
+          />
+          {(override?.zone || override?.relation) && (
+            <Button variant="plain" onClick={() => onChange({ zone: null, relation: null }, true)} data-testid="zone-reset">
+              <ArrowCounterClockwiseIcon size={16} />
+              回到畫面設計的構圖
+            </Button>
           )}
         </Group>
       )}

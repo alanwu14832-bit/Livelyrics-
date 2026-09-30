@@ -14,7 +14,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { formatTimeShort } from "@/lib/timeline";
 import { coerceBible, sanitizeFonts } from "@/lib/band";
-import type { BandBible, DesignPlan, DirectionSet, Research, ShowArc } from "@/lib/types";
+import type { BandBible, DesignPlan, DirectionSet, Research, SceneProgram, ShowArc } from "@/lib/types";
 import { applyArc, ARC_SYSTEM, ArcDraftSchema, buildArcPrompt, normalizeArc, offlineArc, type ArcInput } from "./arc";
 import { BIBLE_SYSTEM, BibleDraftSchema, buildBiblePrompt, offlineBible, type BibleInput } from "./bible";
 import { bibleBlock } from "./prompts";
@@ -25,15 +25,18 @@ import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
 import { describeError } from "./messages";
+import { backupModelName, withRetries, type RetryOptions } from "./retry";
 import { normalizePlan } from "./normalize";
 import { offlineDesign } from "./offline";
 import { freeResearch, type FreeResearchOptions } from "./free-research";
 import type { FetchLike } from "@/lib/server/research/http";
 import { safeCallbacks, type DesignerCallbacks, type DesignerInput, type DesignRequest } from "./types";
+import { buildScenePrompt, ensureSceneProgram, offlineSceneProgram, programFromDraft, SCENE_SYSTEM, SceneProgramDraftSchema } from "./scene-program";
 
 export type { DesignerCallbacks, DesignerInput, DesignRequest } from "./types";
 export { normalizePlan } from "./normalize";
 export { offlineDesign, offlineResearch } from "./offline";
+export { offlineSceneProgram, composerSalt, ensureSceneProgram, buildScenePrompt, SCENE_SYSTEM, SceneProgramDraftSchema } from "./scene-program";
 export { freeResearch, freeBrief, freeSources } from "./free-research";
 export { analyzeFindings, type Findings } from "./findings";
 export { sanitizeSvg, generateMotifSvg } from "./svg";
@@ -68,6 +71,11 @@ export interface DesignerDeps {
   fetch?: FetchLike;
   /** free-research lookup overrides (environment, budget, MusicBrainz spacing) */
   lookup?: FreeResearchOptions["lookup"];
+  /**
+   * Retries of transient Claude failures (5xx / overloaded). On by default for the real SDK transport;
+   * an injected transport gets none unless this is set.
+   */
+  retry?: Omit<RetryOptions, "onLog"> | false;
 }
 
 /** Claude did not finish inside DesignerDeps.timeoutMs (not a cancellation: the offline designer takes over). */
@@ -126,9 +134,12 @@ function resolveDeps(deps: DesignerDeps) {
     /** a key is set but this call was asked not to use it (免費研究 chosen for this run) */
     optedOut: !configured && deps.configured === false && isClaudeConfigured(),
     model: deps.model ?? modelName(),
-    transport: () => {
+    /** a fresh transport per step: the deadline, then retries (a backup model sticks for that step only) */
+    transport: (onLog?: (message: string) => void) => {
       const t = deps.transport ?? defaultTransport();
-      return deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
+      const timed = deadline != null && budget != null ? withDeadline(t, deadline, Math.max(1, Math.round(budget / 1000))) : t;
+      const retry = deps.retry ?? (deps.transport ? false : { backupModel: backupModelName() });
+      return retry ? withRetries(timed, { ...retry, onLog }) : timed;
     },
     now: deps.now,
     free: { fetch: deps.fetch, now: deps.now, lookup: deps.lookup } satisfies FreeResearchOptions,
@@ -160,7 +171,7 @@ export async function researchSong(input: DesignerInput, cb: DesignerCallbacks =
   }
   try {
     cbs.onLog(`Claude（${d.model}）開始研究「${input.meta?.artist || "樂團"}」與〈${input.meta?.title || "這首歌"}〉…`);
-    return await claudeResearch(input, tracked, { transport: d.transport(), model: d.model, now: d.now });
+    return await claudeResearch(input, tracked, { transport: d.transport(cbs.onLog), model: d.model, now: d.now });
   } catch (err) {
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     const why = describeError(err);
@@ -239,19 +250,19 @@ export async function designSong(
     cbs.onLog(
       `${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude（ANTHROPIC_API_KEY）"}，使用離線設計師：依免費研究的發現（曲風的視覺語法、歌詞意象與情緒、音訊情緒）、段落結構與能量產生方案。`,
     );
-    return offlinePath(req, cbs, false);
+    return ensureSceneProgram(req, offlinePath(req, cbs, false));
   }
   try {
     cbs.onLog(`Claude（${d.model}）開始${req.instruction?.trim() ? "依指示重新" : ""}設計主視覺與段落…`);
-    const { plan, repairs, model } = await claudeDesign(req, cbs, { transport: d.transport(), model: d.model, now: d.now });
+    const { plan, repairs, model } = await claudeDesign(req, cbs, { transport: d.transport(cbs.onLog), model: d.model, now: d.now });
     if (repairs.length) cbs.onLog(`已自動修正方案：${repairs.slice(0, 5).join("；")}${repairs.length > 5 ? "…" : ""}`);
     cbs.onLog(`設計完成（${model}）：主視覺「${plan.keyVisual.title}」，${plan.sections.length} 個段落、${plan.cues.length} 個操作提示`);
-    return plan;
+    return ensureSceneProgram(req, plan);
   } catch (err) {
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     const why = describeError(err);
     cbs.onLog(`Claude 設計失敗：${why}。改用離線設計師。`);
-    return offlinePath(req, cbs, true);
+    return ensureSceneProgram(req, offlinePath(req, cbs, true));
   }
 }
 
@@ -273,7 +284,7 @@ export async function generateBible(input: BibleInput, cb: DesignerCallbacks = {
   try {
     cbs.onLog(`Claude（${d.model}）開始整理「${input.bandName}」的視覺聖經…`);
     const { raw, model } = await claudeStructured({ system: BIBLE_SYSTEM, prompt: buildBiblePrompt(input), schema: BibleDraftSchema, label: "視覺聖經" }, cbs, {
-      transport: d.transport(),
+      transport: d.transport(cbs.onLog),
       model: d.model,
       now: d.now,
     });
@@ -312,7 +323,7 @@ export async function planShowArc(input: ArcInput, cb: DesignerCallbacks = {}, d
     const { raw, model } = await claudeStructured(
       { system: ARC_SYSTEM, prompt: buildArcPrompt(input, bibleBlock(input.bible, input.bandName)), schema: ArcDraftSchema, label: "整場弧線" },
       cbs,
-      { transport: d.transport(), model: d.model, now: d.now },
+      { transport: d.transport(cbs.onLog), model: d.model, now: d.now },
     );
     return normalizeArc(raw, input, fallback, model, now);
   } catch (err) {
@@ -352,7 +363,7 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
     const { raw, model } = await claudeStructured(
       { system: DIRECTIONS_SYSTEM, prompt: buildDirectionsPrompt(req), schema: DirectionDraftSchema, label: "設計方向", before: images, effort: "medium", maxTokens: 16_000 },
       cbs,
-      { transport: d.transport(), model: d.model, now: d.now },
+      { transport: d.transport(cbs.onLog), model: d.model, now: d.now },
     );
     const specs = normalizeDirectionDrafts(raw, req, offline);
     const directions = buildDirections(specs, req, { engine: "claude", model, now });
@@ -363,5 +374,62 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
     if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
     cbs.onLog(`Claude 無法提出設計方向：${describeError(err)}。改用離線設計師。`);
     return offlineSet();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 專屬畫面 (phase 7)
+// ---------------------------------------------------------------------------
+
+export interface SceneProgramResult {
+  program: SceneProgram;
+  engine: "claude" | "offline";
+  model?: string;
+}
+
+/**
+ * The song's own scene program for `plan`: Claude (one structured-output call under the same budget
+ * rules as the designer; a program the validator refuses gets one repair turn) when configured,
+ * else — or on any failure — the offline composer (`salt` draws another composition). Never throws
+ * for Claude problems; only cancellation propagates.
+ */
+export async function designSceneProgram(req: DesignRequest, plan: DesignPlan, cb: DesignerCallbacks = {}, deps: DesignerDeps = {}, opts: { salt?: number } = {}): Promise<SceneProgramResult> {
+  const cbs = safeCallbacks(cb);
+  throwIfAborted(cb.signal);
+  const d = resolveDeps(deps);
+  const previous = plan.sceneProgram ?? null;
+  const offline = (why: string): SceneProgramResult => {
+    const program = offlineSceneProgram(req, plan, opts.salt ?? 0);
+    cbs.onLog(`${why}離線作曲器產生專屬畫面「${program.title}」：${program.concept.slice(0, 60)}…`);
+    cbs.onDelta(`### 專屬畫面「${program.title}」\n\n${program.concept}\n`);
+    return { program: previous?.enabled === false ? { ...program, enabled: false } : program, engine: "offline" };
+  };
+  if (!d.configured) return offline(`${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude"}，`);
+  const now = d.now?.() ?? new Date();
+  const instruction = req.instruction?.trim() || undefined;
+  try {
+    cbs.onLog(`Claude（${d.model}）開始寫這首歌的專屬畫面${instruction ? "（依指示）" : ""}…`);
+    const editing = previous && (previous.engine === "claude" || previous.engine === "manual") && instruction ? previous : null;
+    const run = async (errors?: string[]) =>
+      claudeStructured(
+        { system: SCENE_SYSTEM, prompt: buildScenePrompt(req, plan, { errors, previous: editing }), schema: SceneProgramDraftSchema, label: "專屬畫面", effort: "high", maxTokens: 32_000 },
+        cbs,
+        { transport: d.transport(), model: d.model, now: d.now },
+      );
+    let { raw, model } = await run();
+    let made = programFromDraft(raw, plan, { model, instruction, now });
+    if (!made.program) {
+      cbs.onLog(`Claude 的程式沒有通過檢查（${made.errors.slice(0, 3).join("；")}），請它修正一次…`);
+      ({ raw, model } = await run(made.errors));
+      made = programFromDraft(raw, plan, { model, instruction, now });
+    }
+    if (!made.program) return offline(`Claude 的程式仍然沒有通過檢查（${made.errors.slice(0, 2).join("；")}），改用`);
+    const program = previous?.enabled === false ? { ...made.program, enabled: false } : made.program;
+    cbs.onDelta(`### 專屬畫面「${program.title}」\n\n${program.concept}\n`);
+    cbs.onLog(`專屬畫面完成（${model}）：「${program.title}」，${program.sections.length} 個段落的狀態`);
+    return { program, engine: "claude", model };
+  } catch (err) {
+    if (isCancellation(err, cb.signal)) throw cb.signal?.aborted ? abortReason(cb.signal) : err;
+    return offline(`Claude 無法寫專屬畫面：${describeError(err)}。改用`);
   }
 }

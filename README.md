@@ -30,6 +30,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 # ANTHROPIC_WORKSPACE_ID=wrkspc_...
 # 選用：換模型（預設 claude-sonnet-5-5；要最好的品質可改 claude-opus-5-5，費用約兩倍）
 # LIVELYRICS_MODEL=claude-sonnet-5-5
+# 選用：Claude 暫時無法使用（503／過載）時，重試兩次後改用的備用模型（預設 claude-opus-5-5；off 關閉）
+# LIVELYRICS_BACKUP_MODEL=claude-opus-5-5
 # 選用：資料存放位置（預設 ./data）
 # LIVELYRICS_DATA_DIR=/path/to/livelyrics-data
 ```
@@ -63,6 +65,7 @@ node scripts/seed-demo.mjs
    | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用免費研究模式。建立金鑰時把它綁定到一個 workspace（例如 Default）最簡單 |
    | `ANTHROPIC_WORKSPACE_ID` | 只有金鑰沒有綁定單一 workspace 時才需要：填 `wrkspc_` 開頭的 workspace ID（Claude Console 的 **Settings › Workspaces**）。沒填時 Claude 會回應 400「沒有綁定 workspace」 |
    | `LIVELYRICS_MODEL` | 選用：換模型（預設 `claude-sonnet-5-5`；要最好的品質可改 `claude-opus-5-5`，費用約兩倍） |
+   | `LIVELYRICS_BACKUP_MODEL` | 選用：Claude 暫時無法使用（503、529 過載）時，先等 3 秒、8 秒重試兩次，再改用這個備用模型試一次（預設 `claude-opus-5-5`，只在出錯時才用；填 `off` 關閉） |
    | `LIVELYRICS_BLOB_DELIVERY` | 選用：設成 `proxy` 時音檔與素材經由函式轉送，預設 `redirect` 直接從 Blob 讀取（見下方） |
    | `LIVELYRICS_STORAGE` | 選用：`cloud` 或 `local` 強制指定模式；一般不需要 |
    | `LIVELYRICS_FREE_SOURCES` | 選用：設成 `off` 時免費研究不查 MusicBrainz 與維基百科，只分析歌詞與音訊 |
@@ -203,6 +206,16 @@ node scripts/seed-demo.mjs
 - **排版** `/p/<id>/type`：設計總覽、控制台頂欄與設計分頁都有「排版」。整首（字體語言、每個參數、字體、配色處理、裝飾、「重新生成全部構圖」）、段落（覆寫構圖、排列、大小、動態）、這一句（構圖縮圖、「換一個構圖」、點字設定強調字、排列、動態意象、進出場、拖曳或方向鍵移動、大小、角度、顏色：自動／主字色／點綴色／反白／鏤空、鎖定、「重設為生成的」）。預覽就是投影的渲染器，可以「從這句播放」、比較「調整後／生成的」；每一步都能復原，自動儲存，控制台與投影視窗開著時會立刻看到。手機上也能用（44 px 的按鈕、分頁與歌詞清單）。
 - 舊的作品（這個版本以前設計的）維持原本的歌詞樣式；排版頁可以「建立字體語言」。
 
+## 專屬畫面（每首歌自己的生成畫面）
+
+每首歌的背景不再是「同一個特效換顏色」：設計完成後多一個「畫面」步驟，為這首歌寫一支專屬的生成畫面程式（GLSL）。有 Claude 時由 Claude 依研究、歌詞、音訊、視覺聖經與參考圖設計：一個主角形狀、清楚的留白、節制的亮部、隨歌曲弧線演變（主歌稀疏、副歌打開、橋段換規則）；沒有 API 金鑰時由離線作曲器依曲風、歌詞意象與音訊情緒組合「形狀 × 質地 × 構圖 × 動態」，不同的歌有不同的畫面結構。
+
+- 歌詞和畫面一起構圖：每一段都有文字區（畫面的留白），歌詞只排在裡面；字與畫面的關係可以是留白、切開（字從亮的形狀裡挖空）、穿過後方或被照亮。大部分句子是中小字、排在網格上，只有少數重點句（歌名那一句、副歌的 hook）才會放大。
+- 設計總覽的「專屬畫面」：主視覺靜止畫面（副歌裡的一格）、概念、每段的畫面，「重新產生畫面…」（可以寫一句指示）與「使用專屬畫面」開關（關掉就回到每段的內建場景，程式會保留）。
+- 排版編輯器的段落面板可以移動文字區、改變字與畫面的關係。
+- 安全：程式在伺服器與瀏覽器都會先經過檢查（沒有前處理指令、只能用系統提供的 uniform 與取樣輔助、迴圈次數有上限…），畫面仍然經過 LED 安全模式；在這台電腦無法編譯或太耗效能時，自動改用內建場景，控制台預覽會提示。
+- 舞台實驗室：`/stage-lab?program=<範例 id>`（night-drive、tidal-flat、monolith、enso、signal）或 `program=composer:<形狀>` 看每一種畫面。
+
 ## 匯出影片（給音樂祭的媒體伺服器）
 
 有些音樂祭要求事先交影片，在他們的 Resolume／disguise 上播放。控制台頂欄的「匯出」（或設計總覽的「匯出影片」）會在新分頁打開匯出頁：
@@ -258,6 +271,7 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-led.cjs         # L
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-directions.cjs  # 設計方向、參考圖與一頁提案
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-sync.cjs        # 同步與控制器：假的 MIDI 裝置、MIDI clock、MTC、LTC（假麥克風）
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-type.cjs        # 字體藝術：構圖、排版編輯器（電腦與手機）、匯出
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-scene.cjs       # 專屬畫面：投影與預覽、編譯失敗的退回、LED 安全、重新產生與開關
 ```
 
 `e2e-sync.cjs` 不需要實體裝置：它在頁面裡裝一個假的 Web MIDI 輸入，並把自己產生的 LTC 音檔（25 fps，從 01:00:10:00 開始）當成 Chromium 的假麥克風。改了 `src/lib/sync/ltc.ts` 或 `ltc-worklet.ts` 後，執行 `node scripts/build-worklets.mjs` 重新產生 `public/worklets/ltc-decoder.js`（`--check` 只檢查是否過期；單元測試也會檢查）。

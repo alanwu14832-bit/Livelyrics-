@@ -3,7 +3,7 @@
 // `composeLine` (compose.ts) derives it deterministically, the painter
 // (src/components/stage/type/TypePainter.ts) draws it, and the tests measure it.
 
-import type { LyricSafeArea, TypeColorRole, TypeColorTreatment, TypeEnterId, TypeExitId, TypeOrientation, TypeOrnamentId, TypeParams, TypeRecipeId, TypeVoiceId, FontId, SectionKind } from "../types";
+import type { LyricSafeArea, TypeColorRole, TypeColorTreatment, TypeEnterId, TypeExitId, TypeOrientation, TypeOrnamentId, TypeParams, TypeRecipeId, TypeVoiceId, FontId, SectionKind, Zone } from "../types";
 import type { MotionKind } from "./vocab";
 
 /**
@@ -55,10 +55,17 @@ export interface ResolvedHint {
   color: TypeColorRole | "auto";
   /** the last chorus escalates the composition every earlier chorus showed */
   escalate: boolean;
+  /**
+   * one of the song's few key lines (the title line, the chorus hook): only these may be set large
+   * (巨字, 出血, 鏤空窗 at full scale); every other line is small-to-medium on the grid
+   */
+  key?: boolean;
   /** the section's motion override (0..1), null = the system's */
   motion: number | null;
   /** the orientation was set in the editor (line or section): the canvas may not adapt it */
   orientationFixed?: boolean;
+  /** the recipe was set in the editor (line or section): restraint keeps it */
+  recipeFixed?: boolean;
 }
 
 /** Where the line sits in the song (ornaments: numbers, section label, title). */
@@ -71,6 +78,11 @@ export interface LineContext {
   songTitle: string;
   /** the first line of its section (section labels and numbers go here) */
   first: boolean;
+  /**
+   * 專屬畫面 (phase 7): the section's text zone — the scene program's negative space, fractions of
+   * a landscape canvas (compose adapts it to the real canvas); null = the whole readable area
+   */
+  zone?: Zone | null;
 }
 
 /** The canvas a composition is laid out for (pixels, y down). */

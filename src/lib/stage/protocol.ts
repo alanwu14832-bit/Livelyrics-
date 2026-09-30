@@ -161,7 +161,21 @@ export type StageMessage =
    * 排版 editor -> consoles and the per-song output: the plan after a 字體藝術 edit (the editor saves
    * it). A console adopts its type system and re-broadcasts; an output without a console shows it.
    */
-  | { type: "plan"; projectId: string; plan: DesignPlan; sender?: string };
+  | { type: "plan"; projectId: string; plan: DesignPlan; sender?: string }
+  /**
+   * output -> console: a key pressed in the projection window (a presentation clicker or the
+   * keyboard of the projecting computer while the output is fullscreen). The console maps it with
+   * its own hotkey table, so the output never needs to know what a key does. `id` de-duplicates.
+   */
+  | { type: "key"; outputId: string; id: string; key: RemoteKey };
+
+/** The part of a keyboard event a projection window forwards (never modifier chords). */
+export interface RemoteKey {
+  key: string;
+  code: string;
+  shiftKey: boolean;
+  repeat: boolean;
+}
 
 /**
  * LED 安全模式 (phase 3): what the projection window's flash limiter is doing, reported on every
@@ -311,6 +325,12 @@ export function parseStageMessage(raw: unknown): StageMessage | null {
       const plan = raw.plan;
       if (typeof raw.projectId !== "string" || !raw.projectId || !isRecord(plan) || !Array.isArray(plan.sections) || !isRecord(plan.keyVisual)) return null;
       return { type: "plan", projectId: raw.projectId, plan: plan as unknown as DesignPlan, ...sender };
+    }
+    case "key": {
+      const k = raw.key;
+      if (typeof raw.outputId !== "string" || typeof raw.id !== "string" || !raw.id || !isRecord(k)) return null;
+      if (typeof k.key !== "string" || typeof k.code !== "string" || k.key.length > 32 || k.code.length > 32) return null;
+      return { type: "key", outputId: raw.outputId, id: raw.id.slice(0, 64), key: { key: k.key, code: k.code, shiftKey: k.shiftKey === true, repeat: k.repeat === true } };
     }
     default:
       return null;

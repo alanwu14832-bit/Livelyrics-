@@ -218,6 +218,15 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     check("LIVE Space cues the next line", live.lineIndex != null && live.lineIndex !== before, `before=${before} after=${live.lineIndex}「${cued}」`);
     check("output shows the cued line", !!cued && shows(liveOut, cued.replace(/\s+/g, "").slice(0, 4)), liveOut.slice(0, 50));
     await shot(popup, "10b-output-live-cue");
+    // a presentation clicker aimed at the projector: PageDown / PageUp pressed in the output window
+    await popup.keyboard.press("PageDown");
+    await page.waitForTimeout(800);
+    const clicked = await popup.evaluate(() => window.__last?.lineIndex);
+    check("PageDown in the projection window cues the next line", clicked === live.lineIndex + 1, `before=${live.lineIndex} after=${clicked}`);
+    await popup.keyboard.press("PageUp");
+    await page.waitForTimeout(800);
+    const back = await popup.evaluate(() => window.__last?.lineIndex);
+    check("PageUp in the projection window goes back a line", back === live.lineIndex, `expected=${live.lineIndex} after=${back}`);
     await page.keyboard.press("Escape");
     await page.keyboard.press("m");
     await page.waitForTimeout(400);

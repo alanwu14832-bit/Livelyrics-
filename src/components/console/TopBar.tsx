@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackLink, Button, SegmentedControl, StatusCapsules, Tooltip, cx } from "@/components/ui";
-import { ExportIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
+import { ExportIcon, MoonIcon, PauseIcon, PlayIcon, ProjectorScreenIcon, QuestionIcon, SkipBackIcon, SkipForwardIcon, SparkleIcon, TextAaIcon } from "@/components/ui/Icon";
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
@@ -189,19 +189,22 @@ export function TopBar({
   const ov = useStageValue(controller.store, selectOverrides);
   const capsules = capsuleItems(ov, snap);
   const palette = (project?.plan?.keyVisual.palette ?? []).map((p) => p.hex);
+  // on air (a projection window answers): the preparation tools step back to icons so the top bar
+  // is about the show — mode, transport, clock, safety, output and 黑場
+  const prep = compact || snap.output.connected;
 
   const status = snap.timecode.following
     ? live
-      ? "LIVE・跟隨時間碼"
+      ? "手動・跟隨時間碼"
       : snap.audio.buffering
-        ? "TRACK・跟隨時間碼（緩衝中）"
-        : "TRACK・跟隨時間碼"
+        ? "跟音檔・跟隨時間碼（緩衝中）"
+        : "跟音檔・跟隨時間碼"
     : live
     ? held
-      ? "LIVE・等待下一句"
+      ? "手動・等待下一句"
       : snap.playing
-        ? "LIVE・時脈運行中"
-        : "LIVE・手動提詞"
+        ? "手動・時脈運行中"
+        : "手動・按 Space 或 → 送出下一句"
     : snap.audio.status === "error"
       ? "音檔錯誤"
       : snap.audio.buffering
@@ -209,8 +212,8 @@ export function TopBar({
         : snap.audio.status === "loading"
           ? "載入音檔中…"
           : snap.playbackRate !== 1
-            ? `TRACK・${snap.playbackRate}× 速度`
-            : "TRACK・跟隨音檔";
+            ? `跟音檔・${snap.playbackRate}× 速度`
+            : "跟音檔・自動換句";
 
   return (
     <header
@@ -232,24 +235,24 @@ export function TopBar({
 
       {/* centre: mode, transport, clock */}
       <div className="flex items-center gap-4">
-        <Tooltip content={live ? "LIVE：由你逐句送出" : "TRACK：跟著音檔時間自動播放"} shortcut="M">
+        <Tooltip content={live ? "手動：由你逐句送出（Space、→、簡報遙控器，或點清單）" : "跟音檔：跟著音檔時間自動換句"} shortcut="M">
           <span className="inline-flex">
             <SegmentedControl
               label="播放模式"
               value={snap.mode}
-              onChange={(m) => controller.setMode(m)}
+              onChange={(m) => controller.chooseMode(m)}
               blurOnPointer
               fullWidth
-              className="w-[136px]"
+              className="w-[168px]"
               options={[
-                { value: "track", label: <span className="t-latin">TRACK</span>, ariaLabel: "TRACK" },
+                { value: "track", label: "跟音檔", ariaLabel: "跟音檔" },
                 {
                   value: "live",
-                  ariaLabel: "LIVE",
+                  ariaLabel: "手動切換",
                   label: (
-                    <span className="inline-flex items-center gap-1.5 t-latin">
+                    <span className="inline-flex items-center gap-1.5">
                       {live && <Dot className="bg-red" label="on-air" />}
-                      LIVE
+                      手動切換
                     </span>
                   ),
                 },
@@ -262,7 +265,7 @@ export function TopBar({
           <Tooltip content="上一句" shortcut="ArrowLeft">
             <Button variant="quiet" size="icon" aria-label="上一句" icon={SkipBackIcon} className="text-label!" onClick={() => controller.prev()} />
           </Tooltip>
-          <Tooltip content={live ? (snap.playing ? "停止 LIVE 時脈" : "啟動 LIVE 時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
+          <Tooltip content={live ? (snap.playing ? "停止手動時脈" : "啟動手動時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
             <Button
               size="circle"
               aria-label={snap.playing ? "暫停" : "播放"}
@@ -296,8 +299,21 @@ export function TopBar({
         <SyncCapsule engine={controller.sync} />
         <SafetyCapsule project={project} output={snap.output} />
         <OutputControl output={snap.output} onOpen={() => controller.openOutput()} />
-        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : compact ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
-          {compact ? (
+        {/* the panic button of a show: always one click away, red while the stage is black */}
+        <Tooltip content={ov.blackout ? "黑場中：再按一次恢復畫面" : "一鍵淡出為全黑"} shortcut="B" placement="bottom-end">
+          <Button
+            variant={ov.blackout ? "destructive-filled" : "gray"}
+            icon={MoonIcon}
+            aria-pressed={ov.blackout}
+            onClick={() => controller.toggleBlackout()}
+            data-testid="topbar-blackout"
+          >
+            黑場
+          </Button>
+        </Tooltip>
+        <span aria-hidden className="mx-1 h-5 w-px bg-separator" />
+        <Tooltip content={snap.redesign.running ? "重新設計進行中，按一下查看進度" : prep ? "重新設計：用一句話請 AI 設計師調整方案" : "用一句話請 AI 設計師調整方案"} placement="bottom-end">
+          {prep ? (
             <Button variant="quiet" size="icon" aria-label="重新設計" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign} />
           ) : (
             <Button variant="gray" icon={SparkleIcon} loading={snap.redesign.running} onClick={onRedesign}>
@@ -307,16 +323,24 @@ export function TopBar({
         </Tooltip>
         {!compact && project?.plan && (
           <Tooltip content="字體藝術：逐句調整歌詞的構圖（在新分頁開啟，修改會即時出現在投影）" placement="bottom-end">
-            <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor">
-              排版
-            </Button>
+            {prep ? (
+              <Button variant="quiet" size="icon" aria-label="排版" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor" />
+            ) : (
+              <Button variant="gray" icon={TextAaIcon} onClick={() => controller.openTypeEditor()} data-testid="open-type-editor">
+                排版
+              </Button>
+            )}
           </Tooltip>
         )}
         {!compact && (
           <Tooltip content="匯出給媒體伺服器用的影片（在新分頁開啟）" placement="bottom-end">
-            <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
-              匯出
-            </Button>
+            {prep ? (
+              <Button variant="quiet" size="icon" aria-label="匯出" icon={ExportIcon} onClick={() => controller.openExport()} />
+            ) : (
+              <Button variant="gray" icon={ExportIcon} onClick={() => controller.openExport()}>
+                匯出
+              </Button>
+            )}
           </Tooltip>
         )}
         <Tooltip content="快捷鍵說明" shortcut="?" placement="bottom-end">

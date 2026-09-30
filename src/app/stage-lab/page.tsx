@@ -29,6 +29,7 @@ function one(sp: SearchParams, key: string): string | undefined {
  *   &safe=0 (LED 安全模式 off: the designed flash / bloom transitions, full brightness)
  *   字體藝術: &project=<id> (a stored project) &voice=mv-card|title-sequence|ink|glitch
  *   &aspect=16:9|32:9|9:16 (the output canvas) &gen=<n> (another draw of the voice's rules)
+ *   專屬畫面: &program=plan|off|<example id> (the song's program, the built-in scenes, a hand-written example)
  */
 export default async function StageLabPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
@@ -55,6 +56,7 @@ export default async function StageLabPage({ searchParams }: { searchParams: Pro
     voice: one(sp, "voice"),
     aspect: one(sp, "aspect"),
     gen: one(sp, "gen"),
+    program: one(sp, "program"),
   };
   return (
     <div data-theme="dark" className="min-h-screen bg-bg text-label">

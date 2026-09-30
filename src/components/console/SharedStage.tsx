@@ -43,7 +43,7 @@ function createSharedStage(): SharedStage {
       },
     },
     report: (s) => {
-      if (current && current.backend === s.backend && Math.round(current.fps) === Math.round(s.fps)) return;
+      if (current && current.backend === s.backend && Math.round(current.fps) === Math.round(s.fps) && current.program?.state === s.program?.state) return;
       current = s;
       for (const l of listeners) l();
     },

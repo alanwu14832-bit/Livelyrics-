@@ -103,17 +103,17 @@ function SyncTabImpl({ controller, snap, project, onOpenControllers }: { control
           fullWidth
           blurOnPointer
           value={snap.mode}
-          onChange={(m) => controller.setMode(m)}
+          onChange={(m) => controller.chooseMode(m)}
           className="mt-1"
           options={[
-            { value: "track", label: <span className="t-latin">TRACK</span>, ariaLabel: "TRACK", caption: "跟著控制台播放的音檔時間自動換句，適合跟 click 或伴奏軌的演出與彩排。隨時可切到 LIVE 手動接手。" },
-            { value: "live", label: <span className="t-latin">LIVE</span>, ariaLabel: "LIVE", caption: "樂團現場演出時用：按 Space 或 → 逐句送出，時間跳到該句並停在下一句開始前；可接麥克風讓畫面跟著現場律動。" },
+            { value: "track", label: "跟音檔", ariaLabel: "跟音檔", caption: "跟著控制台播放的音檔時間自動換句，適合跟 click 或伴奏軌的演出與彩排。隨時可切到手動接手。" },
+            { value: "live", label: "手動切換", ariaLabel: "手動切換", caption: "樂團現場演出時用：由你逐句切換，歌詞會停在畫面上直到你送出下一句。Space、→ 或簡報遙控器的翻頁鍵送出下一句，← 回上一句，點清單可直接跳到任一句；在投影視窗按也可以。可接麥克風讓畫面跟著現場律動。你選的模式會成為之後開啟新歌時的預設。" },
           ]}
         />
       </section>
 
       <section aria-labelledby="sync-offset">
-        <GroupTitle id="sync-offset" actions={live ? <Tag>LIVE 模式不使用</Tag> : undefined}>
+        <GroupTitle id="sync-offset" actions={live ? <Tag>手動模式不使用</Tag> : undefined}>
           歌詞偏移
         </GroupTitle>
         <Group className={cx("mt-1", live && "opacity-60")}>
@@ -181,7 +181,7 @@ function SyncTabImpl({ controller, snap, project, onOpenControllers }: { control
       </section>
 
       <section aria-labelledby="sync-mic">
-        <GroupTitle id="sync-mic" actions={!live ? <Tag>LIVE 模式使用</Tag> : undefined}>
+        <GroupTitle id="sync-mic" actions={!live ? <Tag>手動模式使用</Tag> : undefined}>
           現場音訊輸入
         </GroupTitle>
         <Group className="mt-1">
@@ -220,8 +220,8 @@ function SyncTabImpl({ controller, snap, project, onOpenControllers }: { control
           {live
             ? mic.status === "on"
               ? "畫面正在跟著現場音量、低頻與起音律動（不會播出聲音）。"
-              : "接上混音台的 line out 或麥克風，讓畫面在 LIVE 模式跟著現場律動。"
-            : "TRACK 模式直接分析控制台播放的音檔。"}
+              : "接上混音台的 line out 或麥克風，讓畫面在手動模式跟著現場律動。"
+            : "跟音檔模式直接分析控制台播放的音檔。"}
         </Footnote>
       </section>
 

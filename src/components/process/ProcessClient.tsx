@@ -47,7 +47,7 @@ export interface ProcessHeaderInfo {
 
 type LoadState = { kind: "loading" } | { kind: "ok" } | { kind: "error"; message: string; notFound: boolean };
 
-const STEP_NAME: Record<string, string> = { lyrics: "歌詞", research: "研究", design: "設計", analyze: "分析", done: "完成" };
+const STEP_NAME: Record<string, string> = { lyrics: "歌詞", research: "研究", design: "設計", scene: "畫面", analyze: "分析", done: "完成" };
 
 function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -253,11 +253,11 @@ export function ProcessClient({
       execute({ steps: retryFrom(recorded), lyricsText: readLyricsHandoff(id) ?? undefined, instruction: recorded.instruction, free: recorded.free });
       return;
     }
-    if (project.research && !project.plan) execute({ steps: ["design"] });
+    if (project.research && !project.plan) execute({ steps: ["design", "scene"] });
     else execute({ lyricsText: readLyricsHandoff(id) ?? undefined });
   };
   const rerunAll = () => execute({ lyricsText: lastRequest?.lyricsText ?? readLyricsHandoff(id) ?? undefined, free: lastRequest?.free });
-  const redesign = (text: string, withResearch: boolean, free = false) => execute({ steps: withResearch ? ["research", "design"] : ["design"], instruction: text || undefined, free });
+  const redesign = (text: string, withResearch: boolean, free = false) => execute({ steps: withResearch ? ["research", "design", "scene"] : ["design", "scene"], instruction: text || undefined, free });
 
   // ---------------------------------------------------------------------------
 
@@ -505,9 +505,20 @@ export function ProcessClient({
             />
           )}
 
-          {!hasDirections && directions}
+          {/* before a design exists the directions are a way to start; once it exists, the key visual
+              leads the page and the directions (a way to try another look) follow it */}
+          {!hasDirections && !showSummary && directions}
 
-          {showSummary && <KeyVisualSummary key={`${project.updatedAt}-${plan.keyVisual.title}`} project={project} reveal={showDone} />}
+          {showSummary && (
+            <KeyVisualSummary
+              key={`${project.updatedAt}-${plan.keyVisual.title}`}
+              project={project}
+              reveal={showDone}
+              scene={{ disabled: running, offline, onRegenerate: (instruction) => execute({ steps: ["scene"], instruction: instruction || undefined }), onProject: setProject }}
+            />
+          )}
+
+          {!hasDirections && showSummary && directions}
 
           {!running && (
             <AssetLibrary

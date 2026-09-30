@@ -99,8 +99,10 @@ describe("phase 5a keys", () => {
 
 describe("phase 2b keys", () => {
   it("maps sections, hold, loop, GO and standby by physical key", () => {
-    expect(hotkeyAction(key("PageDown"))).toEqual({ type: "section", delta: 1 });
-    expect(hotkeyAction(key("PageUp"))).toEqual({ type: "section", delta: -1 });
+    expect(hotkeyAction(key("PageDown"))).toEqual({ type: "page", delta: 1 });
+    expect(hotkeyAction(key("PageUp"))).toEqual({ type: "page", delta: -1 });
+    expect(hotkeyAction(key("Period"))).toEqual({ type: "section", delta: 1 });
+    expect(hotkeyAction(key("Comma"))).toEqual({ type: "section", delta: -1 });
     expect(hotkeyAction(key("Period", { key: "." }))).toEqual({ type: "section", delta: 1 });
     expect(hotkeyAction(key("Comma", { key: "," }))).toEqual({ type: "section", delta: -1 });
     expect(hotkeyAction(key("KeyH", { key: "h" }))).toEqual({ type: "hold" });

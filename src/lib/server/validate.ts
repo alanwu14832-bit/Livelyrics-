@@ -4,6 +4,7 @@ import { z } from "zod";
 import { normalizeLyrics } from "@/lib/lyrics/lrc";
 import type { ProcessRequest } from "@/lib/api-client";
 import { DesignPlanSchema } from "@/lib/schema";
+import { validateProgram } from "@/lib/stage/program/validate";
 import { MAX_NAME, MAX_NOTE, MAX_TAGS, isAssetKind, sanitizeAssetName, sanitizeNote, sanitizeTags } from "@/lib/assets";
 import { OUTPUT_MAX_PX, OUTPUT_MIN_PX, SAFE_MAX, patchOutput } from "@/lib/output";
 import { TimecodeStringSchema, coerceTcString } from "@/lib/sync/timecode";
@@ -240,6 +241,11 @@ export function parsePlanPatch(raw: unknown): DesignPlan {
   if (!parsed.success) throw new HttpError(400, `設計方案格式錯誤：${issuesText(parsed.error)}`);
   const plan = parsed.data;
   if (plan.sections.length === 0) throw new HttpError(400, "設計方案至少需要一個段落");
+  // 專屬畫面: the program is code that runs on the venue's GPU — it must pass the validator
+  if (plan.sceneProgram) {
+    const checked = validateProgram(plan.sceneProgram.source);
+    if (!checked.ok) throw new HttpError(400, `專屬畫面的程式沒有通過檢查：${checked.errors.slice(0, 4).join("；")}`);
+  }
   return plan;
 }
 
@@ -330,7 +336,7 @@ export function applyAssetPatch(current: Asset, raw: unknown): Asset {
 // ---------------------------------------------------------------------------
 
 const ProcessRequestSchema = z.object({
-  steps: z.array(z.enum(["lyrics", "research", "design"])).max(10).optional(),
+  steps: z.array(z.enum(["lyrics", "research", "design", "scene"])).max(10).optional(),
   lyricsText: z.string().max(500_000).optional(),
   instruction: z.string().max(4000).optional(),
   attachOnly: z.boolean().optional(),
@@ -349,7 +355,7 @@ const ProcessRequestSchema = z.object({
   run: z
     .object({
       id: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
-      steps: z.array(z.enum(["lyrics", "research", "design"])).min(1).max(10),
+      steps: z.array(z.enum(["lyrics", "research", "design", "scene"])).min(1).max(10),
     })
     .optional(),
 });

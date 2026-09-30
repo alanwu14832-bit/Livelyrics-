@@ -151,7 +151,7 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
           controller.openOutput();
           break;
         case "mode":
-          controller.toggleMode({ announce: false }); // the HUD says 「LIVE 模式」 / 「TRACK 模式」
+          controller.chooseMode(controller.getSnapshot().mode === "live" ? "track" : "live", { announce: false }); // the HUD says 「手動切換」 / 「跟著音檔」
           break;
         case "hold":
           controller.toggleHold();
@@ -161,6 +161,13 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
           break;
         case "section":
           controller.stepSection(action.delta);
+          break;
+        case "page":
+          // a presentation clicker: lines while cueing by hand, sections while following the track
+          if (controller.getSnapshot().mode === "live") {
+            if (action.delta > 0) controller.next();
+            else controller.prev();
+          } else controller.stepSection(action.delta);
           break;
         case "go":
         case "standby":
@@ -217,6 +224,20 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
   );
   // keyboard-first operation (the sheets are modal and pass through their own keys)
   useConsoleHotkeys({ active: active || !!show, paused: redesignOpen || helpOpen || controllersOpen, onAction: onKey });
+
+  // Keys pressed in the projection window (a clicker aimed at the projector, or the projecting
+  // computer's keyboard while the output is fullscreen): the same table as this window's keyboard,
+  // minus what only makes sense here (help, opening the output, Esc — it leaves fullscreen there)
+  useEffect(
+    () =>
+      controller.onRemoteKey((k) => {
+        const action = hotkeyAction({ ...k, ctrlKey: false, metaKey: false, altKey: false });
+        if (!action || action.type === "help" || action.type === "openOutput" || action.type === "escape") return;
+        if (redesignOpen || controllersOpen) return;
+        onKey(action);
+      }),
+    [controller, onKey, redesignOpen, controllersOpen],
+  );
 
   // MIDI controllers (phase 5a): the same actions, also while a sheet is open (a pad is not typing);
   // before the song is on stage only the show's GO / standby
@@ -299,14 +320,14 @@ export function SongConsole({ controller, intro, show }: { controller: ConsoleCo
                 tone="error"
                 className="shrink-0 py-2.5"
                 title="音檔無法載入"
-                description={`${snap.audio.error ?? "音檔無法載入。"} 仍可切到 LIVE 模式手動送出歌詞。`}
+                description={`${snap.audio.error ?? "音檔無法載入。"} 仍可切到手動模式逐句送出歌詞。`}
                 actions={
                   <>
                     <Button size="sm" variant="gray" onClick={() => controller.retryAudio()}>
                       重新載入音檔
                     </Button>
-                    <Button size="sm" variant="plain" onClick={() => controller.setMode("live")}>
-                      切到 LIVE
+                    <Button size="sm" variant="plain" onClick={() => controller.chooseMode("live")}>
+                      切到手動
                     </Button>
                   </>
                 }

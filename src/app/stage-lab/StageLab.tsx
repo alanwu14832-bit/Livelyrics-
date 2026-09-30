@@ -14,6 +14,9 @@ import { api } from "@/lib/api-client";
 import { TYPE_VOICE_IDS } from "@/lib/schema";
 import { normalizeTypeSystem } from "@/lib/type/normalize";
 import { VOICES } from "@/lib/type/vocab";
+import { exampleProgram, instantiateExample } from "@/lib/stage/program/examples";
+import { FORM_IDS, composeSceneProgram, type FormId } from "@/lib/stage/program/composer";
+import { hashString } from "@/lib/stage/motif";
 import type { LyricPlacement, LyricStyleId, Project, SceneId, TypeVoiceId } from "@/lib/types";
 
 export interface StageLabInitial {
@@ -44,6 +47,22 @@ export interface StageLabInitial {
   aspect?: string;
   /** 「重新生成全部構圖」: another draw of the voice's rules */
   gen?: string;
+  /** 專屬畫面: plan (as designed), off (the built-in scenes), or an example program's id */
+  program?: string;
+}
+
+/** 專屬畫面 for the lab: the plan's program, none, or a hand-written example laid onto the plan. */
+function withProgram(p: Project, program: string | undefined): Project {
+  if (!p.plan || !program || program === "plan") return p;
+  if (program === "off") return { ...p, plan: { ...p.plan, sceneProgram: null } };
+  // composer:<form>[:<salt>] — the offline composer with one form (the lab's view of every form)
+  const m = /^composer:([a-z]+)(?::(\d+))?$/.exec(program);
+  if (m && (FORM_IDS as readonly string[]).includes(m[1])) {
+    const sceneProgram = composeSceneProgram({ seed: hashString(p.id + m[1]), forms: [m[1] as FormId], sections: p.plan.sections, voice: p.plan.typeSystem?.voice ?? "mv-card", title: p.meta.title, salt: Number(m[2] ?? 0) });
+    return { ...p, plan: { ...p.plan, sceneProgram } };
+  }
+  const ex = exampleProgram(program);
+  return ex ? { ...p, plan: { ...p.plan, sceneProgram: instantiateExample(ex, p.plan) } } : p;
 }
 
 const ASPECTS: Record<string, [number, number]> = { "16:9": [1920, 1080], "32:9": [3840, 1080], "9:16": [1080, 1920], "21:9": [2520, 1080], "4:3": [1440, 1080] };
@@ -126,7 +145,7 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
   }, [initial.project]);
   const voice = (TYPE_VOICE_IDS as readonly string[]).includes(initial.voice ?? "") ? (initial.voice as TypeVoiceId) : null;
   const gen = num(initial.gen, 0, 0, 1e6);
-  const baseProject = useMemo(() => withVoice(withAspect(remote ?? demo, initial.aspect), voice, gen), [remote, demo, initial.aspect, voice, gen]);
+  const baseProject = useMemo(() => withProgram(withVoice(withAspect(remote ?? demo, initial.aspect), voice, gen), initial.program), [remote, demo, initial.aspect, voice, gen, initial.program]);
   const duration = baseProject.meta.duration;
 
   const [scene, setScene] = useState<SceneId | null>(isSceneId(initial.scene) ? initial.scene : null);

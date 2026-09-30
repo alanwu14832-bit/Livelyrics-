@@ -100,6 +100,13 @@ async function render(project: Project, direction: DesignDirection): Promise<Sty
   }
 }
 
+/** Run an offline render after the ones queued before it (one WebGL context at a time). */
+export function enqueueRender<T>(fn: () => Promise<T>): Promise<T> {
+  const job = queue.then(fn);
+  queue = job.catch(() => {});
+  return job;
+}
+
 /** The style frames of a direction (cached; renders are queued one at a time). */
 export function styleFrames(project: Project, direction: DesignDirection): Promise<StyleFrame[]> {
   const key = frameKey(project, direction);
