@@ -1303,7 +1303,7 @@ keeps every contract above and changes only where things are kept and how long w
   Route context is typed explicitly (`{ params: Promise<{ id: string }> }`).
 
 ### DESIGNER — `src/lib/server/designer/**`
-- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-sonnet-5-5`), server tool `web_search_20260209`,
+- `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-sonnet-5-5`), server tools `web_search_20260209` and (phase 8) `web_fetch_20260209`,
   adaptive thinking, streaming, `pause_turn` continuation (≤ 5), refusal handling, server-side
   `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Writes a Traditional-Chinese Markdown
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
