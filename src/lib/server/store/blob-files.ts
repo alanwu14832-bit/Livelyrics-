@@ -10,7 +10,7 @@
 // LIVELYRICS_BLOB_DELIVERY=proxy streams the blob through the function instead (Range, If-Range and
 // If-None-Match are forwarded), for a browser or network where the redirect does not work.
 
-import { BlobNotFoundError, del, head } from "@vercel/blob";
+import { BlobNotFoundError, del, head, put } from "@vercel/blob";
 import { HttpError } from "../http";
 import { StorageError } from "./errors";
 import type { BlobInfo, FileStore, ServeOptions } from "./types";
@@ -22,6 +22,8 @@ export interface BlobApi {
   del(urls: string[]): Promise<void>;
   /** plain GET / HEAD of a public blob URL (magic bytes, the proxy delivery) */
   fetch(url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response>;
+  /** a server-side upload (public, random suffix): files the server produced itself */
+  upload(pathname: string, bytes: Uint8Array, contentType: string): Promise<{ url: string; pathname: string }>;
 }
 
 export function vercelBlobApi(token: string): BlobApi {
@@ -39,6 +41,10 @@ export function vercelBlobApi(token: string): BlobApi {
       if (urls.length) await del(urls, { token });
     },
     fetch: (url, init = {}) => fetch(url, { ...init, cache: "no-store" }),
+    async upload(pathname, bytes, contentType) {
+      const r = await put(pathname, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { access: "public", token, contentType, addRandomSuffix: true });
+      return { url: r.url, pathname: r.pathname };
+    },
   };
 }
 
@@ -178,6 +184,11 @@ export function createBlobFileStore(api: BlobApi, opts: BlobStoreOptions = {}): 
         throw new HttpError(502, "無法讀取上傳的檔案，請稍後再試");
       }
       return { blob: { url: meta.url, pathname }, size: meta.size, contentType: meta.contentType, head: first };
+    },
+
+    async write(target, bytes, contentType) {
+      const r = await api.upload(target.blobPathname, bytes, contentType);
+      return { kind: "blob", blob: { url: r.url, pathname: r.pathname } };
     },
 
     async read(file, { maxBytes, signal }) {

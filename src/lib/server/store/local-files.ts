@@ -2,6 +2,7 @@
 // to their document (<project>/audio.<ext>, <project>/assets/<id>.<ext>, <band>/assets/<id>.<ext>)
 // and served from disk with HTTP Range support.
 
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { serveFile } from "../file-response";
@@ -32,6 +33,19 @@ export function createLocalFileStore(): FileStore {
 
     async inspect() {
       throw new HttpError(400, "本機模式不使用雲端上傳，請直接上傳檔案。");
+    },
+
+    async write(target, bytes) {
+      await fs.mkdir(path.dirname(target.diskPath), { recursive: true });
+      const temp = `${target.diskPath}.${randomUUID().slice(0, 8)}.part`;
+      try {
+        await fs.writeFile(temp, bytes);
+        await fs.rename(temp, target.diskPath);
+      } catch (err) {
+        await fs.rm(temp, { force: true }).catch(() => {});
+        throw err;
+      }
+      return { kind: "disk", path: target.diskPath };
     },
 
     async read(file, { maxBytes }) {
