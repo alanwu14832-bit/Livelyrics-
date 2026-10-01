@@ -16,8 +16,9 @@
 import { DesignPlanSchema, TypeSystemSchema } from "@/lib/schema";
 import { safetyReport, type ActiveSafety } from "@/lib/stage/safety";
 import { formatTimeShort } from "@/lib/timeline";
-import type { DesignDirection, DesignPlan, ResearchSource } from "@/lib/types";
+import type { DesignDirection, DesignPlan, ResearchSource, VisualCandidate } from "@/lib/types";
 import { isUsablePlan, tidyBrief } from "./claude";
+import { splitVisuals } from "./visual-candidates";
 import { buildDirections, DirectionDraftSchema, normalizeDirectionDrafts, offlineDirectionSpecs } from "./directions";
 import { PLACEHOLDER_RE, type ManualTarget } from "./manual";
 import { normalizePlanWithReport } from "./normalize";
@@ -798,6 +799,8 @@ export type ManualOutcome =
       /** what LED 安全模式 changes on stage (the pre-show report) */
       safety: string[];
       brief: { brief: string; sources: ResearchSource[] } | null;
+      /** the band's visual material the reply listed (研究找到的素材: the ```visuals block), to download */
+      visualCandidates: VisualCandidate[];
     }
   | {
       ok: false;
@@ -841,12 +844,14 @@ export function readManualReply(
   }
   const fixNotes = parsed.fixes.length ? [`JSON 有小問題，已自動修正：${parsed.fixes.join("、")}`] : [];
   const bpm = req.analysis && Number.isFinite(req.analysis.bpm) && req.analysis.bpm > 0 ? req.analysis.bpm : null;
+  // the ```visuals list (phase 8), anywhere in the reply; the brief never carried it (fences are stripped)
+  const visualCandidates = splitVisuals(cleanReply(reply)).candidates;
   if (target === "plan") {
     const c = checkPlan(parsed.value, req);
     if (!c.ok) return { ok: false, error: "設計方案不能使用", issues: c.issues, fixPrompt: fixPrompt(target, c.issues), brief };
-    return { ok: true, target, plan: c.plan, notes: [...fixNotes, ...c.notes], safety: safetyLines(c.plan, opts.safety, bpm), brief };
+    return { ok: true, target, plan: c.plan, notes: [...fixNotes, ...c.notes], safety: safetyLines(c.plan, opts.safety, bpm), brief, visualCandidates };
   }
   const c = checkDirections(parsed.value, req, opts.now);
   if (!c.ok) return { ok: false, error: "設計方向不能使用", issues: c.issues, fixPrompt: fixPrompt(target, c.issues), brief };
-  return { ok: true, target, directions: c.directions, notes: [...fixNotes, ...c.notes], safety: [], brief };
+  return { ok: true, target, directions: c.directions, notes: [...fixNotes, ...c.notes], safety: [], brief, visualCandidates };
 }

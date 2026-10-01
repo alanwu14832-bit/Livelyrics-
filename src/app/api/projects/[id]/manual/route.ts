@@ -4,6 +4,8 @@ import type { ManualTarget } from "@/lib/api-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** applying a reply may download the material it lists (bounded well inside this) */
+export const maxDuration = 60;
 
 type Ctx = { params: Promise<{ id: string }> };
 

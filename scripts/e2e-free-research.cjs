@@ -47,6 +47,7 @@ const WAV = fs.readFileSync(path.join(REPO, "fixtures/demo-song.wav"));
 const LRC = fs.readFileSync(path.join(REPO, "fixtures/demo-lyrics.lrc"), "utf8");
 const FIX = path.join(REPO, "fixtures/research");
 const COVER_JPG = fs.readFileSync(path.join(REPO, "fixtures/visuals/cover.jpg"));
+const STILL_JPG = fs.readFileSync(path.join(REPO, "fixtures/visuals/still.jpg"));
 const RELEASE_GROUP = "0436f306-0993-4e12-acfa-4b725163b9bd";
 const USER_AGENT = "Livelyrics/0.1 (contact: https://github.com/alanwu14832-bit/Livelyrics-)";
 
@@ -98,6 +99,11 @@ function stubHandler(req, res) {
   if (p === "/coverart/img/cover-1200.jpg") {
     res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(COVER_JPG.length) });
     return res.end(COVER_JPG);
+  }
+  // a key visual the pasted claude.ai reply lists (用 claude.ai 研究 collects it on apply)
+  if (p === "/coverart/img/keyvisual.jpg") {
+    res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(STILL_JPG.length) });
+    return res.end(STILL_JPG);
   }
   if (p === "/musicbrainz/ws/2/recording") return send("musicbrainz-recording-caodong.json");
   if (p.startsWith("/musicbrainz/ws/2/artist/1636f82a")) return send("musicbrainz-artist-caodong.json");
@@ -358,6 +364,7 @@ async function clipboard(page) {
     await prompt.waitFor({ timeout: 30000 });
     const promptText = await prompt.inputValue();
     check("the prompt carries the song, lyrics by section, findings and the schema", promptText.includes("〈大風吹〉") && promptText.includes("【a") && promptText.includes("醜奴兒") && promptText.includes("- keyVisual：物件") && promptText.includes("```json"), `${promptText.length} chars`);
+    check("the prompt asks for the band's visual material (a ```visuals list)", promptText.includes("列出視覺素材") && promptText.includes("```visuals") && !promptText.includes("web_fetch"));
     await page.getByTestId("manual-copy").click();
     await page.getByTestId("manual-copy").filter({ hasText: "已複製" }).waitFor({ timeout: 5000 });
     check("複製提示詞 puts the prompt on the clipboard", (await clipboard(page)) === promptText);
@@ -374,7 +381,8 @@ async function clipboard(page) {
     await page.getByRole("radio", { name: "完整版" }).click();
 
     // a good reply, wrapped in prose
-    const good = `${BRIEF}\n\n以下是設計方案：\n\n\`\`\`json\n${planReply(song.plan, "大風吹過空城")}\n\`\`\`\n\n希望這份設計對你們的演出有幫助！`;
+    const visuals = `\`\`\`visuals\n{"images":[{"kind":"keyvisual","title":"大風吹 主視覺","pageUrl":"http://127.0.0.1:${STUB_PORT}/official","imageUrl":"http://127.0.0.1:${STUB_PORT}/coverart/img/keyvisual.jpg","why":"巡演主視覺的構圖"},{"kind":"live","imageUrl":"http://127.0.0.1:${STUB_PORT}/coverart/img/missing.jpg"}]}\n\`\`\``;
+    const good = `${BRIEF}\n\n${visuals}\n\n以下是設計方案：\n\n\`\`\`json\n${planReply(song.plan, "大風吹過空城")}\n\`\`\`\n\n希望這份設計對你們的演出有幫助！`;
     await page.getByTestId("manual-reply").fill(good);
     await page.waitForTimeout(300);
     await shot(page, "manual-paste");
@@ -386,6 +394,13 @@ async function clipboard(page) {
     const applied = await api("GET", `/api/projects/${id}`);
     check("saved plan and brief marked manual-claude", applied.plan?.keyVisual?.title === "大風吹過空城" && applied.planSource?.engine === "manual-claude" && applied.research?.engine === "manual-claude");
     check("the pasted brief kept its sources and the cached public facts", (applied.research?.sources ?? []).some((s) => /wikipedia/.test(s.url)) && applied.research?.publicInfo?.status?.musicbrainz === "ok");
+    const fromReply = applied.collected ?? [];
+    check(
+      "the reply's ```visuals list was downloaded into 研究找到的素材 (the removed cover stays out)",
+      fromReply.length === 1 && fromReply[0].provenance?.kind === "keyvisual" && fromReply[0].provenance?.foundBy === "claude" && !/visuals/.test(applied.research?.brief ?? ""),
+      JSON.stringify(fromReply.map((c) => [c.provenance?.kind, c.provenance?.foundBy])),
+    );
+    check("the sheet reports what it collected", /研究找到的素材：找到\s*1 張主視覺/.test(successText), successText.replace(/\s+/g, " ").slice(0, 200));
     await page.getByTestId("manual-console").click();
     await page.waitForURL(new RegExp(`/p/${id}$`), { timeout: 60000 });
     await page.waitForFunction(() => document.body.innerText.includes("大風吹過空城"), null, { timeout: 30000 });

@@ -12,10 +12,15 @@ import { DesignPlanSchema } from "@/lib/schema";
 import { projectSafety } from "@/lib/stage/safety";
 import type { Project } from "@/lib/types";
 import { withBandAssets } from "./band-storage";
+import { collectForProject } from "./collect-visuals";
 import { designRequestFor } from "./directions";
 import { HttpError } from "./http";
 import { withLiveStatus } from "./pipeline";
+import { visualsConfig } from "./research/visuals";
 import { getProject, updateProject } from "./storage";
+
+/** Downloading the material a reply lists must leave the apply well inside the route's 60 s. */
+const MANUAL_COLLECT_BUDGET_MS = 25_000;
 
 async function requireProject(id: string): Promise<Project> {
   const project = await getProject(id);
@@ -29,7 +34,7 @@ export async function manualPromptForProject(id: string, opts: { target: ManualT
   const req = await designRequestFor(project, { vision: false });
   const instruction = opts.instruction?.trim();
   if (instruction) req.instruction = instruction.slice(0, 600);
-  return buildManualPrompt(req, { target: opts.target, compact: opts.compact, output: project.output });
+  return buildManualPrompt(req, { target: opts.target, compact: opts.compact, output: project.output, visuals: visualsConfig().enabled });
 }
 
 /**
@@ -68,11 +73,26 @@ export async function manualApplyForProject(id: string, input: { target: ManualT
     if (brief) {
       // the public facts a free research found stay cached for later runs
       const publicInfo = p.research?.publicInfo;
-      p.research = { brief: brief.brief, sources: brief.sources, engine: "manual-claude", createdAt: now, ...(publicInfo ? { publicInfo } : {}) };
+      p.research = { brief: brief.brief, sources: brief.sources, engine: "manual-claude", createdAt: now, ...(publicInfo ? { publicInfo } : {}), ...(outcome.visualCandidates.length ? { visualCandidates: outcome.visualCandidates } : {}) };
     }
   });
+  // 研究找到的素材: the material the reply listed (and the album's cover when the free research knows the
+  // release group), downloaded now, inside this request's time; a failure only shows in `collected`
+  const collected: string[] = [];
+  let latest = saved;
+  if (outcome.visualCandidates.length || saved.research?.publicInfo?.musicbrainz?.recording?.releaseGroup?.id) {
+    const known = saved.research?.publicInfo?.musicbrainz?.recording?.releaseGroup;
+    const got = await collectForProject(saved, {
+      candidates: outcome.visualCandidates,
+      releaseGroup: known?.id ? { id: known.id, title: known.title } : null,
+      signal: AbortSignal.timeout(MANUAL_COLLECT_BUDGET_MS + 5000),
+      budgetMs: MANUAL_COLLECT_BUDGET_MS,
+      log: (m) => collected.push(m),
+    });
+    if (got.project) latest = got.project;
+  }
   return {
     status: 200,
-    body: { ok: true, project: withLiveStatus(await withBandAssets(saved)), target: input.target, notes: outcome.notes, safety: outcome.safety, research: !!brief },
+    body: { ok: true, project: withLiveStatus(await withBandAssets(latest)), target: input.target, notes: outcome.notes, safety: outcome.safety, research: !!brief, collected },
   };
 }
