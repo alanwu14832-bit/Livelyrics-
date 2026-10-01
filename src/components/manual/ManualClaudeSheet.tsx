@@ -187,6 +187,7 @@ export function ManualClaudeSheet({
   };
 
   const images = current?.images ?? prompts.full?.images ?? prompts.compact?.images ?? [];
+  const found = current?.collected ?? prompts.full?.collected ?? prompts.compact?.collected ?? [];
   const imageUrl = (n: number) => {
     const board = [...(project.bandMoodboard ?? []).map((m) => ({ ...m, band: true })), ...(project.moodboard ?? []).filter((m) => !(project.bandMoodboard ?? []).some((b) => b.id === m.id)).map((m) => ({ ...m, band: false }))];
     const m = board[n - 1];
@@ -219,7 +220,8 @@ export function ManualClaudeSheet({
       <div data-testid="manual-sheet" className="flex flex-col gap-4">
         <p className="text-[15px] leading-[22px] text-label">
           不用 API 金鑰：用你自己的 claude.ai 帳號，讓 Claude 上網研究{artistOrBand(project)}，{plan ? "設計主視覺與每一段的畫面" : "提出 2 到 3 個設計方向"}。Livelyrics 已把這首歌的歌詞、音訊分析、免費研究的發現與
-          {project.bandId ? "樂團視覺聖經" : "舞台限制"}整理成一份提示詞，Claude 回覆後貼回來就會套用。
+          {project.bandId ? "樂團視覺聖經" : "舞台限制"}整理成一份提示詞，Claude 回覆後貼回來就會套用
+          {current?.visuals ?? true ? "；回覆裡列出的封面、MV 與主視覺也會下載到「研究找到的素材」" : ""}。
         </p>
 
         <ol className="divide-y-hairline overflow-hidden rounded-lg bg-fill-4" aria-label="步驟">
@@ -302,6 +304,29 @@ export function ManualClaudeSheet({
                   </ul>
                 </div>
               )}
+              {found.length > 0 && (
+                <div className="mt-2 text-[13px] leading-5 text-label">
+                  <p>
+                    {images.length > 0 ? "接著" : "記得"}附上 {found.length} 張研究找到的素材（依素材編號順序；點名稱可以開啟、另存或拖進 claude.ai）：
+                  </p>
+                  <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="要附上的研究找到的素材">
+                    {found.map((img) => (
+                      <li key={img.id}>
+                        <a
+                          href={api.collectedUrl(projectId, img.id)}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="press-fade inline-flex h-7 items-center gap-1 rounded-pill bg-fill-3 px-3 text-[12px] leading-none font-medium text-label hover:bg-fill-2"
+                          title={img.name}
+                        >
+                          素材 {img.n}：{img.kind}
+                          <ArrowSquareOutIcon size={12} className="text-label-2" />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <a
                 href={CLAUDE_NEW_CHAT_URL}
                 target="_blank"
@@ -320,7 +345,7 @@ export function ManualClaudeSheet({
               <label htmlFor={replyId} className="block text-[15px] leading-[22px] font-semibold text-label">
                 把 Claude 的整段回覆貼回來
               </label>
-              <p className="mt-0.5 text-[13px] leading-5 text-label-2">用回覆下方的「複製」按鈕複製整則回覆（研究簡報和 JSON 都要），貼到這裡，再按右上角的「套用」。</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-label-2">用回覆下方的「複製」按鈕複製整則回覆（研究簡報、素材清單和 JSON 都要），貼到這裡，再按右上角的「套用」。</p>
               <TextArea
                 id={replyId}
                 rows={7}
@@ -382,6 +407,20 @@ export function ManualClaudeSheet({
                     : `${success.research ? "研究簡報也已更新。" : ""}和樂團一起看，採用一個成為設計方案。`
               }
             />
+            {success.collected.length > 0 && !undone && (
+              <details className="mt-2 text-[13px] leading-5" data-testid="manual-collected">
+                <summary className="cursor-default select-none text-label hover:text-label">
+                  研究找到的素材：{success.collected.find((l) => l.startsWith("找到")) ?? success.collected[success.collected.length - 1]}
+                </summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-label-2">
+                  {success.collected.slice(0, 12).map((n, i) => (
+                    <li key={i} className="break-words">
+                      {n}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {success.notes.length > 0 && !undone && (
               <details className="mt-2 text-[13px] leading-5">
                 <summary className="cursor-default text-label-2 select-none hover:text-label">自動修正了 {success.notes.length} 處</summary>

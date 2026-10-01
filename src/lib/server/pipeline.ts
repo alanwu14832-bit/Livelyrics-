@@ -34,9 +34,9 @@ import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
 import { getProject, updateProject } from "./storage";
-import { authorizationFor, storeCollected } from "./collected-storage";
-import { collectVisuals, findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
-import { collectedSummary, MAX_COLLECTED } from "@/lib/visuals";
+import { collectForProject } from "./collect-visuals";
+import { findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
+import { collectedSummary } from "@/lib/visuals";
 import { isCloudStorage } from "./store";
 
 export type PipelineStep = "lyrics" | "research" | "design" | "scene";
@@ -731,40 +731,16 @@ async function collectStep(
   const log = (message: string) => emit(run, { type: "log", step: "research", message });
   if (!visualsConfig().enabled) return "";
   try {
-    const current = project.collected ?? [];
-    const room = MAX_COLLECTED - current.length;
     const known = research.publicInfo?.musicbrainz?.recording?.releaseGroup;
     const rg = known?.id ? { id: known.id, title: known.title } : releaseGroup ? await raceAbort(releaseGroup, signal) : null;
     const candidates = Array.isArray(research.visualCandidates) ? research.visualCandidates : [];
-    if (!rg && !candidates.length) return "";
-    if (room <= 0) {
-      log(`研究找到的素材已經有 ${current.length} 張（上限 ${MAX_COLLECTED}），這次不再下載新的。`);
-      return "";
-    }
     // cloud: the step has a hard stop; leave room to save
-    const left = run.cloud ? CLOUD_STEP_TIMEOUT_MS - 15_000 - (Date.now() - startedAt) : VISUALS_BUDGET_MS;
-    const budgetMs = Math.min(VISUALS_BUDGET_MS, left);
-    if (budgetMs < 3000) {
+    const budgetMs = run.cloud ? CLOUD_STEP_TIMEOUT_MS - 15_000 - (Date.now() - startedAt) : VISUALS_BUDGET_MS;
+    if (budgetMs < 3000 && (rg || candidates.length)) {
       log("研究用完了這個步驟的時間，這次不收集視覺素材（重新研究時會再試）。");
       return "";
     }
-    log(`收集樂團的視覺素材：${[rg ? `《${rg.title}》的封面（Cover Art Archive）` : "", candidates.length ? `Claude 列出的 ${candidates.length} 個素材` : ""].filter(Boolean).join("、")}…`);
-    const authorization = await authorizationFor(project);
-    const skip = {
-      urls: new Set([...current.map((c) => c.provenance.imageUrl), ...(project.collectedDismissed ?? [])]),
-      hashes: new Set([...current.map((c) => c.hash), ...(project.collectedDismissed ?? [])]),
-    };
-    const got = await collectVisuals({ meta: project.meta, releaseGroup: rg, candidates, authorization, skip, room }, { signal, budgetMs, onLog: log });
-    for (const note of got.notes.slice(0, 4)) log(note);
-    if (!got.downloads.length) {
-      log(got.tried ? "沒有下載到可用的視覺素材。" : "沒有新的視覺素材。");
-      return "";
-    }
-    const { added } = await storeCollected(project.id, got.downloads);
-    const line = collectedSummary(added);
-    if (!line) return "";
-    log(`${line}${authorization ? "（樂團已授權，可以上台）" : "（尚未確認樂團授權：先只當參考）"}`);
-    return line;
+    return (await collectForProject(project, { candidates, releaseGroup: rg, signal, budgetMs, log })).line;
   } catch (err) {
     if (signal.aborted) throw err;
     log(`收集視覺素材失敗：${describeError(err)}（研究結果不受影響）`);

@@ -1146,6 +1146,11 @@ export class ConsoleController {
   async play(): Promise<void> {
     if (!this.snapshot.project || this.heldByTimecode()) return;
     if (this.settings.mode === "live") {
+      // play means the music: 手動切換 turns the track on (the speaker button turns it off again)
+      if (!this.settings.liveAudio && !this.following && this.audio) {
+        this.updateSettings({ liveAudio: true });
+        this.set({ liveAudio: true });
+      }
       this.clock.start(Date.now());
       this.afterClockChange();
       if (this.settings.liveAudio && !this.following) await this.playElement();
@@ -1555,7 +1560,12 @@ export class ConsoleController {
     const now = Date.now();
     const t = this.songTime(now);
     this.sectionPin = null;
-    // the track keeps playing into 手動切換 when the operator asked for it (a backing track)
+    // a track already playing keeps playing into 手動切換 (the operator pressed play: they want the
+    // music, only the lyrics change hands); a silent LIVE needs a paused track or the speaker off
+    if (mode === "live" && !this.settings.liveAudio && this.audio && !this.audio.paused && !this.audio.ended) {
+      this.updateSettings({ liveAudio: true });
+      this.set({ liveAudio: true });
+    }
     const keepTrack = mode === "live" ? this.settings.liveAudio : this.liveAudioPlaying();
     if (mode === "live") {
       if (!this.settings.liveAudio) this.audio?.pause();

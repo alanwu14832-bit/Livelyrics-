@@ -99,7 +99,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/api/projects/[id]/collected` GET/POST, `/api/projects/[id]/collected/[itemId]` GET/HEAD/PATCH/DELETE | SERVER | 研究找到的素材 (phase 8): `{ items, authorization }` / `{ action: "authorize", note? }` (the band's one-time acknowledgement) → `{ items, authorization, project }` / file with Range / `{ use?: "stage" \| "reference", stats? }` → `{ item, items, plan }` / 移除 → `{ ok, items, plan }`. An item with `use: "stage"` is also served by the project's asset route |
 | `/api/bands/[id]/moodboard` GET/POST, `/api/bands/[id]/moodboard/[imageId]` GET/HEAD/PATCH/DELETE | SERVER | the band's mood board, same contract (applies to all its songs) |
 | `/api/projects/[id]/directions` POST | SERVER | 設計方向 (phase 4) `{ action: generate \| revise \| select \| undo \| status \| comment \| uncomment \| clear, … }` → `{ project, engine?, logs? }` (`maxDuration` 300; cloud: `directionsJob`, 409 while one runs) |
-| `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 4b) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call, no `maxDuration`) |
+| `/api/projects/[id]/manual` POST | SERVER | 用 claude.ai 研究 (phase 4b) `{ action: "prompt", target: plan \| directions, compact?, instruction? }` → `ManualPromptResult`; `{ action: "apply", target, reply, brief? }` → `{ ok: true, project, notes, safety, research, collected }` or 422 `{ ok: false, error, issues, fixPrompt, brief? }` (no LLM call; `maxDuration` 60: applying downloads the reply's ```visuals list into 研究找到的素材 within 25 s via `collect-visuals.ts`) |
 | `/api/lyrics/search` GET | SERVER | LRCLIB proxy → `{ results: LyricsSearchResult[] }` |
 | `/api/bands` GET/POST | SERVER | `BandSummary[]` / create `{ name }` → `Band` |
 | `/api/bands/[id]` GET/PATCH/DELETE | SERVER | band / patch `{ name?, bible? (partial, marks source manual) }` / delete (library + shows go, songs stay unassigned) |
@@ -480,7 +480,10 @@ remain available.
   (research on the web first, the brief with the five headings, then exactly one ```json block), the
   song, the lyrics marked by section 【a1 主歌一 0:08–0:24｜能量 0.43】 with line ids, the audio summary
   and energy curve, the free findings, the bible, the mood board (the user attaches the images; notes
-  and measured colours listed), the band's material, the canvas, the lyric safe area and LED 安全模式,
+  and measured colours listed), 研究找到的素材 (`manualCollectedBlock`: attached after the mood board
+  as 素材 1…, kind, source, colours, 可以上台 or not), the ```visuals list the API research asks for
+  (`manualVisualsRules`, off with `LIVELYRICS_VISUALS=off`; `ManualPromptResult.visuals` /
+  `.collected` tell the sheet), the band's material, the canvas, the lyric safe area and LED 安全模式,
   `DESIGN_SYSTEM` / `DIRECTIONS_SYSTEM` (the API's own rules), a field reference generated from the
   structured-output schema (`designPlanJsonSchema()` / `jsonOutputFormat(DirectionDraftSchema)`) and
   a JSON template on the song's real section timings (valid against the zod schemas; （…） marks what
@@ -497,7 +500,10 @@ remain available.
   after it), tidied like Claude's, sources from its links (http(s) only, claude.ai skipped); a failed
   reply returns it so a JSON-only fix still saves it. `fixPrompt` lists the problems for the same
   chat. Applying saves `plan` (old one in `previousPlan` with its `source`, for 復原), `planSource
-  { engine: "manual-claude" }` and `research { engine: "manual-claude", publicInfo kept }`, or the
+  { engine: "manual-claude" }` and `research { engine: "manual-claude", publicInfo kept, visualCandidates
+  from the ```visuals block }`, then downloads that list (and the cover when `publicInfo` knows the
+  release group) with `collectForProject` (`collect-visuals.ts`, 25 s budget, log lines returned as
+  `collected`), or the
   direction set.
 - **Who made the plan.** `Project.planSource` (`PlanSource`): the pipeline's design step (Claude with
   its model, else `free` / `offline`), 用 claude.ai 研究, or 採用這個方向 (the direction's engine);
@@ -1062,7 +1068,8 @@ one-time acknowledgement before anything goes on stage.
   (local: atomic write; Blob: `put` with a random suffix, `BlobApi.upload`); ids unique across assets,
   mood board and this list (`takenAssetIds`).
 - **Collection** (`src/lib/server/research/visuals.ts`, run at the end of the pipeline's research step,
-  `collectStep` in `pipeline.ts`). The cover: the release group of 免費研究's MusicBrainz lookup, or —
+  `collectStep` in `pipeline.ts` → `collectForProject` in `src/lib/server/collect-visuals.ts`, which the
+  manual apply shares). The cover: the release group of 免費研究's MusicBrainz lookup, or —
   for a Claude research, which has none — `findReleaseGroup` (the recording search through the shared
   MusicBrainz gate, started in parallel with Claude) → `GET <coverart>/release-group/<mbid>` →
   `parseCoverArt` (the front image's 1200 px thumbnail, then large / 500, else the original; http links
@@ -1388,8 +1395,10 @@ keeps every contract above and changes only where things are kept and how long w
 - 手動切換 with the track (`settings.liveAudio`, the speaker toggle next to the mode switch; off by
   default because a live band plays the song): in LIVE the audio element plays from where it is while the
   lyrics still wait for cues; play / pause drive both the virtual clock and the audio, the beat comes from
-  the track (its analyser and beat grid at the audio's own time). Switching back to TRACK keeps the running
-  track (the lyrics follow it from there).
+  the track (its analyser and beat grid at the audio's own time). Play means the music: pressing play in
+  LIVE turns `liveAudio` on, and a track already playing keeps playing when the operator switches
+  TRACK → LIVE (`liveAudio` turns on by itself); a silent LIVE is a paused track or the speaker turned
+  off. Switching back to TRACK keeps the running track (the lyrics follow it from there).
 - Remote keys (phase 7): the projection window forwards every key except F (its fullscreen), Esc, Tab and
   modifier chords as `{ type: "key", outputId, id, key: { key, code, shiftKey, repeat } }` (output ->
   console). `ProjectionLink` hands it once per console window (`id` de-duplicated) to

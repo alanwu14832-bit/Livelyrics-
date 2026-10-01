@@ -279,7 +279,7 @@ export function TopBar({
           <Tooltip content="上一句" shortcut="ArrowLeft">
             <Button variant="quiet" size="icon" aria-label="上一句" icon={SkipBackIcon} className="text-label!" onClick={() => controller.prev()} />
           </Tooltip>
-          <Tooltip content={live ? (snap.liveAudio ? (snap.playing ? "暫停音檔" : "播放音檔（歌詞仍由你切）") : snap.playing ? "停止手動時脈" : "啟動手動時脈") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
+          <Tooltip content={live ? (snap.playing ? (snap.liveAudio ? "暫停音檔" : "停止手動時脈") : "播放音檔（歌詞仍由你切）") : snap.playing ? "暫停" : "播放"} shortcut={live ? undefined : "Space"}>
             <Button
               size="circle"
               aria-label={snap.playing ? "暫停" : "播放"}

@@ -395,3 +395,60 @@ describe("the research brief of a reply", () => {
     expect(fixPrompt("directions", [{ message: "x", severity: "error" }])).toContain('{ "directions": [...] }');
   });
 });
+
+describe("研究找到的素材 in 用 claude.ai 研究", () => {
+  const COLLECTED = [
+    {
+      id: "c1",
+      kind: "image",
+      name: "cover.jpg",
+      file: "c1.jpg",
+      mimeType: "image/jpeg",
+      bytes: 4000,
+      width: 1000,
+      height: 1000,
+      createdAt: NOW,
+      stats: { palette: ["#0b2a2e", "#ff7a1a"], weights: [0.7, 0.3], luma: 0.3, saturation: 0.6, warmth: 0.2 },
+      provenance: { kind: "cover", imageUrl: "https://coverartarchive.org/x/front.jpg", sourceUrl: "https://musicbrainz.org/release-group/x", foundBy: "cover-art-archive", fetchedAt: NOW, title: "醜奴兒", authorization: "", why: "這個時期的顏色" },
+      use: "stage",
+      useSetBy: "auto",
+      hash: "abc",
+    },
+  ] as unknown as import("@/lib/types").CollectedVisual[];
+
+  it("the prompt lists the collected material to attach and asks for the ```visuals list", () => {
+    const p = buildManualPrompt(req({ collected: COLLECTED }), { target: "plan" });
+    expect(p.prompt).toContain("# 研究找到的素材");
+    expect(p.prompt).toContain("素材 1：研究找到的專輯封面「醜奴兒」");
+    expect(p.prompt).toContain("#ff7a1a");
+    expect(p.prompt).toContain("1 張研究找到的素材（素材 1 到素材 1");
+    expect(p.prompt).toContain("3. **列出視覺素材**");
+    expect(p.prompt).toContain("```visuals");
+    expect(p.prompt).not.toContain("web_fetch");
+    expect(p.prompt).toContain("4. **最後輸出設計方案**");
+    expect(p.collected).toEqual([{ n: 1, id: "c1", name: "醜奴兒", kind: "專輯封面" }]);
+    expect(p.visuals).toBe(true);
+    // LIVELYRICS_VISUALS=off: no list asked for, the steps renumber
+    const off = buildManualPrompt(req(), { target: "plan", visuals: false });
+    expect(off.prompt).not.toContain("```visuals");
+    expect(off.prompt).toContain("3. **最後輸出設計方案**");
+    expect(off.visuals).toBe(false);
+    expect(off.collected).toEqual([]);
+  });
+
+  it("the reply's ```visuals block becomes candidates and stays out of the brief", () => {
+    const visuals = '```visuals\n{"images":[{"kind":"mv","pageUrl":"https://www.youtube.com/watch?v=abc123def45","why":"MV 的夜景"},{"kind":"keyvisual","imageUrl":"https://example.com/kv.jpg"},{"kind":"nope","imageUrl":"https://example.com/x.jpg"}]}\n```';
+    const r = readManualReply(`${BRIEF}\n\n${visuals}\n\n\`\`\`json\n${goodPlanJson()}\n\`\`\``, "plan", req(), SAFE);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.visualCandidates).toEqual([
+      { kind: "mv", pageUrl: "https://www.youtube.com/watch?v=abc123def45", why: "MV 的夜景" },
+      { kind: "keyvisual", imageUrl: "https://example.com/kv.jpg" },
+    ]);
+    expect(r.brief?.brief).not.toContain("visuals");
+    expect(r.brief?.brief).toContain("## 設計方向建議");
+    // no list: no candidates, the plan still applies
+    const plain = readManualReply(`\`\`\`json\n${goodPlanJson()}\n\`\`\``, "plan", req(), SAFE);
+    expect(plain.ok && plain.visualCandidates).toEqual([]);
+  });
+});

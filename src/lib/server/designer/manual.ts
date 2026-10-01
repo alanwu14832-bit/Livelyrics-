@@ -18,8 +18,10 @@ import { activeSafety, SAFE_MAX_REACTIVITY, SAFE_PULSE_HZ, SAFE_RED_REACTIVITY, 
 import { AUTO_LYRIC_STYLE_IDS, FONT_IDS, LYRIC_PLACEMENTS, MEDIA_TREATMENTS, SCENE_IDS, SECTION_KINDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "@/lib/schema";
 import { RECIPES, VOICES } from "@/lib/type/vocab";
 import { findMotionWord } from "@/lib/type/motion-words";
-import type { MoodImage, ProjectOutput } from "@/lib/types";
+import type { CollectedVisual, MoodImage, ProjectOutput } from "@/lib/types";
+import { VISUAL_KIND_LABEL } from "@/lib/visuals";
 import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
+import { collectedLabel } from "./collected";
 import { DirectionDraftSchema, DIRECTIONS_SYSTEM } from "./directions";
 import { analyzeFindings, type Findings } from "./findings";
 import { freeBrief } from "./free-research";
@@ -34,6 +36,7 @@ import {
   energyCurveBlock,
   repetitionBlock,
   RESEARCH_HEADINGS,
+  RESEARCH_VISUALS_RULES,
   songBlock,
   trimBrief,
   typeCatalogBlock,
@@ -50,6 +53,8 @@ export interface ManualPromptOptions {
   compact?: boolean;
   /** the project's output canvas (size, lyric safe area, LED 安全模式) */
   output?: ProjectOutput | null;
+  /** ask Claude for the band's visual material too (研究找到的素材; off with LIVELYRICS_VISUALS=off); default on */
+  visuals?: boolean;
 }
 
 export interface ManualPrompt {
@@ -58,6 +63,10 @@ export interface ManualPrompt {
   compact: boolean;
   /** long enough that the free claude.ai tier may cut the answer: offer 精簡版 */
   long: boolean;
+  /** 研究找到的素材 to attach after the mood board (numbered 素材 1… like the prompt) */
+  collected: Array<{ n: number; id: string; name: string; kind: string }>;
+  /** the prompt asks for the ```visuals list (the reply's material is collected on apply) */
+  visuals: boolean;
   /** mood board images to attach, numbered like the prompt (圖 1…) */
   images: Array<{ n: number; name: string; note?: string }>;
   /** the free research findings are included */
@@ -153,6 +162,36 @@ export function sectionedLyrics(req: DesignRequest, st: SongStructure, compact: 
   if (orphans.length && !compact) out.push(`（沒有落在段落裡的歌詞：${orphans.slice(0, 8).map((l) => l.id).join("、")}${orphans.length > 8 ? "…" : ""}）`);
   if (!compact && lines.length > MAX_FULL_LYRIC_LINES) out.push(`…（其餘 ${lines.length - MAX_FULL_LYRIC_LINES} 行省略）`);
   return out.join("\n");
+}
+
+/**
+ * 研究找到的素材 for claude.ai: the user attaches the images after the mood board (素材 1…); kind,
+ * source, colours and whether the band's authorization lets each one on stage are listed.
+ */
+export function manualCollectedBlock(collected: readonly CollectedVisual[], target: ManualTarget): string | null {
+  if (!collected.length) return null;
+  const rows = collected.map((c, i) => {
+    const parts = [collectedLabel(c, i + 1)];
+    if (c.provenance.why) parts.push(`為什麼重要：${clip(c.provenance.why, 160)}`);
+    if (c.stats?.palette.length) parts.push(`量到的主色：${c.stats.palette.slice(0, 5).join("、")}（亮度 ${c.stats.luma.toFixed(2)}、飽和度 ${c.stats.saturation.toFixed(2)}）`);
+    return `- ${parts.join("｜")}`;
+  });
+  const onStage = collected.filter((c) => c.use === "stage");
+  return [
+    `共 ${collected.length} 張，是 Livelyrics 研究時找到的樂團真實素材（專輯封面、MV 畫面、主視覺…）。使用者會把它們附在這則訊息裡、排在參考圖之後（素材 1 到素材 ${collected.length}）；有附上的請真的看圖，沒有附上的只能依種類與色票判斷。`,
+    "- 這是這首歌真正的樣子：配色、母題、構圖與材質要從這些素材長出來（封面的主色與明暗、MV 的場景與光線、主視覺的構圖與字體），設計要一眼看得出和這張專輯、這支 MV 是同一個世界。",
+    ...(target === "plan"
+      ? onStage.length
+        ? [`- 標「可以上台」的素材已列在「樂團素材」清單（同一個 id），可以當一兩個段落的 media（封面用 duotone／halftone／grain-film／slow-drift，MV 畫面用 blur-glow／grain-film，標誌用 full 置中）；節制，不要每段都放。`]
+        : ["- 這些素材目前都只當參考（樂團還沒確認授權）：每段的 media 不要用它們。"]
+      : []),
+    ...rows,
+  ].join("\n");
+}
+
+/** The ```visuals list the API research asks for, worded for a claude.ai chat (no web_fetch tool there). */
+export function manualVisualsRules(): string {
+  return RESEARCH_VISUALS_RULES.replace("## 視覺素材清單（寫在簡報之後）\n", "").replace("可以用 web_fetch 打開", "可以打開").trim();
 }
 
 /** The free research findings as a head start: the whole free brief, or a few lines (精簡版). */
@@ -476,15 +515,16 @@ export function directionsTemplate(req: DesignRequest): string {
 // the prompt
 // ---------------------------------------------------------------------------
 
-function researchSteps(compact: boolean): string[] {
+function researchSteps(compact: boolean, visuals: boolean): string[] {
   return [
     "1. **先上網研究**（有網頁搜尋就用）：這個樂團與這首歌的專輯／單曲封面、MV 的色調與剪輯節奏、logo 與字體、過往演唱會與音樂祭的舞台設計和 VJ 影像、現場的大合唱與樂迷習慣。只採用與這個樂團、這首歌有關的資料（排除同名的其他樂團或歌）；查不到就寫「公開資料有限」，改依歌詞、音訊與下方「免費研究的發現」推論，並標示為推論。",
     `2. **寫研究簡報**：繁體中文 Markdown，約 ${compact ? "300–600" : "600–1200"} 字，依序使用這五個二級標題：${RESEARCH_HEADINGS.map((h) => `## ${h}`).join("、")}。查證過的事實在句中附上 Markdown 來源連結；推論寫明「推測」。不要重製歌詞，提到歌詞只用幾個字。`,
+    ...(visuals ? ["3. **列出視覺素材**：簡報之後、JSON 之前，依下方「視覺素材清單」的格式輸出一個 ```visuals 程式碼區塊，列出研究時看到的封面、官方 MV、主視覺、標誌與現場照片的網址；Livelyrics 會自己下載，給之後的設計參考、授權的放上舞台。"] : []),
   ];
 }
 
-function answerFormat(target: ManualTarget): string {
-  return `3. **最後輸出${target === "plan" ? "設計方案" : "設計方向"}**：在簡報之後輸出**恰好一個** \`\`\`json 程式碼區塊，內容是符合下方「JSON 規格」的完整 JSON${target === "plan" ? "（DesignPlan）" : "（2 到 3 個設計方向）"}。JSON 必須合法：雙引號、沒有註解、沒有結尾逗號，${target === "plan" ? "不要省略任何段落" : "每個方向的欄位都要寫完"}。不要用 artifact 或檔案，直接寫在回覆裡；JSON 之後不要再寫任何文字。`;
+function answerFormat(target: ManualTarget, step: number): string {
+  return `${step}. **最後輸出${target === "plan" ? "設計方案" : "設計方向"}**：在簡報之後輸出**恰好一個** \`\`\`json 程式碼區塊，內容是符合下方「JSON 規格」的完整 JSON${target === "plan" ? "（DesignPlan）" : "（2 到 3 個設計方向）"}。JSON 必須合法：雙引號、沒有註解、沒有結尾逗號，${target === "plan" ? "不要省略任何段落" : "每個方向的欄位都要寫完"}。不要用 artifact 或檔案，直接寫在回覆裡；JSON 之後不要再寫任何文字。`;
 }
 
 function checks(target: ManualTarget, st: SongStructure, lyrics: boolean): string[] {
@@ -540,8 +580,15 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
   const artist = req.meta?.artist?.trim();
   const title = req.meta?.title?.trim() || "這首歌";
   const moodboard = req.moodboard ?? [];
+  const collected = req.collected ?? [];
+  const visuals = opts.visuals !== false;
   const lyrics = (req.lyrics?.lines ?? []).length > 0;
   const target = opts.target;
+  const attachStep = visuals ? 5 : 4;
+  const attach = [
+    ...(moodboard.length ? [`${moodboard.length} 張參考圖（圖 1 到圖 ${moodboard.length}，順序同下方「參考圖」）`] : []),
+    ...(collected.length ? [`${collected.length} 張研究找到的素材（素材 1 到素材 ${collected.length}，順序同下方「研究找到的素材」）`] : []),
+  ];
 
   const parts: string[] = [
     `# 用 claude.ai ${target === "plan" ? "設計" : "提出設計方向"}：〈${title}〉${artist ? `（${artist}）` : ""}`,
@@ -553,9 +600,9 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
     }`,
     "",
     "## 請依序完成",
-    ...researchSteps(compact),
-    answerFormat(target),
-    ...(moodboard.length ? [`4. 使用者會在這則訊息附上 ${moodboard.length} 張參考圖（圖 1 到圖 ${moodboard.length}，順序同下方「參考圖」）：請真的看圖，並在理由中用「圖 n」註明。`] : []),
+    ...researchSteps(compact, visuals),
+    answerFormat(target, visuals ? 4 : 3),
+    ...(attach.length ? [`${attachStep}. 使用者會在這則訊息附上 ${attach.join("與")}：請真的看圖，並在理由中用「圖 n」或「素材 n」註明。`] : []),
     ...(compact ? ["（這是精簡版：歌詞只列每段的開頭，請把研究簡報、rationale 與 designerNotes 寫短一點，避免回覆太長被截斷。）"] : []),
   ];
 
@@ -576,6 +623,9 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
   if (bible) parts.push("", "# 樂團視覺聖經（硬性規範）", BIBLE_RULE, bible);
   const mood = manualMoodboardBlock(moodboard);
   if (mood) parts.push("", "# 參考圖（mood board）", mood);
+  const found = manualCollectedBlock(collected, target);
+  if (found) parts.push("", "# 研究找到的素材", found);
+  if (visuals) parts.push("", "# 視覺素材清單（研究簡報之後、JSON 之前）", manualVisualsRules());
   if (target === "plan") parts.push("", "# 樂團素材（id｜種類｜名稱｜尺寸｜…）", assetsBlock(req.assets));
   else if ((req.assets ?? []).length) parts.push("", `# 樂團素材\n- 有 ${(req.assets ?? []).length} 個素材（專輯封面、照片、MV、logo）；方向可以用 treatments 說明怎麼處理它們。`);
   if (target === "plan" && req.previous && !instruction) {
@@ -618,7 +668,14 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
       "範本只列出一個方向；請輸出 3 個（至少 2 個）彼此明顯不同的方向，例如冷調膠片、飽和拼貼、黑白極簡這樣拉開距離。",
     );
   }
-  parts.push("", "# 送出前檢查", ...checks(target, st, lyrics), "", `請開始：先上網研究，再寫研究簡報，最後輸出一個 \`\`\`json 區塊。`);
+  parts.push(
+    "",
+    "# 送出前檢查",
+    ...checks(target, st, lyrics),
+    ...(visuals ? ["- ```visuals 區塊在簡報之後、```json 之前，裡面的網址都是你實際看到的。"] : []),
+    "",
+    `請開始：先上網研究，再寫研究簡報，${visuals ? "列出視覺素材，" : ""}最後輸出一個 \`\`\`json 區塊。`,
+  );
 
   const prompt = parts.join("\n");
   return {
@@ -626,6 +683,8 @@ export function buildManualPrompt(req: DesignRequest, opts: ManualPromptOptions)
     chars: prompt.length,
     compact,
     long: !compact && prompt.length > LONG_PROMPT_CHARS,
+    collected: collected.map((c, i) => ({ n: i + 1, id: c.id, name: c.provenance.title || c.name, kind: VISUAL_KIND_LABEL[c.provenance.kind] })),
+    visuals,
     images: moodboard.map((m, i) => ({ n: i + 1, name: m.name, ...(m.note ? { note: clip(m.note, 120) } : {}) })),
     findings: true,
   };

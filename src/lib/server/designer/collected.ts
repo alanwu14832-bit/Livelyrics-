@@ -29,6 +29,11 @@ function host(url: string | undefined): string {
   }
 }
 
+/** 「素材 n：研究找到的專輯封面「…」（Cover Art Archive，host）｜可以上台（素材 id …）」 */
+export function collectedLabel(c: CollectedVisual, n: number): string {
+  return label(c, n);
+}
+
 function label(c: CollectedVisual, n: number): string {
   const src = host(c.provenance.sourceUrl) || host(c.provenance.imageUrl);
   const title = c.provenance.title ? `「${clip(c.provenance.title, 60)}」` : "";

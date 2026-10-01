@@ -496,6 +496,10 @@ export interface ManualPromptResult {
   long: boolean;
   /** mood board images to attach in claude.ai, numbered like the prompt (圖 1…) */
   images: Array<{ n: number; name: string; note?: string }>;
+  /** 研究找到的素材 to attach after them, numbered like the prompt (素材 1…) */
+  collected: Array<{ n: number; id: string; name: string; kind: string }>;
+  /** the prompt asks Claude for the band's visual material (collected when the reply is applied) */
+  visuals: boolean;
   /** the free research findings were included as a head start */
   findings: boolean;
 }
@@ -518,6 +522,8 @@ export type ManualApplyResult =
       safety: string[];
       /** the reply's research brief was saved (研究簡報) */
       research: boolean;
+      /** 研究找到的素材 downloaded from the reply's list: 「找到 2 張 MV 畫面」, the notes, or nothing */
+      collected: string[];
     }
   | {
       ok: false;

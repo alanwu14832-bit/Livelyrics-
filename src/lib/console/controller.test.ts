@@ -293,10 +293,36 @@ describe("ConsoleController", () => {
     c.setLiveAudio(false);
     await flush();
     expect(el.paused).toBe(true);
-    // without the option the track never starts in LIVE
+    expect(c.getSnapshot().liveAudio).toBe(false);
+    // play means the music: it turns the track back on
     await c.play();
     await flush();
+    expect(el.paused).toBe(false);
+    expect(c.getSnapshot().liveAudio).toBe(true);
+    c.detach();
+  });
+
+  it("a track playing in 跟音檔 keeps playing when the operator switches to 手動切換", async () => {
+    const c = await ready();
+    c.chooseMode("track");
+    c.setLiveAudio(false);
+    await c.play();
+    await flush();
+    const el = FakeAudio.last!;
+    expect(el.paused).toBe(false);
+    c.chooseMode("live");
+    await flush();
+    expect(el.paused).toBe(false);
+    expect(c.getSnapshot().liveAudio).toBe(true);
+    expect(c.getSnapshot().mode).toBe("live");
+    // a paused track stays paused: a silent LIVE for a live band
+    c.pause();
+    c.setLiveAudio(false);
+    c.chooseMode("track");
+    c.chooseMode("live");
+    await flush();
     expect(el.paused).toBe(true);
+    expect(c.getSnapshot().liveAudio).toBe(false);
     c.detach();
   });
 
