@@ -48,6 +48,22 @@ export interface TypeLayerFrame {
   output: ProjectOutput;
   /** compose without the editor's edits (A/B) */
   generated?: boolean;
+  /**
+   * Round 12: the section transition running this frame (the shaders' code, progress 0–1, the
+   * section's start in song time and the transition's length), so the words that enter with the
+   * section are revealed by the same event; null = none.
+   */
+  transition?: { kind: number; progress: number; sectionStart: number; seconds: number } | null;
+}
+
+/**
+ * Whether a line enters with a section boundary (and so should take the section's transition):
+ * a timed line that starts at or after the boundary (a beat snap may pull it a little earlier),
+ * or a cued line whose cue fell inside the transition.
+ */
+export function entersWithSection(line: { enterAt: number | null; cueAt: number }, tr: { sectionStart: number; seconds: number }, nowEpoch: number): boolean {
+  if (line.enterAt != null) return line.enterAt >= tr.sectionStart - 0.35 && line.enterAt <= tr.sectionStart + tr.seconds;
+  return (nowEpoch - line.cueAt) / 1000 <= tr.seconds;
 }
 
 interface Active {
@@ -457,9 +473,13 @@ export class TypeLayer {
     const db = displayBox(items.map((it) => it.comp));
     const dpad = 0.02;
     const display: [number, number, number, number] | null = db ? [db.x / canvas.width - dpad, 1 - (db.y + db.h) / canvas.height - dpad * (W / H), (db.x + db.w) / canvas.width + dpad, 1 - db.y / canvas.height + dpad * (W / H)] : null;
+    // the section transition reaches the words only when the line on screen entered with the section
+    const tr = f.transition;
+    const transition = tr && this.current && entersWithSection(this.current, tr, f.nowEpoch) ? { kind: tr.kind, progress: tr.progress } : null;
     return {
       area,
       display,
+      transition,
       source: this.painter.canvas,
       version: this.version,
       width: W,

@@ -47,6 +47,18 @@ export interface DirectorInput {
   energy: number;
   /** multiplies transition durations (stage-lab slow motion); default 1 */
   durationScale?: number;
+  /**
+   * Round 12: seconds of song time already elapsed since the section boundary this frame belongs
+   * to (track playback). A section change then starts its transition that far in, so the
+   * transition follows the song clock — a seek into the first second of a section, a frame capture
+   * and the export all show the same moment of it. Null: the wall clock (cues, live mode).
+   */
+  anchor?: number | null;
+  /**
+   * The previous section's target, for a director that has no slot yet (the stage opened inside
+   * the transition window): the outgoing slot is synthesized so the transition still shows.
+   */
+  previousTarget?: SceneTarget | null;
 }
 
 export const TRANSITION_SECONDS: Record<TransitionKind, number> = {
@@ -89,13 +101,22 @@ export class SceneDirector {
     this.sectionKey = null;
   }
 
+  /** The director has rendered a slot (false before the first update). */
+  get started(): boolean {
+    return this.current != null;
+  }
+
   update(input: DirectorInput): DirectorFrame {
     const { target, now } = input;
     const scale = input.durationScale && input.durationScale > 0 ? input.durationScale : 1;
+    const anchorMs = input.anchor != null && Number.isFinite(input.anchor) && input.anchor >= 0 ? input.anchor * 1000 : 0;
     if (!this.current) {
-      this.current = { target, clock: this.initialClock };
-      this.sectionKey = input.sectionKey;
-    } else {
+      // opened inside a transition window: the previous section stands in as the outgoing slot
+      const synth = !!input.previousTarget && input.anchor != null && input.transitionIn !== "cut" && input.sectionKey != null;
+      this.current = { target: synth ? input.previousTarget! : target, clock: this.initialClock };
+      this.sectionKey = synth ? `${input.sectionKey}:previous` : input.sectionKey;
+    }
+    {
       const sectionChanged = input.sectionKey !== this.sectionKey;
       const lookChanged = target.lookKey !== this.current.target.lookKey;
       this.sectionKey = input.sectionKey;
@@ -108,7 +129,7 @@ export class SceneDirector {
         } else if (!lookChanged && kind !== "flash") {
           this.current.target = target;
         } else {
-          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now);
+          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now - anchorMs);
         }
       } else if (lookChanged) {
         if (sameLookIgnoringParams(target, this.current.target)) this.current.target = target;

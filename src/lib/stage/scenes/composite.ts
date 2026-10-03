@@ -3,6 +3,26 @@
 
 export const COMPOSITE_UNIFORMS = ["uRes", "uA", "uB", "uP", "uKind", "uAcc", "uClock"] as const;
 
+/** Transition kinds as the shaders see them (0 = none; the type pass uses the same codes). */
+export const TRANSITION_CODE = { fade: 1, flash: 2, wipe: 3, bloom: 4 } as const;
+
+/**
+ * The wipe's geometry, shared by the scene compositor and the type pass so the words are revealed
+ * along the same edge as the picture: returns (e, front) — the pixel's position along the wipe
+ * direction 0–1 and the edge's position at progress p (both overshoot by the soft width).
+ */
+export const WIPE_GLSL = /* glsl */ `
+const float WIPE_SOFT = 0.07;
+vec2 wipeFront(vec2 uv, float aspect, float p) {
+  vec2 dir = normalize(vec2(1.0, 0.3));
+  vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
+  float extent = dot(vec2(aspect, 1.0) * 0.5, abs(dir));
+  float e = dot(q, dir) / extent * 0.5 + 0.5;
+  float front = mix(-WIPE_SOFT * 2.0, 1.0 + WIPE_SOFT * 2.0, smoothstep(0.0, 1.0, p));
+  return vec2(e, front);
+}
+`;
+
 export const COMPOSITE_FRAGMENT = /* glsl */ `
 uniform vec2 uRes;
 uniform sampler2D uA;
@@ -13,7 +33,7 @@ uniform vec3 uAcc;
 uniform float uClock;
 
 #define PI 3.14159265
-
+${WIPE_GLSL}
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 
 vec3 blurB(vec2 uv, float radius) {
@@ -46,17 +66,18 @@ void main() {
     vec3 fl = mix(vec3(1.0), uAcc, 0.3) * (1.05 - 0.3 * length(q));
     col = mix(base, fl, amt * 0.94);
   } else if (uKind < 3.5) {
-    // wipe: soft diagonal edge with a glowing leading line
-    vec2 dir = normalize(vec2(1.0, 0.3));
-    vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
-    float extent = dot(vec2(aspect, 1.0) * 0.5, abs(dir));
-    float e = dot(q, dir) / extent * 0.5 + 0.5;
-    float soft = 0.05;
-    float front = mix(-soft * 2.0, 1.0 + soft * 2.0, smoothstep(0.0, 1.0, p));
-    float m = smoothstep(front + soft, front - soft, e);
-    col = mix(b, a, m);
-    float edge = exp(-abs(e - front) * 38.0) * sin(p * PI);
-    col += mix(uAcc, vec3(1.0), 0.25) * edge * 0.85;
+    // wipe: a soft diagonal edge the new picture comes in behind, with a leading line of the
+    // accent and a breath of light on the incoming side (round 12: an event you can see, not a swap)
+    vec2 wf = wipeFront(uv, aspect, p);
+    float e = wf.x;
+    float front = wf.y;
+    float m = smoothstep(front + WIPE_SOFT, front - WIPE_SOFT, e);
+    float bell = sin(p * PI);
+    vec3 lift = a * (1.0 + 0.22 * bell * exp(-max(front - e, 0.0) * 7.0));
+    col = mix(b, lift, m);
+    float edge = exp(-abs(e - front) * 24.0) * bell;
+    col += mix(uAcc, vec3(1.0), 0.2) * edge * 0.75;
+    col = col / (1.0 + max(col - 0.9, 0.0));
   } else {
     // bloom: the old scene blooms out, the new one opens from the centre
     float s = sin(p * PI);

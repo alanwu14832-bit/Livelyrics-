@@ -7,7 +7,8 @@
 import { stageAssets } from "@/lib/asset-scope";
 import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
-import { SceneDirector, type SceneSlot } from "@/lib/stage/director";
+import { SceneDirector, TRANSITION_SECONDS, type SceneSlot, type SceneTarget } from "@/lib/stage/director";
+import { TRANSITION_CODE } from "@/lib/stage/scenes/composite";
 import { AudioFeatureMixer, type StageAudioFrame } from "@/lib/stage/features";
 import { StageRenderer, type GridReadback, type MediaDraw, type MediaLayerDraw, type SceneDraw, type TypeDraw } from "@/lib/stage/gl/renderer";
 import { FlashLimiter, LYRIC_INK, SAFETY_OFF, gridSize, projectSafety, transformRgb, type ActiveSafety, type LyricEstimate } from "@/lib/stage/safety";
@@ -707,6 +708,23 @@ export class StageEngine {
 
     // 專屬畫面: the song's program for this frame (null = the section's built-in scene)
     const pd = this.renderer && !this.renderer.lost ? this.programDraw(project, look, t, audio) : null;
+    // round 12: in track playback the section transition follows the song clock (a seek into the
+    // first second of a section, a frame capture and the export show the same moment of it); a
+    // stage that opens inside the window gets the previous section as its outgoing slot
+    let anchor: number | null = null;
+    let previousTarget: SceneTarget | null = null;
+    const sec = look.section;
+    if (state.mode === "track" && sec && look.sectionIndex != null && look.sectionIndex > 0 && look.transitionIn !== "cut") {
+      const elapsed = t - sec.start;
+      if (elapsed >= 0 && elapsed < TRANSITION_SECONDS[look.transitionIn] * this.transitionScale + 0.05) {
+        anchor = elapsed;
+        if (!this.director.started) {
+          const prevLook = resolveLook(project, { ...state, sectionIndex: look.sectionIndex - 1 }, t);
+          const ppd = this.renderer && !this.renderer.lost ? this.programDraw(project, prevLook, t, audio) : null;
+          previousTarget = { scene: prevLook.scene, params: prevLook.params, colorway: prevLook.colorway, lookKey: programLookKey(prevLook.lookKey, ppd), program: ppd };
+        }
+      }
+    }
     const df = this.director.update({
       target: { scene: look.scene, params: look.params, colorway: look.colorway, lookKey: programLookKey(look.lookKey, pd), program: pd },
       sectionKey: look.sectionIndex == null ? null : String(look.sectionIndex),
@@ -716,6 +734,8 @@ export class StageEngine {
       frozen,
       energy: audio.energy,
       durationScale: this.transitionScale,
+      anchor,
+      previousTarget,
     });
     // the current slot always carries this frame's program values (an outgoing slot keeps its last)
     df.current.target.program = pd;
@@ -759,6 +779,8 @@ export class StageEngine {
         width: bw,
         height: bh,
         output: this.output,
+        // the section transition reaches the words that enter with it
+        transition: df.transition && sec ? { kind: TRANSITION_CODE[df.transition.kind], progress: df.transition.progress, sectionStart: sec.start, seconds: TRANSITION_SECONDS[df.transition.kind] * this.transitionScale } : null,
       });
     }
 
