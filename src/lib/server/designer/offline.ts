@@ -221,7 +221,11 @@ interface SectionPlanCtx {
   opening: SceneId | null;
 }
 
-const CLIMAX_SALT = 0x9e3779b9;
+const CLIMAX_SALT = 0xe9b5dba5;
+
+/** How big a chorus scene is: the ladder climbs this rank towards the song's climax. */
+const CHORUS_RANK: Partial<Record<SceneId, number>> = { particles: 1, waves: 1.5, grid: 2, shards: 3, tunnel: 4 };
+const rankOf = (sc: SceneId): number => CHORUS_RANK[sc] ?? 2;
 
 /** A well-mixed 0..1 from a seed and a salt (one mulberry32 step), so neighbouring seeds spread. */
 function unit(seed: number, salt: number): number {
@@ -236,12 +240,14 @@ function unit(seed: number, salt: number): number {
  * allows — the genre's own family first when it names one of them, otherwise by the seed — and
  * never the band's previous song's climax, so the catalogue does not end every song in 隧道.
  */
-export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, salt = CLIMAX_SALT): SceneId {
+export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, chorusCount = 2, salt = CLIMAX_SALT): SceneId {
   // a calm song never climaxes on a tunnel or on shards: its biggest chorus is still a quiet
   // picture (particles, the grid's horizon, the waves' bands)
   const base = calm ? [...ladder.filter((sc) => sc !== "tunnel" && sc !== "shards"), "waves" as SceneId] : [...ladder];
-  const pool = base.filter((sc) => sc !== bandClimax);
-  const list = pool.length ? pool : base;
+  // three or more choruses need room to climb: the climax is then one of the bigger scenes
+  const roomy = chorusCount >= 3 ? base.filter((sc) => rankOf(sc) >= 2) : base;
+  const pool = (roomy.length ? roomy : base).filter((sc) => sc !== bandClimax);
+  const list = pool.length ? pool : roomy.length ? roomy : base;
   if (!list.length) return "particles";
   // a weighted draw: the genre's own scenes count three times, the rest once (so a genre leans
   // but does not lock, and the seed spreads a catalogue of one genre over the ladder)
@@ -280,13 +286,14 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
     const kept = SCENE_CANDIDATES.chorus.filter((sc) => !avoided.has(sc));
     const base0 = kept.length ? kept : cands("chorus");
     const climax = base0.includes(ctx.climax) || ctx.climax === "waves" ? ctx.climax : base0[base0.length - 1];
-    const rest = base0.filter((sc) => sc !== climax);
-    // the rungs below the climax rotate with the seed, so two songs with one climax climb differently
-    const rot = rest.length ? (ctx.seed >>> 9) % rest.length : 0;
-    const ladder = [...rest.slice(rot), ...rest.slice(0, rot), climax];
+    // the rungs below the climax, smallest first: the choruses climb to it (a song whose climax is
+    // the smallest scene keeps every chorus there — restraint, not a drop-back)
+    const rest = [...base0, ...(ctx.calm ? (["waves"] as SceneId[]) : [])].filter((sc, k, a) => sc !== climax && rankOf(sc) < rankOf(climax) && a.indexOf(sc) === k).sort((a, b) => rankOf(a) - rankOf(b));
+    const ladder = [...rest, climax];
     // a genre that prefers one of the lower rungs starts its first chorus there
     const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => sc !== climax && ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
-    const base = genreStart >= 0 ? Math.min(genreStart, Math.max(0, ladder.length - 2)) : ctx.mood.mood === "explosive" ? Math.min(1, ladder.length - 2) : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % Math.max(1, ladder.length - 1);
+    const base0idx = genreStart >= 0 ? Math.min(genreStart, ladder.length - 2) : ctx.mood.mood === "explosive" ? Math.min(1, ladder.length - 2) : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % Math.max(1, ladder.length - 1);
+    const base = Math.max(0, Math.min(ladder.length - 1, base0idx));
     let idx = Math.min(ladder.length - 1, base + ordinal);
     if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
     const pick = ladder[idx];
@@ -759,6 +766,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     seed,
     ctx.bandClimax,
     ctx.calm,
+    ctx.chorusCount,
   );
   // the band's uploads as before; the research's collected material with restraint (one or two sections)
   const collectedIds = new Set((input.collected ?? []).map((c) => c.id));
