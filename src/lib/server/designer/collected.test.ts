@@ -93,7 +93,10 @@ describe("Claude's image list", () => {
     expect(logs.some((l) => /列出 2 個視覺素材/.test(l))).toBe(true);
     const tools = t.calls[0].tools ?? [];
     expect(tools.map((x) => ("name" in x ? x.name : ""))).toEqual(["web_search", "web_fetch"]);
-    expect(String(t.calls[0].system)).toContain("視覺素材清單");
+    expect(JSON.stringify(t.calls[0].system)).toContain("視覺素材清單");
+    // the rules are cached across songs
+    expect(JSON.stringify(t.calls[0].system)).toContain('"cache_control"');
+    expect(logs.some((l) => /用量：輸入 [\d,]+/.test(l))).toBe(true);
   });
 });
 

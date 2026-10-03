@@ -4,7 +4,7 @@
 
 import type { z } from "zod";
 import type { BetaContentBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { adaptiveThinking, ClaudeFailure, FALLBACK_BETA, parsePlanJson, runWithContinuations, THINKING_BINDING_BETA, type ClaudeOptions } from "./claude";
+import { adaptiveThinking, ClaudeFailure, FALLBACK_BETA, parsePlanJson, runWithContinuations, THINKING_BINDING_BETA, usageLine, type ClaudeOptions } from "./claude";
 import { describeRefusal, describeStop, textAfterLastFallback, textOf } from "./messages";
 import { jsonOutputFormat } from "./output-schema";
 import type { DesignerCallbacks } from "./types";
@@ -31,7 +31,8 @@ export async function claudeStructured(
     {
       model: opts.model,
       max_tokens: job.maxTokens ?? 16_000,
-      system: job.system,
+      // the job's rules are the same for every song: cached across calls
+      system: [{ type: "text", text: job.system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: job.before?.length ? [...job.before, { type: "text", text: job.prompt }] : job.prompt }],
       thinking: adaptiveThinking(),
       output_config: { effort: job.effort ?? "high", format: jsonOutputFormat(job.schema) },
@@ -53,6 +54,7 @@ export async function claudeStructured(
   );
   if (result.stopReason === "refusal") throw new ClaudeFailure(describeRefusal(result.message.stop_details));
   if (result.stopReason === "max_tokens" || result.stopReason === "model_context_window_exceeded") throw new ClaudeFailure(`${job.label}不完整：${describeStop(result.stopReason)}`);
+  cb.onLog(`${job.label}完成。${usageLine(result.usage)}`);
   const raw = parsePlanJson(textOf(result.content)) ?? parsePlanJson(textAfterLastFallback(result.content));
   if (raw == null) throw new ClaudeFailure(`Claude 回傳的${job.label}不是有效的 JSON`);
   return { raw, model: String(result.message.model || opts.model) };

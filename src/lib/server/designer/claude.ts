@@ -108,6 +108,33 @@ export interface TurnResult {
   content: BetaContentBlock[];
   continuations: number;
   stopReason: BetaStopReason | null;
+  /** tokens over every response of the turn (continuations included) */
+  usage: TurnUsage;
+}
+
+export interface TurnUsage {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+function addUsage(total: TurnUsage, message: BetaMessage): TurnUsage {
+  const u = message.usage;
+  return {
+    input: total.input + (u?.input_tokens ?? 0),
+    cacheRead: total.cacheRead + (u?.cache_read_input_tokens ?? 0),
+    cacheWrite: total.cacheWrite + (u?.cache_creation_input_tokens ?? 0),
+    output: total.output + (u?.output_tokens ?? 0),
+  };
+}
+
+/** 「用量：輸入 12,345（快取 8,000）、輸出 3,210 tokens」 for the process log, so cost is visible per step. */
+export function usageLine(u: TurnUsage): string {
+  const n = (x: number) => x.toLocaleString("zh-TW");
+  const inTotal = u.input + u.cacheRead + u.cacheWrite;
+  const cache = u.cacheRead ? `（快取讀取 ${n(u.cacheRead)}）` : u.cacheWrite ? `（寫入快取 ${n(u.cacheWrite)}）` : "";
+  return `用量：輸入 ${n(inTotal)}${cache}、輸出 ${n(u.output)} tokens`;
 }
 
 /**
@@ -125,6 +152,7 @@ export async function runWithContinuations(
   const base: BetaMessageParam[] = params.messages;
   let content: BetaContentBlock[] = [];
   let continuations = 0;
+  let usage: TurnUsage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   for (;;) {
     let messages = base;
     if (continuations > 0) {
@@ -134,12 +162,13 @@ export async function runWithContinuations(
     }
     const message = await transport.stream({ ...params, messages }, handlers, opts.signal);
     content = [...content, ...message.content];
+    usage = addUsage(usage, message);
     if (message.stop_reason === "pause_turn" && continuations < max) {
       continuations++;
       opts.onContinue?.(continuations);
       continue;
     }
-    return { message, content, continuations, stopReason: message.stop_reason };
+    return { message, content, continuations, stopReason: message.stop_reason, usage };
   }
 }
 
@@ -195,7 +224,8 @@ export function researchParams(input: DesignerInput, model: string): BetaMessage
   return {
     model,
     max_tokens: RESEARCH_MAX_TOKENS,
-    system: RESEARCH_SYSTEM + RESEARCH_VISUALS_RULES,
+    // the rules never change between songs: cached (the tools above them are fixed too)
+    system: [{ type: "text", text: RESEARCH_SYSTEM + RESEARCH_VISUALS_RULES, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: buildResearchPrompt(input, st) }],
     tools: [
       { type: "web_search_20260209", name: "web_search", max_uses: WEB_SEARCH_MAX_USES },
@@ -260,7 +290,7 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
   }
   brief = appendSources(brief, sources);
   const failed = searchErrors(result.content).length;
-  cb.onLog(`研究完成：${searches} 次搜尋${failed ? `（${failed} 次失敗）` : ""}、${sources.length} 個來源${split.candidates.length ? `、列出 ${split.candidates.length} 個視覺素材` : ""}`);
+  cb.onLog(`研究完成：${searches} 次搜尋${failed ? `（${failed} 次失敗）` : ""}、${sources.length} 個來源${split.candidates.length ? `、列出 ${split.candidates.length} 個視覺素材` : ""}。${usageLine(result.usage)}`);
   return {
     brief,
     sources,
@@ -429,6 +459,7 @@ export async function claudeDesign(req: DesignRequest, cb: Callbacks, opts: Clau
   if (result.stopReason === "max_tokens" || result.stopReason === "model_context_window_exceeded") {
     throw new ClaudeFailure(`設計方案不完整：${describeStop(result.stopReason)}`);
   }
+  cb.onLog(`設計方案完成。${usageLine(result.usage)}`);
   const raw = parsePlanJson(textOf(result.content)) ?? parsePlanJson(textAfterLastFallback(result.content));
   if (raw == null) throw new ClaudeFailure("Claude 回傳的設計方案不是有效的 JSON");
   const checked = DesignPlanSchema.safeParse(raw);
