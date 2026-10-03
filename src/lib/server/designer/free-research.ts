@@ -8,7 +8,7 @@
 import { formatTimeShort } from "@/lib/timeline";
 import { FREE_RESEARCH_LABEL } from "@/lib/research-labels";
 import { coercePublicInfo, isFreshPublicInfo, lookupPublicInfo, publicQuery, type LookupOptions } from "@/lib/server/research/public-info";
-import { musicBrainzUrl } from "@/lib/server/research/musicbrainz";
+import { artistKindLabel, musicBrainzUrl } from "@/lib/server/research/musicbrainz";
 import type { FetchLike } from "@/lib/server/research/http";
 import type { PublicInfo, Research, ResearchSource } from "@/lib/types";
 import { activeBible } from "./bible-style";
@@ -47,7 +47,6 @@ const LINK_LABEL: Record<string, string> = {
 };
 
 const COUNTRY: Record<string, string> = { TW: "臺灣", HK: "香港", CN: "中國", JP: "日本", KR: "韓國", US: "美國", GB: "英國", MY: "馬來西亞", SG: "新加坡", CA: "加拿大", AU: "澳洲", DE: "德國", FR: "法國", SE: "瑞典", IS: "冰島" };
-const ARTIST_TYPE: Record<string, string> = { Group: "樂團", Person: "音樂人", Orchestra: "樂團", Choir: "合唱團" };
 /** MusicBrainz areas are English names: the common ones in 繁中 */
 const AREA: Record<string, string> = {
   Taipei: "臺北",
@@ -121,7 +120,7 @@ function artistSentence(info: PublicInfo): string | null {
   const area = areaName && areaName !== country ? (country && latinArea ? `（${areaName}）` : areaName) : "";
   const where = `${country}${area}`;
   const whereText = where ? (/[A-Za-z]$/.test(where) ? `${where} 的` : `${where}的`) : "";
-  const kind = a.type ? ARTIST_TYPE[a.type] ?? a.type : "音樂人";
+  const kind = artistKindLabel(a.type);
   const since = a.beginYear ? `，${a.beginYear} 年開始活動` : "";
   const dis = a.disambiguation ? `（${a.disambiguation}）` : "";
   return `**${a.name}**：${whereText}${kind}${dis}${since}（${mdLink("MusicBrainz", musicBrainzUrl("artist", a.id))}）。`;
