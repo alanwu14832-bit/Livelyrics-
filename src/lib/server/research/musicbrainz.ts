@@ -217,6 +217,30 @@ export function parseArtistLookup(data: unknown): MbArtistInfo | null {
 }
 
 // ---------------------------------------------------------------------------
+// artist kind
+// ---------------------------------------------------------------------------
+
+export type ArtistKind = "group" | "person" | "orchestra" | "choir" | "other" | "unknown";
+
+/** MusicBrainz artist `type` → what kind of act this is (a solo singer is never 「樂團」). */
+export function artistKind(type: string | null | undefined): ArtistKind {
+  const t = (type ?? "").trim().toLowerCase();
+  if (!t) return "unknown";
+  if (t === "group") return "group";
+  if (t === "person") return "person";
+  if (t === "orchestra") return "orchestra";
+  if (t === "choir") return "choir";
+  return "other";
+}
+
+/** 繁中 noun for the kind: 樂團 / 歌手 / 管弦樂團 / 合唱團; 音樂人 when the type is unknown or a character / other. */
+export const ARTIST_KIND_LABEL: Record<ArtistKind, string> = { group: "樂團", person: "歌手", orchestra: "管弦樂團", choir: "合唱團", other: "音樂人", unknown: "音樂人" };
+
+export function artistKindLabel(type: string | null | undefined): string {
+  return ARTIST_KIND_LABEL[artistKind(type)];
+}
+
+// ---------------------------------------------------------------------------
 // matching
 // ---------------------------------------------------------------------------
 

@@ -158,20 +158,75 @@ const HUE_NAMES: Array<[number, string]> = [
   [360, "緋"],
 ];
 
-/** Short Traditional-Chinese poetic name for a color (e.g. 「深夜靛」「微光金」). */
-export function colorName(hex: string): string {
-  const { h, s, l } = hexToHsl(hex);
-  if (s < 0.12) {
-    if (l < 0.12) return "墨黑";
-    if (l < 0.35) return "炭灰";
-    if (l < 0.7) return "霧灰";
-    if (l < 0.92) return "銀白";
-    return "月白";
+const GREY_NAMES = ["墨黑", "炭灰", "霧灰", "銀白", "月白"];
+const GREY_LIMITS = [0.12, 0.35, 0.7, 0.92];
+
+function tierName(base: string, tier: number): string {
+  switch (tier) {
+    case 0:
+      return `深夜${base}`;
+    case 1:
+      return `暗${base}`;
+    case 2:
+      return base.length === 1 ? `${base}光` : base;
+    case 3:
+      return `微光${base}`;
+    default:
+      return `${base}白`;
   }
-  const base = HUE_NAMES.find(([limit]) => h < limit)?.[1] ?? "緋";
-  if (l < 0.16) return `深夜${base}`;
-  if (l < 0.32) return `暗${base}`;
-  if (l < 0.62) return base.length === 1 ? `${base}光` : base;
-  if (l < 0.85) return `微光${base}`;
-  return `${base}白`;
+}
+
+/**
+ * Short Traditional-Chinese poetic names for a colour, nearest first (e.g. 「深夜靛」「微光金」): the
+ * hue's name in its lightness tier, then the neighbouring tier it is closest to, then the
+ * neighbouring hue name on the side the hue leans to, in both tiers.
+ */
+export function colorNames(hex: string): string[] {
+  const { h, s, l } = hexToHsl(hex);
+  const out: string[] = [];
+  const add = (n: string) => {
+    if (!out.includes(n)) out.push(n);
+  };
+  if (s < 0.12) {
+    let tier = GREY_LIMITS.findIndex((limit) => l < limit);
+    if (tier < 0) tier = GREY_NAMES.length - 1;
+    add(GREY_NAMES[tier]);
+    const mid = tier === 0 ? 0 : tier >= GREY_LIMITS.length ? GREY_LIMITS[GREY_LIMITS.length - 1] : (GREY_LIMITS[tier - 1] + GREY_LIMITS[tier]) / 2;
+    const next = l >= mid ? tier + 1 : tier - 1;
+    if (GREY_NAMES[next]) add(GREY_NAMES[next]);
+    for (const n of GREY_NAMES) add(n);
+    return out;
+  }
+  const idx = Math.max(
+    0,
+    HUE_NAMES.findIndex(([limit]) => h < limit),
+  );
+  const base = HUE_NAMES[idx][1];
+  const lower = idx === 0 ? 0 : HUE_NAMES[idx - 1][0];
+  const upper = HUE_NAMES[idx][0];
+  const tierLimits = [0.16, 0.32, 0.62, 0.85];
+  let tier = tierLimits.findIndex((limit) => l < limit);
+  if (tier < 0) tier = 4;
+  const tierMid = tier === 0 ? 0 : tier === 4 ? 1 : (tierLimits[tier - 1] + tierLimits[tier]) / 2;
+  const nearTier = Math.min(4, Math.max(0, l >= tierMid ? tier + 1 : tier - 1));
+  // the neighbouring hue name on the side this hue leans to (the last and first names are both 緋)
+  const leanUp = h - lower >= upper - h;
+  const names = HUE_NAMES.map(([, n]) => n);
+  const pick = (i: number) => names[((i % names.length) + names.length) % names.length];
+  const neighbour = leanUp ? pick(idx + 1) : pick(idx - 1);
+  const other = leanUp ? pick(idx - 1) : pick(idx + 1);
+  add(tierName(base, tier));
+  add(tierName(base, nearTier));
+  add(tierName(neighbour, tier));
+  add(tierName(neighbour, nearTier));
+  add(tierName(other, tier));
+  for (let t = 0; t <= 4; t++) add(tierName(base, t));
+  return out;
+}
+
+/** Short Traditional-Chinese poetic name for a color (e.g. 「深夜靛」「微光金」), the first not in `taken`. */
+export function colorName(hex: string, taken: ReadonlySet<string> | readonly string[] = []): string {
+  const used = taken instanceof Set ? taken : new Set(taken);
+  const names = colorNames(hex);
+  return names.find((n) => !used.has(n)) ?? names[0];
 }

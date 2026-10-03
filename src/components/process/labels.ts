@@ -1,23 +1,10 @@
-// Display names (繁中) for the plan vocabularies, shown in the design summary.
-// Scene / lyric-style names match the designer's catalog so streamed progress and the
-// summary use the same words.
+// Display names (繁中) for the plan vocabularies, shown in the design summary. Scene names come from
+// the one source (src/lib/stage/scenes/labels.ts) the console timeline and the designer use too.
 
+import { SCENE_LABELS } from "@/lib/stage/scenes/labels";
 import type { CueNote, LyricPlacement, LyricsSource, LyricStyleId, SceneId, SectionKind } from "@/lib/types";
 
-export const SCENE_LABEL: Record<SceneId, string> = {
-  nebula: "星雲",
-  particles: "粒子",
-  waves: "波形",
-  grid: "網格",
-  tunnel: "隧道",
-  rain: "雨絲",
-  bokeh: "光斑",
-  shards: "碎片",
-  ink: "水墨",
-  motif: "主視覺符號",
-  gradient: "漸層",
-  blackout: "全黑",
-};
+export const SCENE_LABEL: Record<SceneId, string> = SCENE_LABELS;
 
 export const LYRIC_STYLE_LABEL: Record<LyricStyleId, string> = {
   karaoke: "卡拉 OK 填色",

@@ -33,7 +33,7 @@ import { loadVisionImages } from "./directions";
 import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
-import { getProject, updateProject } from "./storage";
+import { getProject, listKeyVisualTitles, updateProject } from "./storage";
 import { collectForProject } from "./collect-visuals";
 import { findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
 import { collectedSummary } from "@/lib/visuals";
@@ -626,6 +626,8 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         instruction: run.cloud ? run.cloud.instruction : run.request.instruction,
         previous: project.plan,
         arc: (run.cloud ? run.cloud.arc : run.request.arc) ?? null,
+        // the library's other key-visual titles: a new design gets a title of its own
+        takenTitles: await listKeyVisualTitles(project.id).catch(() => []),
       };
       const live = designerCallbacks(run, "design", signal);
       // designSong's success log names Claude's model; every other path is the offline designer

@@ -29,6 +29,8 @@ export interface DesignerInput {
    * the genre from it. Absent / null = none (lyrics and audio only).
    */
   publicInfo?: PublicInfo | null;
+  /** key-visual titles already used in the library: the offline designer picks another one */
+  takenTitles?: string[];
 }
 
 export interface DesignerCallbacks {

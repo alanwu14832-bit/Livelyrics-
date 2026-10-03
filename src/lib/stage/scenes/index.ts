@@ -29,21 +29,8 @@ export const SCENE_SHADERS: Record<SceneId, string> = {
   blackout,
 };
 
-/** 中文名稱 for operator-facing UIs (stage lab, console pickers). */
-export const SCENE_LABELS: Record<SceneId, string> = {
-  nebula: "星雲煙霧",
-  particles: "粒子星空",
-  waves: "光之波紋",
-  grid: "復古網格",
-  tunnel: "光速隧道",
-  rain: "光雨",
-  bokeh: "散景光球",
-  shards: "彩繪玻璃",
-  ink: "水墨流動",
-  motif: "主視覺符號",
-  gradient: "柔和漸層",
-  blackout: "全黑",
-};
+/** 中文名稱 for operator-facing UIs: the one source (labels.ts), re-exported. */
+export { SCENE_LABELS } from "./labels";
 
 export { buildSceneFragment, buildVertex, UNIFORM_NAMES } from "./common";
 export { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS } from "./composite";

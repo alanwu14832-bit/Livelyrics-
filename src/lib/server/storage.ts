@@ -48,7 +48,7 @@ const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const STATUSES: readonly ProjectStatus[] = ["new", "processing", "ready", "error"];
 const STALE_TEMP_MS = 12 * 60 * 60 * 1000;
 /** bump when summarize() changes: stored cloud summaries of another version are recomputed */
-const SUMMARY_VERSION = 2;
+const SUMMARY_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // paths (local mode)
@@ -277,6 +277,8 @@ function summarize(project: Project): ProjectSummary {
     .slice(0, 4);
   if (colors.length) summary.palette = colors;
   if (project.status === "error" && project.error) summary.error = project.error;
+  const kvTitle = project.plan?.keyVisual?.title;
+  if (typeof kvTitle === "string" && kvTitle.trim()) summary.keyVisualTitle = kvTitle.trim();
   // only a still of the current plan: after a re-design the card falls back to the drawn artwork
   if (project.thumb && project.plan && project.thumb.plan === planHash(project.plan)) summary.thumb = project.thumb.url;
   return summary;
@@ -442,6 +444,16 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     return Number.isFinite(t) ? t : 0;
   };
   return results.sort((a, b) => time(b) - time(a));
+}
+
+/** The key-visual titles of every other project in the library (so a new design never repeats one). */
+export async function listKeyVisualTitles(exceptId?: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const p of await listProjects()) {
+    if (p.id === exceptId || !p.keyVisualTitle) continue;
+    if (!out.includes(p.keyVisualTitle)) out.push(p.keyVisualTitle);
+  }
+  return out;
 }
 
 /** Every file a project owns (its audio and its own assets). */

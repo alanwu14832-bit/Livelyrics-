@@ -1,23 +1,9 @@
-// Operator-facing Traditional Chinese names for the DesignPlan vocabularies.
-// Kept in sync by hand with the stage lab / designer catalog wording so the
-// operator sees the same names everywhere.
+// Operator-facing Traditional Chinese names for the DesignPlan vocabularies. Scene names come from
+// the one source (src/lib/stage/scenes/labels.ts) the stage lab and the designer's catalogue use too.
 
 import type { CueNote, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionDesign, SectionKind } from "@/lib/types";
 
-export const SCENE_LABELS: Record<SceneId, string> = {
-  nebula: "星雲煙霧",
-  particles: "粒子星空",
-  waves: "光之波紋",
-  grid: "復古網格",
-  tunnel: "光速隧道",
-  rain: "光雨",
-  bokeh: "散景光球",
-  shards: "彩繪玻璃",
-  ink: "水墨流動",
-  motif: "主視覺符號",
-  gradient: "柔和漸層",
-  blackout: "全黑",
-};
+export { SCENE_LABELS } from "@/lib/stage/scenes/labels";
 
 export const SCENE_HINTS: Record<SceneId, string> = {
   nebula: "流動的雲霧與色煙，柔和、夢幻",

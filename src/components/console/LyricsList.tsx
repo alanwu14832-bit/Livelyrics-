@@ -16,6 +16,7 @@ import { LYRIC_STYLE_LABELS, SCENE_LABELS } from "@/lib/console/labels";
 import { sectionOfLine, untimedCount } from "@/lib/console/navigation";
 import type { PlaybackMode } from "@/lib/stage/protocol";
 import { lineProgress } from "@/lib/timeline";
+import { shownEmphasis } from "@/lib/type/resolve";
 import type { LineDesign, Project, SectionDesign } from "@/lib/types";
 import { sectionName } from "./Preview";
 import { Pane, PaneHeader, useScrollEdge, useSpringScroll } from "./ui";
@@ -132,6 +133,8 @@ function LyricsListImpl({
     for (const ld of plan?.lines ?? []) map.set(ld.lineId, ld);
     return map;
   }, [plan]);
+  // 強調 chips say what the composition shows (the type system's resolved hint), not the designer's guess
+  const emphasisShown = useMemo(() => lines.map((_, i) => shownEmphasis(plan, lines, i, duration, project.meta.title)), [plan, lines, duration, project.meta.title]);
   const current = useStageValue(controller.store, selectLineIndex);
   const selectUpcoming = useCallback(() => controller.upcomingLine(), [controller]);
   const upcoming = useStageValue(controller.store, selectUpcoming);
@@ -330,7 +333,8 @@ function LyricsListImpl({
                 const ld = lineDesigns.get(line.id);
                 const untimedLine = line.start == null;
                 const blank = !line.text.trim();
-                const hasMeta = !!ld?.styleOverride || (ld?.emphasis?.length ?? 0) > 0 || !!ld?.note;
+                const emphasis = emphasisShown[i] ?? [];
+                const hasMeta = !!ld?.styleOverride || emphasis.length > 0 || !!ld?.note;
                 return (
                   <div
                     key={line.id || `l-${i}`}
@@ -367,7 +371,7 @@ function LyricsListImpl({
                       {hasMeta && (
                         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                           {ld?.styleOverride && <Tag tone="tint">{LYRIC_STYLE_LABELS[ld.styleOverride] ?? ld.styleOverride}</Tag>}
-                          {(ld?.emphasis?.length ?? 0) > 0 && <span className="text-c-footnote text-label-2">強調：{ld!.emphasis.join("、")}</span>}
+                          {emphasis.length > 0 && <span className="text-c-footnote text-label-2">強調：{emphasis.join("、")}</span>}
                           {ld?.note && <span className="min-w-0 truncate text-c-footnote text-label-2">{ld.note}</span>}
                         </span>
                       )}

@@ -68,13 +68,15 @@ const FORMS_BY_GENRE: Record<string, FormId[]> = {
   pop: ["horizon", "ribbons"],
 };
 
-/** Forms that suit the song, best first: the genre's, then the lyric imagery's, then the audio mood's. */
+/** Forms that suit the song, best first: the genre's, the strongest image's own form, then the scene family's and the audio mood's. */
 export function sceneForms(findings: Findings): FormId[] {
   const out: FormId[] = [];
   const add = (list: readonly FormId[] | undefined) => {
     for (const f of list ?? []) if (!out.includes(f)) out.push(f);
   };
   if (findings.genre) add(FORMS_BY_GENRE[findings.genre.id]);
+  // the strongest lyric image with a form of its own (牆 → pillars / strata) speaks before the scene family
+  for (const h of findings.imagery.slice(0, 2)) add(h.family.forms?.filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f)));
   for (const s of findings.hints.scenes.slice(0, 2)) add(FORMS_BY_SCENE[s]);
   const q = findings.audio.quadrant;
   add(findings.audio.arousal > 0.62 ? ["bars", "pillars"] : findings.audio.light > 0.55 ? ["horizon", "ribbons"] : q ? ["strata", "orbits"] : []);

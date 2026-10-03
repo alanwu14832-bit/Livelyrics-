@@ -446,19 +446,28 @@ remain available.
   in parallel inside a 15 s budget (far inside the cloud step's 300 s) and returns `PublicInfo`
   (`status` per source: ok / none / failed / skipped, `notes`); it is cached as
   `Project.research.publicInfo` and reused while fresh (same names, no failed source, < 30 days).
-- **Local analysis** (deterministic, `designer/`). `lexicon/imagery.ts` (54 image families: words,
+- **Local analysis** (deterministic, `designer/`). `lexicon/imagery.ts` (56 image families: words,
   scene family, hues, saturation, light, temperature, motion, emblem, a 繁中 colour phrase, how visual
-  the family is; stop words such as 上海 / 花錢), `lexicon/sentiment.ts` (≈ 270 zh / en words with
+  the family is, optional 專屬畫面 `forms` — 牆 is its own family (水泥灰、裂縫, pillars / strata) apart
+  from 窗 and 門; stop words such as 上海 / 花錢), `lexicon/sentiment.ts` (≈ 270 zh / en words with
   valence and arousal, negators, intensifiers, chants), `lexicon/genres.ts` (20 genre rules: MusicBrainz
   tags and 繁中 keywords → palette tendency, scene family and avoided scenes, lyric density and verse /
-  chorus styles, motion energy, typography, motifs, the live habit and a one-line why).
+  chorus styles, motion energy, typography, motifs, the live habit and a one-line why),
+  `lexicon/moods.ts` (per audio mood: fallback motifs, scenes, keywords and titles, so a song without
+  imagery or genre never gets an empty 母題 / 場景 row or a fixed filler).
   `lyric-analysis.ts`: forward-maximum-matching tokenizer over the lexicons (code-point offsets,
   simplified lyrics matched through the traditional map), imagery (the title counts double), emotion
   (negation, intensifiers, chants, `!`, the hook weighted 40 %; labels 明亮激昂 / 溫柔明亮 / 痛苦掙扎 /
-  憂傷低迴 / 矛盾拉扯 / 平靜內斂), point of view (我們 / 我–你 / 你 / 我 / 他), sing-along phrases (repeated
-  token-bounded grams or chants, always shorter than their line). `audio-mood.ts`: BPM, energy,
-  section contrast, brightness, bass, onset → 爆發釋放 / 冷冽推進 / 溫暖律動 / 陰鬱緩慢 / 溫柔漂浮, the energy
-  shape and the peak. `genre.ts`: tag / Wikipedia matches, general words ("rock", 搖滾) weighted down.
+  憂傷低迴 / 矛盾拉扯 / 平靜內斂, named only from ≥ 2 distinct sentiment words, else 情緒不明顯), point of
+  view (我們 / 我–你 / 你 / 我 / 他), sing-along phrases snapped to phrase boundaries (punctuation and
+  spaces, the particles 了著嗎呢 end a phrase, grams start or end only on a lexicon word — never
+  「掉這面牆」; Latin phrases are whole words that neither start nor end on a stop word; a short line
+  sung more than once is quoted whole, `whole: true`, a line over 12 units never is). `audio-mood.ts`:
+  BPM, energy, section contrast, brightness, bass, onset → 爆發釋放 / 冷冽推進 / 溫暖律動 / 陰鬱緩慢 /
+  溫柔漂浮, the energy shape and the peak. `genre.ts`: tag / Wikipedia matches, general words ("rock",
+  搖滾) weighted down. `research/musicbrainz.ts` `artistKind` / `artistKindLabel`: the artist `type`
+  decides 樂團 / 歌手 / 管弦樂團 / 合唱團 (音樂人 when unknown) everywhere the brief or the concept names
+  the act.
   `findings.ts`: `analyzeFindings` → `Findings` + `DesignHints` (hue, accent hues with the genre
   leading and the strongest image as the accent, saturation, scheme, temperature, scene family minus
   the genre's avoided scenes, motifs, typography, lyric density and styles, motion, sing-along, a
@@ -467,13 +476,48 @@ remain available.
   意象…」 (and `onSearch` per source) and returns a `Research` (`engine: "free"`, the five research
   headings, sources = the MusicBrainz / Wikipedia pages and official links, `publicInfo`), labelled
   「免費研究（公開資料＋歌詞與音訊分析）」 (`src/lib/research-labels.ts`). Every source may fail: the brief then
-  says so and stands on the lyrics and the audio. `DesignerInput.publicInfo` carries the facts into
-  the design step and the directions: `offlineDesign` takes palette, scheme, saturation, fonts, scene
-  family, lyric styles, transitions (soft genres never flash), motifs, the concept sentence, the
-  「免費研究的發現」 notes, the sing-along emphasis and cues from the findings (the bible and the mood
-  board still come first); `offlineDirectionSpecs` keeps film / collage / minimal but takes each
-  direction's colours, scenes, motifs and wording from the song, and the genre's native axis takes
-  the genre's colours and lyric habit (folk → a warm earth-toned film, punk → the collage).
+  says so and stands on the lyrics and the audio; a clip under 20 s (`SHORT_SONG_SECONDS`) gets a
+  「音檔太短，分析不可靠」 warning at the top, and no row is ever empty (`lexicon/moods.ts` fills 母題 /
+  場景). `DesignerInput.publicInfo` carries the facts into the design step and the directions:
+  `offlineDesign` takes palette, scheme, saturation, fonts, scene family, lyric styles, transitions
+  (soft genres and calm songs — `isCalmSong`: soft motion, a genre that says 不要閃爍, a slow / floating
+  audio mood, a 平靜內斂 / 憂傷低迴 lyric — never flash), motifs, the 「免費研究的發現」 notes, the sing-along
+  emphasis and cues from the findings (the bible and the mood board still come first);
+  `offlineDirectionSpecs` keeps film / collage / minimal but takes each direction's colours, scenes,
+  motifs and wording from the song, and the genre's native axis takes the genre's colours and lyric
+  habit (folk → a warm earth-toned film, punk → the collage).
+- **The designer's words** (`designer/concept.ts`, round 11). The key-visual concept is built from one
+  of nine skeletons chosen by the findings (`chooseSkeleton`: fragment for a clip under 20 s,
+  instrumental, chant — a chant genre with a hook sung ≥ 3 times or any short hook sung ≥ 4 times —,
+  ballad — a slow / floating audio mood or a calm emotion on a soft / pop genre —, story — folk /
+  jazz, a 他 or a long 我–你 point of view —, groove — city pop / R&B / electronic / dance imagery —,
+  two peaks — ≥ 2 choruses, a bright emotion and real contrast —, slow build — 爆發釋放 or a rising
+  shape —, steady), each an opening sentence with slots from the findings (imagery families, the
+  emotion adjective, the sing-along phrase, the point of view, the peak time), one of three fact
+  phrasings (artist, place, 樂團 / 歌手, genre palette note or why), a palette sentence in the
+  skeleton's voice (colour names never collide: `color.ts` `colorNames` lists alternatives, nearest
+  first, and `palette.ts` `nameEntries` takes the first free one), a role sentence (what the verses
+  and the choruses do; never a singer for an instrumental) and the BPM / arc sentence only when the
+  tempo is confident (`bpmConfidence` ≥ 0.5) and the song ≥ 60 s. No fixed coda. Titles
+  (`titleCandidates` / `makeTitle`) come from the imagery pair, the emotion, a chant hook, the genre
+  motif and the mood lexicon, and are kept unique in the library: `storage.ts` `listKeyVisualTitles`
+  (from `ProjectSummary.keyVisualTitle`) feeds `DesignerInput.takenTitles` in the pipeline's design
+  step. Motifs are the findings' (imagery families, genre) topped up from the mood lexicon
+  (`conceptMotifs`); keywords dedupe near-duplicates. A clip under 20 s collapses to one section with
+  the warning in the concept and the notes.
+- **Cues** (`designer/cues.ts`). Every cue is gated on evidence: 爆點 needs an energy rise ≥ 0.25
+  (`DROP_RISE`), 合唱 needs ≥ 2 choruses and lyrics, 開場 / 中段檢查 (the `normalizePlan` top-up,
+  `genericCues`) a song ≥ 60 s, 結束 ≥ 20 s, the genre's 「X 的現場」 cue lyrics when its text mentions a
+  singer; nothing mentions a singer for an instrumental. A calm song's drop is 「X 亮起」 (no 閃白, no
+  推到 1.2); the wording names the section's actual transition through `transitionWording` — 「淡入
+  （LED 安全模式把閃白改成淡入）」 when the wall will fade, since LED 安全模式 is on by default.
+- **Labels and 強調** (round 11). `src/lib/stage/scenes/labels.ts` is the one scene-name source: the
+  console (`src/lib/console/labels.ts`), the design summary (`src/components/process/labels.ts`), the
+  stage lab and the designer's catalogue (`SCENES[id].label`, so the rationale sentences and the Claude
+  prompts use the same names) all re-export it. The 強調 chips in the console lyric list and the
+  design summary come from `src/lib/type/resolve.ts` `shownEmphasis` — the type system's resolved hint
+  (editor edits included; only the first run for a giant-word / bleed / window line), the plan's line
+  design only without a type system.
 - **用 claude.ai 研究** (`designer/manual.ts`, `designer/manual-reply.ts`, `src/lib/server/manual.ts`,
   `src/components/manual/ManualClaudeSheet.tsx`). `buildManualPrompt` (plan or directions; 精簡版
   abbreviates the lyrics, the findings and the catalogue and asks for shorter answers): the task
