@@ -428,9 +428,9 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionKind != null;
   if (wantNumber || wantSection) {
     const num = sectionHead && ctx.sectionIndex != null ? String(ctx.sectionIndex + 1).padStart(2, "0") : String(ctx.lineIndex + 1).padStart(2, "0");
-    // the section label is the plan's own (副歌一), in the song's language; the English chrome
-    // ("02 — CHORUS") only on a song sung in Latin letters (M6: no English labels on a Mandarin wall)
-    const sectionText = wantSection ? (input.lt.latinOnly ? (SECTION_LATIN[ctx.sectionKind ?? "verse"] ?? "") : ctx.sectionLabel.trim() || "") : "";
+    // the section label is the plan's own (副歌一); the English chrome ("02 — CHORUS") is off by
+    // default and only stands in when the plan has no label (M6: no English labels on the wall)
+    const sectionText = wantSection ? ctx.sectionLabel.trim() || SECTION_LATIN[ctx.sectionKind ?? "verse"] || "" : "";
     const text = [wantNumber ? num : "", sectionText].filter(Boolean).join(wantNumber && sectionText ? "  —  " : "");
     const g = label(text, b.x, ly, labelSize, sys, input.measure);
     out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));

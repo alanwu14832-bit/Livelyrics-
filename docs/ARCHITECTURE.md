@@ -997,8 +997,8 @@ uniform（全部由系統提供，不能自己宣告）：
   line it replaces while that one is still leaving, the entrance waits for the rest of the exit
   (`entranceDelay`, at most 0.6 s; nothing for a cut exit or lines on different parts of the frame),
   so no incoming line is drawn over an outgoing one. Section labels are the plan's own Chinese names
-  (「02 — 副歌一」, set in the CJK face); the English chrome ("02 — CHORUS") only appears on a line
-  sung in Latin letters.
+  (「02 — 副歌一」, set in the CJK face); the English chrome ("02 — CHORUS") is off by default and only
+  stands in for a plan whose section has no label.
 - **Line breaking between words** (`type/text.ts`). Rows never break inside a known compound or next
   to a bound character (`splitsWord`: the lexicon, now with 之間 / 時間 / 開往 / 前往 … and 之 bound to
   both sides) and never leave a one-character fragment of a phrase (`leavesFragment`): such a split

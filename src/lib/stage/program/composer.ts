@@ -257,13 +257,13 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float depth = sat((hz - uv.y) / max(hz, 0.05));
     // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
     // reflection (a full one on water, a faint sheen on a road or a floor)
-    vec3 ground = mix(uBg * 0.8 + uPri * 0.12, uBg * 0.42 + uPri * 0.04, pow(depth, 0.6));
-    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 5.0) * (0.06 + 0.12 * light);
+    vec3 ground = mix(uBg * 1.1 + uPri * 0.18, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
+    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
     float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
     float wid = r * (0.5 + uParams.x) * (1.0 + depth * 0.6);
     float rf = (1.0 - smoothstep(wid * 0.55, wid, abs(p.x - c.x))) * step(0.5, rip) * (1.0 - depth * 0.8);
-    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.08 + 0.22 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
+    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
     ${refl ? "" : "ground *= 0.92 + 0.08 * vnoise(vec2(uv.x * 40.0, depth * 90.0));"}
     col = ground;
   }
