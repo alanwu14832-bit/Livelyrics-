@@ -350,7 +350,9 @@ export class TypeLayer {
     const next = valid != null ? this.compose(project, valid, canvas, !!f.generated) : null;
     const cur = this.current;
     if (!next || !cur || cur.index !== valid) {
-      if (cur) {
+      // a cut exit is gone at once (never drawn under the incoming line, not even for the one
+      // frame a throttled tab renders); the other exits leave over their duration
+      if (cur && cur.comp.exit !== "cut") {
         cur.exitAt = now;
         this.leaving.push(cur);
       }

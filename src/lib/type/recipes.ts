@@ -66,6 +66,11 @@ function allIdx(lt: LineText, from = 0, to = lt.units.length): number[] {
   return trimIndices(lt.units, out);
 }
 
+/** The span holds no CJK character (a Latin display word such as "Hey"): it reads horizontally only. */
+function latinSpan(lt: LineText, idx: readonly number[]): boolean {
+  return idx.length > 0 && idx.every((i) => lt.units[i]?.kind !== "cjk");
+}
+
 export function piece(role: PieceRole, glyphs: GlyphBox[], o: Partial<Piece> & { plate: PlateId }): Piece {
   return { role, glyphs, alpha: 1, delay: 0, vertical: false, readable: role === "main" || role === "giant" || role === "small", ...o };
 }
@@ -232,8 +237,9 @@ function giantWord(r: RecipeCtx): Piece[] | null {
   const key = keySpan(lt, r.hint.motionWord, lt.latinOnly ? 1 : 3);
   if (!key) return null;
   const [k0, k1] = key;
-  const orient = lt.latinOnly || !lt.cjk ? "h" : r.hint.orientation;
   const kIdx = allIdx(lt, k0, k1);
+  // a Latin display word (Hey) is never stood up sideways, whatever the canvas or the orientation
+  const orient = lt.latinOnly || !lt.cjk || latinSpan(lt, kIdx) ? "h" : r.hint.orientation;
   const before: [number, number] = [0, k0];
   const after: [number, number] = [k1, lt.units.length];
   const hasBefore = allIdx(lt, ...before).length > 0;
@@ -521,7 +527,7 @@ function bleed(r: RecipeCtx): Piece[] | null {
   const key = keySpan(lt, r.hint.motionWord, 2);
   if (!key) return null;
   const kIdx = allIdx(lt, ...key);
-  const vertical = lt.cjk && (r.hint.orientation === "v" || (f.aspect < 0.85 && r.hint.orientation !== "h"));
+  const vertical = lt.cjk && !latinSpan(lt, kIdx) && (r.hint.orientation === "v" || (f.aspect < 0.85 && r.hint.orientation !== "h"));
   const crop = r.rng.range(0.14, 0.26);
   const pieces: Piece[] = [];
   const plate = r.displayWindow ? "spot" : r.displayPlate;
@@ -731,7 +737,7 @@ function windowRecipe(r: RecipeCtx): Piece[] | null {
   const key = keySpan(lt, r.hint.motionWord, 3);
   if (!key) return null;
   const kIdx = allIdx(lt, ...key);
-  const vertical = lt.cjk && (r.hint.orientation === "v" || (f.aspect < 0.85 && kIdx.length > 1));
+  const vertical = lt.cjk && !latinSpan(lt, kIdx) && (r.hint.orientation === "v" || (f.aspect < 0.85 && kIdx.length > 1));
   const pieces: Piece[] = [];
   const S = Math.max(f.minRead, Math.min(r.small, r.body * 0.62));
   const line = fitRows(r, 0, lt.units.length, { wanted: S, min: f.minRead, maxW: rd.w * (f.aspect < 1 ? 0.9 : 0.46), maxH: rd.h * 0.22, maxRows: 2, tracking: 0.06, leading: 1.25 });

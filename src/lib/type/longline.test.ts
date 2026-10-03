@@ -161,6 +161,19 @@ describe("the line-length policy (compose.ts)", () => {
     }
   });
 
+  it("a Latin display word is never stood up sideways, even on a tall canvas (the 9:16 「Hey」)", () => {
+    for (const recipe of ["window", "giant-word", "bleed"] as const) {
+      for (const canvas of [C169, C916]) {
+        for (const orientation of ["h", "v", "mixed"] as const) {
+          const c = compose("Hey 跟著我唱", recipe, canvas, { orientation, emphasis: ["Hey"] });
+          const hey = c.pieces.flatMap((p) => p.glyphs).filter((g) => g.ch === "Hey");
+          expect(hey.length, `${recipe} ${canvas.width} ${orientation}`).toBeGreaterThan(0);
+          for (const g of hey) expect(Math.abs(g.rotate), `${recipe} ${canvas.width} ${orientation}`).toBeLessThan(0.01);
+        }
+      }
+    }
+  });
+
   it("the section label on a Mandarin line is the plan's own, not English chrome", () => {
     const c = compose(SHORT[0], "giant-word", C169, { key: false });
     const labels = c.pieces.filter((p) => p.role === "label").flatMap((p) => p.glyphs.map((g) => g.ch));

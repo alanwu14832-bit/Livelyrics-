@@ -30,6 +30,8 @@ function watch(page, label) {
   page.on("console", (m) => {
     if (m.type() === "error" || m.type() === "warning") {
       const text = m.text();
+      // SwiftShader's own performance note (GPU stall due to ReadPixels) is the test GPU's, not the app's
+      if (/GL Driver Message/.test(text)) return;
       problems.push(`[${label}] console.${m.type()}: ${text}`);
     }
   });
