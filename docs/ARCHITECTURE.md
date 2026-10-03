@@ -870,7 +870,9 @@ uniform（全部由系統提供，不能自己宣告）：
   palette(t) → 沿 uPal0…uPal5 的漸層; px() → 一個像素在 centered 座標裡的大小（抗鋸齒）
   fill(d) / stroke(d, w) → 由距離場得到覆蓋率; sdCircle(p, r), sdBox(p, b), sdSegment(p, a, b)
   grain(fc, amount) → 顆粒; kick() → uPulse × uReact; isSection(k) → 目前段落種類是否為 k（1 或 0）
-  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1; zoneCenter() → 文字區中心（uv）
+  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1（只拿來決定形狀站哪裡、密度往哪邊變稀；不要用它把畫面乘暗：沒有歌詞時那會是一塊黑方塊）
+  zoneCenter() → 文字區中心（uv）
+  wordsMask(uv, soft) → 此刻螢幕上那一句字塊周圍的柔和遮罩 0–1，隨歌詞淡入淡出、沒有歌詞時為 0（要讓位給字就用這個）
   typeMask(uv) → 此刻歌詞字形的覆蓋率 0–1（字的形狀）; typeGlow(uv, r) → 字形周圍 r（uv）內的柔光 0–1
   motifMask(uv, bias) → 主視覺符號（白底透明）的覆蓋率
 
@@ -956,10 +958,47 @@ uniform（全部由系統提供，不能自己宣告）：
   mirror is unit-tested over a colour grid; `e2e-scene` measures rendered frames of a hostile
   full-bleed stripe program (`scripts/legibility.cjs`: with vs without the lyrics, the median glyph
   against the 90th-percentile picture pixel in a ring around the glyphs; light the type itself adds —
-  glow, echo, fringe — is not counted as picture). The composer and the examples also keep busy forms
-  out of the zone: bars are cut clean at the zone per pixel (a few thin segments run through in the
-  chorus), orbits and brush strokes fade there, a circle closes around the words only when its inner
-  edge clears the block's corners (else it closes beside them), the slab stands clear of the words.
+  glow, echo, fringe — is not counted as picture). **Display words** (round 10, B3): the giant /
+  bled / window word is set in the full ink colour and aims at `DISPLAY_TARGET` (7.4 : 1, the check
+  asks ≥ 7). `TypeLayer` hands the type pass the display words' box (`TypeDraw.display` →
+  `uDisplayBox`): inside it the ink is `uInk` (no hue from a lit picture) and the attenuation uses
+  `uDisplayTarget` instead of `uTarget` (`legibleBgT` / `legibleInkT`); the window letters of a
+  knockout are `displayInk(uInk, fill)` — the ink pushed in linear light until it meets the display
+  target against the fill, with only a faint texture of the picture — never the dimmed scene seen
+  through them; a display word never carries alpha, and under the overprint treatment it stays ink
+  (the accent appears as the misregistered ghost — `plates(offset).r` joins the accent plate — not
+  as the fill). `scripts/legibility.cjs` run as a script checks every sung line of the given projects
+  (every project without ids): ≥ 4.5 : 1 for every line and ≥ 7 : 1 inside the display box the
+  type layer reports on `[data-type-layer][data-display]`.
+  **The zone is an attractor, not a mask** (round 10, B2). The composer's forms read the zone only
+  to place themselves (`focalUv`, `horizonY`, the brush circle) and to thin towards it: the bars'
+  segments are kept with a probability that falls from one well outside the zone to none deep inside
+  it (`smoothstep(-0.35, 0.25, gap)`, a density gradient along the bars; the chorus runs them
+  through). Whatever gives way to the words follows the line actually on screen, through the
+  prelude's `wordsMask(uv, soft)` (a soft box around `uTypeBox` × `uTypeAmt`: zero when no lyric is
+  shown, fading with the line) or `uTypeBox` directly (bars drop the segments under the line whole,
+  one by one as `uTypeAmt` rises). Orbits, the brush stroke, ribbons and threads dim under
+  `wordsMask`; the circle still closes around the words only when its inner edge clears the block's
+  corners, the slab stands clear of the words. An empty zone therefore shows the picture, never a
+  soft black rectangle; `scene-program.test.ts` asserts no form multiplies by `zoneMask(uv…)`.
+- **Line length** (round 10, B4; `type/text.ts`, `recipes.ts`, `compose.ts`). A line over
+  `LONG_LINE_CJK` (14 CJK characters) or `LONG_LINE_LATIN` (40 letters) — `isLongUnits` /
+  `isLongLine` — is set by `longLine` whatever its recipe: `splitLongLine` cuts it into two phrases
+  at the punctuation or space nearest the middle, else after a particle (的了著) or before 這 / 那 /
+  每, else between words (never inside a compound, never a one-character fragment, both halves at
+  least two characters), and each phrase is set in at most two rows (or two columns), the second
+  stepped across and down from the first; a long line has no display word. No column stands taller
+  than `MAX_COLUMN_FRACTION` (70 %) of the frame (`fitColumns`). After every layout `clampToSafe`
+  keeps every glyph box and ornament inside the lyric safe area (a bled word excepted): it moves
+  the composition in, drops ornaments that still fall outside, and shrinks as a last resort (below
+  the readable minimum if it must — a clipped line is worse than a small one). The lyrics editor
+  flags such lines (`[data-long-line]`, 「這句太長，建議拆成兩句」). `longline.test.ts`.
+- **One line at a time** (round 10, M6; `TypeLayer`). When a new line's drawn bounds overlap the
+  line it replaces while that one is still leaving, the entrance waits for the rest of the exit
+  (`entranceDelay`, at most 0.6 s; nothing for a cut exit or lines on different parts of the frame),
+  so no incoming line is drawn over an outgoing one. Section labels are the plan's own Chinese names
+  (「02 — 副歌一」, set in the CJK face); the English chrome ("02 — CHORUS") only appears on a line
+  sung in Latin letters.
 - **Line breaking between words** (`type/text.ts`). Rows never break inside a known compound or next
   to a bound character (`splitsWord`: the lexicon, now with 之間 / 時間 / 開往 / 前往 … and 之 bound to
   both sides) and never leave a one-character fragment of a phrase (`leavesFragment`): such a split
@@ -1510,6 +1549,13 @@ Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The 
 
 - `npm run typecheck` runs `next typegen` first, so the global `PageProps` / `LayoutProps` /
   `RouteContext` helpers exist on a fresh clone.
+- **Upload limit** (round 10, B1). Local-mode uploads (`POST /api/projects`, multipart) pass through
+  the proxy (`src/proxy.ts`), and Next buffers a proxied request body only up to
+  `experimental.proxyClientMaxBodySize` (10 MB by default — a longer body is cut short and the route
+  saw 「上傳內容不完整」). `next.config.ts` sets it to 264 MB = `MAX_AUDIO_BYTES` (200 MB) +
+  `FORM_OVERHEAD_BYTES` (64 MB, `src/lib/server/audio-files.ts`); `upload-limit.test.ts` keeps the
+  three and the dropzone's promise (`MAX_UPLOAD_BYTES`) in step. An upload that still ends early
+  says how much arrived (`incompleteMessage`). `scripts/e2e.cjs` uploads a 24 MB silent WAV.
 - Isolated dev servers (`NEXT_DIST_DIR=.next-<name> npx next dev --webpack -p <port>`) are ignored by
   ESLint and git, but `next dev` appends `.next-<name>/types/**` entries to `tsconfig.json` (it checks
   for exact strings, so a glob does not stop it). Restore `tsconfig.json` from git after stopping one.
