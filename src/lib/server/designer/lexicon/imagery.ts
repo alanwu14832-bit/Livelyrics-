@@ -1,7 +1,7 @@
 // The imagery lexicon: lyric words (繁中, English) grouped into image families, each with the
 // visual associations a stage designer would reach for — a scene family (most typical first),
 // colours (hues and a saturation tendency, how dark or bright), temperature, motion and an emblem.
-// Curated by hand; about 430 trigger words in 54 families. Simplified lyrics are matched after
+// Curated by hand; about 450 trigger words in 56 families. Simplified lyrics are matched after
 // `toTraditional`, so only traditional spellings are listed.
 //
 // Single characters that are part of common non-image words (今天, 大家, 開心, 花錢, 電影, 永遠,
@@ -33,6 +33,8 @@ export interface ImageryFamily {
   colors: string;
   /** how visual the image is, 0..1 (default 1): 「歌」「世界」 say less about colour than 「海」「火」 */
   visual?: number;
+  /** 專屬畫面 forms the image calls for (src/lib/stage/program/composer.ts ids), most typical first */
+  forms?: string[];
 }
 
 export const IMAGERY_FAMILIES: readonly ImageryFamily[] = [
@@ -58,7 +60,9 @@ export const IMAGERY_FAMILIES: readonly ImageryFamily[] = [
   { id: "neon", name: "霓虹", motif: "閃爍的霓虹招牌", words: ["霓虹", "霓虹燈", "招牌", "燈牌", "neon", "arcade"], scenes: ["grid", "bokeh", "shards"], hues: [300, 190], saturation: 1.1, light: "dark", temperature: "cool", motion: "flicker", emblem: "crystal", colors: "霓虹粉、電光青" },
   { id: "road", name: "遠方", motif: "通往遠方的路", words: ["遠方", "遙遠", "旅程", "道路", "公路", "出發", "流浪", "前進", "方向", "路上", "一路", "路", "旅", "遠", "road", "journey", "highway", "away", "travel", "wander", "direction"], scenes: ["tunnel", "waves", "particles"], hues: [188, 30], saturation: 0.7, light: "mid", temperature: "neutral", motion: "rush", emblem: "wave", colors: "公路藍、夕照橘", visual: 0.7 },
   { id: "train", name: "列車", motif: "穿過夜的列車", words: ["列車", "火車", "捷運", "車站", "月台", "公車", "汽車", "車窗", "開車", "車", "train", "station", "platform", "car", "drive", "driving", "subway"], scenes: ["tunnel", "grid", "rain"], hues: [210, 40], saturation: 0.6, light: "mid", temperature: "cool", motion: "rush", emblem: "wave", colors: "月台藍、車燈黃" },
-  { id: "room", name: "窗", motif: "窗裡的一盞光", words: ["窗戶", "窗外", "窗簾", "窗台", "房間", "門口", "窗", "門", "牆", "屋", "window", "windows", "room", "door", "wall"], scenes: ["gradient", "rain", "bokeh"], hues: [35, 210], saturation: 0.5, light: "mid", temperature: "neutral", motion: "still", emblem: "crystal", colors: "窗光暖黃、牆灰", visual: 0.8 },
+  { id: "window", name: "窗", motif: "窗裡的一盞光", words: ["窗戶", "窗外", "窗簾", "窗台", "窗邊", "窗前", "窗", "window", "windows", "windowpane"], scenes: ["gradient", "bokeh", "rain"], hues: [35, 210], saturation: 0.5, light: "mid", temperature: "neutral", motion: "still", emblem: "crystal", colors: "窗光暖黃、玻璃上的冷藍", visual: 0.8 },
+  { id: "door", name: "門", motif: "門縫透進來的光", words: ["門口", "門邊", "門縫", "門後", "房間", "屋裡", "屋子", "屋簷", "門", "屋", "door", "doors", "doorway", "room", "hallway"], scenes: ["gradient", "ink", "bokeh"], hues: [30, 225], saturation: 0.45, light: "dark", temperature: "neutral", motion: "still", emblem: "crystal", colors: "門縫的暖光、室內的暗", visual: 0.75 },
+  { id: "wall", name: "牆", motif: "水泥牆上的裂縫", words: ["高牆", "圍牆", "牆壁", "牆面", "牆角", "磚牆", "水泥", "混凝土", "牆", "wall", "walls", "concrete", "brick", "bricks"], scenes: ["shards", "grid", "ink"], hues: [210, 18], saturation: 0.3, light: "dark", temperature: "cool", motion: "still", emblem: "shard", colors: "水泥灰、裂縫裡的鏽紅", forms: ["pillars", "strata"] },
   { id: "mirror", name: "鏡子", motif: "碎裂的倒影", words: ["鏡子", "鏡中", "倒影", "倒映", "鏡", "mirror", "reflection"], scenes: ["shards", "gradient", "ink"], hues: [200, 290], saturation: 0.5, light: "mid", temperature: "cool", motion: "still", emblem: "crystal", colors: "銀、冷灰、淡紫", visual: 0.9 },
   { id: "dream", name: "夢境", motif: "漂浮的夢境", words: ["夢想", "夢境", "作夢", "做夢", "夢裡", "夢中", "幻想", "夢", "dream", "dreams", "dreaming", "fantasy"], scenes: ["nebula", "bokeh", "particles"], hues: [282, 320], saturation: 0.75, light: "mid", temperature: "cool", motion: "drift", emblem: "orbit", colors: "夢幻紫、粉、霧藍", visual: 0.8 },
   { id: "heart", name: "心跳", motif: "心跳脈動", words: ["心跳", "心臟", "心動", "心裡", "心中", "心", "heartbeat", "heart", "hearts", "pulse"], scenes: ["particles", "motif", "gradient"], hues: [350, 340], saturation: 0.9, light: "mid", temperature: "warm", motion: "pulse", emblem: "sun", colors: "心跳紅、玫瑰粉", visual: 0.8 },
