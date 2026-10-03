@@ -611,6 +611,8 @@ export interface ProjectSummary {
   hasPlan?: boolean;
   /** the key still of the current plan (data URL), when the design overview has saved one */
   thumb?: string;
+  /** the plan's key-visual title (the offline designer keeps new titles unique across the library) */
+  keyVisualTitle?: string;
 }
 
 // ---------------------------------------------------------------------------

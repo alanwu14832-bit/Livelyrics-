@@ -38,7 +38,7 @@ import { voiceFonts } from "@/lib/type/vocab";
 import { activeBible } from "./bible-style";
 import { FONT_CATALOG, SECTION_KIND_LABELS } from "./catalog";
 import { colorName, contrastRatio, ensureContrast, hexToHsl, hsl, luminance, MIN_LYRIC_CONTRAST, normalizeHex } from "./color";
-import { capCues, MAX_CUES, MIN_CUES, suggestCues } from "./cues";
+import { capCues, CHECK_MIN_DURATION, genericCues, MAX_CUES, MIN_CUES, suggestCues } from "./cues";
 import { buildPalette, darkestIndex, SCHEMES, type PaletteEntry } from "./palette";
 import { analyzeFindings, type Findings } from "./findings";
 import { analyzeStructure, cjkShare, clamp, defaultKindEnergy, isFiniteNumber, meanEnvelope, resolveDuration, round3 } from "./structure";
@@ -685,12 +685,9 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput, opti
   const lines = normalizeLines(root.lines, lyricsLines, repairs, fill);
 
   let cues = normalizeCues(root.cues, duration);
-  if (cues.length < MIN_CUES) {
-    const generic: CueNote[] = [
-      { time: 0, title: "開場", detail: "確認輸出視窗已全螢幕、歌詞層狀態正確；樂團未就位前可先全黑（B）。", kind: "transition" },
-      { time: r2(duration / 2), title: "中段檢查", detail: "確認畫面與樂團同步；若樂團改變段落順序，切到現場模式手動 cue。", kind: "highlight" },
-    ];
-    const extra = [...suggestCues(sections, duration, lyricsLines), ...generic].filter((c) => !cues.some((x) => Math.abs(x.time - c.time) < 1.5));
+  // a short clip keeps the few cues it earned: 開場 / 中段檢查 only exist on a song long enough (cues.ts)
+  if (cues.length < MIN_CUES && duration >= CHECK_MIN_DURATION) {
+    const extra = [...suggestCues(sections, duration, lyricsLines), ...genericCues(duration)].filter((c) => !cues.some((x) => Math.abs(x.time - c.time) < 1.5));
     cues = capCues([...cues, ...extra.slice(0, Math.max(0, MIN_CUES - cues.length))]);
     if (extra.length) repairs.push("補上操作提示");
   }

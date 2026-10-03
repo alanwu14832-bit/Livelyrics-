@@ -10,7 +10,7 @@ import { FREE_RESEARCH_LABEL } from "@/lib/research-labels";
 import { coercePublicInfo, isFreshPublicInfo, lookupPublicInfo, publicQuery, type LookupOptions } from "@/lib/server/research/public-info";
 import { artistKindLabel, musicBrainzUrl } from "@/lib/server/research/musicbrainz";
 import type { FetchLike } from "@/lib/server/research/http";
-import type { PublicInfo, Research, ResearchSource } from "@/lib/types";
+import type { MbArtistInfo, PublicInfo, Research, ResearchSource } from "@/lib/types";
 import { activeBible } from "./bible-style";
 import { LYRIC_POLICY_INFO } from "@/lib/band";
 import { SCENES, SECTION_KIND_LABELS } from "./catalog";
@@ -19,6 +19,8 @@ import { RESEARCH_HEADINGS } from "./prompts";
 import { chooseVoice } from "./type-design";
 import { VOICES } from "@/lib/type/vocab";
 import { analyzeStructure, type SongStructure } from "./structure";
+import { MOOD_VOCABULARY } from "./lexicon/moods";
+import { SHORT_SONG_SECONDS } from "./concept";
 import type { DesignerCallbacks, DesignerInput } from "./types";
 
 type Callbacks = Required<Omit<DesignerCallbacks, "signal">> & { signal?: AbortSignal };
@@ -111,15 +113,20 @@ export function freeSources(info: PublicInfo | null): ResearchSource[] {
   return out;
 }
 
-function artistSentence(info: PublicInfo): string | null {
-  const a = info.musicbrainz?.artist;
-  if (!a) return null;
+/** 「臺灣臺北的」「美國（Portland）的」 — where the artist is from, with the 的; "" without a place. */
+export function artistWhere(a: Pick<MbArtistInfo, "country" | "area">): string {
   const country = a.country ? COUNTRY[a.country] ?? a.country : "";
   const areaName = a.area ? AREA[a.area] ?? a.area : "";
   const latinArea = /^[A-Za-z]/.test(areaName);
   const area = areaName && areaName !== country ? (country && latinArea ? `（${areaName}）` : areaName) : "";
   const where = `${country}${area}`;
-  const whereText = where ? (/[A-Za-z]$/.test(where) ? `${where} 的` : `${where}的`) : "";
+  return where ? (/[A-Za-z]$/.test(where) ? `${where} 的` : `${where}的`) : "";
+}
+
+function artistSentence(info: PublicInfo): string | null {
+  const a = info.musicbrainz?.artist;
+  if (!a) return null;
+  const whereText = artistWhere(a);
   const kind = artistKindLabel(a.type);
   const since = a.beginYear ? `，${a.beginYear} 年開始活動` : "";
   const dis = a.disambiguation ? `（${a.disambiguation}）` : "";
@@ -145,8 +152,10 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
   const g = f.genre;
   const bible = activeBible(input.bible);
   const found = info && (info.status.musicbrainz === "ok" || info.status.wikipedia === "ok");
+  const short = st.duration > 0 && st.duration < SHORT_SONG_SECONDS;
   const head = [
     `> **${FREE_RESEARCH_LABEL}**：${opts.reason ? `${opts.reason}，改用免費研究。` : ""}這份簡報沒有使用 Claude：公開資料來自 MusicBrainz 與維基百科${info ? `（${sourcesStatus(info)}）` : ""}，其餘是 Livelyrics 在本機分析歌詞與音訊的結果。請把它當成起點，演出前和樂團確認。`,
+    ...(short ? ["", `> **音檔太短，分析不可靠**：這段音檔只有 ${Math.round(st.duration)} 秒，速度、段落與能量的讀法都不能信；設計只給一個安靜的單一畫面，請上傳完整的音檔再重新設計。`] : []),
   ];
 
   // ## 樂團視覺識別
@@ -217,14 +226,15 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
   const h = f.hints;
   // 字體藝術: every line is a composition in the song's typographic voice
   const voice = chooseVoice(f, st.cjk);
+  // without imagery and genre the mood lexicon fills the motif and scene rows: a row is never empty
+  const vocab = MOOD_VOCABULARY[f.audio.quadrant];
+  const motifs = [...h.motifs, ...vocab.motifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4);
+  const scenes = [...h.scenes, ...vocab.scenes.filter((x) => !h.avoidScenes.includes(x))].filter((x, i, a) => a.indexOf(x) === i).slice(0, 4);
   const plan: string[] = [
     `- 世界觀：${h.world}`,
-    `- 配色：${bible?.palette.length ? "沿用樂團視覺聖經的色盤；" : ""}${g ? `${g.palette.note}` : "由歌詞意象決定"}${f.imagery[0] ? `，點綴取自歌詞的「${f.imagery[0].family.name}」（${f.imagery[0].family.colors}）` : ""}；歌詞色與背景對比 4.5:1 以上。`,
-    `- 母題：${h.motifs.slice(0, 4).join("、") || "一個簡單的幾何符號"}。`,
-    `- 場景：${h.scenes
-      .slice(0, 4)
-      .map((x) => SCENES[x].label)
-      .join("、")}${h.avoidScenes.length ? `；避免${h.avoidScenes.map((x) => SCENES[x].label).join("、")}` : ""}。`,
+    `- 配色：${bible?.palette.length ? "沿用樂團視覺聖經的色盤；" : ""}${g ? `${g.palette.note}` : f.imagery[0] ? "由歌詞意象決定" : `由音訊情緒決定（${f.audio.label}）`}${f.imagery[0] ? `，點綴取自歌詞的「${f.imagery[0].family.name}」（${f.imagery[0].family.colors}）` : ""}；歌詞色與背景對比 4.5:1 以上。`,
+    `- 母題：${motifs.join("、")}${f.imagery.length || g ? "" : "（沒有歌詞意象與曲風，取自音訊情緒）"}。`,
+    `- 場景：${scenes.map((x) => SCENES[x].label).join("、")}${h.avoidScenes.length ? `；避免${h.avoidScenes.map((x) => SCENES[x].label).join("、")}` : ""}。`,
     sung
       ? `- 段落角色：前奏與間奏讓畫面主導；每一句歌詞都是一張排好的構圖，不是字幕：${SECTION_KIND_LABELS.verse}小而安靜、避開 IMAG，${SECTION_KIND_LABELS.chorus}放大成畫面的主角，一次比一次亮。${h.lyricDensity === "sparse" ? "這個曲風的歌詞份量要輕：主歌的字很小，只讓最關鍵的幾句放大。" : h.lyricDensity === "dense" ? "主歌字很密：用安靜的小字構圖，不要逐字動畫。" : ""}`
       : "- 段落角色：全程由畫面與燈光敘事，安靜段落退後、能量高的段落跟著節拍爆開。",

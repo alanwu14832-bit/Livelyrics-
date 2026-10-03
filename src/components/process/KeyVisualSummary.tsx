@@ -17,6 +17,7 @@ import { FONTS, fontStack } from "@/lib/fonts";
 import { STAGGER_MAX, staggerDelay } from "@/lib/motion";
 import { prepareMotifSvg, svgToDataUrl } from "@/lib/stage/motif";
 import { formatTimeShort } from "@/lib/timeline";
+import { shownEmphasis } from "@/lib/type/resolve";
 import type { DesignPlan, Project, SectionDesign } from "@/lib/types";
 import { CUE_KIND_LABEL, LYRIC_STYLE_LABEL, PLACEMENT_LABEL, SCENE_LABEL, SECTION_KIND_LABEL } from "./labels";
 import { SectionPreview } from "./SectionPreview";
@@ -288,8 +289,16 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function SectionDetail({ project, section: s }: { project: Project; section: SectionDesign }) {
   const plan = project.plan;
-  const lines = project.lyrics.lines.filter((l) => l.start != null && l.start >= s.start && l.start < s.end);
-  const notes = new Map((plan?.lines ?? []).map((l) => [l.lineId, l]));
+  const all = project.lyrics.lines;
+  const duration = project.meta.duration || project.analysis?.duration || plan?.sections[plan.sections.length - 1]?.end || 0;
+  const lines = all.filter((l) => l.start != null && l.start >= s.start && l.start < s.end);
+  // 強調 from the composition the type system actually uses (edits included), the rest from the plan's line design
+  const notes = new Map(
+    (plan?.lines ?? []).map((l) => {
+      const index = all.findIndex((x) => x.id === l.lineId);
+      return [l.lineId, { ...l, emphasis: index >= 0 ? shownEmphasis(plan, all, index, duration, project.meta.title) : l.emphasis }];
+    }),
+  );
   const styled = lines.filter((l) => notes.has(l.id));
   const kind = kindLabel(s);
   return (

@@ -7,7 +7,7 @@
 import { FONTS } from "../font-meta";
 import { TYPE_COLOR_ROLES, TYPE_COLOR_TREATMENTS, TYPE_ENTER_IDS, TYPE_EXIT_IDS, TYPE_ORIENTATIONS, TYPE_ORNAMENT_IDS, TYPE_RECIPE_IDS, TYPE_VOICE_IDS } from "../schema";
 import { sectionIndexForLine } from "../timeline";
-import type { DesignPlan, LyricLine, TypeLine, TypeParams, TypeSystem } from "../types";
+import type { DesignPlan, LyricLine, TypeLine, TypeParams, TypeRecipeId, TypeSystem } from "../types";
 import type { LineContext, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { findMotionWord } from "./motion-words";
 import { autoHint, textKey } from "./sequence";
@@ -130,6 +130,23 @@ export interface ResolveOptions {
   songTitle?: string;
   /** ignore the editor's edits (the A/B comparison and 「重設為生成的」) */
   generated?: boolean;
+}
+
+/** Recipes that feature one span only (the giant / bled / window word): their first emphasized run is what shows. */
+const SINGLE_SPAN_RECIPES: ReadonlySet<TypeRecipeId> = new Set<TypeRecipeId>(["giant-word", "bleed", "window"]);
+
+/**
+ * The emphasis the wall actually shows for line `index` (the 強調 chips): the resolved hint's words
+ * (the editor's edits included), only the first run for a single-span recipe; without a type system
+ * the plan's line design.
+ */
+export function shownEmphasis(plan: DesignPlan | null | undefined, lines: readonly LyricLine[], index: number, duration: number, songTitle = ""): string[] {
+  const line = lines[index];
+  if (!line || !plan) return [];
+  if (!hasTypeSystem(plan)) return plan.lines?.find((l) => l.lineId === line.id)?.emphasis ?? [];
+  const res = resolveLine(plan, lines, index, { duration, songTitle });
+  if (!res) return [];
+  return SINGLE_SPAN_RECIPES.has(res.hint.recipe) ? res.hint.emphasis.slice(0, 1) : res.hint.emphasis;
 }
 
 /** The effective hint and context of line `index`; null for an empty or missing line. */
