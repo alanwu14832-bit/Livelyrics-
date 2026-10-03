@@ -1312,7 +1312,10 @@ keeps every contract above and changes only where things are kept and how long w
 ### DESIGNER — `src/lib/server/designer/**`
 - `researchSong`: Claude (`LIVELYRICS_MODEL` default `claude-sonnet-5-5`), server tools `web_search_20260209` and (phase 8) `web_fetch_20260209`,
   adaptive thinking, streaming, `pause_turn` continuation (≤ 5), refusal handling, server-side
-  `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Writes a Traditional-Chinese Markdown
+  `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`). Every Claude call caches its system
+  rules (`cache_control: ephemeral` on research, design, the structured jobs) and logs the turn's
+  tokens (`TurnResult.usage` → `usageLine`: 「用量：輸入 …（快取讀取 …）、輸出 … tokens」) so cost per
+  step is visible in the process log. Writes a Traditional-Chinese Markdown
   brief as the band's stage-visual designer: band identity & visual history (album art, MVs, logos,
   colors, past stage shows), song meaning/imagery, mood/energy arc, reference live moments; returns
   sources. Must not reproduce full copyrighted lyrics in the brief.
