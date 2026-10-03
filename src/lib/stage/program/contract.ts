@@ -92,6 +92,7 @@ export const PRELUDE_NAMES = [
   "grain",
   "zoneMask",
   "zoneCenter",
+  "wordsMask",
   "typeMask",
   "typeGlow",
   "motifMask",
@@ -147,7 +148,9 @@ uniform（全部由系統提供，不能自己宣告）：
   palette(t) → 沿 uPal0…uPal5 的漸層; px() → 一個像素在 centered 座標裡的大小（抗鋸齒）
   fill(d) / stroke(d, w) → 由距離場得到覆蓋率; sdCircle(p, r), sdBox(p, b), sdSegment(p, a, b)
   grain(fc, amount) → 顆粒; kick() → uPulse × uReact; isSection(k) → 目前段落種類是否為 k（1 或 0）
-  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1; zoneCenter() → 文字區中心（uv）
+  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1（只拿來決定形狀站哪裡、密度往哪邊變稀；不要用它把畫面乘暗：沒有歌詞時那會是一塊黑方塊）
+  zoneCenter() → 文字區中心（uv）
+  wordsMask(uv, soft) → 此刻螢幕上那一句字塊周圍的柔和遮罩 0–1，隨歌詞淡入淡出、沒有歌詞時為 0（要讓位給字就用這個）
   typeMask(uv) → 此刻歌詞字形的覆蓋率 0–1（字的形狀）; typeGlow(uv, r) → 字形周圍 r（uv）內的柔光 0–1
   motifMask(uv, bias) → 主視覺符號（白底透明）的覆蓋率
 
@@ -294,6 +297,14 @@ float zoneMask(vec2 uv, float soft) {
   return a.x * a.y * b.x * b.y;
 }
 vec2 zoneCenter() { return 0.5 * (uZone.xy + uZone.zw); }
+float wordsMask(vec2 uv, float soft) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 lo = uTypeBox.xy - 0.02;
+  vec2 hi = uTypeBox.zw + 0.02;
+  vec2 a = smoothstep(lo - soft, lo + soft, uv);
+  vec2 b = 1.0 - smoothstep(hi - soft, hi + soft, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
 float typeMask(vec2 uv) {
   vec4 t = TEX(uType, clamp(uv, 0.0, 1.0));
   return max(max(t.r, t.g), t.b) * uTypeAmt;

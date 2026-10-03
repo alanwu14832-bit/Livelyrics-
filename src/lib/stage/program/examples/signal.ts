@@ -40,22 +40,22 @@ vec3 scene(vec2 fc) {
   float sy = r.y * segF + hash11(id) * 3.0 + shift;
   float seg = fract(sy);
   float segOn = step(0.22, seg);
-  // each segment is kept or dropped whole, by where its centre falls: out of the words' block in
-  // the verse (clean cut ends, like a printed poster), through it in the chorus (fewer there)
+  // each segment is kept or dropped whole, by where its centre falls. The words' zone is an
+  // attractor the pattern thins towards: the probability of a segment falls from one well outside
+  // the zone to none deep inside it (a density gradient along the bars, never a cut rectangle:
+  // with no lyric on screen the zone must not read as a hole); the chorus runs the bars through
   vec2 cr = vec2((id + duty * 0.5) / freq, (floor(sy) + 0.61 - hash11(id) * 3.0 - shift) / segF);
   vec2 cp = rot(-ang) * cr;
   vec2 cuv = (cp * min(uRes.x, uRes.y) + 0.5 * uRes) / uRes;
-  float inZone = step(0.5, zoneMask(cuv, 0.0));
-  float keepSeg = mix(1.0 - inZone, 1.0 - inZone * step(0.5, hash11(id * 5.3 + floor(sy))), open);
-  // on a landscape frame the verse's bars also thin out towards the words' side
   float gap = zoneCenter().x < 0.5 ? cuv.x - uZone.z : uZone.x - cuv.x;
-  float thin = aspect() < 0.8 ? 1.0 : step(hash11(id * 2.1 + floor(sy) * 1.7), gap * 4.0 + 0.2);
-  keepSeg *= mix(thin, 1.0, open);
-  // the words' block itself is cut clean (a printed poster's white space): no bar crosses it in the
-  // verse; in the chorus only a few thin segments run through it and the words are cut out of them
-  float zin = zoneMask(uv, 0.01);
-  float through = open * step(0.72, hash11(id * 5.3 + floor(sy) + 0.5)) * step(within, duty * 0.55);
-  keepSeg *= 1.0 - zin * (1.0 - through);
+  float density = aspect() < 0.8 ? 1.0 : smoothstep(-0.35, 0.25, gap);
+  float keepSeg = step(1.0 - mix(density, 1.0, open), hash11(id * 5.3 + floor(sy)));
+  // under the line on screen (uTypeBox) the segments give way whole, one by one as it fades in
+  // (uTypeAmt); in the chorus the words are also cut out of the bars that still run through
+  vec2 wlo = uTypeBox.xy - 0.015;
+  vec2 whi = uTypeBox.zw + 0.015;
+  float under = step(0.001, uTypeBox.z - uTypeBox.x) * step(wlo.x, cuv.x) * step(wlo.y, cuv.y) * step(cuv.x, whi.x) * step(cuv.y, whi.y);
+  keepSeg *= 1.0 - under * step(hash11(id * 2.9 + floor(sy) * 1.3), uTypeAmt);
   float bar = step(within, duty) * present * segOn * keepSeg;
   float field = keepSeg;
 

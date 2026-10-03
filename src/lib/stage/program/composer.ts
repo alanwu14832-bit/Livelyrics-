@@ -255,16 +255,16 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   }
   if (uv.y < hz) {
     float depth = sat((hz - uv.y) / max(hz, 0.05));
-    vec3 ground = mix(uBg * 0.5 + uPri * 0.05, uBg * 0.22, pow(depth, 0.6));
-    ${
-      refl
-        ? `float lanes = pow(depth, 0.45) * 80.0;
+    // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
+    // reflection (a full one on water, a faint sheen on a road or a floor)
+    vec3 ground = mix(uBg * 1.1 + uPri * 0.18, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
+    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
+    float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
     float wid = r * (0.5 + uParams.x) * (1.0 + depth * 0.6);
     float rf = (1.0 - smoothstep(wid * 0.55, wid, abs(p.x - c.x))) * step(0.5, rip) * (1.0 - depth * 0.8);
-    ground += disc * rf * (0.2 + 0.55 * light) * (uMode > 2.5 ? 0.25 : 1.0);`
-        : `ground *= 0.9 + 0.1 * vnoise(vec2(uv.x * 40.0, depth * 90.0));`
-    }
+    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
+    ${refl ? "" : "ground *= 0.92 + 0.08 * vnoise(vec2(uv.x * 40.0, depth * 90.0));"}
     col = ground;
   }
   col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light);
@@ -350,9 +350,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     vec2 mp = vec2(cos(a), sin(a)) * rr;
     moons += fill(length(q - mp) - 0.006) * on;
   }
-  // the orbits fade out where they would cross the words' block
-  lines *= 1.0 - zoneMask(uv, 0.05) * 0.9;
-  moons *= 1.0 - zoneMask(uv, 0.02);
+  // the orbits give way to the words on screen (and only then: an empty zone shows the rings)
+  lines *= 1.0 - wordsMask(uv, 0.03) * 0.9;
+  moons *= 1.0 - wordsMask(uv, 0.02);
   col += lc * lines * (0.5 + 0.6 * light);
   col = mix(col, lc, sat(moons));
   vec2 pq = p - c;
@@ -437,11 +437,17 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float sy = r.y * segF + hash11(id) * 3.0 + shift;
   vec2 cr = vec2((id + duty * 0.5) / freq, (floor(sy) + 0.61 - hash11(id) * 3.0 - shift) / segF);
   vec2 cuv = ((rot(-ang) * cr - mo()) * min(uRes.x, uRes.y) + 0.5 * uRes) / uRes;
-  float inZone = step(0.5, zoneMask(cuv, 0.0));
-  float keep = mix(1.0 - inZone, 1.0 - inZone * step(0.5, hash11(id * 5.3 + floor(sy))), open);
-  // the words' block is cut clean: nothing crosses it in the verse, a few thin segments in the chorus
-  float through = open * step(0.72, hash11(id * 5.3 + floor(sy) + 0.5)) * step(fract(s), duty * 0.55);
-  keep *= 1.0 - zoneMask(uv, 0.01) * (1.0 - through);
+  // the words' zone is an attractor the pattern thins towards: a segment is kept with a
+  // probability that falls from one well outside the zone to none deep inside it — a density
+  // gradient along the bars, never a cut rectangle; the chorus runs the bars right through
+  float gap = zoneCenter().x < 0.5 ? cuv.x - uZone.z : uZone.x - cuv.x;
+  float density = aspect() < 0.8 ? 1.0 : smoothstep(-0.35, 0.25, gap);
+  float keep = step(1.0 - mix(density, 1.0, open), hash11(id * 5.3 + floor(sy)));
+  // under the line on screen the segments give way whole, one by one as it fades in (uTypeAmt)
+  vec2 wlo = uTypeBox.xy - 0.015;
+  vec2 whi = uTypeBox.zw + 0.015;
+  float under = step(0.001, uTypeBox.z - uTypeBox.x) * step(wlo.x, cuv.x) * step(wlo.y, cuv.y) * step(cuv.x, whi.x) * step(cuv.y, whi.y);
+  keep *= 1.0 - under * step(hash11(id * 2.9 + floor(sy) * 1.3), uTypeAmt);
   float bar = step(fract(s), duty) * present * step(0.2, fract(sy)) * keep;
   vec3 col = uBg * 0.92;
   float accent = step(K_ACC - 0.5, mod(id, K_ACC));
@@ -495,8 +501,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
   }
-  // the stroke lifts off the paper before it would cross the words' block
-  ink *= 1.0 - zoneMask(uv, 0.04) * (1.0 - around);
+  // the stroke lifts off the paper under the words on screen (never under an empty zone)
+  ink *= 1.0 - wordsMask(uv, 0.03) * (1.0 - around);
   col = mix(col, mix(uInk, vec3(1.0), 0.08) * (0.8 + 0.2 * uParams.z), ink);
   vec2 sun = c + vec2(R * 0.55, -R * 0.3);
   col = mix(col, uAcc, fill(length(p - sun) - (0.026 + 0.01 * uParams.z)));
@@ -534,7 +540,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float fold = 0.5 + 0.5 * sin(x * K_F * 2.0 + ph * 2.0 + slope * 3.0);
     vec3 rc = mix(mix(uPri, uAcc, fi / max(1.0, K_N)), mix(uAcc, vec3(1.0), 0.3), pow(fold, 3.0) * (0.3 + 0.6 * light));
     float fade = smoothstep(0.0, 0.25, abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0)));
-    float away = 1.0 - zoneMask(uv, 0.08) * 0.97;
+    // the ribbons thin under the words on screen (they light them: a lit relation)
+    float away = 1.0 - wordsMask(uv, 0.05) * 0.9;
     col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y));
     col += rc * exp(-d / max(wd, 1e-3) * 1.5) * 0.06 * light * fade * away;
   }
@@ -562,8 +569,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float y = fract(uv.y * 0.6 + T() * speed * 0.2 + hash11(id + 7.0));
   float thread = smoothstep(0.08, 0.0, abs(fx - 0.5) - 0.02) * smoothstep(len, 0.0, y) * smoothstep(0.0, 0.02, y);
   float on = step(0.3, hash11(id * 1.37 + uSeed));
-  // the words' window stays clear of rain
-  float clear = 1.0 - zoneMask(uv, 0.05) * (1.0 - 0.5 * step(1.5, uMode));
+  // the rain thins around the words on screen (an empty zone rains like the rest of the frame)
+  float clear = 1.0 - wordsMask(uv, 0.04) * 0.85;
   vec3 lc = mix(uPri, mix(uAcc, vec3(1.0), 0.4), 0.3 + 0.5 * light);
   col += lc * thread * on * clear * step(floorY, uv.y) * (0.7 + 0.8 * uParams.x);
   // ripples where the threads land

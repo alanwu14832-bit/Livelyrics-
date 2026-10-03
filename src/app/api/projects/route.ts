@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { coerceBlobRef } from "@/lib/assets";
 import { isJsonRequest } from "@/lib/server/asset-routes";
-import { MAX_AUDIO_BYTES, resolveAudioType, sanitizeFileName } from "@/lib/server/audio-files";
+import { FORM_OVERHEAD_BYTES, MAX_AUDIO_BYTES, resolveAudioType, sanitizeFileName } from "@/lib/server/audio-files";
 import { handle, HttpError, json, readJson } from "@/lib/server/http";
 import { parseMultipart } from "@/lib/server/multipart";
 import { withLiveStatus } from "@/lib/server/pipeline";
@@ -14,8 +14,6 @@ import { parseAnalysis, parseCreateMeta, sanitizeAnalysis } from "@/lib/server/v
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** room for the meta / analysis fields and multipart framing on top of the audio */
-const FORM_OVERHEAD_BYTES = 64 * 1024 * 1024;
 /** the cloud registration carries the analysis (JSON) but not the audio */
 const MAX_REGISTRATION_BYTES = 8 * 1024 * 1024;
 
@@ -77,6 +75,7 @@ export const POST = handle(async (req: Request) => {
     fileField: "audio",
     maxFileBytes: MAX_AUDIO_BYTES,
     tempPath: createUploadTempPath,
+    declaredBytes: Number.isFinite(declared) ? declared : null,
   });
   if (!file) throw new HttpError(400, "缺少音檔（欄位 audio）");
 

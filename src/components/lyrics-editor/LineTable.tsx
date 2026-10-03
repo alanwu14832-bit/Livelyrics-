@@ -2,8 +2,9 @@
 
 import { memo, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Menu, MenuItem, MenuSeparator, Tooltip, cx } from "@/components/ui";
-import { ArrowsMergeIcon, CrosshairIcon, DotsThreeIcon, HandTapIcon, MinusIcon, PlayIcon, PlusIcon, ScissorsIcon, TrashIcon, WarningCircleIcon } from "@/components/ui/Icon";
+import { ArrowsMergeIcon, CrosshairIcon, DotsThreeIcon, HandTapIcon, MinusIcon, PlayIcon, PlusIcon, ScissorsIcon, TrashIcon, WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
 import { SOFT_TEXT } from "@/components/ui/Tag";
+import { isLongLine } from "@/lib/type/text";
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import type { EditorLine } from "./editor-model";
 import { InsertBelowIcon } from "./icons";
@@ -111,6 +112,11 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
         {outOfOrder && (
           <span title="時間早於前一行：儲存時會依時間重新排序" className="flex shrink-0 text-red">
             <WarningCircleIcon size={16} weight="fill" aria-label="時間早於前一行" />
+          </span>
+        )}
+        {!outOfOrder && isLongLine(line.text) && (
+          <span title="這句太長，建議拆成兩句（超過 14 個字的句子會自動拆成兩段排版）" className={cx("flex shrink-0", SOFT_TEXT.orange)} data-long-line>
+            <WarningIcon size={16} weight="fill" aria-label="這句太長，建議拆成兩句" />
           </span>
         )}
         <input
