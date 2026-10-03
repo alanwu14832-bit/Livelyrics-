@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SAFETY, capGain } from "../safety";
 import {
+  DISPLAY_MIN,
+  DISPLAY_TARGET,
   LEGIBILITY_GLSL,
   LEGIBLE_MIN,
   LEGIBLE_TARGET,
   afterSafety,
   contrastRatio,
+  displayInkOver,
   legibleBackground,
   legibleInk,
   relativeLuminance,
   type PostSafety,
   type Rgb,
 } from "./legibility";
-import { TYPE_FRAGMENT } from "./type";
+import { TYPE_FRAGMENT, TYPE_TARGETS } from "./type";
 
 const hex = (h: string): Rgb => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 
@@ -70,8 +73,51 @@ describe("legibility guarantee (mirror of the type pass)", () => {
 
   it("is what the type pass runs", () => {
     expect(TYPE_FRAGMENT).toContain(LEGIBILITY_GLSL.trim().slice(0, 60));
-    expect(TYPE_FRAGMENT).toContain("legibleBg(col, inkC, uSoften, uGain)");
-    expect(TYPE_FRAGMENT).toContain("inkC = legibleInk(inkC, uSoften, uGain)");
+    expect(TYPE_FRAGMENT).toContain("legibleBgT(col, inkC, uSoften, uGain, target)");
+    expect(TYPE_FRAGMENT).toContain("inkC = legibleInkT(inkC, uSoften, uGain, target)");
     expect(LEGIBILITY_GLSL).toContain(String(LEGIBLE_TARGET));
+    expect(LEGIBILITY_GLSL).toContain(String(DISPLAY_TARGET));
+  });
+});
+
+describe("display words (B3): full ink at ≥ 7:1", () => {
+  // the knockout fill is the section's background tone: dark in every palette, light in a daylight one
+  const fills: Rgb[] = [hex("#081516"), hex("#130912"), hex("#1e140d"), hex("#0a0d12"), hex("#f4f3f0"), [0.3, 0.1, 0.2], [0.12, 0.14, 0.2]];
+  const inks: Rgb[] = [hex("#eff5f5"), hex("#f6eef5"), hex("#f6eff0"), hex("#8dbde1"), hex("#767676"), hex("#c63baf"), hex("#111111")];
+
+  it("the window letters meet the display target against the knockout fill, whatever the ink", () => {
+    for (const fill of fills) {
+      for (const ink of inks) {
+        const out = displayInkOver(ink, fill);
+        expect(contrastRatio(out, fill), `${ink} over ${fill}`).toBeGreaterThanOrEqual(DISPLAY_MIN);
+      }
+    }
+  });
+
+  it("an ink that already reads is left as it is; a pale or mid one is pushed, not dimmed", () => {
+    const fill = hex("#081516");
+    expect(displayInkOver([1, 1, 1], fill)).toEqual([1, 1, 1]);
+    const pale = hex("#8dbde1");
+    const out = displayInkOver(pale, fill);
+    expect(relativeLuminance(out)).toBeGreaterThanOrEqual(relativeLuminance(pale));
+    // over a light fill a dark ink gets darker, never lighter
+    const dark = displayInkOver(hex("#5e5e5e"), hex("#f4f3f0"));
+    expect(relativeLuminance(dark)).toBeLessThan(relativeLuminance(hex("#5e5e5e")));
+  });
+
+  it("the picture around a display word is attenuated to the display target", () => {
+    const ink = hex("#eff5f5");
+    for (const bg of BGS) {
+      const out = legibleBackground(bg, ink, DISPLAY_TARGET);
+      expect(contrastRatio(ink, out)).toBeGreaterThanOrEqual(DISPLAY_MIN);
+    }
+  });
+
+  it("the type pass carries a display box and a display target", () => {
+    expect(TYPE_FRAGMENT).toContain("uniform vec4 uDisplayBox;");
+    expect(TYPE_FRAGMENT).toContain("inDisplay ? uDisplayTarget : uTarget");
+    expect(TYPE_FRAGMENT).toContain("displayInk(uInk, fill)");
+    expect(TYPE_TARGETS.display).toBe(DISPLAY_TARGET);
+    expect(TYPE_TARGETS.readable).toBe(LEGIBLE_TARGET);
   });
 });

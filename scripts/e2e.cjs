@@ -30,6 +30,8 @@ function watch(page, label) {
   page.on("console", (m) => {
     if (m.type() === "error" || m.type() === "warning") {
       const text = m.text();
+      // SwiftShader's own performance note (GPU stall due to ReadPixels) is the test GPU's, not the app's
+      if (/GL Driver Message/.test(text)) return;
       problems.push(`[${label}] console.${m.type()}: ${text}`);
     }
   });
@@ -97,6 +99,48 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     check("process url stripped of run=1", !/run=1/.test(page.url()), page.url());
     const project = await (await fetch(`${BASE}/api/projects/${id}`)).json();
     check("project ready with plan", project.status === "ready" && !!project.plan, `status=${project.status} sections=${project.plan?.sections?.length}`);
+
+    // ------------------------------------------------------------- a big upload (B1)
+    // A 24 MB silent WAV through the same multipart route: over the proxy's old 10 MB body limit a
+    // real 4-minute WAV was cut short and refused as 「上傳內容不完整」.
+    {
+      const seconds = 285;
+      const rate = 44100;
+      const dataBytes = seconds * rate * 2;
+      const wav = Buffer.alloc(44 + dataBytes);
+      wav.write("RIFF", 0);
+      wav.writeUInt32LE(36 + dataBytes, 4);
+      wav.write("WAVE", 8);
+      wav.write("fmt ", 12);
+      wav.writeUInt32LE(16, 16);
+      wav.writeUInt16LE(1, 20);
+      wav.writeUInt16LE(1, 22);
+      wav.writeUInt32LE(rate, 24);
+      wav.writeUInt32LE(rate * 2, 28);
+      wav.writeUInt16LE(2, 32);
+      wav.writeUInt16LE(16, 34);
+      wav.write("data", 36);
+      wav.writeUInt32LE(dataBytes, 40);
+      const form = new FormData();
+      form.set("audio", new Blob([wav], { type: "audio/wav" }), "silent-24mb.wav");
+      form.set("meta", JSON.stringify({ title: "大檔上傳測試", artist: "示範樂團", duration: seconds }));
+      form.set("analysis", "null");
+      const res = await fetch(`${BASE}/api/projects`, { method: "POST", body: form });
+      const body = await res.text();
+      let big = null;
+      try {
+        big = JSON.parse(body);
+      } catch {
+        /* not JSON */
+      }
+      check(`a ${(wav.length / 1024 / 1024).toFixed(0)} MB WAV uploads and gets a project back`, res.status === 201 && !!big?.id, `${res.status} ${body.slice(0, 120)}`);
+      if (big?.id) {
+        const audio = await fetch(`${BASE}/api/projects/${big.id}/audio`, { method: "HEAD" }).catch(() => null);
+        const len = Number(audio?.headers.get("content-length") ?? 0);
+        check("the whole file arrived (the audio route serves every byte)", !!audio && audio.ok && len === wav.length, `${audio?.status} ${len}/${wav.length}`);
+        await fetch(`${BASE}/api/projects/${big.id}`, { method: "DELETE" }).catch(() => {});
+      }
+    }
     check("lyrics saved from paste (14 synced lines)", project.lyrics.lines.length === 14 && project.lyrics.synced, `${project.lyrics.lines.length} lines synced=${project.lyrics.synced}`);
     check("analysis stored", !!project.analysis && Math.round(project.analysis.bpm) === 120, `bpm=${project.analysis?.bpm}`);
 

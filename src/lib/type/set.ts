@@ -33,6 +33,15 @@ function fontOf(u: { kind: string; text: string }): FontRole {
   return "cjk";
 }
 
+/**
+ * Letter spacing inside a Latin run (em): a tracked word is drawn with the spacing between its
+ * letters too, so its cell must grow by it — else the word runs into the space after it
+ * ("Theporchlighthums").
+ */
+function innerTracking(u: { kind: string; text: string }, tracking: number): number {
+  return u.kind === "latin" && tracking > 0 ? tracking * Math.max(0, [...u.text].length - 1) : 0;
+}
+
 /** Width of units `idx` set as a row (px). */
 export function rowWidth(lt: LineText, idx: readonly number[], st: Pick<RunStyle, "size" | "weight" | "tracking">, measure: Measure): number {
   let w = 0;
@@ -40,7 +49,7 @@ export function rowWidth(lt: LineText, idx: readonly number[], st: Pick<RunStyle
   for (const i of idx) {
     const u = lt.units[i];
     if (!u) continue;
-    w += unitAdvance(u, measure, st.weight) * st.size;
+    w += (unitAdvance(u, measure, st.weight) + innerTracking(u, st.tracking)) * st.size;
     n++;
   }
   return w + Math.max(0, n - 1) * st.tracking * st.size;
@@ -53,7 +62,7 @@ export function columnHeight(lt: LineText, idx: readonly number[], st: Pick<RunS
   for (const i of idx) {
     const u = lt.units[i];
     if (!u) continue;
-    h += unitColumnAdvance(u, measure, st.weight) * st.size;
+    h += (unitColumnAdvance(u, measure, st.weight) + innerTracking(u, st.tracking)) * st.size;
     n++;
   }
   return h + Math.max(0, n - 1) * st.tracking * st.size;
@@ -79,7 +88,7 @@ export function setRow(lt: LineText, idx: readonly number[], x: number, yc: numb
     if (!u) continue;
     if (!first) cursor += st.tracking * st.size;
     first = false;
-    const adv = unitAdvance(u, measure, st.weight) * st.size;
+    const adv = (unitAdvance(u, measure, st.weight) + innerTracking(u, st.tracking)) * st.size;
     if (u.kind !== "space") {
       const font = fontOf(u);
       glyphs.push({
@@ -115,7 +124,7 @@ export function setColumn(lt: LineText, idx: readonly number[], xc: number, y: n
     if (!u) continue;
     if (!first) cursor += st.tracking * st.size;
     first = false;
-    const adv = unitColumnAdvance(u, measure, st.weight) * st.size;
+    const adv = (unitColumnAdvance(u, measure, st.weight) + innerTracking(u, st.tracking)) * st.size;
     if (u.kind !== "space") {
       const f = verticalForm(u);
       const font = fontOf(u);

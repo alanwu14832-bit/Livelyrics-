@@ -6,7 +6,7 @@ import { designSceneProgram, offlineDesign } from "./index";
 import { analyzeFindings } from "./findings";
 import { jsonOutputFormat } from "./output-schema";
 import { buildScenePrompt, composerSalt, ensureSceneProgram, offlineSceneProgram, SceneProgramDraftSchema, sceneForms } from "./scene-program";
-import { PROGRAM_CONTRACT_DOC } from "@/lib/stage/program/contract";
+import { PROGRAM_CONTRACT_DOC, PROGRAM_PRELUDE } from "@/lib/stage/program/contract";
 import { fakeTransport, message, text } from "./testing/fake-claude";
 import { SONG_FIXTURES, fixtureInput } from "./testing/songs";
 import { demoInput } from "./testing/fixtures";
@@ -55,6 +55,30 @@ describe("offline composer", () => {
       expect(s.zone.x).toBeGreaterThanOrEqual(0.04);
       expect(s.zone.x + s.zone.w).toBeLessThanOrEqual(0.96);
     }
+  });
+
+  it("the zone is an attractor, never a mask: no form multiplies the picture by zoneMask; dimming follows the words on screen (B2)", () => {
+    const sections = [
+      { id: "s0", kind: "verse" as const, energy: 0.4 },
+      { id: "s1", kind: "chorus" as const, energy: 0.9 },
+    ];
+    for (const form of FORM_IDS) {
+      const src = composeSceneProgram({ seed: 4242, forms: [form], sections, voice: "mv-card" }).source;
+      // the zone only places the form (focalUv / horizonY read zoneCenter and uZone)
+      expect(src, `${form}: zoneMask(uv…) as a multiplier`).not.toMatch(/zoneMask\(uv/);
+      // whatever gives way to the words does so through the words actually on screen
+      if (/wordsMask\(|uTypeBox/.test(src)) expect(src, `${form}: dimming must follow uTypeAmt`).toMatch(/wordsMask\(|uTypeAmt/);
+    }
+    // the bars thin towards the zone as a gradient and drop segments under the current line only
+    const bars = composeSceneProgram({ seed: 4242, forms: ["bars"], sections, voice: "glitch" }).source;
+    expect(bars).toMatch(/smoothstep\(-0\.35, 0\.25, gap\)/);
+    expect(bars).toMatch(/uTypeAmt/);
+    // the prelude's wordsMask is zero without a lyric and scales with the lyric's presence
+    expect(PROGRAM_PRELUDE).toMatch(/float wordsMask\(vec2 uv, float soft\)/);
+    expect(PROGRAM_PRELUDE).toMatch(/if \(uTypeAmt < 0\.002 \|\| uTypeBox\.z <= uTypeBox\.x[^)]*\) return 0\.0;/);
+    expect(PROGRAM_PRELUDE).toMatch(/\* uTypeAmt;\n\}/);
+    expect(PROGRAM_CONTRACT_DOC).toContain("wordsMask(uv, soft)");
+    for (const ex of EXAMPLE_PROGRAMS) expect(ex.source, `${ex.id}: zoneMask(uv…) as a multiplier`).not.toMatch(/zoneMask\(uv/);
   });
 });
 
