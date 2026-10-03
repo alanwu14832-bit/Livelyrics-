@@ -40,6 +40,18 @@ export interface MultipartOptions {
   tempPath: () => Promise<string>;
   /** what the file is called in error messages (default 音檔) */
   fileLabel?: string;
+  /** the request's Content-Length, when known: an incomplete upload then says how much arrived */
+  declaredBytes?: number | null;
+}
+
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+
+/** The message of an upload whose body ended before the closing boundary. */
+export function incompleteMessage(received: number, declared: number | null): string {
+  if (declared != null && declared > 0 && received < declared) {
+    return `上傳內容不完整：伺服器只收到 ${mb(received)}，應有 ${mb(declared)}。連線可能中斷；如果每次都停在同一個大小，是伺服器的請求大小上限太低。`;
+  }
+  return `上傳內容不完整（收到 ${mb(received)}，連線可能中斷）`;
 }
 
 const HEAD_BYTES = 64;
@@ -198,6 +210,7 @@ export async function parseMultipart(
   let sink: Sink = discardSink;
 
   const reader = body.getReader();
+  let received = 0;
 
   const startPart = async (headers: PartHeaders): Promise<Sink> => {
     if (headers.fileName != null) {
@@ -286,11 +299,12 @@ export async function parseMultipart(
       const { value, done } = await reader.read();
       if (done) break;
       if (!value || value.length === 0) continue;
+      received += value.length;
       buf = buf.length ? Buffer.concat([buf, value]) : Buffer.from(value);
       if (await process()) break;
     }
     // `state` is updated inside process(); widen it back from the narrowed initial value
-    if ((state as State) !== "done") throw new MultipartError(400, "上傳內容不完整（連線可能中斷）");
+    if ((state as State) !== "done") throw new MultipartError(400, incompleteMessage(received, options.declaredBytes ?? null));
     return { fields: { ...fields }, file };
   } catch (err) {
     await sink.abort().catch(() => {});

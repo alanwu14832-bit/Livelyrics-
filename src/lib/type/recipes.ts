@@ -12,7 +12,7 @@ import { colRight, colX, type Frame } from "./frame";
 import type { Box, GlyphBox, LineContext, Measure, Piece, PieceRole, PlateId, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { createRng, hashUnit, type Rng } from "./rng";
 import { columnEm, rowEm, setColumn, setRow, type RunStyle } from "./set";
-import { breakRows, keySpan, trimIndices, type LineText } from "./text";
+import { breakRows, keySpan, splitLongLine, trimIndices, type LineText } from "./text";
 
 export interface Zone {
   /** where the composition leans: the sequencer alternates these between consecutive lines */
@@ -112,19 +112,23 @@ interface ColsFit {
   gap: number;
 }
 
-/** Columns: at most maxCols columns of at most maxH px, the block at most maxW px wide. */
+/** No column stands taller than this share of the frame (B4: a 27-character column ran off the safe area). */
+export const MAX_COLUMN_FRACTION = 0.7;
+
+/** Columns: at most maxCols columns of at most maxH px (never over 70 % of the frame), the block at most maxW px wide. */
 function fitColumns(r: RecipeCtx, from: number, to: number, o: { wanted: number; min: number; maxW: number; maxH: number; maxCols: number; tracking: number; gap: number }): ColsFit | null {
   const idx = allIdx(r.lt, from, to);
   if (!idx.length) return null;
+  const maxH = Math.min(o.maxH, r.frame.H * MAX_COLUMN_FRACTION);
   const height = (ix: number[]) => columnEm(r.lt, ix, r.weight, o.tracking, r.measure);
   let size = Math.max(o.min, o.wanted);
   for (let guard = 0; guard < 40; guard++) {
-    const cols = breakRows(r.lt.units, from, to, { max: o.maxH / size, maxRows: o.maxCols, width: height, wordStarts: r.lt.wordStarts });
+    const cols = breakRows(r.lt.units, from, to, { max: maxH / size, maxRows: o.maxCols, width: height, wordStarts: r.lt.wordStarts });
     const heights = cols.map((c) => height(c) * size);
     const h = Math.max(0, ...heights);
     const gap = size * o.gap;
     const w = cols.length * size + (cols.length - 1) * gap;
-    if ((h <= o.maxH + 0.5 && w <= o.maxW + 0.5) || size <= o.min + 1e-6) return { size, cols, heights, w, h, gap };
+    if ((h <= maxH + 0.5 && w <= o.maxW + 0.5) || size <= o.min + 1e-6) return { size, cols, heights, w, h, gap };
     size = Math.max(o.min, size * 0.93);
   }
   return null;
@@ -447,6 +451,8 @@ interface Cell {
 
 function gridPoem(r: RecipeCtx): Piece[] | null {
   const { lt, frame: f } = r;
+  // a grid of em cells is a CJK form: Latin words forced into cells leave half the grid empty
+  if (!lt.cjk || lt.units.some((u) => u.kind === "latin")) return null;
   const rd = f.read;
   const vertical = r.hint.orientation === "v" && lt.cjk;
   // a CJK character (or a kept mark) takes one cell, a Latin word the cells its width needs
@@ -520,7 +526,8 @@ function bleed(r: RecipeCtx): Piece[] | null {
   const pieces: Piece[] = [];
   const plate = r.displayWindow ? "spot" : r.displayPlate;
   const gap = f.minRead * 0.8;
-  const giantOpts = { plate, window: r.displayWindow, bleed: true, readable: false, alpha: r.displayWindow ? 1 : 0.92 } as const;
+  // the bled word is a display word: full ink, no alpha (B3)
+  const giantOpts = { plate, window: r.displayWindow, bleed: true, readable: false, alpha: 1 } as const;
   if (!vertical) {
     const kEm = rowEm(lt, kIdx, r.weight, -0.02, r.measure);
     const n = Math.max(1, kEm);
@@ -916,6 +923,74 @@ function titleCard(r: RecipeCtx): Piece[] | null {
   const tp = translationPiece(r, rx, y + fit.h + fit.size * 0.8, ruleW, "center");
   if (tp) out.push(tp);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// long lines (B4): two staggered phrases
+// ---------------------------------------------------------------------------
+
+/**
+ * The line-length policy's layout: a line over the length limit (text.ts `isLongUnits`) is set as
+ * two phrases, each in at most two rows (or two columns), the second stepped down and across
+ * from the first so the eye reads one after the other — never one column the height of the
+ * frame, never a 30-character row. No display word: a long line is read, not shown. Null when
+ * the line has no acceptable cut (the recipe then lays it out as usual).
+ */
+export function longLine(r: RecipeCtx): Piece[] | null {
+  const { lt, frame: f } = r;
+  const cut = splitLongLine(lt.units, lt.wordStarts);
+  if (!cut) return null;
+  const rd = f.read;
+  const [a, b] = cut;
+  const vertical = lt.cjk && r.hint.orientation === "v";
+  const pieces: Piece[] = [];
+  if (vertical) {
+    const tracking = lerp(0.16, 0.06, r.d);
+    const size = r.body * lerp(0.95, 1.1, r.e);
+    const maxH = Math.min(rd.h * 0.8, f.H * MAX_COLUMN_FRACTION);
+    const fa = fitColumns(r, a[0], a[1], { wanted: size, min: f.minRead, maxW: rd.w * 0.3, maxH: maxH * 0.78, maxCols: 2, tracking, gap: 0.5 });
+    const fb = fitColumns(r, b[0], b[1], { wanted: size, min: f.minRead, maxW: rd.w * 0.3, maxH: maxH * 0.78, maxCols: 2, tracking, gap: 0.5 });
+    if (!fa || !fb) return null;
+    const s = Math.min(fa.size, fb.size);
+    const A = fitColumns(r, a[0], a[1], { wanted: s, min: f.minRead, maxW: rd.w * 0.3, maxH: maxH * 0.78, maxCols: 2, tracking, gap: 0.5 }) ?? fa;
+    const B = fitColumns(r, b[0], b[1], { wanted: s, min: f.minRead, maxW: rd.w * 0.3, maxH: maxH * 0.78, maxCols: 2, tracking, gap: 0.5 }) ?? fb;
+    // the first phrase stands right, the second steps down to its left (columns read right to left)
+    const gap = s * 1.1;
+    const stagger = Math.min(s * 1.6, Math.max(0, Math.min(rd.h, maxH) - Math.max(A.h, B.h)));
+    const blockW = A.w + gap + B.w;
+    const blockH = Math.max(A.h, B.h + stagger);
+    const x = sideX(r, blockW);
+    const top = bandY(r, blockH, 0.08, 0.42);
+    pieces.push(piece("main", placeColumns(r, A, x + blockW, top, style(r, s, tracking), 0, 0), { plate: r.mainPlate, vertical: true }));
+    pieces.push(piece("main", placeColumns(r, B, x + B.w, top + stagger, style(r, s, tracking), 0, 100), { plate: r.mainPlate, vertical: true, delay: 0.16 }));
+    const tp = translationPiece(r, x, top + blockH + s * 0.5, Math.max(blockW * 1.5, rd.w * 0.3));
+    if (tp) pieces.push(tp);
+    return pieces;
+  }
+  const tracking = lt.latinOnly ? 0.0 : 0.03;
+  const size = r.body * lerp(0.92, 1.05, r.e);
+  const measureW = rd.w * (f.aspect < 1 ? 0.9 : f.aspect > 2.4 ? 0.42 : 0.6);
+  const fa = fitRows(r, a[0], a[1], { wanted: size, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 });
+  const fb = fitRows(r, b[0], b[1], { wanted: size, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 });
+  if (!fa || !fb) return null;
+  const s = Math.min(fa.size, fb.size);
+  const A = fitRows(r, a[0], a[1], { wanted: s, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 }) ?? fa;
+  const B = fitRows(r, b[0], b[1], { wanted: s, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 }) ?? fb;
+  // the second phrase steps across by two ems (towards the frame's centre) and down a gap
+  const gap = s * 0.55;
+  const step = Math.min(s * 2, Math.max(0, rd.w - Math.max(A.w, B.w)));
+  const toRight = r.zone.side !== "right";
+  const blockW = Math.max(A.w, B.w) + step;
+  const blockH = A.h + gap + B.h;
+  const x = sideX(r, blockW);
+  const y = bandY(r, blockH, 0.12, 0.42);
+  const ax = toRight ? x : x + step;
+  const bx = toRight ? x + step : x;
+  pieces.push(piece("main", placeRows(r, A, ax, y, style(r, s, tracking), 1.24, toRight ? "left" : "right", 0), { plate: r.mainPlate }));
+  pieces.push(piece("main", placeRows(r, B, bx, y + A.h + gap, style(r, s, tracking), 1.24, toRight ? "left" : "right", 100), { plate: r.mainPlate, delay: 0.16 }));
+  const tp = translationPiece(r, x, y + blockH + s * 0.45, Math.max(blockW, rd.w * 0.4));
+  if (tp) pieces.push(tp);
+  return pieces;
 }
 
 export type RecipeFn = (r: RecipeCtx) => Piece[] | null;

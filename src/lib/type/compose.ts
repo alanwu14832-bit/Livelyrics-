@@ -9,10 +9,10 @@ import type { TypeEnterId, TypeExitId, TypeOrientation, TypeRecipeId, TypeVoiceI
 import { makeFrame, type Frame } from "./frame";
 import { EMPTY_BOX, glyphBox, pieceBox, unionBox, type Box, type CanvasSpec, type Composition, type GlyphBox, type LineContext, type Measure, type Piece, type PlateId, type ResolvedHint, type ResolvedTypeSystem } from "./model";
 import { motionKindOf } from "./motion-words";
-import { RECIPE_FALLBACK, RECIPE_FNS, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
+import { RECIPE_FALLBACK, RECIPE_FNS, longLine, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
 import { createRng, hash32 } from "./rng";
 import { canvasZone } from "../stage/program/model";
-import type { LineText } from "./text";
+import { isLongUnits, type LineText } from "./text";
 import { VOICES, type MotionKind } from "./vocab";
 
 export interface ComposeInput {
@@ -64,7 +64,9 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   // 鏤空 always opens the display word; the knockout treatment opens it on strong lines only (a
   // whole song of filled frames would hide the stage); 主字色 / 點綴色 / 反白 never do
   const displayWindow = role === "window" || (role === "auto" && sys.color === "knockout" && e >= KNOCK_ENERGY);
-  const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" || (role === "auto" && sys.color === "overprint") ? "accent" : "ink";
+  // the display word is set in the full ink colour (B3): a colour accent is the overprint's offset
+  // copy or an emphasized run, never the fill of the word the crowd must read; only 點綴色 asks for it
+  const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" ? "accent" : "ink";
   // restraint: most lines are small-to-medium; the few key lines keep the full display scale
   const restrained = hint.key === false;
   const body = Math.max(frame.minRead, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc);
@@ -304,6 +306,55 @@ function placeTranslation(pieces: Piece[], frame: Frame, r: RecipeCtx): Piece[] 
   return pieces;
 }
 
+/**
+ * The hard clamp (B4): nothing drawn — glyphs, labels, rules, brackets, the seal — leaves the
+ * lyric safe area (a bled display word excepted: it is meant to run off the frame). Ornaments
+ * that fall outside are dropped first; then the composition moves in; when it is still larger
+ * than the safe area it shrinks as a last resort, below the readable minimum if it must (a
+ * clipped line is worse than a small one).
+ */
+function clampToSafe(pieces: Piece[], safe: Box): Piece[] {
+  const tol = 1;
+  const inside = (b: Box) => b.w <= 0 || (b.x >= safe.x - tol && b.y >= safe.y - tol && b.x + b.w <= safe.x + safe.w + tol && b.y + b.h <= safe.y + safe.h + tol);
+  const movable = (p: Piece) => !p.bleed;
+  const boxOf = () => {
+    let b: Box = { ...EMPTY_BOX };
+    for (const p of pieces) if (movable(p)) b = unionBox(b, pieceBox(p));
+    return b;
+  };
+  let b = boxOf();
+  if (b.w <= 0 || inside(b)) return pieces;
+  // 1. move in
+  let dx = 0;
+  let dy = 0;
+  if (b.x < safe.x) dx = safe.x - b.x;
+  else if (b.x + b.w > safe.x + safe.w) dx = safe.x + safe.w - (b.x + b.w);
+  if (b.y < safe.y) dy = safe.y - b.y;
+  else if (b.y + b.h > safe.y + safe.h) dy = safe.y + safe.h - (b.y + b.h);
+  moveAll(pieces, dx, dy, movable);
+  b = boxOf();
+  if (inside(b)) return pieces;
+  // 2. ornaments outside the safe area go (the text matters more than its chrome)
+  const kept = pieces.filter((p) => p.readable || p.bleed || p.role === "translation" || inside(pieceBox(p)));
+  if (kept.length !== pieces.length) {
+    pieces = kept;
+    b = boxOf();
+    if (inside(b)) return pieces;
+  }
+  // 3. shrink around the centre of what is drawn, then move in
+  const k = Math.min(1, safe.w / b.w, safe.h / b.h);
+  if (k < 1) scaleAll(pieces.filter(movable), k, b.x + b.w / 2, b.y + b.h / 2);
+  b = boxOf();
+  dx = 0;
+  dy = 0;
+  if (b.x < safe.x) dx = safe.x - b.x;
+  else if (b.x + b.w > safe.x + safe.w) dx = safe.x + safe.w - (b.x + b.w);
+  if (b.y < safe.y) dy = safe.y - b.y;
+  else if (b.y + b.h > safe.y + safe.h) dy = safe.y + safe.h - (b.y + b.h);
+  moveAll(pieces, dx, dy, movable);
+  return pieces;
+}
+
 /** Keep the readable text inside `area`: move it in, and shrink it (never below `min`) when it is larger. */
 function fitInto(pieces: Piece[], area: Box, min: number) {
   let b = readableBox(pieces);
@@ -326,9 +377,14 @@ function fitInto(pieces: Piece[], area: Box, min: number) {
 }
 
 function label(text: string, x: number, y: number, size: number, sys: ResolvedTypeSystem, measure: Measure, align: "left" | "right" | "center" = "left", tracking = 0.18): GlyphBox {
-  const w = (measure(text, "latin", sys.weight) + tracking * Math.max(0, text.length - 1)) * size;
+  // a label with CJK characters (the plan's section label) is set in the CJK face, tracked less
+  const cjk = /\p{Script=Han}/u.test(text);
+  const font = cjk ? "cjk" : "latin";
+  const tr = cjk ? Math.min(tracking, 0.1) : tracking;
+  const chars = [...text].length;
+  const w = (measure(text, font, sys.weight) + tr * Math.max(0, chars - 1)) * size;
   const left = align === "left" ? x : align === "right" ? x - w : x - w / 2;
-  return { ch: text, font: "latin", weight: Math.min(900, Math.max(500, sys.weight - 100)), size, x: left + w / 2, y: y + size / 2, w, h: size, rotate: 0, plate: "ink", order: 950, unit: -1, t0: 0, tracking: tracking * size };
+  return { ch: text, font, weight: Math.min(900, Math.max(500, sys.weight - 100)), size, x: left + w / 2, y: y + size / 2, w, h: size, rotate: 0, plate: "ink", order: 950, unit: -1, t0: 0, tracking: tr * size };
 }
 
 /** The ornaments a line carries: numbers, a section label, the title, 「」, a seal, a rule. */
@@ -372,7 +428,10 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionKind != null;
   if (wantNumber || wantSection) {
     const num = sectionHead && ctx.sectionIndex != null ? String(ctx.sectionIndex + 1).padStart(2, "0") : String(ctx.lineIndex + 1).padStart(2, "0");
-    const text = [wantNumber ? num : "", wantSection ? SECTION_LATIN[ctx.sectionKind ?? "verse"] ?? "" : ""].filter(Boolean).join(wantNumber && wantSection ? "  —  " : "");
+    // the section label is the plan's own (副歌一), in the song's language; the English chrome
+    // ("02 — CHORUS") only on a song sung in Latin letters (M6: no English labels on a Mandarin wall)
+    const sectionText = wantSection ? (input.lt.latinOnly ? (SECTION_LATIN[ctx.sectionKind ?? "verse"] ?? "") : ctx.sectionLabel.trim() || "") : "";
+    const text = [wantNumber ? num : "", sectionText].filter(Boolean).join(wantNumber && sectionText ? "  —  " : "");
     const g = label(text, b.x, ly, labelSize, sys, input.measure);
     out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));
     if (on.has("rule") && level >= 0.55 && above) {
@@ -567,6 +626,16 @@ export function composeLine(given: ComposeInput): Composition {
   const frame = view ? makeFrame(view.canvas, given.system.params) : zone ? makeFrame(given.canvas, given.system.params, zone) : full;
   let recipe = hint.recipe;
   let pieces: Piece[] | null = null;
+  // the line-length policy (B4): a long line is two staggered phrases, whatever its recipe says
+  const long = isLongUnits(given.lt.units);
+  if (long) {
+    try {
+      pieces = longLine(recipeCtx(input, frame, recipe));
+    } catch {
+      pieces = null;
+    }
+    if (pieces && !pieces.some((p) => p.glyphs.length)) pieces = null;
+  }
   const tried = new Set<TypeRecipeId>();
   for (let guard = 0; guard < 4 && !pieces; guard++) {
     tried.add(recipe);
@@ -605,6 +674,8 @@ export function composeLine(given: ComposeInput): Composition {
   const edited = scale !== 1 || hint.rotate !== 0 || hint.dx !== 0 || hint.dy !== 0;
   // nudged text may leave the readable band but never the canvas
   fitInto(pieces, edited ? { x: 0, y: 0, w: full.W, h: full.H } : zone ? frame.read : full.read, full.minRead);
+  // the hard clamp: every glyph box and ornament inside the lyric safe area (the whole canvas for a nudged line)
+  pieces = clampToSafe(pieces, edited ? { x: 0, y: 0, w: full.W, h: full.H } : full.safe);
 
   const voice = input.system.voice;
   const motion: MotionKind = recipe === "whisper" && hint.motionWord === "" ? "still" : motionKindOf(hint.motionWord);

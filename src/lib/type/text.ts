@@ -3,7 +3,7 @@
 // punctuation, vertical forms: rotated brackets and dashes, sideways Latin, upright short
 // numbers) and a row / column breaker that balances rows by measured width.
 
-import { DROP_AT_ROW_END, NO_LINE_END, NO_LINE_START, isCjkChar, type TextUnit } from "../stage/lyrics/tokenize";
+import { DROP_AT_ROW_END, NO_LINE_END, NO_LINE_START, isCjkChar, tokenizeLyric, type TextUnit } from "../stage/lyrics/tokenize";
 import type { TimedUnit } from "../stage/lyrics/timing";
 import type { FontRole, Measure } from "./model";
 
@@ -470,4 +470,94 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     if (!best || scored < best.cost) best = { cost: scored, rows: splits.filter((r) => r.length) };
   }
   return best ? best.rows : [whole];
+}
+
+// ---------------------------------------------------------------------------
+// line length (B4): long lines are set as two staggered phrases
+// ---------------------------------------------------------------------------
+
+/** A line with more CJK characters than this is long (industry practice: ~16 per row, two rows at most). */
+export const LONG_LINE_CJK = 14;
+/** …or more Latin letters than this (about seven words). */
+export const LONG_LINE_LATIN = 40;
+
+/** How much text a line carries: CJK characters and Latin letters (spaces and marks not counted). */
+export function lineLoad(units: readonly TextUnit[]): { cjk: number; latin: number } {
+  let cjk = 0;
+  let latin = 0;
+  for (const u of units) {
+    if (u.kind === "cjk") cjk++;
+    else if (u.kind === "latin") latin += [...u.text].length;
+  }
+  return { cjk, latin };
+}
+
+/** The line-length policy: a line this long is split into two phrases (`splitLongLine`). */
+export function isLongUnits(units: readonly TextUnit[]): boolean {
+  const { cjk, latin } = lineLoad(units);
+  return cjk > LONG_LINE_CJK || latin > LONG_LINE_LATIN || cjk + latin / 2.6 > LONG_LINE_CJK;
+}
+
+/** `isLongUnits` on raw text (the lyrics editor's 「這句太長」 flag). */
+export function isLongLine(text: string): boolean {
+  return isLongUnits(tokenizeLyric(text));
+}
+
+/** Hard phrase boundaries: a row of a long line ends here first. */
+const PHRASE_PUNCT = new Set([..."，。、；：！？,.;:!?…—"]);
+/** Particles a phrase may end after (的了著 close a noun phrase or a verb phrase). */
+const PHRASE_PARTICLE = new Set([..."的了著嗎呢吧啊呀喔哦嘛啦"]);
+
+/**
+ * Split a long line into two phrases, [from, to) unit ranges, each trimmed of spaces and soft
+ * marks: at the punctuation or space nearest the middle, else after a particle (的了著) or before
+ * a demonstrative (這那每), else between words — never inside a compound, never leaving a
+ * one-character fragment. Null when the line is not long or has no acceptable cut.
+ */
+export function splitLongLine(units: readonly TextUnit[], wordStarts: ReadonlySet<number> = new Set()): [[number, number], [number, number]] | null {
+  if (!isLongUnits(units)) return null;
+  const load = (a: number, b: number) => {
+    const l = lineLoad(units.slice(a, b));
+    return l.cjk + l.latin / 2.6;
+  };
+  const total = load(0, units.length);
+  let best: { cut: number; cost: number } | null = null;
+  for (let k = 1; k < units.length; k++) {
+    const before = units[k - 1];
+    const after = units[k];
+    let cost: number;
+    if (before.kind === "space" || after.kind === "space") cost = 0;
+    else if (before.kind === "punct" && PHRASE_PUNCT.has(before.text)) cost = 0;
+    else if (after.kind === "punct" && NO_LINE_END.has(after.text)) cost = 0.6;
+    else if (before.kind === "punct" || after.kind === "punct") continue;
+    else if (before.kind === "latin" && after.kind === "latin") continue;
+    else if (before.kind === "cjk" && after.kind === "cjk") {
+      if (splitsWord(units, k - 1) || leavesFragment(units, k - 1)) continue;
+      if (ATTACH_LEFT.has(after.text)) continue;
+      if (wordStarts.size && !wordStarts.has(k)) cost = 2.4;
+      else if (PHRASE_PARTICLE.has(before.text)) cost = 0.9;
+      else if (BREAK_BEFORE.has(after.text)) cost = 1.1;
+      else cost = 1.8;
+    } else cost = 1.2;
+    const a = load(0, k);
+    const b = total - a;
+    // both halves readable on their own; the cut as near the middle as the words allow
+    if (Math.min(a, b) < 2) continue;
+    cost += (Math.abs(a - b) / total) * 3;
+    if (!best || cost < best.cost) best = { cut: k, cost };
+  }
+  if (!best) return null;
+  const first = trimIndices(units, unitRange(0, best.cut));
+  const second = trimIndices(units, unitRange(best.cut, units.length));
+  if (!first.length || !second.length) return null;
+  return [
+    [first[0], first[first.length - 1] + 1],
+    [second[0], second[second.length - 1] + 1],
+  ];
+}
+
+function unitRange(a: number, b: number): number[] {
+  const out: number[] = [];
+  for (let i = a; i < b; i++) out.push(i);
+  return out;
 }
