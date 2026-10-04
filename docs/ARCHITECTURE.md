@@ -970,9 +970,10 @@ uniform（全部由系統提供，不能自己宣告）：
   transition; the offline frame (`offlineSceneFrame`) transitions when the program's mode changes too.
   **Transitions follow the song clock** (round 12): in track playback `StageEngine` hands the
   director `anchor` (seconds since the section boundary), so a section change starts its transition
-  that far in — and while the anchor is given, the progress *is* the anchor over the duration, so a
-  paused seek holds its moment like the export — and a seek into the first second of a section, a
-  frame capture (`stage-lab?t=`) and the export all show the same moment of it (`data-transition` on
+  that far in — and while the anchor is given the progress follows the song clock (never behind the
+  wall clock live, so a console paused on a seek to a section start still settles within the
+  transition's length; the stage lab sets `inspect`, and a paused lab holds the anchored moment, so
+  a frame capture (`stage-lab?t=`) and the export show the same moment of it; `data-transition` on
   the stage root reports `kind:progress`); a stage that opens inside the window gets the previous
   section's look as `previousTarget` and the director synthesizes the outgoing slot. Cues and live
   mode (no anchor) stay on the wall clock. The compositor's wipe is a visible event — a soft diagonal

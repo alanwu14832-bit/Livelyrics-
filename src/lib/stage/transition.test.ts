@@ -71,15 +71,22 @@ describe("the director follows the song clock", () => {
     expect(p.update(input(target("grid"), "s1", 500, { previousTarget: target("nebula") })).transition).toBeNull();
   });
 
-  it("an anchored transition holds its moment while the song is paused, and finishes on the song clock", () => {
+  it("an inspection holds an anchored transition at its moment while paused; live, the wall clock still finishes it", () => {
     const d = new SceneDirector();
     d.update(input(target("nebula"), "s0", 0));
-    d.update(input(target("grid"), "s1", 1000, { anchor: 0.3 }));
-    // the wall clock runs on for 5 s, the song does not: the frame still shows 0.3 s into the wipe
-    const held = d.update(input(target("grid"), "s1", 6000, { anchor: 0.3 }));
+    d.update(input(target("grid"), "s1", 1000, { anchor: 0.3, hold: true }));
+    // the wall clock runs on for 5 s, the song does not: the lab's frame still shows 0.3 s into the wipe
+    const held = d.update(input(target("grid"), "s1", 6000, { anchor: 0.3, hold: true }));
     expect(held.transition?.progress).toBeCloseTo(0.3 / TRANSITION_SECONDS.wipe, 3);
-    const done = d.update(input(target("grid"), "s1", 6100, { anchor: TRANSITION_SECONDS.wipe + 0.01 }));
+    const done = d.update(input(target("grid"), "s1", 6100, { anchor: TRANSITION_SECONDS.wipe + 0.01, hold: true }));
     expect(done.transition).toBeNull();
+    // the console paused on a seek to a section start: the transition settles within its duration
+    const live = new SceneDirector();
+    live.update(input(target("nebula"), "s0", 0));
+    live.update(input(target("grid"), "s1", 1000, { anchor: 0.1 }));
+    const mid = live.update(input(target("grid"), "s1", 1000 + TRANSITION_SECONDS.wipe * 500, { anchor: 0.1 }));
+    expect(mid.transition?.progress).toBeCloseTo(0.5 + 0.1 / TRANSITION_SECONDS.wipe, 2);
+    expect(live.update(input(target("grid"), "s1", 1000 + TRANSITION_SECONDS.wipe * 1000 + 5, { anchor: 0.1 })).transition).toBeNull();
   });
 
   it("without an anchor (cues, live mode) the wall clock still drives it", () => {

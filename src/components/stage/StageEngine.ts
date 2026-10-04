@@ -119,6 +119,8 @@ export class StageEngine {
   private renderScale = 1;
   private adaptive = true;
   private transitionScale = 1;
+  /** an inspection stage (the lab): anchored transitions hold their moment while paused */
+  private inspect = false;
   private quality = 1;
   private onStats: ((s: StageStats) => void) | null = null;
 
@@ -341,6 +343,11 @@ export class StageEngine {
   }
 
   /** slow down section transitions (stage lab inspection); 1 = normal */
+  /** The stage lab: a paused song holds a section transition at its anchored moment (frame captures). */
+  setInspect(on: boolean) {
+    this.inspect = on;
+  }
+
   setTransitionScale(scale: number) {
     this.transitionScale = clamp(scale, 0.1, 50, 1);
   }
@@ -736,6 +743,7 @@ export class StageEngine {
       durationScale: this.transitionScale,
       anchor,
       previousTarget,
+      hold: this.inspect && !state.playing,
     });
     // the current slot always carries this frame's program values (an outgoing slot keeps its last)
     df.current.target.program = pd;

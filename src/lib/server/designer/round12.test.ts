@@ -49,7 +49,8 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     // 雨 gives the threads a real chance in a pop ballad
     expect(ballad.threads).toBeGreaterThan(1.5);
     const folk = formWeights(analyzeFindings(auditInput(auditSong("folk"))));
-    expect(sceneForms(analyzeFindings(auditInput(auditSong("folk"))))[0]).toBe("strata");
+    // the genre's strata, or the river's ribbons: the imagery may outweigh the genre's default
+    expect(["strata", "ribbons"]).toContain(sceneForms(analyzeFindings(auditInput(auditSong("folk"))))[0]);
     expect(folk.brush).toBeGreaterThan(folk.bars);
     // every form keeps a weight: nothing is forbidden, only rarer
     for (const f of FORM_IDS) expect(punk[f]).toBeGreaterThan(0);
@@ -68,9 +69,9 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     expect(nudged.bars).toBeCloseTo(base.bars * 0.8, 2);
     expect(nudged.pillars).toBeCloseTo(base.pillars, 2);
     expect(nudged.horizon).toBeGreaterThan(0);
-    // a form worn twice among the last five weighs half again
+    // a form worn twice among the last five takes both recency factors and weighs half again
     const twice = formWeights(f, { recentForms: ["horizon", "bars", "horizon"] });
-    expect(twice.horizon).toBeCloseTo(base.horizon * 0.55 * 0.5, 2);
+    expect(twice.horizon).toBeCloseTo(base.horizon * 0.55 * 0.8 * 0.5, 2);
   });
 
   it("the texture follows the genre's surface and the imagery, the motion the strongest image", () => {

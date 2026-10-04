@@ -25,6 +25,8 @@ export interface StageViewProps {
   forceWebGL1?: boolean;
   /** multiplies section-transition durations (slow motion for inspection); default 1 */
   transitionScale?: number;
+  /** an inspection stage (the lab): a paused song holds a section transition at its moment */
+  inspect?: boolean;
   /** called about once per second with renderer statistics */
   onStats?: (stats: StageStats) => void;
   style?: CSSProperties;
@@ -40,6 +42,7 @@ export function StageView({
   adaptiveQuality = true,
   forceWebGL1 = false,
   transitionScale = 1,
+  inspect = false,
   onStats,
   style,
 }: StageViewProps) {
@@ -91,6 +94,10 @@ export function StageView({
   useEffect(() => {
     engineRef.current?.setTransitionScale(transitionScale);
   }, [transitionScale, forceWebGL1]);
+
+  useEffect(() => {
+    engineRef.current?.setInspect(inspect);
+  }, [inspect, forceWebGL1]);
 
   useEffect(() => {
     engineRef.current?.setOnStats(onStats ?? null);

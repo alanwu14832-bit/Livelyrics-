@@ -59,6 +59,12 @@ export interface DirectorInput {
    * the transition window): the outgoing slot is synthesized so the transition still shows.
    */
   previousTarget?: SceneTarget | null;
+  /**
+   * An inspection (the stage lab, a frame capture): an anchored transition holds the anchored
+   * moment while the song is paused. Live (the console, the projection) the wall clock still
+   * finishes it, so a seek that lands on a section start settles within a second.
+   */
+  hold?: boolean;
 }
 
 export const TRANSITION_SECONDS: Record<TransitionKind, number> = {
@@ -148,7 +154,9 @@ export class SceneDirector {
     if (this.transition && this.previous) {
       // an anchored transition follows the song clock (paused, it holds its moment like the export);
       // once the anchor is gone (a cue, live mode) the wall clock finishes it
-      const p = this.transition.anchored && input.anchor != null && Number.isFinite(input.anchor) ? input.anchor / this.transition.duration : (now - this.transition.start) / (this.transition.duration * 1000);
+      const wall = (now - this.transition.start) / (this.transition.duration * 1000);
+      const anchored = this.transition.anchored && input.anchor != null && Number.isFinite(input.anchor) ? input.anchor / this.transition.duration : null;
+      const p = anchored == null ? wall : input.hold ? anchored : Math.max(anchored, wall);
       if (p >= 1 || !Number.isFinite(p)) {
         this.transition = null;
         this.previous = null;
