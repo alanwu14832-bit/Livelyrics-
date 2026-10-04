@@ -39,6 +39,12 @@ export interface DesignerInput {
    * wear the same form + texture and never climax on the same built-in scene.
    */
   bandSongs?: BandSongSummary[];
+  /**
+   * The forms the library's most recently designed other songs wear (most recent first, any band):
+   * a soft nudge — the two most recent forms weigh less — so a catalogue of different bands does
+   * not come out as the same picture three times in a row.
+   */
+  recentForms?: string[];
 }
 
 export interface BandSongSummary {

@@ -869,6 +869,7 @@ export class StageEngine {
       // diagnostics (e2e): how many media layers the last frame drew, and the LED-safety state
       this.root.dataset.stageMedia = String(this.mediaLayers);
       this.root.dataset.safety = safety.on ? String(Math.round(safety.brightness * 100)) : "off";
+      this.root.dataset.transition = df.transition ? `${df.transition.kind}:${df.transition.progress.toFixed(2)}` : "none";
       this.root.dataset.limiter = damping ? "damping" : limiter ? "idle" : "off";
       this.root.dataset.limiterEngaged = String(this.engagedTotal);
       const st = limiter?.status;

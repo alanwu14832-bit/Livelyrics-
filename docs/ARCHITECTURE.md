@@ -970,8 +970,10 @@ uniform（全部由系統提供，不能自己宣告）：
   transition; the offline frame (`offlineSceneFrame`) transitions when the program's mode changes too.
   **Transitions follow the song clock** (round 12): in track playback `StageEngine` hands the
   director `anchor` (seconds since the section boundary), so a section change starts its transition
-  that far in and a seek into the first second of a section, a frame capture (`stage-lab?t=`) and the
-  export all show the same moment of it; a stage that opens inside the window gets the previous
+  that far in — and while the anchor is given, the progress *is* the anchor over the duration, so a
+  paused seek holds its moment like the export — and a seek into the first second of a section, a
+  frame capture (`stage-lab?t=`) and the export all show the same moment of it (`data-transition` on
+  the stage root reports `kind:progress`); a stage that opens inside the window gets the previous
   section's look as `previousTarget` and the director synthesizes the outgoing slot. Cues and live
   mode (no anchor) stay on the wall clock. The compositor's wipe is a visible event — a soft diagonal
   edge (`WIPE_GLSL` `wipeFront`), a leading line of the accent and a breath of light on the incoming
@@ -1132,7 +1134,10 @@ uniform（全部由系統提供，不能自己宣告）：
   **Per band**: `DesignerInput.bandSongs` (the band's other songs, most recently updated first, from
   `storage.ts` `listBandSongs` over `ProjectSummary.sceneRecipe` / `chorusScene`) gives
   `ComposerInput.avoid`: the previous song's form + texture pair is never worn again (another texture,
-  or the next form when it wore them all). The chorus takes the form's relation (horizon / orbits /
+  or the next form when it wore them all). **Across the library** (any band) the two most recently
+  designed songs' forms weigh `RECENT_FORM_FACTOR` (0.55) — a nudge, never a ban — through
+  `DesignerInput.recentForms` (`storage.ts` `listRecentForms`), so a catalogue of different bands does
+  not come out as one picture three times in a row. The chorus takes the form's relation (horizon / orbits /
   ribbons lit, pillars behind, bars / brush knockout). **An instrumental** (`lyrics: false`) gets the
   `quiet()` layer: slow motes rising through the frame in every mode but the open chorus and, every
   8 s, a soft band of light crossing the frame as strong as `uEnergy` — the energy curve drives

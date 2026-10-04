@@ -14,7 +14,7 @@ import { DesignPlanSchema } from "@/lib/schema";
 import type { DesignDirection, DirectionEngine, DirectionSet, MoodImage, Project } from "@/lib/types";
 import { bandAssetFileOf, getBand } from "./band-storage";
 import { HttpError } from "./http";
-import { assetFileOf, getProject, listBandSongs, updateProject } from "./storage";
+import { assetFileOf, getProject, listBandSongs, listRecentForms, updateProject } from "./storage";
 import { files } from "./store";
 
 /**
@@ -68,6 +68,7 @@ export async function designRequestFor(project: Project, opts: { vision: boolean
     collected: project.collected ?? [],
     songId: project.id,
     bandSongs: await listBandSongs(project.bandId, project.id).catch(() => []),
+    recentForms: await listRecentForms(project.id).catch(() => []),
   };
   if (opts.vision && moodboard.length) {
     const { images, skipped } = await loadVisionImages(project, moodboard, { signal: opts.signal });

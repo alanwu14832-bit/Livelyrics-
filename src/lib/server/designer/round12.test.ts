@@ -50,6 +50,16 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     expect(formWeights(inst, { lyrics: false }).bars).toBeLessThan(formWeights(inst, { lyrics: true }).bars);
   });
 
+  it("the library's two most recent forms weigh less, a nudge rather than a ban", () => {
+    const f = analyzeFindings(auditInput(auditSong("demo")));
+    const base = formWeights(f);
+    const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars"] });
+    expect(nudged.horizon).toBeCloseTo(base.horizon * 0.55, 2);
+    expect(nudged.orbits).toBeCloseTo(base.orbits * 0.55, 2);
+    expect(nudged.bars).toBeCloseTo(base.bars, 2);
+    expect(nudged.horizon).toBeGreaterThan(0);
+  });
+
   it("the texture follows the genre's surface and the imagery, the motion the strongest image", () => {
     const punk = surfaceWeights(analyzeFindings(auditInput(auditSong("punk"))));
     expect(punk.halftone!).toBeGreaterThan(punk.film!);

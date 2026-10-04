@@ -71,6 +71,17 @@ describe("the director follows the song clock", () => {
     expect(p.update(input(target("grid"), "s1", 500, { previousTarget: target("nebula") })).transition).toBeNull();
   });
 
+  it("an anchored transition holds its moment while the song is paused, and finishes on the song clock", () => {
+    const d = new SceneDirector();
+    d.update(input(target("nebula"), "s0", 0));
+    d.update(input(target("grid"), "s1", 1000, { anchor: 0.3 }));
+    // the wall clock runs on for 5 s, the song does not: the frame still shows 0.3 s into the wipe
+    const held = d.update(input(target("grid"), "s1", 6000, { anchor: 0.3 }));
+    expect(held.transition?.progress).toBeCloseTo(0.3 / TRANSITION_SECONDS.wipe, 3);
+    const done = d.update(input(target("grid"), "s1", 6100, { anchor: TRANSITION_SECONDS.wipe + 0.01 }));
+    expect(done.transition).toBeNull();
+  });
+
   it("without an anchor (cues, live mode) the wall clock still drives it", () => {
     const d = new SceneDirector();
     d.update(input(target("nebula"), "s0", 0));

@@ -33,7 +33,7 @@ import { loadVisionImages } from "./directions";
 import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
-import { getProject, listBandSongs, listKeyVisualTitles, updateProject } from "./storage";
+import { getProject, listBandSongs, listKeyVisualTitles, listRecentForms, updateProject } from "./storage";
 import { collectForProject } from "./collect-visuals";
 import { findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
 import { collectedSummary } from "@/lib/visuals";
@@ -631,6 +631,7 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         // the composer's seed and the band's other songs (never the same picture twice in a row)
         songId: project.id,
         bandSongs: await listBandSongs(project.bandId, project.id).catch(() => []),
+        recentForms: await listRecentForms(project.id).catch(() => []),
       };
       const live = designerCallbacks(run, "design", signal);
       // designSong's success log names Claude's model; every other path is the offline designer
@@ -706,6 +707,7 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
     arc: (run.cloud ? run.cloud.arc : run.request.arc) ?? null,
     songId: project.id,
     bandSongs: await listBandSongs(project.bandId, project.id).catch(() => []),
+    recentForms: await listRecentForms(project.id).catch(() => []),
   };
   const cb = designerCallbacks(run, "scene", signal);
   const deps = designerDeps(run) ?? {};

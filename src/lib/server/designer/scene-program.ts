@@ -106,7 +106,7 @@ const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
   heaven: ["orbits", "horizon"],
   stars: ["orbits", "threads"],
   universe: ["orbits", "horizon"],
-  night: ["horizon", "orbits"],
+  night: ["orbits", "horizon"],
   writing: ["brush", "strata"],
   memory: ["brush", "strata"],
   autumn: ["brush", "threads"],
@@ -122,7 +122,7 @@ const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
   glass: ["bars", "pillars"],
   forest: ["strata", "pillars"],
   desert: ["strata", "horizon"],
-  world: ["horizon", "strata"],
+  world: ["strata", "horizon"],
   blood: ["pillars", "threads"],
   war: ["pillars", "bars"],
   heart: ["orbits", "brush"],
@@ -139,7 +139,12 @@ const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
 export interface FormWeightOptions {
   /** the song has lyrics (false: an instrumental) */
   lyrics?: boolean;
+  /** the library's most recent forms (most recent first): the two latest weigh RECENT_FORM_FACTOR */
+  recentForms?: readonly string[];
 }
+
+/** How much a form the library's two most recent songs wear is weighed down (a nudge, never a ban). */
+export const RECENT_FORM_FACTOR = 0.55;
 
 /** Weights over the forms for a song (exported for the tests and the stage lab). */
 export function formWeights(findings: Findings, opts: FormWeightOptions = {}): Record<FormId, number> {
@@ -183,6 +188,7 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.orbits += 0.3;
     w.bars *= 0.6;
   }
+  for (const f of (opts.recentForms ?? []).slice(0, 2)) if ((FORM_IDS as readonly string[]).includes(f)) w[f as FormId] *= RECENT_FORM_FACTOR;
   for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.05, w[f]) * 1000) / 1000;
   return w;
 }
@@ -275,10 +281,11 @@ export function songSeed(req: Pick<DesignerInput, "meta" | "songId">): number {
 export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt = 0, findings?: Findings): SceneProgram {
   const f = findings ?? analyzeFindings(req);
   const lyrics = (req.lyrics?.lines ?? []).some((l) => typeof l?.text === "string" && l.text.trim());
+  const wopts: FormWeightOptions = { lyrics, recentForms: req.recentForms };
   const program = composeSceneProgram({
     seed: songSeed(req),
-    forms: sceneForms(f, { lyrics }),
-    weights: formWeights(f, { lyrics }),
+    forms: sceneForms(f, wopts),
+    weights: formWeights(f, wopts),
     avoid: bandPairs(req),
     surface: surfaceWeights(f),
     motionBias: motionBias(f),

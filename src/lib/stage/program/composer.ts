@@ -153,6 +153,9 @@ export function weightedOrder<K extends string>(weights: Partial<Record<K, numbe
   return out;
 }
 
+/** How much the form weights are sharpened before the draw (1 = proportional; higher = the top form wins more often). */
+export const FORM_SHARPEN = 1.15;
+
 /** The composer's choices for a song (exported for the UI label and the tests). */
 export function chooseComposition(input: ComposerInput): ComposerChoice {
   const r = rng((input.seed ^ Math.imul(input.salt ?? 0, 0x2c1b3c6d)) >>> 0);
@@ -164,7 +167,7 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
     // the weighted draw, seeded by the song alone (the salt walks the same order so a regenerate
     // never lands on the same form twice in a row)
     // the weights are sharpened (^1.8) so the tail forms stay rare: more variety, not a lottery
-    const sharp = Object.fromEntries(Object.entries(input.weights!).map(([k, w]) => [k, Math.pow(Math.max(0, w ?? 0), 1.8)])) as Partial<Record<FormId, number>>;
+    const sharp = Object.fromEntries(Object.entries(input.weights!).map(([k, w]) => [k, Math.pow(Math.max(0, w ?? 0), FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
     const order = weightedOrder(sharp, rng(input.seed >>> 0));
     form = order[salt % order.length] ?? forms[0] ?? "horizon";
     // the band's previous song wears this form with every texture it could: another form

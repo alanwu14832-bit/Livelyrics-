@@ -474,6 +474,15 @@ export async function listBandSongs(bandId: string | undefined, exceptId?: strin
     .map((p) => ({ id: p.id, recipe: p.sceneRecipe ?? null, chorusScene: p.chorusScene ?? null }));
 }
 
+/** The forms the library's other designed songs wear, most recently updated first (from their program recipes). */
+export async function listRecentForms(exceptId?: string): Promise<string[]> {
+  return (await listProjects())
+    .filter((p) => p.id !== exceptId && p.sceneRecipe)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .map((p) => (p.sceneRecipe ?? "").split("/")[0])
+    .filter(Boolean);
+}
+
 /** Every file a project owns (its audio and its own assets). */
 function projectFiles(project: Project): StoredFile[] {
   const out: StoredFile[] = [];

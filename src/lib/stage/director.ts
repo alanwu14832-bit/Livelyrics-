@@ -89,7 +89,7 @@ function sameLookIgnoringParams(a: SceneTarget, b: SceneTarget): boolean {
 export class SceneDirector {
   private current: SceneSlot | null = null;
   private previous: SceneSlot | null = null;
-  private transition: { kind: ActiveTransitionKind; start: number; duration: number } | null = null;
+  private transition: { kind: ActiveTransitionKind; start: number; duration: number; anchored: boolean } | null = null;
   private sectionKey: string | null = null;
 
   constructor(private readonly initialClock = 0) {}
@@ -129,7 +129,7 @@ export class SceneDirector {
         } else if (!lookChanged && kind !== "flash") {
           this.current.target = target;
         } else {
-          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now - anchorMs);
+          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now - anchorMs, input.anchor != null);
         }
       } else if (lookChanged) {
         if (sameLookIgnoringParams(target, this.current.target)) this.current.target = target;
@@ -146,7 +146,9 @@ export class SceneDirector {
 
     let transition: DirectorFrame["transition"] = null;
     if (this.transition && this.previous) {
-      const p = (now - this.transition.start) / (this.transition.duration * 1000);
+      // an anchored transition follows the song clock (paused, it holds its moment like the export);
+      // once the anchor is gone (a cue, live mode) the wall clock finishes it
+      const p = this.transition.anchored && input.anchor != null && Number.isFinite(input.anchor) ? input.anchor / this.transition.duration : (now - this.transition.start) / (this.transition.duration * 1000);
       if (p >= 1 || !Number.isFinite(p)) {
         this.transition = null;
         this.previous = null;
@@ -161,11 +163,11 @@ export class SceneDirector {
     return { current: this.current, previous: this.previous, transition };
   }
 
-  private begin(kind: ActiveTransitionKind, duration: number, target: SceneTarget, now: number) {
+  private begin(kind: ActiveTransitionKind, duration: number, target: SceneTarget, now: number, anchored = false) {
     const outgoing = this.current!;
     this.previous = { target: outgoing.target, clock: outgoing.clock };
     this.current = { target, clock: outgoing.clock };
-    this.transition = { kind, start: now, duration: Math.max(0.05, duration) };
+    this.transition = { kind, start: now, duration: Math.max(0.05, duration), anchored };
   }
 }
 
