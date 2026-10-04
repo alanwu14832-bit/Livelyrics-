@@ -1409,7 +1409,9 @@ one-time acknowledgement before anything goes on stage.
   (the type box over its zone) around the words (`ProbeSample.around`); a chorus below `PROBE_CHORUS_FLOOR`
   (0.08) or darker than the song's brightest verse fails. The composer's orbits (ring halos, a wider core),
   threads (brighter rain, light from the floor), brush and ribbons open up in the chorus to pass on every
-  audit song (`chorus-floor.test.ts`).
+  audit song (`chorus-floor.test.ts`). The demo chorus was in fact hidden by the type engine: the knockout
+  treatment's automatic window filled the frame (`windowFill` 0.52–0.84) over the program; under a 專屬畫面 zone
+  (`LineContext.zone`) the automatic knockout no longer opens the display word (an explicit 鏤空 still does).
 
 ### Cloud mode (Vercel)
 
