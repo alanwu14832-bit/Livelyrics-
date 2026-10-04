@@ -155,6 +155,8 @@ export function weightedOrder<K extends string>(weights: Partial<Record<K, numbe
 
 /** How much the form weights are sharpened before the draw (1 = proportional; higher = the top form wins more often). */
 export const FORM_SHARPEN = 1.15;
+/** Two forms within this fraction of the top weight are a tie the seed settles. */
+export const TIE_BAND = 0.2;
 
 /** The composer's choices for a song (exported for the UI label and the tests). */
 export function chooseComposition(input: ComposerInput): ComposerChoice {
@@ -164,11 +166,16 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
   const hasWeights = input.weights && Object.values(input.weights).some((w) => typeof w === "number" && w > 0);
   let form: FormId;
   if (hasWeights) {
-    // the weighted draw, seeded by the song alone (the salt walks the same order so a regenerate
-    // never lands on the same form twice in a row)
-    // the weights are sharpened (^1.8) so the tail forms stay rare: more variety, not a lottery
-    const sharp = Object.fromEntries(Object.entries(input.weights!).map(([k, w]) => [k, Math.pow(Math.max(0, w ?? 0), FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
-    const order = weightedOrder(sharp, rng(input.seed >>> 0));
+    // the best-fitting form leads (a near tie — within TIE_BAND — is settled by the song's seed, so
+    // two songs with the same evidence can differ), then a weighted order of the rest for the salt
+    // (「重新產生畫面」 walks it and never lands on the same form twice in a row); the weights are
+    // what the designer's evidence says, nudged by what the band and the library just wore
+    const ranked = (Object.entries(input.weights!) as Array<[FormId, number]>).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]);
+    const top = ranked[0];
+    const tied = ranked.filter(([, w]) => w >= top[1] * (1 - TIE_BAND));
+    const lead = tied[Math.floor(rng(input.seed >>> 0)() * tied.length)][0];
+    const rest = Object.fromEntries(ranked.filter(([k]) => k !== lead).map(([k, w]) => [k, Math.pow(w, FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
+    const order: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
     form = order[salt % order.length] ?? forms[0] ?? "horizon";
     // the band's previous song wears this form with every texture it could: another form
     const worn = (input.avoid ?? []).filter((a) => a.form === form).map((a) => a.texture);

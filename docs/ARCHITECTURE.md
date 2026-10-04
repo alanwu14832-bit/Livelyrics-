@@ -1124,20 +1124,26 @@ uniform（全部由系統提供，不能自己宣告）：
   `forms`, else `FORMS_BY_IMAGERY`: 雨／淚／雪 → threads, 河／路／風／夢 → ribbons, 牆／門 → pillars /
   strata, 光／月／星 → orbits / horizon, 筆墨／時光／花 → brush, 城市／霓虹／列車 → bars…), the energy
   shape bends it (driving → bars / pillars, bright → horizon / ribbons, slow → strata / brush) and an
-  instrumental leans to shapes that hold a frame without words. `chooseComposition` sharpens the
-  weights (^1.8), draws a weighted order seeded by the song (`songSeed`: title | artist mixed with the
-  project id, so two indie-rock songs — or two songs with one title — differ) and takes index 0; a
-  salt (「重新產生畫面」) walks that order, so a regenerate never repeats the form. The texture is the
+  instrumental leans to shapes that hold a frame without words (the strongest image adds
+  `IMAGERY_LEAD` 3.0 / `IMAGERY_SECOND` 1.5 × its share, so 雨 beats a pop genre's horizon).
+  `chooseComposition` takes the best-fitting form; when the top two are within `TIE_BAND` (20 %) the
+  song's seed settles it (`songSeed`: title | artist mixed with the project id, so two indie-rock
+  songs — or two songs with one title — can differ, but only between forms the evidence rates
+  alike), and the rest follow in a weighted order the salt (「重新產生畫面」) walks, so a regenerate
+  never repeats the form. The draw is deterministic and explainable: evidence first, then what the
+  band and the library just wore. The texture is the
   voice's surfaces weighted by the genre's (`surfaceWeights`: punk → halftone, electronic / city pop →
   scan, folk → paper) and the imagery's; the motion is the form's own ways of moving bent by the
   strongest image (`motionBias`: rain falls → drift, a river flows → drift / sweep, a planet → orbit).
   **Per band**: `DesignerInput.bandSongs` (the band's other songs, most recently updated first, from
   `storage.ts` `listBandSongs` over `ProjectSummary.sceneRecipe` / `chorusScene`) gives
   `ComposerInput.avoid`: the previous song's form + texture pair is never worn again (another texture,
-  or the next form when it wore them all). **Across the library** (any band) the two most recently
-  designed songs' forms weigh `RECENT_FORM_FACTOR` (0.55) — a nudge, never a ban — through
+  or the next form when it wore them all). **Across the library** (any band) the forms the last songs
+  wear weigh less by recency (`RECENT_FORM_FACTORS` 0.55, 0.55, 0.8, 0.8; a form worn twice among the
+  last five `RECENT_REPEAT_FACTOR` 0.5 more) — a nudge, never a ban — through
   `DesignerInput.recentForms` (`storage.ts` `listRecentForms`), so a catalogue of different bands does
-  not come out as one picture three times in a row. The chorus takes the form's relation (horizon / orbits /
+  not come out as one picture three times in a row (the seven audit songs, designed in order, wear
+  五 forms with none more than twice; `round12.test.ts`). The chorus takes the form's relation (horizon / orbits /
   ribbons lit, pillars behind, bars / brush knockout). **An instrumental** (`lyrics: false`) gets the
   `quiet()` layer: slow motes rising through the frame in every mode but the open chorus and, every
   8 s, a soft band of light crossing the frame as strong as `uEnergy` — the energy curve drives

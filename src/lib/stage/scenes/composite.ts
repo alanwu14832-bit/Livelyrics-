@@ -75,8 +75,8 @@ void main() {
     float bell = sin(p * PI);
     vec3 lift = a * (1.0 + 0.22 * bell * exp(-max(front - e, 0.0) * 7.0));
     col = mix(b, lift, m);
-    float edge = exp(-abs(e - front) * 24.0) * bell;
-    col += mix(uAcc, vec3(1.0), 0.2) * edge * 0.75;
+    float edge = exp(-abs(e - front) * 32.0) * bell;
+    col += mix(uAcc, vec3(1.0), 0.2) * edge * 0.5;
     col = col / (1.0 + max(col - 0.9, 0.0));
   } else {
     // bloom: the old scene blooms out, the new one opens from the centre

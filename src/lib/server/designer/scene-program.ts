@@ -136,15 +136,21 @@ const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
   mirror: ["pillars", "horizon"],
 };
 
+/** What the strongest image adds to its first and second form (the genre family sets 2–3.2 for its own). */
+export const IMAGERY_LEAD = 3.0;
+export const IMAGERY_SECOND = 1.5;
+
 export interface FormWeightOptions {
   /** the song has lyrics (false: an instrumental) */
   lyrics?: boolean;
-  /** the library's most recent forms (most recent first): the two latest weigh RECENT_FORM_FACTOR */
+  /** the library's most recent forms (most recent first): the latest weigh RECENT_FORM_FACTORS, a repeat RECENT_REPEAT_FACTOR more */
   recentForms?: readonly string[];
 }
 
-/** How much a form the library's two most recent songs wear is weighed down (a nudge, never a ban). */
-export const RECENT_FORM_FACTOR = 0.55;
+/** How much the forms the library's last songs wear are weighed down, by recency (a nudge, never a ban). */
+export const RECENT_FORM_FACTORS = [0.55, 0.55, 0.8, 0.8] as const;
+/** …and once more when a form was worn twice among the last five songs. */
+export const RECENT_REPEAT_FACTOR = 0.5;
 
 /** Weights over the forms for a song (exported for the tests and the stage lab). */
 export function formWeights(findings: Findings, opts: FormWeightOptions = {}): Record<FormId, number> {
@@ -157,8 +163,8 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
   for (const h of top) {
     const share = Math.min(1, h.weight / max);
     const forms = (h.family.forms?.filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f)) ?? []).concat(FORMS_BY_IMAGERY[h.family.id] ?? []);
-    if (forms[0]) w[forms[0]] += 1.6 * share;
-    if (forms[1]) w[forms[1]] += 0.9 * share;
+    if (forms[0]) w[forms[0]] += IMAGERY_LEAD * share;
+    if (forms[1]) w[forms[1]] += IMAGERY_SECOND * share;
   }
   // the energy shape
   const a = findings.audio;
@@ -188,7 +194,11 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.orbits += 0.3;
     w.bars *= 0.6;
   }
-  for (const f of (opts.recentForms ?? []).slice(0, 2)) if ((FORM_IDS as readonly string[]).includes(f)) w[f as FormId] *= RECENT_FORM_FACTOR;
+  const recent = (opts.recentForms ?? []).slice(0, 5).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
+  recent.forEach((f, i) => {
+    if (i < RECENT_FORM_FACTORS.length) w[f] *= RECENT_FORM_FACTORS[i];
+  });
+  for (const f of new Set(recent)) if (recent.filter((x) => x === f).length >= 2) w[f] *= RECENT_REPEAT_FACTOR;
   for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.05, w[f]) * 1000) / 1000;
   return w;
 }

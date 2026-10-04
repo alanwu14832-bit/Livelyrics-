@@ -211,7 +211,7 @@ void main() {
     } else if (uTransition < 3.5) {
       vec2 wf = wipeFront(uv, uRes.x / uRes.y, tp);
       keep = smoothstep(wf.y + WIPE_SOFT, wf.y - WIPE_SOFT, wf.x);
-      tGlow = exp(-abs(wf.x - wf.y) * 24.0) * sin(tp * 3.14159265) * 0.7;
+      tGlow = exp(-abs(wf.x - wf.y) * 32.0) * sin(tp * 3.14159265) * 0.6;
     } else {
       keep = smoothstep(0.0, 0.6, tp);
       tGlow = sin(tp * 3.14159265) * 0.6;

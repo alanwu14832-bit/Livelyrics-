@@ -15,7 +15,16 @@ import { chooseClimax, offlineContext, offlineDesign } from "./offline";
 import { bandPairs, ensureSceneProgram, formWeights, motionBias, offlineSceneProgram, programFromDraft, sceneForms, songSeed, surfaceWeights } from "./scene-program";
 import { AUDIT_SONGS, auditInput, auditSong } from "./testing/audit-songs";
 
-const plans = new Map(AUDIT_SONGS.map((s) => [s.key, offlineDesign(auditInput(s))] as const));
+// the seven songs are designed in the audit's order, each seeing the forms the library wore before it
+// (DesignerInput.recentForms, as the pipeline passes them)
+const recent: string[] = [];
+const plans = new Map(
+  AUDIT_SONGS.map((s) => {
+    const plan = offlineDesign({ ...auditInput(s), recentForms: [...recent] });
+    recent.unshift(plan.sceneProgram!.recipe!.split("/")[0]);
+    return [s.key, plan] as const;
+  }),
+);
 const plan = (key: string) => plans.get(key)!;
 const recipeOf = (key: string) => plan(key).sceneProgram!.recipe!.split("#")[0].split("/") as [FormId, TextureId, string];
 const lastChorus = (key: string) => [...plan(key).sections].reverse().find((s) => s.kind === "chorus")!;
@@ -53,11 +62,15 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
   it("the library's two most recent forms weigh less, a nudge rather than a ban", () => {
     const f = analyzeFindings(auditInput(auditSong("demo")));
     const base = formWeights(f);
-    const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars"] });
+    const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars", "strata", "ribbons", "pillars"] });
     expect(nudged.horizon).toBeCloseTo(base.horizon * 0.55, 2);
     expect(nudged.orbits).toBeCloseTo(base.orbits * 0.55, 2);
-    expect(nudged.bars).toBeCloseTo(base.bars, 2);
+    expect(nudged.bars).toBeCloseTo(base.bars * 0.8, 2);
+    expect(nudged.pillars).toBeCloseTo(base.pillars, 2);
     expect(nudged.horizon).toBeGreaterThan(0);
+    // a form worn twice among the last five weighs half again
+    const twice = formWeights(f, { recentForms: ["horizon", "bars", "horizon"] });
+    expect(twice.horizon).toBeCloseTo(base.horizon * 0.55 * 0.5, 2);
   });
 
   it("the texture follows the genre's surface and the imagery, the motion the strongest image", () => {
@@ -70,17 +83,21 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     expect(motionBias(analyzeFindings(auditInput(auditSong("longlines")))).sweep).toBeGreaterThan(1);
   });
 
-  it("the seed mixes the project id in, and two songs of one genre on one audio differ", () => {
+  it("the best-fitting form leads; a near tie is settled by the seed, which mixes the project id in", () => {
     const meta = { title: "同名", artist: "同團", duration: 73, fileName: "a.wav" } as never;
     expect(songSeed({ meta, songId: "p1" })).not.toBe(songSeed({ meta, songId: "p2" }));
     expect(songSeed({ meta })).toBe(songSeed({ meta }));
-    const findings = analyzeFindings(auditInput(auditSong("demo")));
-    const weights = formWeights(findings);
+    // a clear winner is always chosen, whatever the seed
+    const clear = { horizon: 5, orbits: 2, bars: 1 } as Partial<Record<FormId, number>>;
+    for (let seed = 1; seed <= 12; seed++) expect(chooseComposition({ seed: seed * 2654435761, forms: [], weights: clear, sections: [] }).form).toBe("horizon");
+    // two forms within 20 % of each other: the seed decides, and both get chosen across seeds
+    const tie = { horizon: 5, orbits: 4.4, bars: 1 } as Partial<Record<FormId, number>>;
     const forms = new Set<string>();
-    for (let seed = 1; seed <= 24; seed++) forms.add(chooseComposition({ seed: seed * 2654435761, forms: sceneForms(findings), weights, sections: [] }).form);
-    expect(forms.size).toBeGreaterThanOrEqual(4);
+    for (let seed = 1; seed <= 24; seed++) forms.add(chooseComposition({ seed: seed * 2654435761, forms: [], weights: tie, sections: [] }).form);
+    expect([...forms].sort()).toEqual(["horizon", "orbits"]);
     // the demo and the long-lines song are both indie rock on the same audio and wear different programs
     expect(recipeOf("demo")[0]).not.toBe(recipeOf("longlines")[0]);
+    void sceneForms;
   });
 
   it("a salt walks the weighted order: 「重新產生畫面」 never lands on the same form twice in a row", () => {
