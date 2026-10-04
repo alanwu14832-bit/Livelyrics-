@@ -22,6 +22,16 @@ export const PROBE_MEAN_MAX = 0.42;
 export const PROBE_BLACK_MEAN = 0.012;
 /** Mid luminance: the lit-area threshold (sRGB luma of the displayed colour). */
 export const PROBE_MID = 0.5;
+/**
+ * Round 13: a chorus must reach a visible protagonist. Measured with the words on screen (the type
+ * box over the section's zone, so the form gives way under them as it does live), over the picture
+ * around the words: its mean luminance may not fall below this floor, nor below the brightest verse
+ * of the song (a chorus darker than its verse is a failure: the audit's dim orbits behind the giant word).
+ */
+export const PROBE_CHORUS_FLOOR = 0.08;
+/** a chorus may be this much darker than the verse before it fails (measurement noise) */
+export const PROBE_CHORUS_TOLERANCE = 0.003;
+
 /** Default sample grid (columns × rows): enough for area fractions, cheap on the server. */
 export const PROBE_GRID: [number, number] = [32, 18];
 
@@ -35,6 +45,8 @@ export interface ProbeSample {
   lit: number;
   /** fraction of samples below 0.04 */
   dark: number;
+  /** mean sRGB luma of the picture around the words, with the words on screen (the type box over the zone) */
+  around: number;
 }
 
 export interface ProbeResult {
@@ -158,16 +170,33 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       let lit = 0;
       let dark = 0;
       const n = cols * rows;
+      const at = (i: number, j: number): [number, number] => [((i + 0.5) / cols) * res[0], ((j + 0.5) / rows) * res[1]];
       for (let j = 0; j < rows; j++) {
         for (let i = 0; i < cols; i++) {
-          const fc: [number, number] = [((i + 0.5) / cols) * res[0], ((j + 0.5) / rows) * res[1]];
-          const l = luma(compiled.scene(fc).color);
+          const l = luma(compiled.scene(at(i, j)).color);
           sum += l;
           if (l > PROBE_MID) lit++;
           if (l < 0.04) dark++;
         }
       }
-      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: Math.round((sum / n) * 1000) / 1000, lit: Math.round((lit / n) * 1000) / 1000, dark: Math.round((dark / n) * 1000) / 1000 };
+      // the same state with the words on screen: the type box over the zone, measured around it
+      const box = u.uZone;
+      compiled.setUniforms({ ...u, uTypeBox: box, uTypeAmt: 1 });
+      let aroundSum = 0;
+      let aroundN = 0;
+      for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) {
+          const fc = at(i, j);
+          const x = fc[0] / res[0];
+          const y = fc[1] / res[1];
+          if (x > box[0] - 0.02 && x < box[2] + 0.02 && y > box[1] - 0.02 && y < box[3] + 0.02) continue;
+          aroundSum += luma(compiled.scene(fc).color);
+          aroundN++;
+        }
+      }
+      compiled.setUniforms(u);
+      const r3 = (x: number) => Math.round(x * 1000) / 1000;
+      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n) };
       seen.set(sig, sample);
       samples.push(sample);
     });
@@ -181,6 +210,14 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
     if (s.lit > PROBE_LIT_MAX) errors.push(`${label(s)}：亮部佔畫面 ${Math.round(s.lit * 100)}%，上限 ${Math.round(PROBE_LIT_MAX * 100)}%——把亮的形狀縮小、光暈收短，大部分畫面留暗`);
     else if (s.mean > PROBE_MEAN_MAX) errors.push(`${label(s)}：平均亮度 ${s.mean.toFixed(2)}，上限 ${PROBE_MEAN_MAX}——整體壓暗，亮只留給主角形狀`);
     if (s.mean < PROBE_BLACK_MEAN && s.lit === 0) warnings.push(`${label(s)}：畫面幾乎全黑（平均亮度 ${s.mean.toFixed(3)}），這一段沒有東西可看`);
+  }
+  // the chorus is where the picture opens: with the words on screen it must stay visible and never
+  // be darker than the song's verse
+  const verseAround = Math.max(0, ...samples.filter((s) => s.kind === "verse").map((s) => s.around));
+  for (const s of samples) {
+    if (s.kind !== "chorus") continue;
+    if (s.around < PROBE_CHORUS_FLOOR) errors.push(`${label(s)}：副歌字的周圍平均亮度只有 ${s.around.toFixed(3)}，下限 ${PROBE_CHORUS_FLOOR}——副歌要有看得見的主角（用 uPri／uAcc 的形狀、亮的核心或軌跡）`);
+    else if (s.around < verseAround - PROBE_CHORUS_TOLERANCE) errors.push(`${label(s)}：副歌（${s.around.toFixed(3)}）比主歌（${verseAround.toFixed(3)}）還暗——副歌應該打開畫面`);
   }
   const uniq = (xs: string[]) => [...new Set(xs)];
   const out: ProbeResult & { sectionsKey?: object } = { ok: errors.length === 0, errors: uniq(errors).slice(0, 8), warnings: uniq(warnings).slice(0, 8), samples };
