@@ -317,11 +317,13 @@ describe("runPipeline", () => {
     );
     const saved = (await getProject(p.id))!;
     expect(saved.lyrics.source).toBe("lrclib-plain");
-    expect(saved.lyrics.synced).toBe(true);
+    // round 13: every line has a time, but the times are estimated (not synced until 對拍)
+    expect(saved.lyrics.synced).toBe(false);
+    expect(saved.lyrics.timing).toBe("estimated");
     expect(saved.lyrics.lines[0].start).toBeGreaterThan(0);
     expect(events.find((e) => e.type === "step" && e.status === "done")).toMatchObject({ message: expect.stringContaining("粗略分配") });
 
-    // now synced lyrics exist: the lyrics step is skipped
+    // now every line has a time: the lyrics step is skipped (and says the times are estimated)
     const again = await collect(runPipeline(p.id, { steps: ["lyrics", "research"] }));
     expect(again).toContainEqual(expect.objectContaining({ type: "step", step: "lyrics", status: "skipped" }));
 
