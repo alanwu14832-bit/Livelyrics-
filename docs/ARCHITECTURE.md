@@ -86,7 +86,8 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/type` | HOME | 排版 (phase 6): the song's 字體語言 and every line's composition, desktop and phone (edits live on the projection) |
 | `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan (`?voice=&aspect=&project=`: 字體藝術 in a voice on a canvas; `?program=`: 專屬畫面) |
 | `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
-| `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
+| `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth, keySource, keyEditable }` (never touches storage; never the key, not even masked) |
+| `/api/settings/api-key` GET/PUT/DELETE | SERVER | round 13 「設定」: `KeyStatus { configured, source: env \| settings \| null, masked, editable }` / PUT `{ key }` (sk-ant-…, same-origin only) / DELETE 移除金鑰 (local mode; 409 on Vercel) |
 | `/api/auth/login` POST, `/api/auth/logout` POST | SERVER | password gate: JSON `{ password, next? }` or a plain form post → session cookie / clear it |
 | `/api/blob/upload` POST | SERVER | cloud: signs one browser upload to Vercel Blob (`@vercel/blob/client` `handleUpload`, see "Cloud mode") |
 | `/api/projects` GET/POST | SERVER | list summaries / create (local: multipart `audio`, `meta` JSON, `analysis` JSON; cloud: JSON `{ blob, fileName, meta, analysis, bandId? }` after the browser uploaded to Blob) |
@@ -1370,6 +1371,45 @@ one-time acknowledgement before anything goes on stage.
 - Entry points: console top bar 「匯出」 and 控制 › 輸出畫面 open the page in a new tab at the playhead; the
   design overview header has 「匯出影片」. Dev builds expose `window.__livelyricsExport` (`debugStage`,
   `exportToOpfs`) for the render checks.
+
+### Round 13: 設定, estimated lyric timing, honest copy
+
+- **API key settings** (`src/lib/server/api-key.ts`, route `/api/settings/api-key`). Local mode only (not on
+  Vercel / cloud: the sheet explains the project's Environment Variables in two sentences instead). The key
+  pasted into the home page's 「設定」 sheet is validated (`KEY_PATTERN`), written atomically to
+  `<data dir>/settings/anthropic-key.json` with mode 0600 (no route serves that folder) and cached in memory.
+  `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` in the environment always win (`storedApiKey()` is then null and
+  the SDK reads the environment). `isClaudeConfigured()` = `hasApiKey()`; the designer's SDK client passes the
+  stored key as `apiKey` and is rebuilt when it changes (`defaultTransport`). No route returns the key: the
+  settings route a masked form (`sk-ant-…` + last 4), `/api/status` only `claude` / `keySource`; nothing logs it;
+  writes need the page's own origin. Only `api-key.ts` and `designer/index.ts` read it (tested). The header
+  badge is 「基本模式」 (tooltip: what it does and what a key adds); 「免費研究」 stays the research engine label.
+- **Estimated lyric timing** (`Lyrics.timing?: "estimated"`). `distributeLines` (untimed lyrics pasted at upload,
+  an LRCLIB plain result, the editor's 自動分配) sets it; `normalizeLyrics` keeps it while every line has a time
+  and then reports `synced: false` (`allLinesTimed`, `timingEstimated` in `lrc.ts`); the PATCH validator accepts
+  it. The pipeline's lyric step treats an estimated song like a timed one (no LRCLIB search over the user's
+  lyrics). The console starts such a song in 手動切換, the top bar subtitle links 「歌詞時間是估的・去對拍」 and
+  the 歌詞 pane shows the banner 「歌詞時間是估的，先到歌詞編輯器對拍」. The lyric editor carries the flag in its
+  undoable state, its drafts and its dirty key; a 對拍 mark clears it, so the save is synced.
+- **Console preview diagnostics**: the resolution, renderer / fps readout and the 歌詞安全區 guides show only
+  with 測試圖 on (a lost / fallback renderer and the window-mismatch warning always show); the badges share one
+  bottom row with LED 模擬 so nothing clips on a phone.
+- **Projection waiting pill** (`src/lib/stage/waiting-hint.ts`): 「等待控制台連線…」 is on the wall for at most
+  `WAITING_HINT_MS` (5 s) after the window opens and never comes back (the console says 投影未連線 itself).
+- **Export**: the 單格預覽 cannot leave the main thread (the OfflineStage needs the page's DOM lyric layer,
+  next/font faces and media), so it runs through `PreviewRunner` (one at a time, cancellable: the pre-roll
+  yields between frames and checks the signal), with 「正在算這一格…」 and 取消 over the frame; an export
+  estimated above 2 GB (`exportNeedsSizeConfirm`) asks first; the hints are plain language (MP4 / WebM,
+  黑底白字 for the VJ) with the technical term once in parentheses.
+- **Honesty on the process page**: `Research.truncated` (Claude's brief cut by max_tokens / pause_turn) shows
+  「Claude 的研究簡報沒有寫完」; a clip under 20 s shows 「音檔太短，分析不可靠」; the 專屬畫面 panel names who
+  wrote the program (`Claude（model）` or 離線作曲器); the home library backfills missing key-still thumbnails
+  (`thumb-backfill.ts`, a few per visit), lists the songs before the bands, and an empty 樂團 is one quiet row.
+- **Chorus floor in the luminance probe** (`probe.ts`): every state is also measured with the words on screen
+  (the type box over its zone) around the words (`ProbeSample.around`); a chorus below `PROBE_CHORUS_FLOOR`
+  (0.08) or darker than the song's brightest verse fails. The composer's orbits (ring halos, a wider core),
+  threads (brighter rain, light from the floor), brush and ribbons open up in the chorus to pass on every
+  audit song (`chorus-floor.test.ts`).
 
 ### Cloud mode (Vercel)
 
