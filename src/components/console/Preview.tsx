@@ -108,6 +108,10 @@ function PreviewPanelImpl({
     return () => ro.disconnect();
   }, []);
   const geometry = sim.on && frameWidth > 0 ? ledGeometry(sim, aspect, frameWidth) : null;
+  // diagnostics (resolution, renderer and fps, the 歌詞安全區 guides) only with the 測試圖 on:
+  // the operator's preview looks like the wall unless they are checking the setup
+  const diagnostics = useStageValue(controller.store, selectOverrides).testPattern;
+  const backendTrouble = !!stats && (stats.backend === "lost" || stats.backend === "fallback");
 
   return (
     <Pane label="投影預覽" order={1} className="flex-1 p-3">
@@ -129,7 +133,7 @@ function PreviewPanelImpl({
                 <StageView
                   project={project}
                   store={controller.store}
-                  showGuides={!sim.on}
+                  showGuides={false}
                   renderScale={0.5}
                   onStats={onStats}
                   className="h-full w-full"
@@ -137,34 +141,43 @@ function PreviewPanelImpl({
                 />
               )}
             </LedSimStage>
-            <LedSimControls settings={sim} geometry={geometry} onChange={setSim} className="absolute right-2 bottom-2" />
-            <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
-              <FrameLabel className="t-latin tabular">
-                {label}・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
-              </FrameLabel>
-              {mismatch && (
-                <FrameLabel className="text-orange-text">
-                  投影視窗 {output.width} × {output.height}，會加黑邊
-                </FrameLabel>
-              )}
-              {stats && (
-                <FrameLabel className={cx("t-latin", (stats.backend === "lost" || stats.backend === "fallback") && "text-orange-text")}>
-                  {BACKEND_LABELS[stats.backend]} {Math.round(stats.fps)} fps
-                </FrameLabel>
-              )}
-              {/* 專屬畫面: the program failed or ran over budget here; the built-in scenes are on */}
-              {(stats?.program?.state === "failed" || stats?.program?.state === "slow") && (
-                <FrameLabel className="text-orange-text">
-                  <span data-program-notice={stats.program.state} title={stats.program.log}>
-                    {stats.program.state === "failed" ? "專屬畫面無法編譯，已改用內建場景" : "專屬畫面太耗效能，已改用內建場景"}
-                  </span>
-                </FrameLabel>
-              )}
-              {limiter.damping && (
-                <FrameLabel className="text-orange-text">
-                  <span data-limiter-label="">已抑制閃爍</span>
-                </FrameLabel>
-              )}
+            {/* one bottom row inside the frame: the labels wrap and shrink before the LED 模擬 button,
+                so nothing is clipped at the preview's edge on a phone */}
+            <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-end justify-between gap-1.5" data-preview-badges="">
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
+                {diagnostics && (
+                  <FrameLabel className="t-latin tabular">
+                    {label}・{canvas.width} × {canvas.height}（{aspectLabel(canvas.width, canvas.height)}）
+                  </FrameLabel>
+                )}
+                {mismatch && (
+                  <FrameLabel className="text-orange-text">
+                    投影視窗 {output.width} × {output.height}，會加黑邊
+                  </FrameLabel>
+                )}
+                {stats && (diagnostics || backendTrouble) && (
+                  <FrameLabel className={cx("t-latin", backendTrouble && "text-orange-text")}>
+                    <span data-fps-readout="">
+                      {BACKEND_LABELS[stats.backend]}
+                      {diagnostics && ` ${Math.round(stats.fps)} fps`}
+                    </span>
+                  </FrameLabel>
+                )}
+                {/* 專屬畫面: the program failed or ran over budget here; the built-in scenes are on */}
+                {(stats?.program?.state === "failed" || stats?.program?.state === "slow") && (
+                  <FrameLabel className="text-orange-text">
+                    <span data-program-notice={stats.program.state} title={stats.program.log}>
+                      {stats.program.state === "failed" ? "專屬畫面無法編譯，已改用內建場景" : "專屬畫面太耗效能，已改用內建場景"}
+                    </span>
+                  </FrameLabel>
+                )}
+                {limiter.damping && (
+                  <FrameLabel className="text-orange-text">
+                    <span data-limiter-label="">已抑制閃爍</span>
+                  </FrameLabel>
+                )}
+              </div>
+              <LedSimControls settings={sim} geometry={geometry} onChange={setSim} className="shrink-0" />
             </div>
             <BlackoutFrame controller={controller} />
             {/* console chrome only: the HUD never reaches the projection window */}

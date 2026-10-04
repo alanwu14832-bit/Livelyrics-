@@ -207,6 +207,7 @@ const LyricLineInput = z.object({
 const LyricsInput = z.object({
   source: z.enum(["lrclib-synced", "lrclib-plain", "user", "embedded", "none"]).optional(),
   synced: z.boolean().optional(),
+  timing: z.enum(["estimated"]).nullable().optional(),
   language: z.string().max(35).nullable().optional(),
   lines: z.array(LyricLineInput).max(5000),
 });
@@ -229,6 +230,7 @@ export function parseLyricsPatch(raw: unknown): Lyrics {
     })),
   };
   if (l.language) lyrics.language = l.language;
+  if (l.timing === "estimated") lyrics.timing = "estimated";
   return normalizeLyrics(lyrics);
 }
 

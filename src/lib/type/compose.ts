@@ -63,7 +63,10 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   const mainPlate: PlateId = role === "accent" ? "accent" : "ink";
   // 鏤空 always opens the display word; the knockout treatment opens it on strong lines only (a
   // whole song of filled frames would hide the stage); 主字色 / 點綴色 / 反白 never do
-  const displayWindow = role === "window" || (role === "auto" && sys.color === "knockout" && e >= KNOCK_ENERGY);
+  // round 13: under a 專屬畫面 (the section gives the words a zone) the picture is the chorus's
+  // protagonist, standing opposite the words: the automatic knockout never fills the frame over it
+  // (the demo's orbits went near-black behind the giant word); an explicit 鏤空 still does
+  const displayWindow = role === "window" || (role === "auto" && sys.color === "knockout" && e >= KNOCK_ENERGY && !input.ctx.zone);
   // the display word is set in the full ink colour (B3): a colour accent is the overprint's offset
   // copy or an emphasized run, never the fill of the word the crowd must read; only 點綴色 asks for it
   const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" ? "accent" : "ink";

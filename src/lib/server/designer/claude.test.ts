@@ -147,6 +147,8 @@ describe("researchSong with Claude", () => {
     const research = await researchSong(input, r.cb, { transport: t, configured: true });
     expect(research.engine).toBe("claude");
     expect(research.brief).toContain("簡報未完成");
+    // round 13: the process page tells the customer (Research.truncated)
+    expect(research.truncated).toBe("輸出達到長度上限");
   });
 
   it("falls back to the free research on refusal, discarding the partial output", async () => {
@@ -180,7 +182,7 @@ describe("researchSong with Claude", () => {
     const r = recorder();
     const research = await researchSong(input, r.cb, { configured: false, fetch: noNetwork });
     expect(research.engine).toBe("free");
-    expect(r.logs[0]).toContain("ANTHROPIC_API_KEY");
+    expect(r.logs[0]).toContain("API 金鑰");
     expect(r.deltas.join("")).toContain("查詢 MusicBrainz");
     expect(r.deltas.join("")).toContain("## 樂團視覺識別");
   });

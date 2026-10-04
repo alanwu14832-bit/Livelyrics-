@@ -107,8 +107,14 @@ export type LyricsSource = "lrclib-synced" | "lrclib-plain" | "user" | "embedded
 
 export interface Lyrics {
   source: LyricsSource;
-  /** true when every line has a start time */
+  /** true when every line has a start time that was not estimated (see `timing`) */
   synced: boolean;
+  /**
+   * "estimated": the start times were spread over the song by `distributeLines` (untimed lyrics),
+   * not taken from an LRC file, LRCLIB or the operator's 對拍. `synced` is then false; the console
+   * says so and starts in 手動切換. The lyric editor's 對拍 clears it. Absent = real timings.
+   */
+  timing?: "estimated";
   lines: LyricLine[];
   /** e.g. "zh-Hant", "en", "ja" */
   language?: string;
@@ -167,6 +173,12 @@ export interface Research {
    * poster, logo, live photos). The research step downloads what it can into `Project.collected`.
    */
   visualCandidates?: VisualCandidate[];
+  /**
+   * Claude's brief was cut short (output limit, context window or the search continuations ran out):
+   * the reason in Traditional Chinese. The design used the part that was written; the process page
+   * tells the customer.
+   */
+  truncated?: string;
 }
 
 // ---------------------------------------------------------------------------

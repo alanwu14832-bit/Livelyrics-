@@ -173,7 +173,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
 
   const lines = state.lines;
   const duration = project ? project.meta.duration || project.analysis?.duration || 0 : 0;
-  const dirty = useMemo(() => load.kind === "ok" && contentKey(lines, state.source) !== savedKey, [load.kind, lines, state.source, savedKey]);
+  const dirty = useMemo(() => load.kind === "ok" && contentKey(lines, state.source, state.estimated) !== savedKey, [load.kind, lines, state.source, state.estimated, savedKey]);
   const flags = useMemo(() => outOfOrderFlags(lines), [lines]);
   const timed = useMemo(() => timedCount(lines), [lines]);
   const anyOutOfOrder = flags.some(Boolean);
@@ -202,10 +202,11 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         if (cancelled) return;
         const loaded = fromLyrics(p.lyrics);
         setProject(p);
-        dispatch({ type: "load", lines: loaded, source: p.lyrics.source, language: p.lyrics.language });
-        setSavedKey(contentKey(loaded, p.lyrics.source));
+        const estimated = p.lyrics.timing === "estimated";
+        dispatch({ type: "load", lines: loaded, source: p.lyrics.source, language: p.lyrics.language, estimated });
+        setSavedKey(contentKey(loaded, p.lyrics.source, estimated));
         const d = loadDraft(id);
-        if (d && contentKey(draftToLines(d), d.source) !== contentKey(loaded, p.lyrics.source)) setDraft(d);
+        if (d && contentKey(draftToLines(d), d.source, d.estimated === true) !== contentKey(loaded, p.lyrics.source, estimated)) setDraft(d);
         else if (d) clearDraft(id);
         setLoad({ kind: "ok" });
       })
@@ -235,9 +236,9 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       clearDraft(id);
       return;
     }
-    const t = setTimeout(() => saveDraft(id, { lines: state.lines, source: state.source, baseUpdatedAt: project.updatedAt, savedAt: Date.now() }), 600);
+    const t = setTimeout(() => saveDraft(id, { lines: state.lines, source: state.source, estimated: state.estimated, baseUpdatedAt: project.updatedAt, savedAt: Date.now() }), 600);
     return () => clearTimeout(t);
-  }, [dirty, state.lines, state.source, load.kind, project, draft, id]);
+  }, [dirty, state.lines, state.source, state.estimated, load.kind, project, draft, id]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -379,7 +380,8 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     const r = tapMark(linesRef.current, cur, playhead.now(), latencyRef.current, durationRef.current);
     if (r.session === cur) return;
     linesRef.current = r.lines;
-    dispatch({ type: "edit", lines: r.lines, record: false, source: "user" });
+    // a tapped time is real: the song is no longer "estimated" (Lyrics.timing)
+    dispatch({ type: "edit", lines: r.lines, record: false, source: "user", estimated: false });
     setTap(r.session);
     // one sweep of tint over the row that was just marked (never a loop)
     const markedIndex = cur.pointer;
@@ -433,7 +435,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const save = useCallback(async () => {
     if (savingRef.current || !loadedRef.current) return;
     const before = stateRef.current;
-    const lyrics = normalizeLyrics(toLyrics(before.lines, { source: before.source, language: before.language }));
+    const lyrics = normalizeLyrics(toLyrics(before.lines, { source: before.source, language: before.language, estimated: before.estimated }));
     savingRef.current = true;
     setSaving(true);
     setSaveError(null);
@@ -441,12 +443,13 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       const saved = await api.updateProject(id, { lyrics });
       setProject(saved);
       const savedLines = fromLyrics(saved.lyrics);
-      const key = contentKey(savedLines, saved.lyrics.source);
-      const beforeKey = contentKey(before.lines, before.source);
+      const savedEstimated = saved.lyrics.timing === "estimated";
+      const key = contentKey(savedLines, saved.lyrics.source, savedEstimated);
+      const beforeKey = contentKey(before.lines, before.source, before.estimated);
       const latest = stateRef.current;
       // replace the rows with the normalized result unless the user kept typing meanwhile
-      if (contentKey(latest.lines, latest.source) === beforeKey && key !== beforeKey) {
-        dispatch({ type: "replace", lines: savedLines, source: saved.lyrics.source, language: saved.lyrics.language });
+      if (contentKey(latest.lines, latest.source, latest.estimated) === beforeKey && key !== beforeKey) {
+        dispatch({ type: "replace", lines: savedLines, source: saved.lyrics.source, language: saved.lyrics.language, estimated: savedEstimated });
       }
       setSavedKey(key);
       setDraft(null);
@@ -463,7 +466,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const importLyrics = (lyrics: Lyrics) => {
     if (sessionRef.current) setTap(null);
     setSavedInfo(null);
-    dispatch({ type: "edit", lines: fromLyrics(lyrics), source: lyrics.source === "none" ? "user" : lyrics.source });
+    dispatch({ type: "edit", lines: fromLyrics(lyrics), source: lyrics.source === "none" ? "user" : lyrics.source, estimated: lyrics.timing === "estimated" });
     showToast(`已匯入 ${lyrics.lines.length} 行${lyrics.synced ? "（含時間碼）" : ""}`, "ok");
   };
 
@@ -472,7 +475,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     const base = mode === "all" ? clearAllTimes(cur.lines) : cur.lines;
     const result = distributeLines(toLyrics(base, { source: cur.source, language: cur.language }), project?.analysis ?? null, duration);
     setSavedInfo(null);
-    dispatch({ type: "edit", lines: fromLyrics(result), source: "user" });
+    dispatch({ type: "edit", lines: fromLyrics(result), source: "user", estimated: result.timing === "estimated" });
     setDistributeOpen(false);
     showToast(project?.analysis ? "已依音訊能量粗略分配時間，建議再對拍校正" : "已平均分配時間（沒有音訊分析），建議再對拍校正");
   };
@@ -480,7 +483,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const exportLrc = () => {
     if (!project) return;
     const cur = stateRef.current;
-    const lyrics = normalizeLyrics(toLyrics(cur.lines, { source: cur.source, language: cur.language }));
+    const lyrics = normalizeLyrics(toLyrics(cur.lines, { source: cur.source, language: cur.language, estimated: cur.estimated }));
     const m = project.meta;
     const header = [
       `[ti:${lrcHeaderValue(m.title)}]`,
@@ -644,6 +647,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       <span>
         共 <span className="t-latin tabular">{lines.length}</span> 行，
         {timed === lines.length ? "全部已定時" : timed === 0 ? "都還沒有時間" : `${timed} 行已定時，${untimed} 行未定時`}
+        {state.estimated && timed > 0 && <span data-testid="timing-estimated">（時間是估的，對拍後才算同步）</span>}
       </span>
       <span>歌詞來源：{LYRICS_SOURCE_LABEL[state.source] ?? state.source}</span>
     </div>
@@ -676,7 +680,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             <Button
               variant="tinted"
               onClick={() => {
-                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source });
+                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source, estimated: draft.estimated === true });
                 setDraft(null);
               }}
             >

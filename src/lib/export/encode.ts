@@ -60,12 +60,12 @@ export async function planVideoCodec(pref: VideoCodecChoice, width: number, heig
   if (pref === "avc") {
     const avc = await tryAvc();
     if (avc) return make(avc, null);
-    if (await supported(vp9, width, height, fps, bitrateFor("vp9"), false)) return make(vp9, `這個瀏覽器無法以 H.264 編碼 ${width} × ${height}，改用 VP9（WebM）。需要 H.264 時請用 Chrome 或 Edge 正式版。`);
+    if (await supported(vp9, width, height, fps, bitrateFor("vp9"), false)) return make(vp9, `這個瀏覽器做不出這個尺寸（${width} × ${height}）的 MP4，改存成 WebM 影片（VP9 編碼）；大部分媒體伺服器都能播。一定要 MP4 時，請改用 Chrome 或 Edge 正式版。`);
     return null;
   }
   if (await supported(vp9, width, height, fps, bitrateFor("vp9"), false)) return make(vp9, null);
   const avc = await tryAvc();
-  return avc ? make(avc, `這個瀏覽器無法以 VP9 編碼 ${width} × ${height}，改用 H.264（MP4）。`) : null;
+  return avc ? make(avc, `這個瀏覽器做不出這個尺寸（${width} × ${height}）的 WebM，改存成 MP4 影片（H.264 編碼）。`) : null;
 }
 
 /** Whether the transparent (VP9 alpha) lyric layer can be encoded at this size. */

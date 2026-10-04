@@ -7,7 +7,8 @@
 // keyboard selection scrolls instantly; manual scrolling pauses the follow for 4 s.
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Button, EmptyState, Kbd, Tag, Tooltip, cx } from "@/components/ui";
+import { Banner, Button, EmptyState, Kbd, Tag, Tooltip, cx } from "@/components/ui";
+import { timingEstimated } from "@/lib/lyrics/lrc";
 import { CrosshairIcon, MusicNotesIcon, PencilSimpleIcon } from "@/components/ui/Icon";
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import type { ConsoleController } from "@/lib/console/controller";
@@ -139,6 +140,7 @@ function LyricsListImpl({
   const selectUpcoming = useCallback(() => controller.upcomingLine(), [controller]);
   const upcoming = useStageValue(controller.store, selectUpcoming);
   const untimed = project.lyrics ? untimedCount(project.lyrics) : 0;
+  const estimated = untimed === 0 && timingEstimated(project.lyrics);
   const reduce = useReducedMotion();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -283,6 +285,21 @@ function LyricsListImpl({
           </Button>
         }
       />
+
+      {estimated && (
+        <div className="shrink-0 px-3 pb-2" data-testid="timing-estimated">
+          <Banner
+            tone="warning"
+            title="歌詞時間是估的，先到歌詞編輯器對拍"
+            description={live ? "在那之前用手動切換：由你逐句送出。對拍後就能跟著音檔自動換句。" : "跟音檔模式會照估的時間換句，可能對不上歌手。建議先對拍，或改用手動切換。"}
+            actions={
+              <Button size="sm" variant="tinted" href={editHref} transitionTypes={["push"]} onClick={leave}>
+                去對拍
+              </Button>
+            }
+          />
+        </div>
+      )}
 
       {lines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">

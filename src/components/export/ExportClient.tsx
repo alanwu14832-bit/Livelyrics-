@@ -7,7 +7,7 @@
 // is WebCodecs + mediabunny (src/lib/export/encode.ts).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppHeader, Banner, Button, EmptyState, InsetGroup, ListRow, ProgressBar, SegmentedControl, Select, Sheet, Skeleton, SkeletonGroup, Switch, TextField, cx } from "@/components/ui";
+import { Alert, AppHeader, Banner, Button, EmptyState, InsetGroup, ListRow, ProgressBar, SegmentedControl, Select, Sheet, Skeleton, SkeletonGroup, Spinner, Switch, TextField, cx } from "@/components/ui";
 import { DownloadSimpleIcon, ExportIcon, FilmStripIcon, ImageIcon, MonitorPlayIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
@@ -21,6 +21,7 @@ import {
   VARIANT_INFO,
   clampRange,
   estimateBytes,
+  exportNeedsSizeConfirm,
   formatBytes,
   rangeFor,
   sectionLabel,
@@ -38,6 +39,7 @@ import { safetySummary } from "@/lib/stage/safety";
 import { formatTime, formatTimeShort } from "@/lib/timeline";
 import type { Project } from "@/lib/types";
 import { ExportCanceled, debugExportToOpfs, debugStage, renderPreview, runExport, type DebugExportOptions, type ExportProgress, type ExportResult } from "./runExport";
+import { PreviewRunner } from "./preview-runner";
 
 export interface ExportHeaderInfo {
   title: string;
@@ -123,6 +125,9 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
   /** LED 安全模式 for this export: null = the project's own setting (default); off only after a confirm */
   const [safeOverride, setSafeOverride] = useState<boolean | null>(null);
   const [askUnsafe, setAskUnsafe] = useState<null | "toggle" | "start">(null);
+  // > 2 GB estimated: asked before the export starts (whether LED safety was already confirmed off)
+  const [askSize, setAskSize] = useState<null | { unsafe: boolean }>(null);
+  const [previewRunner] = useState(() => new PreviewRunner());
   const [preview, setPreview] = useState<PreviewState>({ busy: false, t: null, images: null, error: null, warnings: [] });
   const [previewView, setPreviewView] = useState<PreviewView>("full");
   const [timeText, setTimeText] = useState("");
@@ -256,11 +261,16 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
   const plannedBytes = Object.values(cap.plans).reduce((a, p) => a + estimateBytes(p!.bitrate, range.end - range.start, withAudio), 0);
   const canStart = !!project && !cap.checking && variants.length > 0 && Object.keys(cap.plans).length > 0 && frames > 0 && !running;
 
-  const start = useCallback(async (confirmed = false) => {
+  const start = useCallback(async (confirmed: { unsafe?: boolean; size?: boolean } = {}) => {
     if (!exportProject) return;
     // an export without LED safety always asks first
-    if (!exportProject.output.safety.enabled && !confirmed) {
+    if (!exportProject.output.safety.enabled && !confirmed.unsafe) {
       setAskUnsafe("start");
+      return;
+    }
+    // a very large export (a long set, the highest quality) asks too: disk space, hours of rendering
+    if (exportNeedsSizeConfirm(plannedBytes) && !confirmed.size) {
+      setAskSize({ unsafe: !!confirmed.unsafe });
       return;
     }
     const project = exportProject;
@@ -297,7 +307,7 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
     }
     // settings is rebuilt every render; the values it holds are the deps below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exportProject, toFolder, frames, range, cap, variants, lyricFormat, codec, quality, rate, withAudio]);
+  }, [exportProject, toFolder, frames, range, cap, variants, lyricFormat, codec, quality, rate, withAudio, plannedBytes]);
 
   const previewTime = parseTimeInput(timeText);
   const runPreview = useCallback(async () => {
@@ -305,14 +315,19 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
     const t = parseTimeInput(timeText);
     if (t == null) return;
     const at = Math.min(Math.max(0, t), Math.max(0, duration - 0.001));
+    // one render at a time: a second press while one runs is ignored (never two stages at once)
+    if (previewRunner.busy) return;
     setPreview((p) => ({ ...p, busy: true, error: null }));
     try {
-      const r = await renderPreview(exportProject, at, fps);
-      setPreview({ busy: false, t: at, images: { full: r.full, background: r.background, matte: r.matte }, error: null, warnings: r.warnings });
+      const r = await previewRunner.run((signal) => renderPreview(exportProject, at, fps, signal));
+      if (!r) setPreview((p) => ({ ...p, busy: false })); // cancelled: keep the last frame
+      else setPreview({ busy: false, t: at, images: { full: r.value.full, background: r.value.background, matte: r.value.matte }, error: null, warnings: r.value.warnings });
     } catch (e) {
       setPreview((p) => ({ ...p, busy: false, error: e instanceof Error ? e.message : String(e) }));
     }
-  }, [exportProject, timeText, duration, fps]);
+  }, [exportProject, timeText, duration, fps, previewRunner]);
+  // leaving the page stops a running preview
+  useEffect(() => () => previewRunner.cancel(), [previewRunner]);
 
   // ---------------------------------------------------------------------------
 
@@ -393,7 +408,16 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
           </InsetGroup>
 
           {variants.includes("lyrics") && (
-            <InsetGroup header="歌詞層格式" footer={lyricFormat === "alpha" ? (cap.alpha ? "VP9 WebM 含透明度；支援 alpha 的媒體伺服器可以直接疊。" : "這個瀏覽器無法編碼含透明度的 VP9，請改用黑底白字。") : "黑底白字：白色 = 歌詞，當作 luma matte 或用 Add / Screen 疊加。"}>
+            <InsetGroup
+              header="歌詞層格式"
+              footer={
+                lyricFormat === "alpha"
+                  ? cap.alpha
+                    ? "背景是透明的影片（WebM），媒體伺服器可以直接疊在其他畫面上。"
+                    : "這個瀏覽器做不出透明背景的影片，請改用黑底白字。"
+                  : "黑底白字：白色的地方就是歌詞。交給現場的 VJ，用「疊加／濾色」或當作遮罩（luma matte）疊在畫面上。"
+              }
+            >
               <div className="px-(--row-pad-x) py-2.5">
                 <SegmentedControl
                   label="歌詞層格式"
@@ -409,20 +433,23 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
             </InsetGroup>
           )}
 
-          <InsetGroup header="規格" footer={fallbackNote ?? (opaquePlan ? `${opaquePlan.label}，約 ${(opaquePlan.bitrate / 1e6).toFixed(1)} Mbps，每秒一個關鍵影格。` : cap.checking ? "檢查這台電腦能用的編碼器…" : "")}>
+          <InsetGroup
+            header="規格"
+            footer={fallbackNote ?? (opaquePlan ? `${opaquePlan.container === "mp4" ? "MP4 影片，相容性最好" : "WebM 影片"}（${opaquePlan.label}，約 ${(opaquePlan.bitrate / 1e6).toFixed(1)} Mbps）；每一秒都可以直接跳播。` : cap.checking ? "檢查這台電腦能輸出哪些影片格式…" : "")}
+          >
             <ListRow title="畫面尺寸" value={`${width} × ${height}`} subtitle={`${aspectLabel(width, height)}，在控制台的「控制」分頁「輸出畫面」修改`} />
             <SegmentRow label="影格率">
               <SegmentedControl label="影格率" value={rateId} onChange={setRateId} fullWidth options={FRAME_RATE_IDS.map((r) => ({ value: r, label: <span className="t-latin tabular">{FRAME_RATES[r].label}</span> }))} />
             </SegmentRow>
-            <SegmentRow label="編碼">
+            <SegmentRow label="檔案格式">
               <SegmentedControl
-                label="編碼"
+                label="檔案格式"
                 value={codec}
                 onChange={setCodec}
                 fullWidth
                 options={[
-                  { value: "avc", label: "H.264 MP4" },
-                  { value: "vp9", label: "VP9 WebM" },
+                  { value: "avc", label: "MP4（通用）", ariaLabel: "MP4（H.264）" },
+                  { value: "vp9", label: "WebM", ariaLabel: "WebM（VP9）" },
                 ]}
               />
             </SegmentRow>
@@ -477,7 +504,7 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
             header="LED 安全模式"
             footer={
               exportSafe
-                ? `${safetySummary({ ...baseSafety, enabled: true })}。完整與背景版本照這個設定算出，說明文字檔會寫明；歌詞層 matte 是鍵控訊號，不降亮度。`
+                ? `${safetySummary({ ...baseSafety, enabled: true })}。完整與背景版本照這個設定算出，說明文字檔會寫明；黑底白字的歌詞層是給 VJ 疊字用的遮罩，不降亮度。`
                 : "這次匯出不套用亮度上限與閃爍限制。交給音樂祭前請再確認。"
             }
           >
@@ -501,7 +528,7 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
           {!exportSafe && <Banner tone="warning" title="沒有 LED 安全保護" description="閃白、光暈與快速閃爍會照原設計輸出，LED 牆播放時可能讓前排觀眾不適。" />}
           {exportProject && <SafetyCheck project={exportProject} title="安全模式調整的段落" variant="page" footer="影片照這些調整算出，並套用亮度上限與閃爍限制；說明文字檔會寫明使用的設定。" />}
 
-          <InsetGroup header="其他" footer={withAudio ? `附上歌曲音訊（${cap.audio.mp4 === "aac" ? "AAC" : "Opus"}），只建議用在排練預覽；交給音樂祭的版本請關閉。` : "音樂祭交件通常不含音訊，現場用 timecode 或 click 對齊第一格。"}>
+          <InsetGroup header="其他" footer={withAudio ? `附上歌曲音訊（${cap.audio.mp4 === "aac" ? "AAC" : "Opus"}），只建議用在排練預覽；交給音樂祭的版本請關閉。` : "交給音樂祭的影片通常不含聲音，現場用時間碼（timecode）或節拍器對齊第一格。"}>
             <ListRow title="附上音訊" subtitle="排練預覽用" htmlFor="with-audio" accessory={<Switch id="with-audio" checked={withAudio} onChange={setWithAudio} disabled={running} />} />
             {canPickFolder && (
               <ListRow
@@ -515,11 +542,11 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
 
           {!toFolder && plannedBytes > 1.5e9 && <Banner tone="warning" title="檔案很大" description={`預估約 ${formatBytes(plannedBytes)}，放在記憶體可能讓分頁當掉。建議開啟「直接存到資料夾」或縮短範圍。`} />}
           {cap.missing.length > 0 && !cap.checking && (
-            <Banner tone="error" title="有版本無法編碼" description={`${cap.missing.map((v) => VARIANT_INFO[v].label).join("、")}：這個瀏覽器在 ${width} × ${height}、${rate.label} fps 沒有可用的編碼器。`} />
+            <Banner tone="error" title="有版本無法編碼" description={`${cap.missing.map((v) => VARIANT_INFO[v].label).join("、")}：這個瀏覽器做不出 ${width} × ${height}、每秒 ${rate.label} 格的影片。請改用 Chrome 或 Edge，或換一個影格率。`} />
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="filled" size="lg" icon={ExportIcon} onClick={() => void start(false)} disabled={!canStart} loading={cap.checking && variants.length > 0}>
+            <Button variant="filled" size="lg" icon={ExportIcon} onClick={() => void start()} disabled={!canStart} loading={cap.checking && variants.length > 0}>
               開始匯出
             </Button>
             <span className="text-[13px] leading-5 text-label-2 tabular">{Object.keys(cap.plans).length > 0 ? `${Object.keys(cap.plans).length} 個檔案，預估 ${formatBytes(plannedBytes)}` : variants.length === 0 ? "至少選一個版本" : ""}</span>
@@ -534,7 +561,7 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
               </label>
               <TextField id="preview-time" size="lg" value={timeText} onChange={(e) => setTimeText(e.target.value)} invalid={previewTime == null} className="font-numeric tabular" onKeyDown={(e) => { if (e.key === "Enter") void runPreview(); }} />
             </div>
-            <Button variant="gray" icon={ImageIcon} onClick={() => void runPreview()} loading={preview.busy} disabled={previewTime == null || running}>
+            <Button variant="gray" icon={ImageIcon} onClick={() => void runPreview()} loading={preview.busy} disabled={preview.busy || previewTime == null || running} data-testid="preview-frame">
               單格預覽
             </Button>
             {preview.images && (
@@ -556,9 +583,23 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
               // eslint-disable-next-line @next/next/no-img-element
               <img src={previewImage} alt={`單格預覽：${preview.t != null ? formatTime(preview.t) : ""}`} className="absolute inset-0 size-full object-contain" data-export-preview={previewView} />
             ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-[13px] leading-5 text-white/70">
-                <FilmStripIcon size={44} />
-                <span>按「單格預覽」，算出這個時間點的一格，確認字型、素材和歌詞位置再開始長時間的匯出。</span>
+              !preview.busy && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-[13px] leading-5 text-white/70">
+                  <FilmStripIcon size={44} />
+                  <span>按「單格預覽」，算出這個時間點的一格，確認字型、素材和歌詞位置再開始長時間的匯出。</span>
+                </div>
+              )
+            )}
+            {preview.busy && (
+              // the frame is computed on this page (the stage needs its fonts and media): say so,
+              // and let the operator stop it
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70 px-6 text-center text-white" role="status" data-preview-busy="">
+                <Spinner size={28} />
+                <span className="text-[15px] leading-[22px] font-semibold">正在算這一格…</span>
+                <span className="max-w-[28em] text-[13px] leading-5 text-white/70">要重播前面幾秒才能算準，可能要十幾秒；這段時間頁面會比較慢。</span>
+                <Button size="sm" variant="gray" onClick={() => previewRunner.cancel()} data-testid="preview-cancel">
+                  取消
+                </Button>
               </div>
             )}
           </div>
@@ -585,7 +626,19 @@ export function ExportClient({ id, initial, initialTime }: { id: string; initial
           const why = askUnsafe;
           setAskUnsafe(null);
           setSafeOverride(false);
-          if (why === "start") void start(true);
+          if (why === "start") void start({ unsafe: true });
+        }}
+      />
+      <Alert
+        open={askSize != null}
+        title={`這次匯出預估 ${formatBytes(plannedBytes)}`}
+        message={`${Object.keys(cap.plans).length} 個檔案，共 ${durationLabel(range.end - range.start)}。請確認存放的磁碟有足夠空間；算完可能要很久，電腦請接上電源。想要小一點，可以縮短範圍、少選幾個版本或把畫質調成「標準」。`}
+        confirmLabel="仍要匯出"
+        onCancel={() => setAskSize(null)}
+        onConfirm={() => {
+          const ask = askSize;
+          setAskSize(null);
+          void start({ unsafe: ask?.unsafe, size: true });
         }}
       />
       <ProgressSheet

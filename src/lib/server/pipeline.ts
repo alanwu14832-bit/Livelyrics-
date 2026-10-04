@@ -20,7 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ProcessRequest } from "@/lib/api-client";
-import { distributeLines, emptyLyrics, parseLyricsText } from "@/lib/lyrics/lrc";
+import { allLinesTimed, distributeLines, emptyLyrics, parseLyricsText, timingEstimated } from "@/lib/lyrics/lrc";
 import { remapPlanLines } from "@/lib/lyrics/remap";
 import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
@@ -786,8 +786,13 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
     }
   }
 
-  if (!lyrics && project.lyrics.synced && project.lyrics.lines.length > 0) {
-    return { skipped: true, message: `沿用現有的同步歌詞（${project.lyrics.lines.length} 行）` };
+  if (!lyrics && allLinesTimed(project.lyrics)) {
+    return {
+      skipped: true,
+      message: timingEstimated(project.lyrics)
+        ? `沿用現有歌詞（${project.lyrics.lines.length} 行）；時間是估的，建議到歌詞編輯器對拍`
+        : `沿用現有的同步歌詞（${project.lyrics.lines.length} 行）`,
+    };
   }
 
   if (!lyrics) {

@@ -640,8 +640,8 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
     ...(ctx.findings.genre && ctx.st.lines.length > 0 ? [`- ${ctx.findings.genre.label}：${ctx.findings.genre.live}`] : []),
     "",
     ctx.findings.info?.status.musicbrainz === "ok" || ctx.findings.info?.status.wikipedia === "ok"
-      ? "> 這份方案由**離線設計師**依免費研究（MusicBrainz、維基百科的公開資料＋歌詞與音訊分析）自動產生，沒有使用 Claude。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或設定 `ANTHROPIC_API_KEY`。"
-      : "> 這份方案由**離線設計師**依音訊能量、歌詞意象與重複段落自動產生，沒有經過網路研究。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或設定 `ANTHROPIC_API_KEY`。",
+      ? "> 這份方案由**離線設計師**依免費研究（MusicBrainz、維基百科的公開資料＋歌詞與音訊分析）自動產生，沒有使用 Claude。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或在首頁的「設定」加入 Anthropic API 金鑰。"
+      : "> 這份方案由**離線設計師**依音訊能量、歌詞意象與重複段落自動產生，沒有經過網路研究。想要更完整的研究，可以在設計總覽用「用 claude.ai 研究」（用你自己的 claude.ai 帳號，不需 API 費用），或在首頁的「設定」加入 Anthropic API 金鑰。",
   ];
   return lines.join("\n");
 }
@@ -864,7 +864,7 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
     mood.bpm > 0 ? `約 **${mood.bpm} BPM**（${mood.tempo === "slow" ? "慢板" : mood.tempo === "mid" ? "中板" : "快板"}）` : "速度未知（沒有音訊分析）";
 
   const brief = [
-    `> **離線模式**：${reason ?? "尚未設定 Claude（ANTHROPIC_API_KEY）"}，以下是依音訊分析與歌詞自動推論的啟發式簡報，**沒有經過網路研究**，請把它當成起點而不是結論。`,
+    `> **離線模式**：${reason ?? "沒有 Anthropic API 金鑰"}，以下是依音訊分析與歌詞自動推論的啟發式簡報，**沒有經過網路研究**，請把它當成起點而不是結論。`,
     ...(st.duration < SHORT_SONG_SECONDS ? [`> **音檔太短，分析不可靠**：只有 ${Math.round(st.duration)} 秒，請上傳完整的音檔再重新設計。`] : []),
     "",
     "## 樂團視覺識別",
@@ -892,7 +892,7 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
     "",
     "## 參考來源",
     "- 無（離線模式不做網路搜尋）。",
-    "- 啟用 Claude：在專案根目錄的 `.env.local` 加上 `ANTHROPIC_API_KEY=你的金鑰`，重新啟動伺服器後重新執行「研究」與「設計」。",
+    "- 啟用 Claude：在首頁的「設定」加入 Anthropic API 金鑰，再重新執行「研究」與「設計」。",
   ].join("\n");
 
   return { brief, sources: [], engine: "offline", createdAt: new Date().toISOString() };

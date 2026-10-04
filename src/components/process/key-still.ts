@@ -115,10 +115,10 @@ const savedThumbs = new Set<string>();
  * the stored one is missing or shows an older plan. Best effort: the card falls back to the drawn
  * artwork, so a failure is only logged.
  */
-export async function saveThumb(project: Project, still: KeyStill): Promise<void> {
+export async function saveThumb(project: Project, still: KeyStill): Promise<string | null> {
   const plan = planHash(project.plan);
   const key = `${project.id}:${plan}`;
-  if (!plan || project.thumb?.plan === plan || savedThumbs.has(key)) return;
+  if (!plan || project.thumb?.plan === plan || savedThumbs.has(key)) return null;
   savedThumbs.add(key);
   try {
     const img = new Image();
@@ -132,11 +132,13 @@ export async function saveThumb(project: Project, still: KeyStill): Promise<void
     canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
     let url = canvas.toDataURL("image/jpeg", 0.72);
     if (url.length > THUMB_MAX_CHARS) url = canvas.toDataURL("image/jpeg", 0.5);
-    if (url.length > THUMB_MAX_CHARS) return;
+    if (url.length > THUMB_MAX_CHARS) return null;
     await api.updateProject(project.id, { thumb: { url, plan } });
+    return url;
   } catch (err) {
     savedThumbs.delete(key);
     console.info("[Livelyrics] 無法儲存作品庫縮圖：", err);
+    return null;
   }
 }
 

@@ -591,7 +591,8 @@ export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
     i = j + 1;
   }
 
-  return normalizeLyrics({ ...lyrics, lines });
+  // the spread times are a guess: the song is not synced until the operator taps it (對拍)
+  return normalizeLyrics({ ...lyrics, lines, timing: "estimated" });
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +622,21 @@ function sanitizeWords(words: unknown, start: number): LyricWord[] | undefined {
   return out;
 }
 
-/** Recompute `synced` and ids ("l0".."lN") after edits. */
+/** Every line has a start time (real or estimated). */
+export function allLinesTimed(lyrics: Pick<Lyrics, "lines"> | null | undefined): boolean {
+  const lines = lyrics?.lines ?? [];
+  return lines.length > 0 && lines.every((l) => l.start != null);
+}
+
+/** The lines' times were spread by `distributeLines` and not yet tapped / imported. */
+export function timingEstimated(lyrics: Pick<Lyrics, "timing" | "lines"> | null | undefined): boolean {
+  return !!lyrics && lyrics.timing === "estimated" && (lyrics.lines?.length ?? 0) > 0;
+}
+
+/**
+ * Recompute `synced` and ids ("l0".."lN") after edits. `timing: "estimated"` is kept while every
+ * line still has a time (a line without one leaves nothing estimated to flag).
+ */
 export function normalizeLyrics(lyrics: Lyrics): Lyrics {
   const source: LyricsSource = lyrics && VALID_SOURCES.includes(lyrics.source) ? lyrics.source : "user";
   const input: unknown[] = Array.isArray(lyrics?.lines) ? lyrics.lines.slice(0, MAX_LINES) : [];
@@ -685,7 +700,10 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
   }
 
   const language = typeof lyrics?.language === "string" && lyrics.language.trim() ? lyrics.language.trim().slice(0, 20) : detectLanguage(lines.map((l) => l.text));
-  const out: Lyrics = { source, synced: lines.length > 0 && lines.every((l) => l.start != null), lines };
+  const allTimed = lines.length > 0 && lines.every((l) => l.start != null);
+  const estimated = allTimed && lyrics?.timing === "estimated";
+  const out: Lyrics = { source, synced: allTimed && !estimated, lines };
+  if (estimated) out.timing = "estimated";
   if (language) out.language = language;
   return out;
 }

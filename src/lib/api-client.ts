@@ -71,6 +71,19 @@ export interface ServerStatus {
   };
   /** LIVELYRICS_PASSWORD is set: pages and APIs need a login */
   auth: boolean;
+  /** where the Claude credential comes from (never the key itself); null = none */
+  keySource?: "env" | "settings" | null;
+  /** the 「設定」 dialog can save a key on this server (local mode) */
+  keyEditable?: boolean;
+}
+
+/** `/api/settings/api-key`: whether a key is set and a masked form; never the key. */
+export interface ApiKeyStatus {
+  configured: boolean;
+  source: "env" | "settings" | null;
+  /** `sk-ant-…abcd` for a key saved through 「設定」 */
+  masked: string | null;
+  editable: boolean;
 }
 
 let storageModePromise: Promise<StorageModeName> | null = null;
@@ -142,6 +155,12 @@ async function processStream(id: string, body: ProcessRequest, onEvent: (e: Pipe
 
 export const api = {
   status: () => fetch("/api/status").then((r) => json<ServerStatus>(r)),
+
+  /** 「設定」 › API 金鑰 (local mode): the response never contains the key */
+  apiKeyStatus: () => fetch("/api/settings/api-key").then((r) => json<ApiKeyStatus>(r)),
+  saveApiKey: (key: string) =>
+    fetch("/api/settings/api-key", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ key }) }).then((r) => json<ApiKeyStatus>(r)),
+  removeApiKey: () => fetch("/api/settings/api-key", { method: "DELETE" }).then((r) => json<ApiKeyStatus>(r)),
 
   listProjects: () => fetch("/api/projects").then((r) => json<ProjectSummary[]>(r)),
 

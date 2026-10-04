@@ -19,6 +19,7 @@ import type { ProjectSummary } from "@/lib/types";
 import { AssignBandSheet } from "./AssignBandSheet";
 import { useStorageMode } from "./use-storage-mode";
 import { ProjectArt, validPalette } from "./ProjectArt";
+import { useThumbBackfill } from "./thumb-backfill";
 import { formatAbsoluteTime, formatRelativeTime } from "./relative-time";
 import { PUSH, artTransitionName, titleTransitionName } from "./transitions";
 
@@ -113,6 +114,8 @@ export function ProjectLibrary({
   }, [anyProcessing, load]);
 
   const projects = useMemo(() => (state.kind === "ok" ? state.projects : []), [state]);
+  // designed songs without a saved key still get one, a few per visit (the card shows it at once)
+  const backfilled = useThumbBackfill(state.kind === "ok" ? state.projects : null);
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return projects;
@@ -215,7 +218,7 @@ export function ProjectLibrary({
                   exit={{ opacity: 0, scale: 0.96, filter: "blur(4px)", transition: { duration: 0.15, ease: easeOut } }}
                   transition={spring}
                 >
-                  <ProjectCard project={p} now={now} onDelete={() => setPendingDelete(p)} onReprocess={() => reprocess(p)} onAssign={() => setAssigning(p)} />
+                  <ProjectCard project={backfilled[p.id] && !p.thumb ? { ...p, thumb: backfilled[p.id] } : p} now={now} onDelete={() => setPendingDelete(p)} onReprocess={() => reprocess(p)} onAssign={() => setAssigning(p)} />
                 </motion.li>
               ))}
             </AnimatePresence>

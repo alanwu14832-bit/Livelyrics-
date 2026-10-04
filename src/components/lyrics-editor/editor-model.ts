@@ -85,7 +85,7 @@ export function fromLyrics(lyrics: Lyrics | null | undefined): EditorLine[] {
 }
 
 /** Raw Lyrics for saving (pass the result through normalizeLyrics). */
-export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSource; language?: string }): Lyrics {
+export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSource; language?: string; estimated?: boolean }): Lyrics {
   const out: Lyrics = {
     source: base.source,
     synced: false,
@@ -103,13 +103,15 @@ export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSou
     }),
   };
   if (base.language) out.language = base.language;
+  if (base.estimated) out.timing = "estimated";
   return out;
 }
 
 /** Stable fingerprint of the saved content (dirty tracking). */
-export function contentKey(lines: readonly EditorLine[], source: LyricsSource): string {
+export function contentKey(lines: readonly EditorLine[], source: LyricsSource, estimated = false): string {
   return JSON.stringify([
     source,
+    estimated,
     lines.map((l) => [l.text.trim(), l.translation.trim(), l.start, l.start != null ? l.end : null, l.words?.length ?? 0]),
   ]);
 }

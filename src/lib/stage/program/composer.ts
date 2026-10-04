@@ -451,15 +451,29 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     vec2 mp = vec2(cos(a), sin(a)) * rr;
     moons += fill(length(q - mp) - 0.006) * on;
   }
+  // round 13: the chorus opens the system — every ring carries a coloured halo (uPri → uAcc), the
+  // core glows wider; a chorus is never darker than its verse, the giant word stays in front
+  float open = smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
+  float halo = 0.0;
+  for (int i = 0; i < 7; i++) {
+    float fi = float(i);
+    if (fi >= K_RINGS) break;
+    float rr = (pr * 1.8 + fi * 0.055 * K_SCALE) * (1.0 - collapse * (fi / K_RINGS));
+    float on = step(fi, K_RINGS * (0.35 + 0.65 * uParams.y));
+    halo += exp(-abs(d - rr) * 70.0) * on * (1.0 - 0.08 * fi);
+  }
   // the orbits give way to the words on screen (and only then: an empty zone shows the rings)
-  lines *= 1.0 - wordsMask(uv, 0.03) * 0.9;
+  float clearW = 1.0 - wordsMask(uv, 0.03) * 0.9;
+  lines *= clearW;
+  halo *= clearW;
   moons *= 1.0 - wordsMask(uv, 0.02);
-  col += lc * lines * (0.5 + 0.6 * light);
+  col += lc * lines * (0.5 + 0.6 * light) * (1.0 + 1.2 * open);
+  col += mix(uPri, uAcc, sat(d * 2.0)) * halo * (0.05 + 0.2 * open) * (0.6 + 0.4 * light);
   col = mix(col, lc, sat(moons));
   vec2 pq = p - c;
   float pd = length(pq);
   vec3 planet = mix(uBg * 0.3, mix(uPri, uAcc, 0.4), smoothstep(-0.6, 0.9, dot(normalize(pq + 1e-4), normalize(vec2(-0.6, 0.7))) * (pd / pr)));
-  col += mix(uPri, uAcc, 0.5) * exp(-pd * 9.0) * (0.1 + 0.4 * light);
+  col += mix(uPri, uAcc, 0.5) * exp(-pd * mix(9.0, 4.0, open)) * (0.1 + 0.4 * light) * (1.0 + 0.6 * open);
   col = mix(col, planet * (0.8 + 0.5 * light), fill(pd - pr));
   // rings pass in front of the planet on their near side
   float nearSide = step(0.0, -q.y) * fill(pd - pr);
@@ -602,6 +616,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
   }
+  // round 13: in the chorus the paper warms around the stroke (the accent soaked into it)
+  col += mix(uPri, uAcc, 0.6) * closeUp * 0.07 * smoothstep(1.0, 0.0, length(p - c) / (R * 1.8)) * (0.6 + 0.4 * uParams.z);
   // the stroke lifts off the paper under the words on screen (never under an empty zone)
   ink *= 1.0 - wordsMask(uv, 0.03) * (1.0 - around);
   col = mix(col, mix(uInk, vec3(1.0), 0.08) * (0.8 + 0.2 * uParams.z), ink);
@@ -625,6 +641,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   vec3 col = mix(uBg * 0.6, uBg, uv.y);
   col += uPri * 0.08 * exp(-length(p - toP(fu)) * 2.5);
   float tight = step(2.5, uMode);
+  // round 13: the chorus lights the ribbons from within (never darker than the verse)
+  float open = smoothstep(1.5, 2.0, uMode) * (1.0 - tight);
   for (int i = 0; i < 4; i++) {
     float fi = float(i);
     if (fi >= K_N) break;
@@ -644,7 +662,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     // the ribbons thin under the words on screen (they light them: a lit relation)
     float away = 1.0 - wordsMask(uv, 0.05) * 0.9;
     col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y));
-    col += rc * exp(-d / max(wd, 1e-3) * 1.5) * 0.06 * light * fade * away;
+    col += rc * exp(-d / max(wd, 1e-3) * 1.5) * (0.06 * light + 0.1 * open) * fade * away;
   }
   return col;
 }`,
@@ -673,7 +691,11 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   // the rain thins around the words on screen (an empty zone rains like the rest of the frame)
   float clear = 1.0 - wordsMask(uv, 0.04) * 0.85;
   vec3 lc = mix(uPri, mix(uAcc, vec3(1.0), 0.4), 0.3 + 0.5 * light);
-  col += lc * thread * on * clear * step(floorY, uv.y) * (0.7 + 0.8 * uParams.x);
+  // round 13: the chorus pours — brighter threads and the light they bring up from the floor
+  float open = smoothstep(1.5, 2.0, uMode) * (1.0 - still);
+  col += lc * thread * on * clear * step(floorY, uv.y) * (0.7 + 0.8 * uParams.x) * (1.0 + 1.4 * open);
+  col += mix(uPri, uAcc, 0.5) * exp(-max(0.0, uv.y - floorY) * 2.4) * (0.03 + 0.22 * open) * step(floorY, uv.y);
+  col += uPri * 0.035 * open;
   // ripples where the threads land
   vec2 rp = vec2((uv.x - 0.5) * aspect(), (uv.y - floorY) * 4.0);
   vec2 cell = floor(rp * vec2(6.0, 1.0));

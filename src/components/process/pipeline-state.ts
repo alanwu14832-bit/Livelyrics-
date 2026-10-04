@@ -192,7 +192,7 @@ export function stepsFromProject(project: Project): Record<ProcessStep, StepStat
       ? {
           status: "done",
           text: "",
-          message: `${LYRICS_SOURCE_LABEL[project.lyrics.source] ?? "歌詞"}，${lines.length} 行${project.lyrics.synced ? "，已同步" : timed > 0 ? `，${timed} 行有時間` : "，未定時"}`,
+          message: `${LYRICS_SOURCE_LABEL[project.lyrics.source] ?? "歌詞"}，${lines.length} 行${project.lyrics.synced ? "，已同步" : project.lyrics.timing === "estimated" && timed === lines.length ? "，時間是估的（請到歌詞編輯器對拍）" : timed > 0 ? `，${timed} 行有時間` : "，未定時"}`,
         }
       : { status: "kept", text: "", message: "尚無歌詞，可到歌詞編輯器加入" };
   const r = project.research;
