@@ -7,6 +7,7 @@
 // src/lib/font-meta.ts; only the designer-facing descriptions live here.
 
 import { FONTS } from "@/lib/font-meta";
+import { SCENE_LABELS } from "@/lib/stage/scenes/labels";
 import type { MEDIA_BLENDS } from "@/lib/schema";
 import type { FontId, LyricPlacement, LyricStyleId, MediaTreatment, SceneId, SectionKind } from "@/lib/types";
 
@@ -17,28 +18,27 @@ export interface SceneInfo {
   energy: [number, number];
 }
 
-export const SCENES: Record<SceneId, SceneInfo> = {
-  nebula: { label: "星雲", description: "流動的 fbm 雲霧與色煙，柔和、夢幻、有深度；適合抒情主歌、橋段、前奏。", energy: [0.1, 0.6] },
-  particles: {
-    label: "粒子",
-    description: "漂浮的粒子場／星空，會隨拍點脈動；中高能量都能用，副歌時密度拉高就是一片燈海。",
+const SCENE_INFO: Record<SceneId, Omit<SceneInfo, "label">> = {
+  nebula: { description: "流動的 fbm 雲霧與色煙，柔和、夢幻、有深度；適合抒情主歌、橋段、前奏。", energy: [0.1, 0.6] },
+  particles: { description: "漂浮的粒子場／星空，會隨拍點脈動；中高能量都能用，副歌時密度拉高就是一片燈海。",
     energy: [0.3, 0.95],
   },
-  waves: { label: "波形", description: "層疊的正弦光帶／示波器線條，律動感強但不搶戲；適合主歌、導歌、律動型段落。", energy: [0.25, 0.75] },
-  grid: { label: "網格", description: "復古透視網格與地平線光暈（synthwave），有速度感與前進感；適合電子、搖滾副歌。", energy: [0.5, 1] },
-  tunnel: { label: "隧道", description: "向觀眾衝來的放射環狀隧道，強烈的衝刺感；留給最高潮、drop、最後一次副歌。", energy: [0.65, 1] },
-  rain: { label: "雨絲", description: "垂直落下的光絲／雨／流星線條，帶憂鬱或洗滌感；適合 breakdown、悲傷段落、雨的意象。", energy: [0.1, 0.6] },
-  bokeh: { label: "光斑", description: "柔焦的圓形光球，溫暖、城市夜色、回憶感；適合前奏、抒情主歌、尾奏。", energy: [0.05, 0.5] },
-  shards: { label: "碎片", description: "Voronoi 碎片／彩繪玻璃／破碎玻璃，張力與衝突感；適合激烈副歌、solo、情緒爆發。", energy: [0.55, 1] },
-  ink: { label: "水墨", description: "高對比、域扭曲的墨流，東方、文學、神秘；適合詩意主歌、橋段、直排歌詞。", energy: [0.15, 0.7] },
-  motif: {
-    label: "主視覺符號",
-    description: "主視覺 SVG 符號平鋪／環繞／脈動；用在開場建立識別、關鍵轉折或結尾回到主視覺。",
+  waves: { description: "層疊的正弦光帶／示波器線條，律動感強但不搶戲；適合主歌、導歌、律動型段落。", energy: [0.25, 0.75] },
+  grid: { description: "復古透視網格與地平線光暈（synthwave），有速度感與前進感；適合電子、搖滾副歌。", energy: [0.5, 1] },
+  tunnel: { description: "向觀眾衝來的放射環狀隧道，強烈的衝刺感；留給最高潮、drop、最後一次副歌。", energy: [0.65, 1] },
+  rain: { description: "垂直落下的光絲／雨／流星線條，帶憂鬱或洗滌感；適合 breakdown、悲傷段落、雨的意象。", energy: [0.1, 0.6] },
+  bokeh: { description: "柔焦的圓形光球，溫暖、城市夜色、回憶感；適合前奏、抒情主歌、尾奏。", energy: [0.05, 0.5] },
+  shards: { description: "Voronoi 碎片／彩繪玻璃／破碎玻璃，張力與衝突感；適合激烈副歌、solo、情緒爆發。", energy: [0.55, 1] },
+  ink: { description: "高對比、域扭曲的墨流，東方、文學、神秘；適合詩意主歌、橋段、直排歌詞。", energy: [0.15, 0.7] },
+  motif: { description: "主視覺 SVG 符號平鋪／環繞／脈動；用在開場建立識別、關鍵轉折或結尾回到主視覺。",
     energy: [0.15, 0.8],
   },
-  gradient: { label: "漸層", description: "平靜極簡的漸層色場，讓歌詞成為主角；適合敘事句、安靜段落、尾奏。", energy: [0, 0.45] },
-  blackout: { label: "全黑", description: "純黑（刻意的黑暗），把焦點完全還給舞台燈光與樂手；用於極安靜的瞬間或刻意留白。", energy: [0, 0.25] },
+  gradient: { description: "平靜極簡的漸層色場，讓歌詞成為主角；適合敘事句、安靜段落、尾奏。", energy: [0, 0.45] },
+  blackout: { description: "純黑（刻意的黑暗），把焦點完全還給舞台燈光與樂手；用於極安靜的瞬間或刻意留白。", energy: [0, 0.25] },
 };
+
+/** Scene vocabulary with the shared operator-facing label (src/lib/stage/scenes/labels.ts). */
+export const SCENES: Record<SceneId, SceneInfo> = Object.fromEntries((Object.keys(SCENE_INFO) as SceneId[]).map((id) => [id, { label: SCENE_LABELS[id], ...SCENE_INFO[id] }])) as Record<SceneId, SceneInfo>;
 
 export interface LyricStyleInfo {
   label: string;

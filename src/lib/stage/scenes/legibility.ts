@@ -13,6 +13,10 @@ import { softenChannel } from "../safety";
 export const LEGIBLE_TARGET = 5.4;
 /** The contrast every readable lyric must meet against the picture around it. */
 export const LEGIBLE_MIN = 4.5;
+/** Display words (the giant / bled / window word the crowd reads from 80 m) aim higher: ≥ 7 : 1 with a margin. */
+export const DISPLAY_TARGET = 7.4;
+/** …and the check asks ≥ 7 : 1 of them. */
+export const DISPLAY_MIN = 7;
 /** The dilation ring radii, as fractions of the output's shorter side. */
 export const LEGIBLE_RING = [0.006, 0.014] as const;
 
@@ -99,6 +103,29 @@ export function legibleBackground(bg: Rgb, ink: Rgb, target = LEGIBLE_TARGET, po
   return lin.map(toSrgbC) as [number, number, number];
 }
 
+/**
+ * A display word's ink over the knockout fill (B3): the ink colour itself, pushed towards white
+ * (or black, over a light fill) in linear light until it meets `target` against the fill — never
+ * the dimmed picture seen through the letters (mirror of the GLSL `displayInk`).
+ */
+export function displayInkOver(ink: Rgb, fill: Rgb, target = DISPLAY_TARGET): [number, number, number] {
+  const il = ink.map(toLinC) as [number, number, number];
+  const li = lumLin(il);
+  const lf = relativeLuminance(fill);
+  // over a dark fill the ink goes light, over a light fill dark (the side that can reach the target)
+  const lighter = lf < Math.sqrt(0.05 * 1.05) - 0.05;
+  if (lighter) {
+    const need = Math.min(1, target * (lf + 0.05) - 0.05);
+    if (li >= need) return [...ink] as [number, number, number];
+    const t = Math.max(0, (need - li) / Math.max(1 - li, 1e-5));
+    return il.map((v) => toSrgbC(v + (1 - v) * t)) as [number, number, number];
+  }
+  const need = Math.max(0, (lf + 0.05) / target - 0.05);
+  if (li <= need) return [...ink] as [number, number, number];
+  const k = need / Math.max(li, 1e-5);
+  return il.map((v) => toSrgbC(v * k)) as [number, number, number];
+}
+
 const f = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
 
 /** GLSL helpers for the type pass (needs uRes, uType, softenC and the TEX macro). */
@@ -117,19 +144,20 @@ float legInkOut(vec3 ink, float soft, float gain) { return legLum(legToLin(softe
 // how the cap scales a dark picture (below the shoulder)
 float legCapLum(float gain) { return legLum(legToLin(vec3(clamp(gain, 0.05, 1.0)))); }
 // an ink that could reach the target over neither black nor the capped white is lifted
-vec3 legibleInk(vec3 ink, float soft, float gain) {
+vec3 legibleInkT(vec3 ink, float soft, float gain, float target) {
   float li = legInkOut(ink, soft, gain);
   float cw = legInkOut(vec3(1.0), soft, gain);
-  float light = ${f(0.05 * LEGIBLE_TARGET - 0.05 + 0.004)};
-  float dark = (cw + 0.05) / ${f(LEGIBLE_TARGET)} - 0.05;
+  float light = 0.05 * target - 0.05 + 0.004;
+  float dark = (cw + 0.05) / target - 0.05;
   if (li >= light || li <= dark) return ink;
   vec3 il = legToLin(ink);
   float pre = legLum(il);
   float want = min(1.0, light / cw * 1.02);
   return legToSrgb(il + (1.0 - il) * max(0.0, (want - pre) / max(1.0 - pre, 1e-5)));
 }
+vec3 legibleInk(vec3 ink, float soft, float gain) { return legibleInkT(ink, soft, gain, ${f(LEGIBLE_TARGET)}); }
 // the picture under the letters, attenuated until the ink meets the target contrast against it
-vec3 legibleBg(vec3 bg, vec3 ink, float soft, float gain) {
+vec3 legibleBgT(vec3 bg, vec3 ink, float soft, float gain, float target) {
   vec3 bl = legToLin(bg);
   float lb = legLum(bl);
   float li = legInkOut(ink, soft, gain);
@@ -138,13 +166,29 @@ vec3 legibleBg(vec3 bg, vec3 ink, float soft, float gain) {
   float cw = legInkOut(vec3(1.0), soft, gain);
   float split = sqrt(0.05 * (cw + 0.05)) - 0.05;
   if (li > split) {
-    float maxB = ((li + 0.05) / ${f(LEGIBLE_TARGET)} - 0.05) / gl;
+    float maxB = ((li + 0.05) / target - 0.05) / gl;
     if (lb > maxB) bl *= max(maxB, 0.0) / max(lb, 1e-5);
   } else {
-    float minB = min(1.0, (${f(LEGIBLE_TARGET)} * (li + 0.05) - 0.05) / cw);
+    float minB = min(1.0, (target * (li + 0.05) - 0.05) / cw);
     if (lb < minB) bl += (1.0 - bl) * ((minB - lb) / max(1.0 - lb, 1e-5));
   }
   return legToSrgb(bl);
+}
+vec3 legibleBg(vec3 bg, vec3 ink, float soft, float gain) { return legibleBgT(bg, ink, soft, gain, ${f(LEGIBLE_TARGET)}); }
+// a display word's ink over the knockout fill: the ink colour pushed towards white (or black over
+// a light fill) until it meets the display target against the fill (never the picture through the letters)
+vec3 displayInk(vec3 ink, vec3 fill) {
+  vec3 il = legToLin(ink);
+  float li = legLum(il);
+  float lf = legLum(legToLin(fill));
+  if (lf < 0.1791) {
+    float need = min(1.0, ${f(DISPLAY_TARGET)} * (lf + 0.05) - 0.05);
+    if (li >= need) return ink;
+    return legToSrgb(il + (1.0 - il) * max(0.0, (need - li) / max(1.0 - li, 1e-5)));
+  }
+  float needD = max(0.0, (lf + 0.05) / ${f(DISPLAY_TARGET)} - 0.05);
+  if (li <= needD) return ink;
+  return legToSrgb(il * (needD / max(li, 1e-5)));
 }
 // the readable glyphs dilated: rings of ink / accent taps plus the painter's halo (which already
 // follows each glyph's size; giant display glyphs have no halo, the rings cover them). x: around

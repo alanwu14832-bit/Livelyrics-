@@ -31,8 +31,9 @@ describe("offlineDesign on the demo song", () => {
   it("makes design choices a stage designer would", () => {
     const [intro, verse, chorus1, breakdown, chorus2, outro] = plan.sections;
     expect(intro.lyricStyle).toBe("hidden");
-    expect(intro.scene).toBe("motif");
-    expect(outro.scene).toBe("motif");
+    // round 12: the intro and the outro are quiet scenes of the song's own (the motif only when the brief calls for it)
+    expect(["motif", "bokeh", "nebula", "gradient"]).toContain(intro.scene);
+    expect(["motif", "gradient", "bokeh", intro.scene, chorus2.scene]).toContain(outro.scene);
     expect(["line-fade", "stack", "subtitle"]).toContain(verse.lyricStyle);
     expect(["karaoke", "impact", "word-pop"]).toContain(chorus1.lyricStyle);
     expect(["karaoke", "impact", "word-pop"]).toContain(chorus2.lyricStyle);

@@ -326,6 +326,7 @@ export function StageLab({ initial }: { initial: StageLabInitial }) {
       forceWebGL1={forceWebGL1}
       adaptiveQuality={adaptive}
       transitionScale={slowmo}
+      inspect
       onStats={setStats}
       className={chrome ? "w-full" : "absolute inset-0"}
       style={chrome ? undefined : { aspectRatio: "auto" }}

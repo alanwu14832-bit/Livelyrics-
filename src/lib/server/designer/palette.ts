@@ -55,12 +55,20 @@ export function buildPalette(spec: PaletteSpec): PaletteEntry[] {
     [highlight, "高光"],
     [bg2, "對比背景"],
   ];
+  return nameEntries(entries);
+}
+
+/** Palette entries with distinct names: a second blue is 「靛光」, never a second 「湛藍」. */
+export function nameEntries(entries: ReadonlyArray<readonly [string, string]>): PaletteEntry[] {
   const seen = new Set<string>();
+  const names = new Set<string>();
   const out: PaletteEntry[] = [];
   for (const [hex, role] of entries) {
     if (seen.has(hex)) continue;
     seen.add(hex);
-    out.push({ hex, role, name: colorName(hex) });
+    const name = colorName(hex, names);
+    names.add(name);
+    out.push({ hex, role, name });
   }
   return out;
 }

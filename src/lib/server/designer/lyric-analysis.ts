@@ -6,8 +6,9 @@
 //   emotion      valence / arousal from the sentiment lexicon (negation, intensifiers, chants),
 //                the hook weighted in, and a 繁中 reading of the quadrant
 //   point of view 我／你／我們 (I, you, we): who sings to whom
-//   sing-along   the short repeated phrases (and chants) of the chorus that a crowd would sing —
-//                always shorter than their line, so the brief never reproduces a lyric line
+//   sing-along   the short repeated phrases (and chants) of the chorus that a crowd would sing,
+//                snapped to phrase boundaries (punctuation, spaces, 了著嗎呢 particles, dictionary
+//                words); a short line sung more than once is quoted whole, a long one never is
 //
 // Simplified lyrics are matched through a char-by-char traditional mapping (the same code point
 // positions), so every phrase and word reported is an exact substring of the original line.
@@ -148,6 +149,8 @@ export interface Emotion {
   arousal: number;
   /** sentiment words found */
   hits: number;
+  /** distinct sentiment words: an emotion is named only from two independent ones */
+  distinct: number;
   label: string;
   confidence: "low" | "mid" | "high";
   positive: string[];
@@ -162,10 +165,15 @@ interface Tally {
   n: number;
   pos: Map<string, number>;
   neg: Map<string, number>;
+  /** distinct sentiment words (chants and punctuation do not count) */
+  words: Set<string>;
 }
 
+/** Two independent sentiment words before an emotion is named: one 「安靜」 is not 矛盾拉扯. */
+export const MIN_EMOTION_WORDS = 2;
+
 function tally(lines: readonly string[]): Tally {
-  const t: Tally = { v: 0, a: 0, n: 0, pos: new Map(), neg: new Map() };
+  const t: Tally = { v: 0, a: 0, n: 0, pos: new Map(), neg: new Map(), words: new Set() };
   for (const line of lines) {
     let negate = 0;
     let boost = 1;
@@ -190,6 +198,7 @@ function tally(lines: readonly string[]): Tally {
         t.v += v;
         t.a += a;
         t.n += 1;
+        t.words.add(tok.key);
         const bucket = v >= 0 ? t.pos : t.neg;
         bucket.set(tok.key, (bucket.get(tok.key) ?? 0) + 1);
         negate = 0;
@@ -226,12 +235,14 @@ export function estimateEmotion(lines: readonly string[], hookLines: readonly st
   const valence = r2(h ? 0.6 * m.v + 0.4 * h.v : m.v);
   const arousal = r2(Math.max(0, Math.min(1, h ? 0.6 * m.a + 0.4 * h.a : m.a)));
   const top = (map: Map<string, number>) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([w]) => w);
+  const named = all.words.size >= MIN_EMOTION_WORDS;
   return {
     valence,
     arousal,
     hits: Math.round(all.n),
-    label: all.n >= 1 ? emotionLabel(valence, arousal) : "情緒不明顯",
-    confidence: all.n >= 6 ? "high" : all.n >= 2 ? "mid" : "low",
+    distinct: all.words.size,
+    label: named ? emotionLabel(valence, arousal) : "情緒不明顯",
+    confidence: all.n >= 6 && all.words.size >= 4 ? "high" : named ? "mid" : "low",
     positive: top(all.pos),
     negative: top(all.neg),
     hook: h ? { valence: r2(h.v), arousal: r2(h.a) } : null,
@@ -284,6 +295,8 @@ export function pointOfView(lines: readonly string[]): PointOfView {
 export interface SingalongPhrase {
   /** exact substring of every line listed */
   text: string;
+  /** the phrase is a whole line of the song (a short line sung more than once) */
+  whole?: boolean;
   lineIds: string[];
   /** first time it is sung (seconds), when timed */
   start: number | null;
@@ -294,71 +307,174 @@ export interface SingalongPhrase {
 
 /** Function words a sung phrase should not start / end with (「的歌會」「心跳交給這」). */
 const BAD_START = new Set(Array.from("的了著是和與就也都又還很太啊呀吧嗎呢而且但卻個們到給裡上下過"));
-const BAD_END = new Set(Array.from("的了著是在和與就也都把被讓給又還很太而且但卻這那個一再會從向對跟交找"));
-const LATIN_STOP = new Set(["the", "a", "an", "to", "of", "and", "in", "on", "at", "is", "it", "my", "your", "i", "you", "we", "me", "be", "so", "for", "with"]);
-const CJK_LEN_FACTOR: Record<number, number> = { 2: 0.45, 3: 0.8, 4: 1, 5: 1, 6: 0.85 };
-const LATIN_LEN_FACTOR: Record<number, number> = { 1: 0.55, 2: 0.9, 3: 1, 4: 0.9 };
+const BAD_END = new Set(Array.from("的是在和與就也都把被讓給又還很太而且但卻這那個一再會從向對跟交找"));
+/** Phrase-final particles: a sung phrase ends on them (「睡著了」), never continues through them. */
+const CJK_PARTICLES = new Set(Array.from("了著嗎呢吧啊呀嘛囉哦喔"));
+const LATIN_STOP = new Set(["the", "a", "an", "to", "of", "and", "in", "on", "at", "is", "it", "my", "your", "i", "you", "we", "me", "be", "so", "for", "with", "that", "this", "but", "or", "if", "as", "by", "from", "are", "was"]);
+const CJK_LEN_FACTOR: Record<number, number> = { 2: 0.45, 3: 0.8, 4: 1, 5: 1, 6: 0.85, 7: 0.75, 8: 0.7 };
+const LATIN_LEN_FACTOR: Record<number, number> = { 1: 0.5, 2: 0.9, 3: 1, 4: 0.9, 5: 0.8, 6: 0.7 };
+/** The longest repeated whole line still quoted as a phrase (reading units: CJK characters + Latin words). */
+export const MAX_WHOLE_LINE_UNITS = 12;
+
+/** Punctuation splits a line into the chunks a crowd sings as one breath (a space does too, between CJK runs). */
+const CHUNK_SPLIT = /[,.;:!?，。；：！？、「」『』（）()[\]【】《》〈〉—–…~～"“”]+/u;
+/** A Latin word, accents included (llévame), apostrophes kept (water's). */
+const LATIN_WORD = /[^\s\p{P}\p{S}\p{Script=Han}]+(?:['’][^\s\p{P}\p{S}\p{Script=Han}]+)*/gu;
+const REPEATED_CHAR = /^(.)\1+$/u;
 
 interface Gram {
   text: string;
   cjk: boolean;
   chant: boolean;
   units: number;
+  /** the gram is a whole line of the song, sung more than once */
+  whole: boolean;
+  /** the gram is a complete breath: a whole chunk / sub-phrase, not a piece cut out of one */
+  complete: boolean;
 }
 
-/** Code point offsets where a token starts or ends (a phrase never cuts a word like 心跳 in half). */
-function boundaries(line: string): Set<number> {
+/** Reading units of a chunk: CJK characters plus Latin words. */
+function unitsOf(text: string): number {
+  const cjk = (text.match(/\p{Script=Han}/gu) ?? []).length;
+  const latin = (text.match(LATIN_WORD) ?? []).length;
+  return cjk + latin;
+}
+
+/** A CJK run's sub-phrases: cut after a phrase-final particle (「睡著了」｜「我們還醒著」). */
+function subPhrases(run: string): string[] {
+  const chars = Array.from(run);
+  const out: string[] = [];
+  let from = 0;
+  for (let i = 0; i < chars.length; i++) {
+    // cut after the last particle of a run of them (「睡著了」 stays whole)
+    if (CJK_PARTICLES.has(chars[i]) && i > from && i < chars.length - 1 && !CJK_PARTICLES.has(chars[i + 1])) {
+      out.push(chars.slice(from, i + 1).join(""));
+      from = i + 1;
+    }
+  }
+  if (from < chars.length) out.push(chars.slice(from).join(""));
+  return out;
+}
+
+/**
+ * Code point offsets inside a CJK run where a lexicon word starts or ends: dictionary words of any
+ * length (我們, 歌, 牆), never the gaps between unknown single characters (拆｜掉｜這｜面).
+ */
+function wordEdges(run: string): Set<number> {
   const out = new Set<number>();
-  for (const t of tokenize(line)) {
+  for (const t of tokenize(run)) {
+    if (t.latin || !(t.length >= 2 || IMAGERY_INDEX.has(t.key) || SENTIMENT_INDEX.has(t.key) || POV_INDEX.has(t.key))) continue;
     out.add(t.start);
     out.add(t.start + t.length);
   }
   return out;
 }
 
-function gramsOf(line: string): Gram[] {
+function isCjkChant(text: string): boolean {
+  return REPEATED_CHAR.test(text) && CHANT_SET.has(Array.from(text)[0]);
+}
+
+function cjkOk(text: string): boolean {
+  const g = Array.from(text);
+  if (g.length < 2 || g.length > MAX_WHOLE_LINE_UNITS) return false;
+  if (isCjkChant(text)) return true;
+  return !BAD_START.has(g[0]) && !BAD_END.has(g[g.length - 1]);
+}
+
+/**
+ * The candidate phrases of one line, every one snapped to a phrase boundary: the whole line when it
+ * is short; for CJK the runs between punctuation / spaces, their particle-bounded sub-phrases and
+ * runs of those, plus grams that start and end on a dictionary word (never 「掉這面牆」, cut inside a
+ * run of single characters); for Latin the chunks and the word runs inside them that neither start
+ * nor end on a stop word.
+ */
+function gramsOf(line: string, wholeLines: ReadonlySet<string>): Gram[] {
   const out: Gram[] = [];
-  const chars = Array.from(line);
-  const cuts = boundaries(line);
-  // CJK runs, cut at word boundaries
-  let i = 0;
-  while (i < chars.length) {
-    if (!CJK_RE.test(chars[i])) {
-      i++;
-      continue;
+  const seen = new Map<string, Gram>();
+  const push = (text: string, cjk: boolean, chant: boolean, whole = false, complete = true) => {
+    const key = cjk ? text : text.toLowerCase();
+    if (!text) return;
+    const had = seen.get(key);
+    if (had) {
+      // the same words as a complete breath somewhere else in the line: it counts as one
+      had.complete ||= complete;
+      had.whole ||= whole;
+      return;
     }
-    let j = i;
-    while (j < chars.length && CJK_RE.test(chars[j])) j++;
-    for (let a = i; a < j; a++) {
-      if (!cuts.has(a)) continue;
-      for (let n = 2; n <= 6 && a + n <= j; n++) {
-        if (!cuts.has(a + n)) continue;
-        const g = chars.slice(a, a + n);
-        const text = g.join("");
-        const repeatChant = /^(.)\1+$/u.test(text) && CHANT_SET.has(g[0]);
-        if (!repeatChant && (BAD_START.has(g[0]) || BAD_END.has(g[g.length - 1]))) continue;
-        out.push({ text, cjk: true, chant: repeatChant, units: n });
-      }
-    }
-    i = j;
+    const gram: Gram = { text, cjk, chant, units: unitsOf(text), whole, complete };
+    seen.set(key, gram);
+    out.push(gram);
+  };
+  const trimmed = line.trim();
+  const cjk = CJK_RE.test(trimmed);
+  const mixed = cjk && LATIN_WORD.test(trimmed);
+  LATIN_WORD.lastIndex = 0;
+  // a short single-script line is a candidate as a whole; sung more than once it is the phrase
+  // itself (「拆掉這面牆」, "Lay me down"); a mixed line (「Hey 跟著我唱」) is its chunks
+  if (trimmed && !mixed && unitsOf(trimmed) <= MAX_WHOLE_LINE_UNITS) {
+    const chant = isCjkChant(trimmed) || (!cjk && (trimmed.match(LATIN_WORD) ?? []).every((w) => CHANT_SET.has(w.toLowerCase())));
+    if (!cjk || cjkOk(trimmed)) push(trimmed, cjk, chant, wholeLines.has(trimmed) && unitsOf(trimmed) <= 6);
   }
-  // Latin word sequences, as written
-  const words = [...line.matchAll(/[A-Za-z][A-Za-z']*/g)].map((m) => ({ word: m[0], start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }));
-  for (let a = 0; a < words.length; a++) {
-    for (let n = 1; n <= 4 && a + n <= words.length; n++) {
-      const seq = words.slice(a, a + n);
-      const keys = seq.map((w) => w.word.toLowerCase());
-      const chant = keys.some((k) => CHANT_SET.has(k));
-      if (!chant && keys.every((k) => LATIN_STOP.has(k))) continue;
-      out.push({ text: line.slice(seq[0].start, seq[n - 1].end), cjk: false, chant, units: n });
+  for (const chunk of trimmed.split(CHUNK_SPLIT).filter(Boolean)) {
+    // a chunk is CJK runs (a space between them is a phrase boundary) and Latin runs (words across spaces)
+    for (const run of chunk.match(/\p{Script=Han}+|[^\p{Script=Han}]+/gu) ?? []) {
+      if (CJK_RE.test(run)) {
+        const subs = subPhrases(run);
+        for (let a = 0; a < subs.length; a++) {
+          let text = "";
+          for (let b = a; b < subs.length; b++) {
+            text += subs[b];
+            if (cjkOk(text)) push(text, true, isCjkChant(text));
+          }
+        }
+        // grams anchored to one end of a sub-phrase and cut on a lexicon word's edge at the other
+        // (「我們的青春」 → 「青春」, 「我們的歌會找到方向」 → 「我們的歌」; never 「的青春」, never a piece
+        // floating in the middle like 「世界都睡著」)
+        for (const sub of subs) {
+          const chars = Array.from(sub);
+          const edges = [...wordEdges(sub)].filter((e) => e > 0 && e < chars.length).sort((x, y) => x - y);
+          for (const e of edges) {
+            for (const [a, b] of [
+              [0, e],
+              [e, chars.length],
+            ]) {
+              const text = chars.slice(a, b).join("");
+              if (Array.from(text).length <= 6 && cjkOk(text)) push(text, true, isCjkChant(text), false, false);
+            }
+          }
+        }
+        continue;
+      }
+      const words = run.match(LATIN_WORD) ?? [];
+      if (!words.length) continue;
+      const keys = words.map((w) => w.toLowerCase());
+      // a chant is all chant words ("Oh oh oh"); a phrase with one chant word in it is a phrase
+      const chant = keys.every((k) => CHANT_SET.has(k));
+      if (chant || !keys.every((k) => LATIN_STOP.has(k))) push(words.join(" "), false, chant);
+      for (let a = 0; a < words.length; a++) {
+        for (let n = 1; n <= 6 && a + n <= words.length; n++) {
+          const seq = keys.slice(a, a + n);
+          const isChant = seq.every((k) => CHANT_SET.has(k));
+          if (!isChant) {
+            if (seq.some((k) => CHANT_SET.has(k)) && n === 1) continue;
+            if (LATIN_STOP.has(seq[0]) || LATIN_STOP.has(seq[n - 1])) continue;
+            // a single word only when it carries weight on its own
+            if (n === 1 && seq[0].length < 6) continue;
+          }
+          push(words.slice(a, a + n).join(" "), false, isChant, false, n === words.length);
+        }
+      }
     }
   }
   return out;
 }
 
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function containsGram(line: string, gram: Gram): boolean {
   if (gram.cjk) return line.includes(gram.text);
-  const re = new RegExp(`(^|[^A-Za-z'])${gram.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z'])`, "i");
+  const words = gram.text.split(" ").map(escapeRe);
+  const re = new RegExp(`(^|[^\\p{L}'’])${words.join("[\\s\\p{P}]+")}($|[^\\p{L}'’])`, "iu");
   return re.test(line);
 }
 
@@ -373,23 +489,32 @@ export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string
   const repeated = new Set(st ? st.lines.filter((l) => l.repeats >= 2).map((l) => l.id) : []);
   const candidateLines = lines.filter((l) => chorusIds.has(l.id) || hookIds.has(l.id) || repeated.has(l.id));
   const pool = candidateLines.length ? candidateLines : lines;
+  // whole lines sung more than once: the crowd sings the whole line, so the phrase is the whole line
+  const lineCount = new Map<string, number>();
+  for (const t of texts) {
+    const k = t.trim();
+    if (k) lineCount.set(k, (lineCount.get(k) ?? 0) + 1);
+  }
+  const wholeLines = new Set([...lineCount.entries()].filter(([, n]) => n >= 2).map(([k]) => k));
+  // every complete breath of the song (a whole line, a chunk, a sub-phrase), wherever it is sung
+  const breaths = new Set<string>();
+  for (const t of texts) for (const g of gramsOf(t, wholeLines)) if (g.complete) breaths.add(g.cjk ? g.text : g.text.toLowerCase());
   const seen = new Map<string, { gram: Gram; score: number; lines: number[] }>();
   for (const l of pool) {
-    for (const g of gramsOf(l.text ?? "")) {
+    for (const g of gramsOf(l.text ?? "", wholeLines)) {
       const key = g.cjk ? g.text : g.text.toLowerCase();
       if (seen.has(key)) continue;
+      if (breaths.has(key)) g.complete = true;
       const containing = texts.map((t, i) => (containsGram(t, g) ? i : -1)).filter((i) => i >= 0);
       if (containing.length < 2 && !g.chant) continue;
-      // never a whole line: the phrase is strictly shorter than every line holding it
-      const shortest = Math.min(...containing.map((i) => Array.from(texts[i].trim()).length));
-      if (Array.from(g.text).length >= shortest) continue;
       const factor = g.cjk ? (CJK_LEN_FACTOR[g.units] ?? 0.6) : (LATIN_LEN_FACTOR[g.units] ?? 0.6);
       const inHook = containing.some((i) => hookIds.has(lines[i].id));
       // a phrase with an image or a feeling in it, or 「我們」, is what a crowd shouts back
       const toks = tokenize(g.text);
       const meaning = toks.some((t) => IMAGERY_INDEX.has(t.key) || SENTIMENT_INDEX.has(t.key)) ? 0.5 : 0;
       const collective = toks.some((t) => POV_INDEX.get(t.key) === "we") ? 0.5 : 0;
-      const score = containing.length * factor + (g.chant ? 2 : 0) + (inHook ? 1.5 : 0) + meaning + collective;
+      // a complete breath (a chunk, a sub-phrase) over a piece of one; a repeated whole line over its pieces
+      const score = containing.length * factor + (g.chant ? 2 : 0) + (inHook ? 1.5 : 0) + meaning + collective + (g.complete ? 0.75 : 0) + (g.whole ? 1 : 0);
       seen.set(key, { gram: g, score, lines: containing });
     }
   }
@@ -403,7 +528,7 @@ export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string
   }
   return picked.map((c) => {
     const starts = c.lines.map((i) => lines[i].start).filter((s): s is number => typeof s === "number" && Number.isFinite(s));
-    return { text: c.gram.text, lineIds: c.lines.map((i) => lines[i].id), start: starts.length ? Math.min(...starts) : null, count: c.lines.length, chant: c.gram.chant };
+    return { text: c.gram.text, ...(c.gram.whole ? { whole: true } : {}), lineIds: c.lines.map((i) => lines[i].id), start: starts.length ? Math.min(...starts) : null, count: c.lines.length, chant: c.gram.chant };
   });
 }
 

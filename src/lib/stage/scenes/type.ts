@@ -15,7 +15,11 @@
 // is attenuated until the lyric colour meets the contrast target (legibility.ts).
 // Common GLSL ES 1.00 / 3.00 subset.
 
-import { LEGIBILITY_GLSL } from "./legibility";
+import { WIPE_GLSL } from "./composite";
+import { DISPLAY_TARGET, LEGIBILITY_GLSL, LEGIBLE_TARGET } from "./legibility";
+
+/** The type pass' contrast targets (the renderer sets the uniforms from these). */
+export const TYPE_TARGETS = { readable: LEGIBLE_TARGET, display: DISPLAY_TARGET } as const;
 
 export const TYPE_UNIFORMS = [
   "uRes",
@@ -47,6 +51,11 @@ export const TYPE_UNIFORMS = [
   "uGain",
   "uRelation",
   "uTypeArea",
+  "uDisplayBox",
+  "uTarget",
+  "uDisplayTarget",
+  "uTransition",
+  "uTransitionP",
 ] as const;
 
 export const TYPE_FRAGMENT = /* glsl */ `
@@ -79,6 +88,11 @@ uniform float uSoften;    // layer mode: the safety pass' soften and cap
 uniform float uGain;
 uniform float uRelation;  // 專屬畫面: 0 plain, 1 knockout, 2 behind, 3 lit (how the words meet the image)
 uniform vec4 uTypeArea;   // where the type can be (uv, y up, padded): the legibility taps run only there
+uniform vec4 uDisplayBox; // the display word's box (uv, y up, padded; x1 <= x0 = none): the full ink colour and uDisplayTarget there
+uniform float uTarget;        // the legibility target around readable text (WCAG ratio)
+uniform float uDisplayTarget; // …and around the display word
+uniform float uTransition;    // round 12: the section transition the words enter with (0 none, 1 fade, 2 flash, 3 wipe, 4 bloom)
+uniform float uTransitionP;   // …and its progress 0–1
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
@@ -106,6 +120,7 @@ vec3 softenC(vec3 x, float s) {
 
 vec4 plates(vec2 uv) { return TEX(uType, clamp(uv, 0.0, 1.0)); }
 ${LEGIBILITY_GLSL}
+${WIPE_GLSL}
 
 void main() {
   vec2 fc = gl_FragCoord.xy;
@@ -182,6 +197,33 @@ void main() {
     inkB *= 1.0 - e;
     acc *= 1.0 - e * 0.8;
   }
+  // the section transition reaches the words that enter with it: a wipe reveals them along the
+  // picture's edge, a fade brings them in with it, a flash or bloom flares their halo and settles
+  // (LED 安全模式 already turned flash and bloom into fades upstream, so no new light appears there)
+  float tGlow = 0.0;
+  if (uTransition > 0.5 && uTransitionP < 1.0) {
+    float tp = clamp(uTransitionP, 0.0, 1.0);
+    float keep = 1.0;
+    if (uTransition < 1.5) {
+      keep = smoothstep(0.0, 0.75, tp);
+    } else if (uTransition < 2.5) {
+      tGlow = pow(1.0 - tp, 2.0) * 0.9;
+    } else if (uTransition < 3.5) {
+      vec2 wf = wipeFront(uv, uRes.x / uRes.y, tp);
+      keep = smoothstep(wf.y + WIPE_SOFT, wf.y - WIPE_SOFT, wf.x);
+      tGlow = exp(-abs(wf.x - wf.y) * 32.0) * sin(tp * 3.14159265) * 0.6;
+    } else {
+      keep = smoothstep(0.0, 0.6, tp);
+      tGlow = sin(tp * 3.14159265) * 0.6;
+    }
+    ink *= keep;
+    inkR *= keep;
+    inkB *= keep;
+    acc *= keep;
+    spot *= keep;
+    halo *= keep;
+    haloRaw *= keep;
+  }
   float a = clamp(uAlpha, 0.0, 1.0);
   ink *= a;
   inkR *= a;
@@ -228,7 +270,11 @@ void main() {
     inkC = mix(inkC, vec3(1.0), 0.12 * lightK);
   }
   bool inArea = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
-  if (inArea) inkC = legibleInk(inkC, uSoften, uGain);
+  // the display word (B3): the full ink colour, no hue from the picture, and a higher contrast target around it
+  bool inDisplay = uDisplayBox.z > uDisplayBox.x && uv.x >= uDisplayBox.x && uv.y >= uDisplayBox.y && uv.x <= uDisplayBox.z && uv.y <= uDisplayBox.w;
+  float target = inDisplay ? uDisplayTarget : uTarget;
+  if (inDisplay) inkC = uInk;
+  if (inArea) inkC = legibleInkT(inkC, uSoften, uGain, target);
   // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
   // where the picture is bright (light type on a light scene still reads from the back of the hall)
   float haloK = clamp(uHalo * (0.6 + 0.75 * smoothstep(0.25, 0.75, sl)), 0.0, 0.96) * haloScale;
@@ -240,25 +286,25 @@ void main() {
   // knockout: the words cut a clean window out of the image's shapes — around the letters the
   // picture gives way to the background tone (a printed knockout), the letters keep the lyric colour
   if (uRelation > 0.5 && uRelation < 1.5) col = mix(col, uFill * 0.9 + col * 0.06, cover * 0.9);
-  if (cover > 0.001) col = mix(col, legibleBg(col, inkC, uSoften, uGain), cover);
-  // glow: the halo turned into light (bloom entrances, 光; a lit relation glows a little)
-  col += inkC * halo * (uGlow * 0.55 + (uRelation > 2.5 ? 0.16 : 0.0));
-  // knockout: the frame fills with the background, the scene is seen only through the glyphs
+  if (cover > 0.001) col = mix(col, legibleBgT(col, inkC, uSoften, uGain, target), cover);
+  // glow: the halo turned into light (bloom entrances, 光, the transition's flare; a lit relation glows a little)
+  col += inkC * halo * (uGlow * 0.55 + tGlow * 0.5 + (uRelation > 2.5 ? 0.16 : 0.0));
+  // knockout: the frame fills with the background; the window letters are the display word, so
+  // they are set in the full ink colour (pushed until it meets the display target against the
+  // fill) — the picture only lights their texture a little, never dims them (B3)
   if (win > 0.001) {
     vec3 fill = mix(scene * 0.16, uFill, 0.9);
-    vec3 inside = min(vec3(1.0), scene * 1.3 + uAccent * 0.16 + 0.05);
-    // the letters must read against the fill wherever the picture is as dark (or as light) as it:
-    // there the ink colour comes through, the scene's texture still inside the letters
-    float lf = luma(fill);
-    float li = luma(inside);
-    float need = lf < 0.5 ? clamp((lf + 0.42 - li) / 0.42, 0.0, 1.0) : clamp((li - lf + 0.42) / 0.42, 0.0, 1.0);
-    inside = lf < 0.5 ? mix(inside, max(inside, uInk), need * 0.78) : mix(inside, inside * 0.22, need * 0.78);
+    vec3 inkW = displayInk(uInk, fill);
+    vec3 inside = clamp(inkW + (scene - vec3(luma(scene))) * 0.18 + vec3(0.08 * luma(scene)) * step(0.5, luma(inkW)), 0.0, 1.0);
+    inside = mix(inkW, inside, 0.5);
     col = mix(col, fill, win * (1.0 - windowMask));
     col = mix(col, inside, windowMask);
   }
-  // overprint: a misregistered accent plate screened over the picture
+  // overprint: a misregistered second plate screened over the picture — the accent plate, and a
+  // ghost of the ink letters in the accent colour (the colour accent is the offset copy, never the fill)
   if (uOverprint > 0.001) {
-    float accO = plates(tuv + vec2(3.0 * s * px.x, -2.0 * s * px.y)).g * a;
+    vec4 off = plates(tuv + vec2(3.0 * s * px.x, -2.0 * s * px.y));
+    float accO = max(off.g, off.r * 0.6) * a;
     col = 1.0 - (1.0 - col) * (1.0 - uAccent * accO * uOverprint * 0.85);
     acc *= 1.0 - uOverprint * 0.35;
   }
@@ -266,7 +312,7 @@ void main() {
   // the type's own accent layers (a glitch echo stack, an overprint) behind the readable letters
   // meet the same contrast right around the letters (further out they keep their colour)
   float ghost = covers.y * min(1.0, acc * 3.0);
-  if (ghost > 0.001) col = mix(col, legibleBg(col, inkC, uSoften, uGain), ghost);
+  if (ghost > 0.001) col = mix(col, legibleBgT(col, inkC, uSoften, uGain, target), ghost);
   // the RGB split stays a fringe: the base glyph keeps (most of) the ink in every channel
   vec3 inkM = vec3(max(inkR, ink * 0.88), ink, max(inkB, ink * 0.88));
   col = col * (1.0 - inkM) + inkC * inkM;

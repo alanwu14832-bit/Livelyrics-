@@ -25,6 +25,7 @@ import type {
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { ensureContrast } from "./color";
+import { buildConcept, chooseSkeleton, conceptKeywords, conceptMotifs, makeTitle, SHORT_SONG_SECONDS, type ConceptContext } from "./concept";
 import { capCues, suggestCues } from "./cues";
 import { analyzeFindings, type DesignHints, type Findings } from "./findings";
 import { findImagery, type ImageryHit } from "./imagery";
@@ -35,6 +36,7 @@ import { generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { moodPalette, moodScenes } from "./moodboard";
 import { combinedMood, placeCollected } from "./collected";
 import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./type-design";
+import { MOOD_VOCABULARY } from "./lexicon/moods";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
 import { offlineSceneProgram } from "./scene-program";
@@ -153,34 +155,19 @@ function makeTypography(mood: Mood, seed: number, imagery: ImageryHit[], finding
   };
 }
 
-const MOOD_TITLES: Record<MoodClass, string[]> = {
-  calm: ["靜默的潮汐", "留白的光", "安靜的回聲"],
-  warm: ["溫熱的光", "慢慢亮起的夜", "微光裡的我們"],
-  driving: ["脈動的城市", "向前的光", "節拍裡的風"],
-  explosive: ["失速的光", "燃燒的節拍", "全場的心跳"],
-};
-const MOOD_KEYWORDS: Record<MoodClass, string[]> = {
-  calm: ["靜謐", "溫柔", "留白"],
-  warm: ["溫暖", "懷舊", "光暈"],
-  driving: ["脈動", "前進", "律動"],
-  explosive: ["爆發", "熱血", "衝刺"],
-};
-const MOOD_MOTIF: Record<MoodClass, string> = { calm: "呼吸般的光環", warm: "溫暖的光暈", driving: "律動的幾何線條", explosive: "放射狀的光芒" };
 const MOOD_EMBLEM: Record<MoodClass, EmblemStyle> = { calm: "orbit", warm: "bloom", driving: "wave", explosive: "sun" };
 
-function makeTitle(mood: Mood, imagery: ImageryHit[], seed: number): string {
-  const [a, b] = imagery.map((h) => h.imagery.name);
-  if (a && b) {
-    const templates = [`${a}裡的${b}`, `${a}與${b}`, `穿過${a}的${b}`, `${b}落在${a}`];
-    const t = templates[seed % templates.length];
-    if (t.length <= 12) return t;
-  }
-  if (a) {
-    const templates = [`${a}的回聲`, `${a}之間`, `${a}進行式`, `點亮${a}`];
-    return templates[seed % templates.length];
-  }
-  const list = MOOD_TITLES[mood.mood];
-  return list[seed % list.length];
+const CALM_EMOTIONS = new Set(["平靜內斂", "憂傷低迴"]);
+
+/**
+ * A calm song never flashes: a soft genre (folk's 「不要閃爍」), a ballad's calm lyric emotion, or a
+ * slow / floating audio mood. Its drops fade or bloom in, and its cues never ask for 「閃白」.
+ */
+export function isCalmSong(f: Findings): boolean {
+  if (f.hints.motion === "soft") return true;
+  if (f.genre?.live.includes("閃爍")) return true;
+  if (f.audio.quadrant === "dark-slow" || f.audio.quadrant === "gentle-float") return true;
+  return f.lyrics.lineCount > 0 && CALM_EMOTIONS.has(f.lyrics.emotion.label);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +209,57 @@ interface SectionPlanCtx {
   findings: Findings;
   /** 字體藝術: the song's typographic voice */
   voice: VoiceChoice;
+  /** a calm song (isCalmSong): no flash, no 「推到 1.2」 */
+  calm: boolean;
+  /** round 12: the built-in scene this song's last chorus climaxes on (drawn per song, never the band's previous) */
+  climax: SceneId;
+  /** the band's most recently designed other song's climax scene (never repeated in a row) */
+  bandClimax: SceneId | null;
+  /** whether the song's brief calls for the motif to close it (the band has a symbol, or one strong recurring image) */
+  wantsMotif: boolean;
+  /** the first section's scene once chosen (the outro may return to it) */
+  opening: SceneId | null;
+}
+
+const CLIMAX_SALT = 0xe9b5dba5;
+
+/** How big a chorus scene is: the ladder climbs this rank towards the song's climax. */
+const CHORUS_RANK: Partial<Record<SceneId, number>> = { particles: 1, waves: 1.5, grid: 2, shards: 3, tunnel: 4 };
+const rankOf = (sc: SceneId): number => CHORUS_RANK[sc] ?? 2;
+
+/** A well-mixed 0..1 from a seed and a salt (one mulberry32 step), so neighbouring seeds spread. */
+function unit(seed: number, salt: number): number {
+  let t = (seed ^ salt) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/**
+ * The scene a song's last chorus climaxes on. Drawn per song from the chorus scenes the genre
+ * allows — the genre's own family first when it names one of them, otherwise by the seed — and
+ * never the band's previous song's climax, so the catalogue does not end every song in 隧道.
+ */
+export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, chorusCount = 2, salt = CLIMAX_SALT): SceneId {
+  // a calm song never climaxes on a tunnel or on shards: its biggest chorus is still a quiet
+  // picture (particles, the grid's horizon, the waves' bands)
+  const base = calm ? [...ladder.filter((sc) => sc !== "tunnel" && sc !== "shards"), "waves" as SceneId] : [...ladder];
+  // three or more choruses need room to climb: the climax is then one of the bigger scenes
+  const roomy = chorusCount >= 3 ? base.filter((sc) => rankOf(sc) >= 2) : base;
+  const pool = (roomy.length ? roomy : base).filter((sc) => sc !== bandClimax);
+  const list = pool.length ? pool : roomy.length ? roomy : base;
+  if (!list.length) return "particles";
+  // a weighted draw: the genre's own scenes count three times, the rest once (so a genre leans
+  // but does not lock, and the seed spreads a catalogue of one genre over the ladder)
+  const preferred = new Set(findings.genre ? findings.hints.scenes.slice(0, 3) : []);
+  const weights = list.map((sc) => (preferred.has(sc) ? 3 : 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let u = unit(seed, salt) * total;
+  for (let k = 0; k < list.length; k++) {
+    u -= weights[k];
+    if (u < 0) return list[k];
+  }
+  return list[list.length - 1];
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
@@ -242,13 +280,20 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   const e = s.energy;
   const cands = (k: SectionKind) => songCandidates(k, ctx);
   if (s.kind === "chorus") {
-    // choruses escalate: particles -> grid / shards -> tunnel on the last one (avoided scenes left out)
+    // choruses escalate along a ladder that ends on this song's climax scene (round 12: drawn per
+    // song, not always 隧道); avoided scenes are left out
     const avoided = new Set([...(ctx.bible?.sceneAvoid ?? []), ...ctx.findings.hints.avoidScenes]);
     const kept = SCENE_CANDIDATES.chorus.filter((sc) => !avoided.has(sc));
-    const ladder = kept.length ? kept : cands("chorus");
-    // a genre that prefers one of the ladder's scenes starts its first chorus there
-    const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
-    const base = genreStart >= 0 ? Math.min(genreStart, Math.max(0, ladder.length - 2)) : ctx.mood.mood === "explosive" ? 1 : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % 2;
+    const base0 = kept.length ? kept : cands("chorus");
+    const climax = base0.includes(ctx.climax) || ctx.climax === "waves" ? ctx.climax : base0[base0.length - 1];
+    // the rungs below the climax, smallest first: the choruses climb to it (a song whose climax is
+    // the smallest scene keeps every chorus there — restraint, not a drop-back)
+    const rest = [...base0, ...(ctx.calm ? (["waves"] as SceneId[]) : [])].filter((sc, k, a) => sc !== climax && rankOf(sc) < rankOf(climax) && a.indexOf(sc) === k).sort((a, b) => rankOf(a) - rankOf(b));
+    const ladder = [...rest, climax];
+    // a genre that prefers one of the lower rungs starts its first chorus there
+    const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => sc !== climax && ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
+    const base0idx = genreStart >= 0 ? Math.min(genreStart, ladder.length - 2) : ctx.mood.mood === "explosive" ? Math.min(1, ladder.length - 2) : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % Math.max(1, ladder.length - 1);
+    const base = Math.max(0, Math.min(ladder.length - 1, base0idx));
     let idx = Math.min(ladder.length - 1, base + ordinal);
     if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
     const pick = ladder[idx];
@@ -267,7 +312,23 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   if (lexScene && (s.kind === "verse" || s.kind === "bridge" || s.kind === "breakdown")) return lexScene;
   const pool = kindList.filter((sc) => fits(sc, e) && sc !== prev);
   const list = pool.length ? pool : kindList.filter((sc) => sc !== prev);
-  if (s.kind === "intro" || s.kind === "outro") return list.includes("motif") ? "motif" : list[0];
+  if (s.kind === "intro") {
+    // the motif opens the song when the brief calls for it; otherwise the song's own quiet scene
+    if (ctx.wantsMotif && list.includes("motif")) return "motif";
+    const quiet = list.filter((sc) => sc !== "motif");
+    return quiet[(ctx.seed >>> 11) % quiet.length] ?? list[0] ?? "motif";
+  }
+  if (s.kind === "outro") {
+    // round 12: three ways to close — the motif only for songs whose brief calls for it, a return
+    // to the opening scene, or the climax scene dying down (its energy is already low here)
+    const variants: SceneId[] = [];
+    if (ctx.wantsMotif && list.includes("motif")) variants.push("motif");
+    if (ctx.opening && ctx.opening !== prev && ctx.opening !== "blackout") variants.push(ctx.opening);
+    if (ctx.climax !== prev) variants.push(ctx.climax);
+    for (const sc of list) if (sc !== prev && !variants.includes(sc)) variants.push(sc);
+    const uniq = variants.filter((sc, k) => variants.indexOf(sc) === k);
+    return uniq[(ctx.seed >>> 7) % Math.min(3, uniq.length)] ?? list[0] ?? "motif";
+  }
   return list[(ctx.seed + i * 7 + ordinal) % list.length] ?? "nebula";
 }
 
@@ -364,9 +425,9 @@ function colorwayFor(kind: SectionKind, last: boolean, p: Palette): [string, str
 }
 
 /** The genre's transition energy on top of the energy rules: soft genres never flash or cut, punchy ones cut into choruses. */
-function transitionFor(s: StructSection, prev: StructSection | undefined, motion: DesignHints["motion"] = "medium"): SectionDesign["transitionIn"] {
+function transitionFor(s: StructSection, prev: StructSection | undefined, motion: DesignHints["motion"] = "medium", calm = false): SectionDesign["transitionIn"] {
   const t = transitionBase(s, prev);
-  if (motion === "soft") return t === "flash" ? "bloom" : t === "cut" ? "fade" : t;
+  if (motion === "soft" || calm) return t === "flash" ? "bloom" : t === "cut" ? "fade" : t;
   if (motion === "punchy" && s.kind === "chorus" && t === "wipe") return "cut";
   return t;
 }
@@ -397,7 +458,7 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
         ? `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，讓光與節拍帶動全場。`
         : `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，邀請全場合唱。`;
     case "verse":
-      if (hidden) return `主歌以「${sc}」維持中低亮度；${lyricClause}，把焦點留給主唱。`;
+      if (hidden) return songHasLyrics ? `主歌以「${sc}」維持中低亮度；${lyricClause}，把焦點留給主唱。` : `主歌以「${sc}」維持中低亮度；${lyricClause}，跟著樂手的動態慢慢呼吸。`;
       return style === "subtitle"
         ? `主歌字很密，畫面「${sc}」為主、歌詞退到小字幕，不和主唱搶戲。`
         : voice
@@ -413,14 +474,10 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
     case "interlude":
       return `器樂段落交給「${sc}」與燈光，歌詞隱藏，畫面隨節拍反應。`;
     case "outro":
-      return `回到「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
+      return scene === "motif"
+        ? `回到主視覺「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`
+        : `「${sc}」慢慢暗下去收尾，畫面退回安靜；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
   }
-}
-
-/** A Latin name inside Chinese text gets a space on its Latin side(s): 「說 Livelyrics Band 是」. */
-function latinPad(name: string): string {
-  const head = /^[A-Za-z0-9]/.test(name) ? ` ${name}` : name;
-  return /[A-Za-z0-9.]$/.test(name) ? `${head} ` : head;
 }
 
 function sectionLabel(kind: SectionKind, n: number, total: number): string {
@@ -443,6 +500,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
     const total = counts.get(s.kind) ?? 1;
     const scene = chooseScene(s, i, prevScene, ordinal, ctx);
     prevScene = scene;
+    if (i === 0) ctx.opening = scene;
     const last = s.kind === "chorus" && ordinal === total - 1 && total > 1;
     const { style, placement, scale } = applyLyricPolicy(
       chooseLyrics(s, ordinal, ctx),
@@ -472,7 +530,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricPlacement: placement,
       lyricScale: scale,
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
-      transitionIn: transitionFor(s, st.sections[i - 1], ctx.findings.hints.motion),
+      transitionIn: transitionFor(s, st.sections[i - 1], ctx.findings.hints.motion, ctx.calm),
       media: null,
       rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0, ctx.voice),
     };
@@ -544,9 +602,13 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
   const choruses = sections.filter((s) => s.kind === "chorus");
   const hidden = sections.filter((s) => s.lyricStyle === "hidden").map((s) => s.label);
   const verse = sections.find((s) => s.kind === "verse");
+  const short = ctx.st.duration < SHORT_SONG_SECONDS;
   const lines = [
+    ...(short ? ["## 音檔太短，分析不可靠", `這段音檔只有 ${Math.round(ctx.st.duration)} 秒：速度、段落與能量都讀不準，所以只設計一個安靜的單一畫面，不閃、不切。上傳完整的音檔後再重新設計。`, ""] : []),
     "## 敘事弧線",
-    `以主視覺「${title}」開場建立世界觀，${arcDescription(ctx.st)}。畫面隨能量起伏，副歌一次比一次更亮、更快，最後回到主視覺收尾。`,
+    short
+      ? `整段用主視覺「${title}」一個畫面撐住，沒有段落變化。`
+      : `以主視覺「${title}」開場建立世界觀，${arcDescription(ctx.st)}。${choruses.length >= 2 ? "畫面隨能量起伏，副歌一次比一次更亮、更快，最後回到主視覺收尾。" : choruses.length === 1 ? "畫面隨能量起伏，副歌是全曲最亮的一段，最後回到主視覺收尾。" : "畫面跟著能量的起伏走，最後回到主視覺收尾。"}`,
     "",
     "## 歌詞與動畫",
     ...(ctx.st.lines.length === 0
@@ -564,7 +626,9 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
             ? typeSystem
               ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}」`).join("、")}，歌詞放大成畫面的主角，重複的句子沿用同一個構圖讓觀眾跟唱。`
               : `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
-            : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
+            : short
+              ? "- 音檔太短，沒有段落可言：歌詞小而安靜地出現。"
+              : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
           hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
         ]),
     "",
@@ -612,7 +676,8 @@ function findingsCues(cues: CueNote[], sections: readonly SectionDesign[], f: Fi
     const said = (here.length ? here : phrases.slice(0, 1)).map((x) => `「${x.text}」`).join("、");
     return said ? { ...c, detail: `全場會一起唱${said}：${c.detail}`.slice(0, 240) } : c;
   });
-  if (f.genre && st.lines.length > 0 && f.audio.peakAt != null) {
+  const mentionsSinger = /主唱|口號|跟唱|合唱|歌詞|喊/.test(f.genre?.live ?? "");
+  if (f.genre && f.audio.peakAt != null && st.duration >= SHORT_SONG_SECONDS && (st.lines.length > 0 || !mentionsSinger)) {
     const time = Math.max(0, Math.round((f.audio.peakAt - 2) * 100) / 100);
     out.push({ time, title: `${f.genre.label}的現場`, detail: f.genre.live.slice(0, 240), kind: "highlight" });
   }
@@ -639,8 +704,17 @@ export interface OfflineContext {
   findings: Findings;
 }
 
+/** A clip too short to analyse becomes one section (its lines, its mean energy): nothing to cue, nothing to escalate. */
+function collapseShort(st: SongStructure): SongStructure {
+  if (!(st.duration < SHORT_SONG_SECONDS) || st.sections.length <= 1) return st;
+  const lineIds = st.sections.flatMap((s) => s.lineIds);
+  const energy = st.sections.reduce((a, s) => a + s.energy, 0) / st.sections.length;
+  const density = st.sections.reduce((a, s) => a + s.density, 0) / st.sections.length;
+  return { ...st, sections: [{ start: 0, end: st.duration, energy: Math.round(energy * 100) / 100, kind: lineIds.length ? "verse" : "intro", lineIds, repeatedRatio: 0, density }] };
+}
+
 export function offlineContext(input: DesignerInput): OfflineContext {
-  const structure = analyzeStructure(input);
+  const structure = collapseShort(analyzeStructure(input));
   const mood = analyzeMood(input, structure);
   const imagery = findImagery(
     structure.lines.map((l) => l.text),
@@ -680,30 +754,46 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     moodScenes: moodScenes(moodboard),
     findings,
     voice: chooseVoice(findings, st.cjk),
+    calm: isCalmSong(findings),
+    climax: "tunnel",
+    bandClimax: input.bandSongs?.[0]?.chorusScene ?? null,
+    wantsMotif: !!bible?.motifs.length || (findings.imagery[0]?.weight ?? 0) >= 4,
+    opening: null,
   };
+  ctx.climax = chooseClimax(
+    SCENE_CANDIDATES.chorus.filter((sc) => !(bible?.sceneAvoid ?? []).includes(sc) && !hints.avoidScenes.includes(sc)),
+    findings,
+    seed,
+    ctx.bandClimax,
+    ctx.calm,
+    ctx.chorusCount,
+  );
   // the band's uploads as before; the research's collected material with restraint (one or two sections)
   const collectedIds = new Set((input.collected ?? []).map((c) => c.id));
   const uploaded = (input.assets ?? []).filter((a) => !collectedIds.has(a.id));
   const sections = applyTreatments(placeCollected(assignMedia(buildSections(ctx), uploaded), input.collected), bible, input.assets);
-  const title = makeTitle(mood, imagery, seed);
-  const ownMotifs = [...hints.motifs.slice(0, 3), MOOD_MOTIF[mood.mood]];
-  const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...ownMotifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
-  const moodKeywords = [...hints.keywords, ...MOOD_KEYWORDS[mood.mood], ...imagery.map((h) => h.imagery.name)].filter((k, i, a) => a.indexOf(k) === i).slice(0, 6);
+  // the words: a concept skeleton chosen from the findings, a title unique in the library, the song's own motifs
+  const conceptCtx: ConceptContext = {
+    title: "",
+    songTitle: input.meta?.title?.trim() ?? "",
+    artist: input.meta?.artist?.trim() ?? "",
+    findings,
+    structure: st,
+    imagery,
+    palette: palette.entries,
+    bpm: mood.bpm,
+    bpmConfidence: input.analysis && Number.isFinite(input.analysis.bpmConfidence) ? input.analysis.bpmConfidence : 0,
+    seed,
+    hasLyrics: st.lines.length > 0,
+  };
+  const skeleton = chooseSkeleton(conceptCtx);
+  const title = makeTitle(conceptCtx, skeleton, input.takenTitles ?? []);
+  conceptCtx.title = title;
+  const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...conceptMotifs(findings)].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
+  const moodKeywords = conceptKeywords(findings, imagery);
   const emblem = hints.emblem ?? MOOD_EMBLEM[mood.mood];
-  const tempoText = mood.bpm ? `約 ${mood.bpm} BPM、${findings.audio.label}型` : `${findings.audio.label}型`;
-  const imageryText = imagery.length ? `歌詞裡的${imagery.map((h) => `「${h.imagery.name}」`).join("")}` : "音樂本身的能量起伏";
-  const artist = findings.info?.musicbrainz?.artist;
-  const factText = findings.genre
-    ? `公開資料說${latinPad(input.meta?.artist?.trim() || "這個樂團")}是${artist?.country === "TW" ? "臺灣的" : ""}${findings.genre.label}${artist?.type === "Group" ? "樂團" : ""}，所以沿用${findings.genre.label}的視覺語法：${findings.genre.palette.note}。`
-    : "";
   const concept = [
-    `這首${tempoText}的歌，在舞台上是「${title}」——${hints.world}`,
-    factText,
-    `畫面從${imageryText}長出來，以${palette.entries[1].name}與${palette.entries[2].name}為主色，在${palette.entries[0].name}的深色背景上發光。`,
-    st.lines.length > 0
-      ? "主歌讓畫面退後、把空間留給主唱；副歌讓光與節拍一起爆開，邀請全場合唱。"
-      : "這首歌不放歌詞：安靜的段落讓畫面退後，能量高的段落讓光與節拍一起爆開。",
-    "視覺始終是配角：它是樂團背後的一道牆，托起表演而不搶戲。",
+    buildConcept(conceptCtx, skeleton),
     bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
     fromMood
       ? collectedColours
@@ -722,7 +812,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       }
     : baseTypography;
 
-  const cues: CueNote[] = findingsCues(suggestCues(sections, st.duration, input.lyrics?.lines ?? []), sections, findings, st);
+  const cues: CueNote[] = findingsCues(suggestCues(sections, st.duration, input.lyrics?.lines ?? [], { hasLyrics: st.lines.length > 0, motion: hints.motion, calm: ctx.calm, ledSafe: true }), sections, findings, st);
   const lines = buildLines(ctx, sections);
   // 字體藝術: the song's voice and a composition for every sung line
   const { system: typeSystem } = designTypeSystem({
@@ -744,7 +834,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       concept,
       moodKeywords,
       palette: palette.entries,
-      motifs: motifs.length >= 2 ? motifs : [...motifs, "光的節奏"],
+      motifs: motifs.length >= 2 ? motifs : [...motifs, ...MOOD_VOCABULARY[findings.audio.quadrant].motifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4),
       motifSvg: generateMotifSvg(`${input.meta?.title ?? ""}|${input.meta?.artist ?? ""}`, emblem),
       typography,
     },
@@ -761,7 +851,8 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
 
 /** Heuristic research brief with the same headings as Claude's, honest about its limits. */
 export function offlineResearch(input: DesignerInput, reason?: string): Research {
-  const { structure: st, mood, imagery } = offlineContext(input);
+  const { structure: st, mood, imagery, findings } = offlineContext(input);
+  const vocab = MOOD_VOCABULARY[findings.audio.quadrant];
   const artist = input.meta?.artist?.trim() || "（未填樂團）";
   const title = input.meta?.title?.trim() || "（未填歌名）";
   const choruses = st.sections.filter((s) => s.kind === "chorus");
@@ -774,6 +865,7 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
 
   const brief = [
     `> **離線模式**：${reason ?? "尚未設定 Claude（ANTHROPIC_API_KEY）"}，以下是依音訊分析與歌詞自動推論的啟發式簡報，**沒有經過網路研究**，請把它當成起點而不是結論。`,
+    ...(st.duration < SHORT_SONG_SECONDS ? [`> **音檔太短，分析不可靠**：只有 ${Math.round(st.duration)} 秒，請上傳完整的音檔再重新設計。`] : []),
     "",
     "## 樂團視覺識別",
     `- 無法在離線模式查證 **${artist}** 的專輯封面、MV、logo 與過往舞台設計。`,
@@ -794,7 +886,7 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
     timed ? "- 歌詞已有時間碼，可用軌道模式自動播放；現場仍保留手動 cue。" : "- 歌詞沒有時間碼，建議先在歌詞編輯器打點，或在現場用手動 cue。",
     "",
     "## 設計方向建議",
-    `- 先訂下世界觀：以${imagery[0] ? `「${imagery[0].imagery.motif}」` : "一個簡單的幾何符號"}當主視覺，開場與結尾都回到它。`,
+    `- 先訂下世界觀：以「${imagery[0]?.imagery.motif ?? vocab.motifs[0]}」當主視覺，開場與結尾都回到它。`,
     "- 每一句歌詞都是排好的構圖，不是字幕：主歌小而安靜，副歌才讓歌詞成為畫面主角。",
     "- 歌詞字重 700 以上、對比 4.5:1 以上、每次最多兩行，避開主唱 IMAG 與畫面下緣。",
     "",

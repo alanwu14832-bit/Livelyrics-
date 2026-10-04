@@ -179,7 +179,9 @@ describe("findings drive the offline designer", () => {
     expect(post.keyVisual.concept).toContain("後搖滾");
     expect(post.designerNotes).toContain("## 免費研究的發現");
     expect(post.designerNotes).toContain("曲風「後搖滾」");
-    expect(post.keyVisual.concept).toContain("公開資料說 Livelyrics Band 是");
+    // the concept names the band and its genre (one of the skeleton's phrasings)
+    expect(post.keyVisual.concept).toContain("Livelyrics Band");
+    expect(post.keyVisual.concept).toContain("後搖滾");
   });
 
   it("differs by lyrics: the sea song gets the sea's colours, scenes and motifs", () => {

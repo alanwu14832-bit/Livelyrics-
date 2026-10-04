@@ -611,6 +611,12 @@ export interface ProjectSummary {
   hasPlan?: boolean;
   /** the key still of the current plan (data URL), when the design overview has saved one */
   thumb?: string;
+  /** the plan's key-visual title (the offline designer keeps new titles unique across the library) */
+  keyVisualTitle?: string;
+  /** the plan's scene program recipe (form/texture/motion#salt) when the composer wrote it */
+  sceneRecipe?: string;
+  /** the built-in scene of the plan's last chorus */
+  chorusScene?: SceneId;
 }
 
 // ---------------------------------------------------------------------------

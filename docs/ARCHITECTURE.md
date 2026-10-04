@@ -446,19 +446,28 @@ remain available.
   in parallel inside a 15 s budget (far inside the cloud step's 300 s) and returns `PublicInfo`
   (`status` per source: ok / none / failed / skipped, `notes`); it is cached as
   `Project.research.publicInfo` and reused while fresh (same names, no failed source, < 30 days).
-- **Local analysis** (deterministic, `designer/`). `lexicon/imagery.ts` (54 image families: words,
+- **Local analysis** (deterministic, `designer/`). `lexicon/imagery.ts` (56 image families: words,
   scene family, hues, saturation, light, temperature, motion, emblem, a 繁中 colour phrase, how visual
-  the family is; stop words such as 上海 / 花錢), `lexicon/sentiment.ts` (≈ 270 zh / en words with
+  the family is, optional 專屬畫面 `forms` — 牆 is its own family (水泥灰、裂縫, pillars / strata) apart
+  from 窗 and 門; stop words such as 上海 / 花錢), `lexicon/sentiment.ts` (≈ 270 zh / en words with
   valence and arousal, negators, intensifiers, chants), `lexicon/genres.ts` (20 genre rules: MusicBrainz
   tags and 繁中 keywords → palette tendency, scene family and avoided scenes, lyric density and verse /
-  chorus styles, motion energy, typography, motifs, the live habit and a one-line why).
+  chorus styles, motion energy, typography, motifs, the live habit and a one-line why),
+  `lexicon/moods.ts` (per audio mood: fallback motifs, scenes, keywords and titles, so a song without
+  imagery or genre never gets an empty 母題 / 場景 row or a fixed filler).
   `lyric-analysis.ts`: forward-maximum-matching tokenizer over the lexicons (code-point offsets,
   simplified lyrics matched through the traditional map), imagery (the title counts double), emotion
   (negation, intensifiers, chants, `!`, the hook weighted 40 %; labels 明亮激昂 / 溫柔明亮 / 痛苦掙扎 /
-  憂傷低迴 / 矛盾拉扯 / 平靜內斂), point of view (我們 / 我–你 / 你 / 我 / 他), sing-along phrases (repeated
-  token-bounded grams or chants, always shorter than their line). `audio-mood.ts`: BPM, energy,
-  section contrast, brightness, bass, onset → 爆發釋放 / 冷冽推進 / 溫暖律動 / 陰鬱緩慢 / 溫柔漂浮, the energy
-  shape and the peak. `genre.ts`: tag / Wikipedia matches, general words ("rock", 搖滾) weighted down.
+  憂傷低迴 / 矛盾拉扯 / 平靜內斂, named only from ≥ 2 distinct sentiment words, else 情緒不明顯), point of
+  view (我們 / 我–你 / 你 / 我 / 他), sing-along phrases snapped to phrase boundaries (punctuation and
+  spaces, the particles 了著嗎呢 end a phrase, grams start or end only on a lexicon word — never
+  「掉這面牆」; Latin phrases are whole words that neither start nor end on a stop word; a short line
+  sung more than once is quoted whole, `whole: true`, a line over 12 units never is). `audio-mood.ts`:
+  BPM, energy, section contrast, brightness, bass, onset → 爆發釋放 / 冷冽推進 / 溫暖律動 / 陰鬱緩慢 /
+  溫柔漂浮, the energy shape and the peak. `genre.ts`: tag / Wikipedia matches, general words ("rock",
+  搖滾) weighted down. `research/musicbrainz.ts` `artistKind` / `artistKindLabel`: the artist `type`
+  decides 樂團 / 歌手 / 管弦樂團 / 合唱團 (音樂人 when unknown) everywhere the brief or the concept names
+  the act.
   `findings.ts`: `analyzeFindings` → `Findings` + `DesignHints` (hue, accent hues with the genre
   leading and the strongest image as the accent, saturation, scheme, temperature, scene family minus
   the genre's avoided scenes, motifs, typography, lyric density and styles, motion, sing-along, a
@@ -467,13 +476,58 @@ remain available.
   意象…」 (and `onSearch` per source) and returns a `Research` (`engine: "free"`, the five research
   headings, sources = the MusicBrainz / Wikipedia pages and official links, `publicInfo`), labelled
   「免費研究（公開資料＋歌詞與音訊分析）」 (`src/lib/research-labels.ts`). Every source may fail: the brief then
-  says so and stands on the lyrics and the audio. `DesignerInput.publicInfo` carries the facts into
-  the design step and the directions: `offlineDesign` takes palette, scheme, saturation, fonts, scene
-  family, lyric styles, transitions (soft genres never flash), motifs, the concept sentence, the
-  「免費研究的發現」 notes, the sing-along emphasis and cues from the findings (the bible and the mood
-  board still come first); `offlineDirectionSpecs` keeps film / collage / minimal but takes each
-  direction's colours, scenes, motifs and wording from the song, and the genre's native axis takes
-  the genre's colours and lyric habit (folk → a warm earth-toned film, punk → the collage).
+  says so and stands on the lyrics and the audio; a clip under 20 s (`SHORT_SONG_SECONDS`) gets a
+  「音檔太短，分析不可靠」 warning at the top, and no row is ever empty (`lexicon/moods.ts` fills 母題 /
+  場景). `DesignerInput.publicInfo` carries the facts into the design step and the directions:
+  `offlineDesign` takes palette, scheme, saturation, fonts, scene family, lyric styles, transitions
+  (soft genres and calm songs — `isCalmSong`: soft motion, a genre that says 不要閃爍, a slow / floating
+  audio mood, a 平靜內斂 / 憂傷低迴 lyric — never flash), motifs, the 「免費研究的發現」 notes, the sing-along
+  emphasis and cues from the findings (the bible and the mood board still come first). **Built-in
+  scenes rotate per song** (round 12): the last chorus climaxes on a scene drawn per song
+  (`chooseClimax`: the chorus candidates the genre allows, the genre's own family counting three
+  times, a calm song never on 隧道 or 碎片 — 波形 joins its pool —, three or more choruses only on the
+  bigger scenes so there is room to climb, never the band's previous song's climax from
+  `bandSongs[0].chorusScene`); the choruses climb a ladder of the smaller scenes (`CHORUS_RANK`:
+  particles < waves < grid < shards < tunnel) up to it. The intro opens on the motif only when the
+  brief calls for it (the band has motifs, or one recurring image weighs ≥ 4), else on one of the
+  song's quiet scenes; the outro closes one of three ways by the seed — the motif (when called for),
+  a return to the opening scene, or the climax scene dying down (its rationale says 「慢慢暗下去收尾」);
+  nothing is 主視覺符號 by default any more.
+  `offlineDirectionSpecs` keeps film / collage / minimal but takes each direction's colours, scenes,
+  motifs and wording from the song, and the genre's native axis takes the genre's colours and lyric
+  habit (folk → a warm earth-toned film, punk → the collage).
+- **The designer's words** (`designer/concept.ts`, round 11). The key-visual concept is built from one
+  of nine skeletons chosen by the findings (`chooseSkeleton`: fragment for a clip under 20 s,
+  instrumental, chant — a chant genre with a hook sung ≥ 3 times or any short hook sung ≥ 4 times —,
+  ballad — a slow / floating audio mood or a calm emotion on a soft / pop genre —, story — folk /
+  jazz, a 他 or a long 我–你 point of view —, groove — city pop / R&B / electronic / dance imagery —,
+  two peaks — ≥ 2 choruses, a bright emotion and real contrast —, slow build — 爆發釋放 or a rising
+  shape —, steady), each an opening sentence with slots from the findings (imagery families, the
+  emotion adjective, the sing-along phrase, the point of view, the peak time), one of three fact
+  phrasings (artist, place, 樂團 / 歌手, genre palette note or why), a palette sentence in the
+  skeleton's voice (colour names never collide: `color.ts` `colorNames` lists alternatives, nearest
+  first, and `palette.ts` `nameEntries` takes the first free one), a role sentence (what the verses
+  and the choruses do; never a singer for an instrumental) and the BPM / arc sentence only when the
+  tempo is confident (`bpmConfidence` ≥ 0.5) and the song ≥ 60 s. No fixed coda. Titles
+  (`titleCandidates` / `makeTitle`) come from the imagery pair, the emotion, a chant hook, the genre
+  motif and the mood lexicon, and are kept unique in the library: `storage.ts` `listKeyVisualTitles`
+  (from `ProjectSummary.keyVisualTitle`) feeds `DesignerInput.takenTitles` in the pipeline's design
+  step. Motifs are the findings' (imagery families, genre) topped up from the mood lexicon
+  (`conceptMotifs`); keywords dedupe near-duplicates. A clip under 20 s collapses to one section with
+  the warning in the concept and the notes.
+- **Cues** (`designer/cues.ts`). Every cue is gated on evidence: 爆點 needs an energy rise ≥ 0.25
+  (`DROP_RISE`), 合唱 needs ≥ 2 choruses and lyrics, 開場 / 中段檢查 (the `normalizePlan` top-up,
+  `genericCues`) a song ≥ 60 s, 結束 ≥ 20 s, the genre's 「X 的現場」 cue lyrics when its text mentions a
+  singer; nothing mentions a singer for an instrumental. A calm song's drop is 「X 亮起」 (no 閃白, no
+  推到 1.2); the wording names the section's actual transition through `transitionWording` — 「淡入
+  （LED 安全模式把閃白改成淡入）」 when the wall will fade, since LED 安全模式 is on by default.
+- **Labels and 強調** (round 11). `src/lib/stage/scenes/labels.ts` is the one scene-name source: the
+  console (`src/lib/console/labels.ts`), the design summary (`src/components/process/labels.ts`), the
+  stage lab and the designer's catalogue (`SCENES[id].label`, so the rationale sentences and the Claude
+  prompts use the same names) all re-export it. The 強調 chips in the console lyric list and the
+  design summary come from `src/lib/type/resolve.ts` `shownEmphasis` — the type system's resolved hint
+  (editor edits included; only the first run for a giant-word / bleed / window line), the plan's line
+  design only without a type system.
 - **用 claude.ai 研究** (`designer/manual.ts`, `designer/manual-reply.ts`, `src/lib/server/manual.ts`,
   `src/components/manual/ManualClaudeSheet.tsx`). `buildManualPrompt` (plan or directions; 精簡版
   abbreviates the lyrics, the findings and the catalogue and asks for shorter answers): the task
@@ -711,7 +765,11 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   text): the recipe's place when free, else under the block, beside its foot, under everything, over
   it, re-set in two balanced rows for the measure, then the block moves up, then it shrinks (never
   below the minimum); the editor's scale, rotation and nudge (fractions of the whole canvas) applied
-  after the layout and fitted back into the canvas; entrance / exit timing), `animate.ts`
+  after the layout and fitted back into the canvas; entrance / exit timing — the entrance follows
+  the recipe (round 12, `autoEnter`): a giant word cuts on the beat in MV cards and swells in
+  elsewhere, a vertical column and a cross take a mask wipe (the ink voice writes them), posters,
+  title cards and bled words wipe in, a grid poem rises, a window blooms, a scatter falls, the glitch
+  voice tears everything in; only a whisper fades), `animate.ts`
   (per-glyph and per-piece frames: entrances, exits, the motion word's motion, the glitch stutter on
   beats — at most 3 a second with LED 安全模式 on, a shake while the line holds (the entrance and
   the exit may tear it apart), a torn row of 撕裂 keeps its tear — and the type-pass uniforms),
@@ -870,7 +928,9 @@ uniform（全部由系統提供，不能自己宣告）：
   palette(t) → 沿 uPal0…uPal5 的漸層; px() → 一個像素在 centered 座標裡的大小（抗鋸齒）
   fill(d) / stroke(d, w) → 由距離場得到覆蓋率; sdCircle(p, r), sdBox(p, b), sdSegment(p, a, b)
   grain(fc, amount) → 顆粒; kick() → uPulse × uReact; isSection(k) → 目前段落種類是否為 k（1 或 0）
-  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1; zoneCenter() → 文字區中心（uv）
+  zoneMask(uv, soft) → 文字區的柔和遮罩 0–1（只拿來決定形狀站哪裡、密度往哪邊變稀；不要用它把畫面乘暗：沒有歌詞時那會是一塊黑方塊）
+  zoneCenter() → 文字區中心（uv）
+  wordsMask(uv, soft) → 此刻螢幕上那一句字塊周圍的柔和遮罩 0–1，隨歌詞淡入淡出、沒有歌詞時為 0（要讓位給字就用這個）
   typeMask(uv) → 此刻歌詞字形的覆蓋率 0–1（字的形狀）; typeGlow(uv, r) → 字形周圍 r（uv）內的柔光 0–1
   motifMask(uv, bias) → 主視覺符號（白底透明）的覆蓋率
 
@@ -908,6 +968,22 @@ uniform（全部由系統提供，不能自己宣告）：
   before the scene when a program reads them (`typeMask` / `typeGlow`); otherwise an empty 1 × 1
   texture is bound. The director carries the outgoing slot's last program values through a section
   transition; the offline frame (`offlineSceneFrame`) transitions when the program's mode changes too.
+  **Transitions follow the song clock** (round 12): in track playback `StageEngine` hands the
+  director `anchor` (seconds since the section boundary), so a section change starts its transition
+  that far in — and while the anchor is given the progress follows the song clock (never behind the
+  wall clock live, so a console paused on a seek to a section start still settles within the
+  transition's length; the stage lab sets `inspect`, and a paused lab holds the anchored moment, so
+  a frame capture (`stage-lab?t=`) and the export show the same moment of it; `data-transition` on
+  the stage root reports `kind:progress`); a stage that opens inside the window gets the previous
+  section's look as `previousTarget` and the director synthesizes the outgoing slot. Cues and live
+  mode (no anchor) stay on the wall clock. The compositor's wipe is a visible event — a soft diagonal
+  edge (`WIPE_GLSL` `wipeFront`), a leading line of the accent and a breath of light on the incoming
+  side — and the **type pass takes the same transition** (`TypeDraw.transition`, `uTransition` /
+  `uTransitionP`): the words that enter with the section (`entersWithSection`: a timed line starting
+  at the boundary, a cue inside the transition; a pickup from the previous section is left alone) are
+  revealed along the wipe's edge, come in with a fade, or flare their halo and settle on a flash or
+  bloom. LED 安全模式 converts flash and bloom to fades upstream (`safeTransition`), so the fade branch
+  adds no light; the pass still runs before the safety chain.
   The media pass and the transition compositor pass the foreground alpha through. `programFrame`
   builds the values from the project, the look and the clock (section index / kind / energy /
   progress, bar phase, tempo, palette ×6, the section colourway and lyric colour, the zone in GL uv,
@@ -956,10 +1032,47 @@ uniform（全部由系統提供，不能自己宣告）：
   mirror is unit-tested over a colour grid; `e2e-scene` measures rendered frames of a hostile
   full-bleed stripe program (`scripts/legibility.cjs`: with vs without the lyrics, the median glyph
   against the 90th-percentile picture pixel in a ring around the glyphs; light the type itself adds —
-  glow, echo, fringe — is not counted as picture). The composer and the examples also keep busy forms
-  out of the zone: bars are cut clean at the zone per pixel (a few thin segments run through in the
-  chorus), orbits and brush strokes fade there, a circle closes around the words only when its inner
-  edge clears the block's corners (else it closes beside them), the slab stands clear of the words.
+  glow, echo, fringe — is not counted as picture). **Display words** (round 10, B3): the giant /
+  bled / window word is set in the full ink colour and aims at `DISPLAY_TARGET` (7.4 : 1, the check
+  asks ≥ 7). `TypeLayer` hands the type pass the display words' box (`TypeDraw.display` →
+  `uDisplayBox`): inside it the ink is `uInk` (no hue from a lit picture) and the attenuation uses
+  `uDisplayTarget` instead of `uTarget` (`legibleBgT` / `legibleInkT`); the window letters of a
+  knockout are `displayInk(uInk, fill)` — the ink pushed in linear light until it meets the display
+  target against the fill, with only a faint texture of the picture — never the dimmed scene seen
+  through them; a display word never carries alpha, and under the overprint treatment it stays ink
+  (the accent appears as the misregistered ghost — `plates(offset).r` joins the accent plate — not
+  as the fill). `scripts/legibility.cjs` run as a script checks every sung line of the given projects
+  (every project without ids): ≥ 4.5 : 1 for every line and ≥ 7 : 1 inside the display box the
+  type layer reports on `[data-type-layer][data-display]`.
+  **The zone is an attractor, not a mask** (round 10, B2). The composer's forms read the zone only
+  to place themselves (`focalUv`, `horizonY`, the brush circle) and to thin towards it: the bars'
+  segments are kept with a probability that falls from one well outside the zone to none deep inside
+  it (`smoothstep(-0.35, 0.25, gap)`, a density gradient along the bars; the chorus runs them
+  through). Whatever gives way to the words follows the line actually on screen, through the
+  prelude's `wordsMask(uv, soft)` (a soft box around `uTypeBox` × `uTypeAmt`: zero when no lyric is
+  shown, fading with the line) or `uTypeBox` directly (bars drop the segments under the line whole,
+  one by one as `uTypeAmt` rises). Orbits, the brush stroke, ribbons and threads dim under
+  `wordsMask`; the circle still closes around the words only when its inner edge clears the block's
+  corners, the slab stands clear of the words. An empty zone therefore shows the picture, never a
+  soft black rectangle; `scene-program.test.ts` asserts no form multiplies by `zoneMask(uv…)`.
+- **Line length** (round 10, B4; `type/text.ts`, `recipes.ts`, `compose.ts`). A line over
+  `LONG_LINE_CJK` (14 CJK characters) or `LONG_LINE_LATIN` (40 letters) — `isLongUnits` /
+  `isLongLine` — is set by `longLine` whatever its recipe: `splitLongLine` cuts it into two phrases
+  at the punctuation or space nearest the middle, else after a particle (的了著) or before 這 / 那 /
+  每, else between words (never inside a compound, never a one-character fragment, both halves at
+  least two characters), and each phrase is set in at most two rows (or two columns), the second
+  stepped across and down from the first; a long line has no display word. No column stands taller
+  than `MAX_COLUMN_FRACTION` (70 %) of the frame (`fitColumns`). After every layout `clampToSafe`
+  keeps every glyph box and ornament inside the lyric safe area (a bled word excepted): it moves
+  the composition in, drops ornaments that still fall outside, and shrinks as a last resort (below
+  the readable minimum if it must — a clipped line is worse than a small one). The lyrics editor
+  flags such lines (`[data-long-line]`, 「這句太長，建議拆成兩句」). `longline.test.ts`.
+- **One line at a time** (round 10, M6; `TypeLayer`). When a new line's drawn bounds overlap the
+  line it replaces while that one is still leaving, the entrance waits for the rest of the exit
+  (`entranceDelay`, at most 0.6 s; nothing for a cut exit or lines on different parts of the frame),
+  so no incoming line is drawn over an outgoing one. Section labels are the plan's own Chinese names
+  (「02 — 副歌一」, set in the CJK face); the English chrome ("02 — CHORUS") is off by default and only
+  stands in for a plan whose section has no label.
 - **Line breaking between words** (`type/text.ts`). Rows never break inside a known compound or next
   to a bound character (`splitsWord`: the lexicon, now with 之間 / 時間 / 開往 / 前往 … and 之 bound to
   both sides) and never leave a one-character fragment of a phrase (`leavesFragment`): such a split
@@ -1005,15 +1118,61 @@ uniform（全部由系統提供，不能自己宣告）：
   textures `film` / `halftone` / `paper` / `scan` (by the type voice); motions `drift` / `breathe` /
   `rise` / `orbit` / `sweep`; the composition puts the form at least a fifth of the frame away from the
   words, on the other side (or half, on a tall canvas), and alternates the words' side when the song
-  turns a page (verse after chorus, pre-chorus, bridge). The form comes from the 免費研究 findings
-  (`sceneForms`: the genre's forms, then the lyric imagery's scene family, then the audio mood), the
-  rest from the song's seed; the chorus takes the form's relation (horizon / orbits / ribbons lit,
-  pillars behind, bars / brush knockout). Why this and not templates with colour swaps: the old
+  turns a page (verse after chorus, pre-chorus, bridge). **The form is a weighted draw** (round 12,
+  `designer/scene-program.ts` `formWeights`): the genre family sets a base over all eight forms
+  (`FORM_WEIGHTS_BY_GENRE`: every form keeps a small weight — the ones that look worse than the
+  genre's own stay low rather than forbidden), the imagery families add theirs (the lexicon's own
+  `forms`, else `FORMS_BY_IMAGERY`: 雨／淚／雪 → threads, 河／路／風／夢 → ribbons, 牆／門 → pillars /
+  strata, 光／月／星 → orbits / horizon, 筆墨／時光／花 → brush, 城市／霓虹／列車 → bars…), the energy
+  shape bends it (driving → bars / pillars, bright → horizon / ribbons, slow → strata / brush) and an
+  instrumental leans to shapes that hold a frame without words (the strongest image adds
+  `IMAGERY_LEAD` 3.0 / `IMAGERY_SECOND` 1.5 × its share, so 雨 beats a pop genre's horizon).
+  `chooseComposition` takes the best-fitting form; when the top two are within `TIE_BAND` (20 %) the
+  song's seed settles it (`songSeed`: title | artist mixed with the project id, so two indie-rock
+  songs — or two songs with one title — can differ, but only between forms the evidence rates
+  alike), and the rest follow in a weighted order the salt (「重新產生畫面」) walks, so a regenerate
+  never repeats the form. The draw is deterministic and explainable: evidence first, then what the
+  band and the library just wore. The texture is the
+  voice's surfaces weighted by the genre's (`surfaceWeights`: punk → halftone, electronic / city pop →
+  scan, folk → paper) and the imagery's; the motion is the form's own ways of moving bent by the
+  strongest image (`motionBias`: rain falls → drift, a river flows → drift / sweep, a planet → orbit).
+  **Per band**: `DesignerInput.bandSongs` (the band's other songs, most recently updated first, from
+  `storage.ts` `listBandSongs` over `ProjectSummary.sceneRecipe` / `chorusScene`) gives
+  `ComposerInput.avoid`: the previous song's form + texture pair is never worn again (another texture,
+  or the next form when it wore them all). **Across the library** (any band) the forms the last songs
+  wear weigh less by recency (`RECENT_FORM_FACTORS` 0.55, 0.55, 0.8, 0.8; a form worn twice among the
+  last five `RECENT_REPEAT_FACTOR` 0.5 more) — a nudge, never a ban — through
+  `DesignerInput.recentForms` (`storage.ts` `listRecentForms`), so a catalogue of different bands does
+  not come out as one picture three times in a row (the seven audit songs, designed in order, wear
+  五 forms with none more than twice; `round12.test.ts`). The chorus takes the form's relation (horizon / orbits /
+  ribbons lit, pillars behind, bars / brush knockout). **An instrumental** (`lyrics: false`) gets the
+  `quiet()` layer: slow motes rising through the frame in every mode but the open chorus and, every
+  8 s, a soft band of light crossing the frame as strong as `uEnergy` — the energy curve drives
+  something visible, and a verse is never a black screen; the `pillars` form (the audit's white-out)
+  now lights its slabs with the accent (`mix(uAcc, uPri, 0.2)`, never white), a short halo and a fan
+  of rays that reaches a third of the frame at most, over a sky that is dark but never black, with a
+  line of light at the slabs' feet. Why this and not templates with colour swaps: the old
   problem was "the same effect in another colour"; here the structure of the picture (what stands
   where, what surface, how it moves, how the words meet it) changes with the song, while each module
   is still hand-designed and safe. Directions get one per direction (`directionSceneProgram`: forms
   from the direction's scene families, seeded by its letter), so the three style-frame sets show three
   worlds.
+- **Luminance probe** (`src/lib/stage/program/probe.ts` over `glsl-eval.ts`, round 12). The server
+  has no GL, so a program is rendered on the CPU: `glsl-eval.ts` compiles the scene-program subset of
+  GLSL ES 1.00 (scalars, vec2–4, mat2–4, functions with in / out / inout, if / for / break / return,
+  swizzles read and write, constructors, the common built-ins) to closures and implements the prelude
+  natively (hash, noise, fbm, sdf, zone and type masks; the samplers read as empty, like a frame with
+  no lyric). `probeSceneProgram` evaluates a 32 × 18 grid for every section state (the plan's palette
+  and colourways, the mode and parameters, no words) and measures the mean sRGB luma and the lit-area
+  fraction (luma > 0.5): a state over `PROBE_LIT_MAX` (35 %) or `PROBE_MEAN_MAX` (0.42) fails with
+  the section and the numbers in 繁中; a near-black state is a warning. Calibrated against the audit's
+  rendered frames (the instrumental's chorus: probe mean 0.23 / lit 6.5 %, frame 0.21 / 7.5 %). It
+  runs in `programFromDraft` (a white-out goes back to Claude for its repair turn like a validator
+  error) and in `ensureSceneProgram` (a Claude / pasted program kept across a re-design that fails it
+  is replaced by the composer, with a repair note); never in PATCH or `normalizeSceneProgram` (the
+  legibility scripts PATCH deliberately flat or hostile programs). A program the evaluator cannot run
+  (a struct) is reported as 「無法評估」 and passes. Every composer form × state and every example
+  passes (`probe.test.ts`).
 - **Examples** (`src/lib/stage/program/examples/`): five hand-written programs of the quality the
   prompt asks for — 夜航 (city pop: a setting sun, a city line, its reflection; the bridge an eclipse),
   潮間帶 (folk: a tidal flat under a low moon; the chorus floods it; the bridge a mirror), 碑 (post-rock:
@@ -1045,8 +1204,11 @@ uniform（全部由系統提供，不能自己宣告）：
   stage root, not over the channel). The frame-time watchdog is a heuristic on the page's frame
   interval (it cannot separate the program's cost from the rest of the frame) and only acts at the
   adaptive-resolution floor. Programs have no access to the band's media textures. The composer's
-  forms are eight hand-written families: songs of the same genre and imagery share a form (their
-  seed still changes the parameters, texture, motion and composition).
+  forms are eight hand-written families; the weighted draw spreads a catalogue over them, but a
+  form that fits a song badly can still be drawn when its weight is low and the seed lands there.
+  The luminance probe measures a program without words on screen and without the LED safety pass
+  (which only darkens), on doubles rather than the GPU's floats: a program that is bright only
+  under the lyric mask or only at one moment can pass it.
 
 ### 研究找到的素材 (phase 8)
 
@@ -1190,7 +1352,8 @@ one-time acknowledgement before anything goes on stage.
   (`preserveDrawingBuffer`, `ensureReady()` compiles the plan's shaders first) fed by
   `src/lib/stage/offline.ts` (`trackStateAt`, `buildSceneClock`: the director's speed × smoothed-energy
   integral precomputed on a 20 Hz grid so frame t is the same from any range start; `offlineSceneFrame`:
-  section transitions by song time; beat index from the analysis grid). Audio uniforms: the live
+  section transitions by song time, handed to the type layer too so the words that enter with a
+  section take its transition in the video; beat index from the analysis grid). Audio uniforms: the live
   `AudioFeatureMixer` over the analysis envelopes, stepped at the export frame rate. Media: the shared
   `src/lib/stage/media/draw.ts` (also used by StageEngine) with `ExactMedia` (images decoded up front, videos
   seeked to the exact frame and used after `seeked`). Lyrics: the live `LyricLayer` in a hidden host at the
@@ -1367,7 +1530,8 @@ keeps every contract above and changes only where things are kept and how long w
   rAF loop (no React re-render per frame). Extrapolates time with `stageTime()`.
 - One GLSL fragment shader per `SceneId` sharing uniforms (time, resolution, 3 colorway colors,
   speed, density, intensity, reactivity, live level/bass/onset, beat phase, analysis energy at t,
-  motif texture). Section changes transition per `transitionIn` (cut/fade/flash/wipe/bloom).
+  motif texture). Section changes transition per `transitionIn` (cut/fade/flash/wipe/bloom), anchored
+  to the song clock in track playback (round 12) and reaching the type pass.
   Overrides: scene, freeze, intensity, blackout (smooth ~0.4 s fade). Handles context loss, resize,
   devicePixelRatio, never throws into React.
 - Lyric layer implements every `LyricStyleId` & `LyricPlacement`, plan typography via `fontStack`,
@@ -1513,6 +1677,13 @@ Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The 
 
 - `npm run typecheck` runs `next typegen` first, so the global `PageProps` / `LayoutProps` /
   `RouteContext` helpers exist on a fresh clone.
+- **Upload limit** (round 10, B1). Local-mode uploads (`POST /api/projects`, multipart) pass through
+  the proxy (`src/proxy.ts`), and Next buffers a proxied request body only up to
+  `experimental.proxyClientMaxBodySize` (10 MB by default — a longer body is cut short and the route
+  saw 「上傳內容不完整」). `next.config.ts` sets it to 264 MB = `MAX_AUDIO_BYTES` (200 MB) +
+  `FORM_OVERHEAD_BYTES` (64 MB, `src/lib/server/audio-files.ts`); `upload-limit.test.ts` keeps the
+  three and the dropzone's promise (`MAX_UPLOAD_BYTES`) in step. An upload that still ends early
+  says how much arrived (`incompleteMessage`). `scripts/e2e.cjs` uploads a 24 MB silent WAV.
 - Isolated dev servers (`NEXT_DIST_DIR=.next-<name> npx next dev --webpack -p <port>`) are ignored by
   ESLint and git, but `next dev` appends `.next-<name>/types/**` entries to `tsconfig.json` (it checks
   for exact strings, so a glob does not stop it). Restore `tsconfig.json` from git after stopping one.

@@ -1,6 +1,9 @@
 // Accepted audio formats for uploads: extension / declared MIME / magic-byte sniffing.
 
 export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
+/** room for the meta / analysis fields and multipart framing on top of the audio (the proxy's
+ * request-body limit in next.config.ts covers MAX_AUDIO_BYTES plus this) */
+export const FORM_OVERHEAD_BYTES = 64 * 1024 * 1024;
 
 /** extension -> Content-Type we store and serve */
 export const AUDIO_EXTENSIONS: Readonly<Record<string, string>> = {

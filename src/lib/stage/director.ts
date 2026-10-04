@@ -47,6 +47,24 @@ export interface DirectorInput {
   energy: number;
   /** multiplies transition durations (stage-lab slow motion); default 1 */
   durationScale?: number;
+  /**
+   * Round 12: seconds of song time already elapsed since the section boundary this frame belongs
+   * to (track playback). A section change then starts its transition that far in, so the
+   * transition follows the song clock — a seek into the first second of a section, a frame capture
+   * and the export all show the same moment of it. Null: the wall clock (cues, live mode).
+   */
+  anchor?: number | null;
+  /**
+   * The previous section's target, for a director that has no slot yet (the stage opened inside
+   * the transition window): the outgoing slot is synthesized so the transition still shows.
+   */
+  previousTarget?: SceneTarget | null;
+  /**
+   * An inspection (the stage lab, a frame capture): an anchored transition holds the anchored
+   * moment while the song is paused. Live (the console, the projection) the wall clock still
+   * finishes it, so a seek that lands on a section start settles within a second.
+   */
+  hold?: boolean;
 }
 
 export const TRANSITION_SECONDS: Record<TransitionKind, number> = {
@@ -77,7 +95,7 @@ function sameLookIgnoringParams(a: SceneTarget, b: SceneTarget): boolean {
 export class SceneDirector {
   private current: SceneSlot | null = null;
   private previous: SceneSlot | null = null;
-  private transition: { kind: ActiveTransitionKind; start: number; duration: number } | null = null;
+  private transition: { kind: ActiveTransitionKind; start: number; duration: number; anchored: boolean } | null = null;
   private sectionKey: string | null = null;
 
   constructor(private readonly initialClock = 0) {}
@@ -89,13 +107,22 @@ export class SceneDirector {
     this.sectionKey = null;
   }
 
+  /** The director has rendered a slot (false before the first update). */
+  get started(): boolean {
+    return this.current != null;
+  }
+
   update(input: DirectorInput): DirectorFrame {
     const { target, now } = input;
     const scale = input.durationScale && input.durationScale > 0 ? input.durationScale : 1;
+    const anchorMs = input.anchor != null && Number.isFinite(input.anchor) && input.anchor >= 0 ? input.anchor * 1000 : 0;
     if (!this.current) {
-      this.current = { target, clock: this.initialClock };
-      this.sectionKey = input.sectionKey;
-    } else {
+      // opened inside a transition window: the previous section stands in as the outgoing slot
+      const synth = !!input.previousTarget && input.anchor != null && input.transitionIn !== "cut" && input.sectionKey != null;
+      this.current = { target: synth ? input.previousTarget! : target, clock: this.initialClock };
+      this.sectionKey = synth ? `${input.sectionKey}:previous` : input.sectionKey;
+    }
+    {
       const sectionChanged = input.sectionKey !== this.sectionKey;
       const lookChanged = target.lookKey !== this.current.target.lookKey;
       this.sectionKey = input.sectionKey;
@@ -108,7 +135,7 @@ export class SceneDirector {
         } else if (!lookChanged && kind !== "flash") {
           this.current.target = target;
         } else {
-          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now);
+          this.begin(kind, TRANSITION_SECONDS[kind] * scale, target, now - anchorMs, input.anchor != null);
         }
       } else if (lookChanged) {
         if (sameLookIgnoringParams(target, this.current.target)) this.current.target = target;
@@ -125,7 +152,11 @@ export class SceneDirector {
 
     let transition: DirectorFrame["transition"] = null;
     if (this.transition && this.previous) {
-      const p = (now - this.transition.start) / (this.transition.duration * 1000);
+      // an anchored transition follows the song clock (paused, it holds its moment like the export);
+      // once the anchor is gone (a cue, live mode) the wall clock finishes it
+      const wall = (now - this.transition.start) / (this.transition.duration * 1000);
+      const anchored = this.transition.anchored && input.anchor != null && Number.isFinite(input.anchor) ? input.anchor / this.transition.duration : null;
+      const p = anchored == null ? wall : input.hold ? anchored : Math.max(anchored, wall);
       if (p >= 1 || !Number.isFinite(p)) {
         this.transition = null;
         this.previous = null;
@@ -140,11 +171,11 @@ export class SceneDirector {
     return { current: this.current, previous: this.previous, transition };
   }
 
-  private begin(kind: ActiveTransitionKind, duration: number, target: SceneTarget, now: number) {
+  private begin(kind: ActiveTransitionKind, duration: number, target: SceneTarget, now: number, anchored = false) {
     const outgoing = this.current!;
     this.previous = { target: outgoing.target, clock: outgoing.clock };
     this.current = { target, clock: outgoing.clock };
-    this.transition = { kind, start: now, duration: Math.max(0.05, duration) };
+    this.transition = { kind, start: now, duration: Math.max(0.05, duration), anchored };
   }
 }
 

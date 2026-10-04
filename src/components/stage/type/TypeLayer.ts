@@ -20,7 +20,7 @@ import { transformHex, type ActiveSafety } from "@/lib/stage/safety";
 import { lineSpan } from "@/lib/timeline";
 import { compositionUniforms, mergeUniforms, type TypeClock } from "@/lib/type/animate";
 import { ORNAMENT_CHARS } from "@/lib/type/compose";
-import type { CanvasSpec, Composition } from "@/lib/type/model";
+import { EMPTY_BOX, pieceBox, unionBox, type Box, type CanvasSpec, type Composition } from "@/lib/type/model";
 import { composeProjectLine } from "@/lib/type/prepare";
 import { hasTypeSystem, resolveSystem } from "@/lib/type/resolve";
 import { SEAL_COLOR } from "@/lib/type/vocab";
@@ -48,6 +48,22 @@ export interface TypeLayerFrame {
   output: ProjectOutput;
   /** compose without the editor's edits (A/B) */
   generated?: boolean;
+  /**
+   * Round 12: the section transition running this frame (the shaders' code, progress 0–1, the
+   * section's start in song time and the transition's length), so the words that enter with the
+   * section are revealed by the same event; null = none.
+   */
+  transition?: { kind: number; progress: number; sectionStart: number; seconds: number } | null;
+}
+
+/**
+ * Whether a line enters with a section boundary (and so should take the section's transition):
+ * a timed line that starts at or after the boundary (a beat snap may pull it a little earlier),
+ * or a cued line whose cue fell inside the transition.
+ */
+export function entersWithSection(line: { enterAt: number | null; cueAt: number }, tr: { sectionStart: number; seconds: number }, nowEpoch: number): boolean {
+  if (line.enterAt != null) return line.enterAt >= tr.sectionStart - 0.35 && line.enterAt <= tr.sectionStart + tr.seconds;
+  return (nowEpoch - line.cueAt) / 1000 <= tr.seconds;
 }
 
 interface Active {
@@ -58,6 +74,30 @@ interface Active {
   enterAt: number | null;
   cueAt: number;
   exitAt: number | null;
+  /** seconds the entrance waits for an outgoing line it would overlap (M6: no line drawn over another) */
+  delay: number;
+}
+
+/** Two compositions' drawn bounds overlap (more than a touch). */
+export function boundsOverlap(a: Composition, b: Composition): boolean {
+  const p = a.bounds;
+  const q = b.bounds;
+  if (!(p.w > 0 && p.h > 0 && q.w > 0 && q.h > 0)) return false;
+  const w = Math.min(p.x + p.w, q.x + q.w) - Math.max(p.x, q.x);
+  const h = Math.min(p.y + p.h, q.y + q.h) - Math.max(p.y, q.y);
+  if (w <= 0 || h <= 0) return false;
+  return w * h > 0.04 * Math.min(p.w * p.h, q.w * q.h);
+}
+
+/**
+ * How long an incoming line waits when the line it replaces is still leaving over the same part
+ * of the frame: the rest of that exit (at most 0.6 s), nothing when the exit is a cut or the two
+ * do not meet.
+ */
+export function entranceDelay(incoming: Composition, leaving: Composition, exitElapsed: number): number {
+  if (!boundsOverlap(incoming, leaving)) return 0;
+  const left = leaving.exitDur - exitElapsed;
+  return left > 0.08 ? Math.min(0.6, left) : 0;
 }
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : Number.isFinite(x) ? x : 0);
@@ -91,6 +131,19 @@ export function snapToBeat(analysis: AudioAnalysis | null, t: number): number {
   return best;
 }
 
+/** The box (canvas px) of the display words of these compositions — giant, bled and window pieces — or null. */
+export function displayBox(comps: readonly Composition[]): Box | null {
+  let b: Box = { ...EMPTY_BOX };
+  for (const c of comps) {
+    for (const p of c.pieces) {
+      if (!p.glyphs.length || p.echo) continue;
+      if (p.role !== "giant" && !p.window) continue;
+      b = unionBox(b, pieceBox(p));
+    }
+  }
+  return b.w > 0 && b.h > 0 ? b : null;
+}
+
 export class TypeLayer {
   private painter: TypePainter;
   private current: Active | null = null;
@@ -112,6 +165,8 @@ export class TypeLayer {
   /** the current line's text, visually hidden */
   private text: HTMLElement | null = null;
   private textKey = "";
+  /** the output canvas the compositions are laid out for (the hidden text's display box is in its fractions) */
+  private canvasSize = { width: 1920, height: 1080 };
 
   constructor(
     private readonly host: HTMLElement,
@@ -142,10 +197,17 @@ export class TypeLayer {
       el.dataset.recipe = cur.comp.recipe;
       el.dataset.voice = cur.comp.voice;
       el.dataset.line = String(cur.index);
+      // the display word's box as fractions of the canvas (x0, y0, x1, y1; y down): the legibility check measures it apart
+      const db = displayBox([cur.comp]);
+      const W = this.canvasSize.width || 1920;
+      const H = this.canvasSize.height || 1080;
+      if (db) el.dataset.display = [db.x / W, db.y / H, (db.x + db.w) / W, (db.y + db.h) / H].map((v) => Math.min(1.2, Math.max(-0.2, v)).toFixed(4)).join(",");
+      else delete el.dataset.display;
     } else {
       delete el.dataset.recipe;
       delete el.dataset.voice;
       delete el.dataset.line;
+      delete el.dataset.display;
     }
   }
 
@@ -224,6 +286,8 @@ export class TypeLayer {
     const chars = new Set<string>();
     for (const l of project.lyrics?.lines ?? []) for (const ch of `${l.text ?? ""}${l.translation ?? ""}`) chars.add(ch);
     for (const ch of `${ts.seal ?? ""}${project.meta?.title ?? ""}0123456789「」﹁﹂—CHORUSVERSEBRIDGEINTROUTLPEAKDWN`) chars.add(ch);
+    // the plan's section labels (副歌一) are drawn as ornaments
+    for (const s of project.plan?.sections ?? []) for (const ch of s.label ?? "") chars.add(ch);
     chars.delete(" ");
     const text = [...chars].join("");
     const key = `${fam.key}|${sys.weight}|${text}`;
@@ -244,6 +308,7 @@ export class TypeLayer {
     const chars = new Set<string>();
     for (const l of project.lyrics?.lines ?? []) for (const ch of `${l.text ?? ""}${l.translation ?? ""}`) chars.add(ch);
     for (const ch of `${project.plan.typeSystem.seal ?? ""}${project.meta?.title ?? ""}${ORNAMENT_CHARS}`) chars.add(ch);
+    for (const s of project.plan.sections ?? []) for (const ch of s.label ?? "") chars.add(ch);
     chars.delete(" ");
     const ok = await loadFaces(this.families, [...new Set([sys.weight, Math.max(500, sys.weight - 100), Math.max(500, sys.weight - 200), 700])], [...chars].join(""), 20000);
     this.fontToken++;
@@ -291,6 +356,7 @@ export class TypeLayer {
 
     const output = f.output;
     const canvas: CanvasSpec = { width: output.width || 1920, height: output.height || 1080, safe: output.lyricSafe };
+    this.canvasSize = { width: canvas.width, height: canvas.height };
     const lines = project.lyrics?.lines ?? [];
     const idx = state.lineIndex;
     let valid = typeof idx === "number" && Number.isInteger(idx) && idx >= 0 && idx < lines.length && !!lines[idx]?.text?.trim() ? idx : null;
@@ -300,7 +366,9 @@ export class TypeLayer {
     const next = valid != null ? this.compose(project, valid, canvas, !!f.generated) : null;
     const cur = this.current;
     if (!next || !cur || cur.index !== valid) {
-      if (cur) {
+      // a cut exit is gone at once (never drawn under the incoming line, not even for the one
+      // frame a throttled tab renders); the other exits leave over their duration
+      if (cur && cur.comp.exit !== "cut") {
         cur.exitAt = now;
         this.leaving.push(cur);
       }
@@ -308,7 +376,10 @@ export class TypeLayer {
       if (next && valid != null) {
         const span = lineSpan(lines, valid, project.meta?.duration || project.analysis?.duration || 0);
         const enterAt = span ? (next.comp.snap ? snapToBeat(project.analysis, span[0]) : span[0]) : null;
-        this.current = { index: valid, key: next.key, comp: next.comp, enterAt, cueAt: Number.isFinite(state.lineStartedAt) ? state.lineStartedAt : f.nowEpoch, exitAt: null };
+        // the incoming line waits for an outgoing one it would be drawn over
+        let delay = 0;
+        for (const a of this.leaving) if (a.exitAt != null) delay = Math.max(delay, entranceDelay(next.comp, a.comp, (now - a.exitAt) / 1000));
+        this.current = { index: valid, key: next.key, comp: next.comp, enterAt, cueAt: Number.isFinite(state.lineStartedAt) ? state.lineStartedAt : f.nowEpoch, exitAt: null, delay };
       }
     } else if (cur.key !== next.key) {
       cur.key = next.key;
@@ -331,7 +402,7 @@ export class TypeLayer {
     const items: PaintItem[] = [];
     const uniforms = [];
     const clockOf = (a: Active, leaving: boolean): TypeClock => {
-      let since = a.enterAt != null ? f.t - a.enterAt : (f.nowEpoch - a.cueAt) / 1000;
+      let since = (a.enterAt != null ? f.t - a.enterAt : (f.nowEpoch - a.cueAt) / 1000) - a.delay;
       // a leaving line has entered, whatever the clock did since (a seek back must not hide it)
       if (leaving) since = Math.max(since, a.comp.enterDur + 0.6);
       const exit = a.exitAt != null ? clamp01((now - a.exitAt) / 1000 / Math.max(0.05, a.comp.exitDur)) : null;
@@ -398,8 +469,17 @@ export class TypeLayer {
     }
     const pad = 0.08;
     const area: [number, number, number, number] = x1 > x0 ? [x0 - pad, y0 - pad * (W / H), x1 + pad, y1 + pad * (W / H)] : [0, 0, 1, 1];
+    // the display words on screen (B3): the full ink colour and the higher contrast target there
+    const db = displayBox(items.map((it) => it.comp));
+    const dpad = 0.02;
+    const display: [number, number, number, number] | null = db ? [db.x / canvas.width - dpad, 1 - (db.y + db.h) / canvas.height - dpad * (W / H), (db.x + db.w) / canvas.width + dpad, 1 - db.y / canvas.height + dpad * (W / H)] : null;
+    // the section transition reaches the words only when the line on screen entered with the section
+    const tr = f.transition;
+    const transition = tr && this.current && entersWithSection(this.current, tr, f.nowEpoch) ? { kind: tr.kind, progress: tr.progress } : null;
     return {
       area,
+      display,
+      transition,
       source: this.painter.canvas,
       version: this.version,
       width: W,

@@ -46,11 +46,31 @@ export interface ComposerSection {
   energy: number;
 }
 
+/** A form + texture pair another song already wears (the band's previous song: never the same picture twice in a row). */
+export interface ComposerPair {
+  form: FormId;
+  texture: TextureId;
+}
+
 export interface ComposerInput {
   /** a stable hash of the song (title | artist) */
   seed: number;
   /** forms that suit the song, best first (the designer derives them from its findings) */
   forms: readonly FormId[];
+  /**
+   * Round 12: weights over the forms (genre family × imagery families × energy shape). When given,
+   * the form is a weighted draw seeded by the song (two indie-rock songs differ), ordered so a salt
+   * (「重新產生畫面」) walks the weighted order; `forms` is then only the fallback.
+   */
+  weights?: Partial<Record<FormId, number>>;
+  /** form + texture pairs the band's other songs wear, most recent first: the first is never repeated */
+  avoid?: readonly ComposerPair[];
+  /** texture weights the song suggests (the type voice, the genre's surface, the imagery) */
+  surface?: Partial<Record<TextureId, number>>;
+  /** motion weights the imagery suggests (rain falls, a river flows, a planet orbits) */
+  motionBias?: Partial<Record<MotionId, number>>;
+  /** false for an instrumental: the picture itself must breathe (no words will) */
+  lyrics?: boolean;
   sections: readonly ComposerSection[];
   voice?: TypeVoiceId | null;
   temperature?: "warm" | "cool" | "neutral";
@@ -94,36 +114,89 @@ function f(x: number): string {
   return /[.e]/.test(s) ? s : `${s}.0`;
 }
 
-const TEXTURE_FOR_VOICE: Record<TypeVoiceId, TextureId[]> = {
-  "mv-card": ["film", "film", "paper"],
-  "title-sequence": ["halftone", "film", "scan"],
-  ink: ["paper", "paper", "film"],
-  glitch: ["scan", "halftone", "scan"],
+const TEXTURE_FOR_VOICE: Record<TypeVoiceId, Partial<Record<TextureId, number>>> = {
+  "mv-card": { film: 2, paper: 1, scan: 0.4, halftone: 0.3 },
+  "title-sequence": { halftone: 1.4, film: 1, scan: 1, paper: 0.3 },
+  ink: { paper: 2, film: 1, halftone: 0.3, scan: 0.15 },
+  glitch: { scan: 2, halftone: 1, film: 0.4, paper: 0.15 },
 };
 
-const MOTION_FOR_FORM: Record<FormId, MotionId[]> = {
-  horizon: ["rise", "drift", "breathe"],
-  pillars: ["breathe", "rise", "drift"],
-  orbits: ["orbit", "orbit", "breathe"],
-  strata: ["drift", "rise", "breathe"],
-  bars: ["sweep", "drift", "sweep"],
-  brush: ["sweep", "breathe", "drift"],
-  ribbons: ["drift", "sweep", "breathe"],
-  threads: ["drift", "sweep", "rise"],
+const MOTION_FOR_FORM: Record<FormId, Partial<Record<MotionId, number>>> = {
+  horizon: { rise: 1.2, drift: 1, breathe: 1 },
+  pillars: { breathe: 1.2, rise: 1, drift: 0.8 },
+  orbits: { orbit: 2, breathe: 0.8, drift: 0.3 },
+  strata: { drift: 1.2, rise: 1, breathe: 0.8 },
+  bars: { sweep: 1.6, drift: 1, breathe: 0.3 },
+  brush: { sweep: 1.2, breathe: 1, drift: 0.8 },
+  ribbons: { drift: 1.2, sweep: 1, breathe: 0.8, orbit: 0.3 },
+  threads: { drift: 1.2, sweep: 0.8, rise: 1 },
 };
+
+/**
+ * A weighted order of keys: sampling without replacement with the stream `r`, so index 0 is the
+ * weighted draw and the next indices are the next-most-likely choices (what a salt walks).
+ */
+export function weightedOrder<K extends string>(weights: Partial<Record<K, number>>, r: () => number): K[] {
+  const pool = (Object.entries(weights) as Array<[K, number | undefined]>).filter((e): e is [K, number] => typeof e[1] === "number" && e[1] > 0);
+  const out: K[] = [];
+  while (pool.length) {
+    const total = pool.reduce((a, [, w]) => a + w, 0);
+    let u = r() * total;
+    let k = 0;
+    for (; k < pool.length - 1; k++) {
+      u -= pool[k][1];
+      if (u < 0) break;
+    }
+    out.push(pool[k][0]);
+    pool.splice(k, 1);
+  }
+  return out;
+}
+
+/** How much the form weights are sharpened before the draw (1 = proportional; higher = the top form wins more often). */
+export const FORM_SHARPEN = 1.15;
+/** Two forms within this fraction of the top weight are a tie the seed settles. */
+export const TIE_BAND = 0.2;
 
 /** The composer's choices for a song (exported for the UI label and the tests). */
 export function chooseComposition(input: ComposerInput): ComposerChoice {
   const r = rng((input.seed ^ Math.imul(input.salt ?? 0, 0x2c1b3c6d)) >>> 0);
   const forms = input.forms.length ? input.forms : FORM_IDS;
-  // the best-fitting form most of the time, the second one sometimes (a salt redraws it)
-  const pick = r();
-  // the best-fitting form; a salt (「重新產生畫面」) draws among the three that fit best
-  const form = (input.salt ? forms[(Math.floor(pick * Math.min(3, forms.length)) + (input.salt % 3)) % Math.min(3, forms.length)] : forms[0]) ?? "horizon";
-  const tex = TEXTURE_FOR_VOICE[input.voice ?? "mv-card"] ?? TEXTURE_FOR_VOICE["mv-card"];
-  const texture = tex[Math.floor(r() * tex.length)];
-  const mot = MOTION_FOR_FORM[form];
-  const motion = mot[Math.floor(r() * mot.length)];
+  const salt = Math.max(0, Math.floor(input.salt ?? 0));
+  const hasWeights = input.weights && Object.values(input.weights).some((w) => typeof w === "number" && w > 0);
+  let form: FormId;
+  if (hasWeights) {
+    // the best-fitting form leads (a near tie — within TIE_BAND — is settled by the song's seed, so
+    // two songs with the same evidence can differ), then a weighted order of the rest for the salt
+    // (「重新產生畫面」 walks it and never lands on the same form twice in a row); the weights are
+    // what the designer's evidence says, nudged by what the band and the library just wore
+    const ranked = (Object.entries(input.weights!) as Array<[FormId, number]>).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]);
+    const top = ranked[0];
+    const tied = ranked.filter(([, w]) => w >= top[1] * (1 - TIE_BAND));
+    const lead = tied[Math.floor(rng(input.seed >>> 0)() * tied.length)][0];
+    const rest = Object.fromEntries(ranked.filter(([k]) => k !== lead).map(([k, w]) => [k, Math.pow(w, FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
+    const order: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
+    form = order[salt % order.length] ?? forms[0] ?? "horizon";
+    // the band's previous song wears this form with every texture it could: another form
+    const worn = (input.avoid ?? []).filter((a) => a.form === form).map((a) => a.texture);
+    if (worn.length >= TEXTURE_IDS.length - 1 && order.length > 1) form = order[(salt + 1) % order.length];
+  } else {
+    const pick = r();
+    // the best-fitting form; a salt (「重新產生畫面」) draws among the three that fit best
+    form = (salt ? forms[(Math.floor(pick * Math.min(3, forms.length)) + (salt % 3)) % Math.min(3, forms.length)] : forms[0]) ?? "horizon";
+  }
+  // texture: the voice's surfaces, weighted by what the song suggests; never the band's previous pair
+  const texW: Partial<Record<TextureId, number>> = {};
+  const voiceTex = TEXTURE_FOR_VOICE[input.voice ?? "mv-card"] ?? TEXTURE_FOR_VOICE["mv-card"];
+  for (const t of TEXTURE_IDS) texW[t] = (voiceTex[t] ?? 0.2) * (input.surface?.[t] ?? 1);
+  const banned = input.avoid?.[0]?.form === form ? input.avoid[0].texture : null;
+  if (banned) texW[banned] = 0;
+  const texOrder = weightedOrder(texW, r);
+  const texture = texOrder[0] ?? "film";
+  // motion: the form's own ways of moving, bent by the imagery
+  const motW: Partial<Record<MotionId, number>> = {};
+  for (const [m, w] of Object.entries(MOTION_FOR_FORM[form]) as Array<[MotionId, number]>) motW[m] = w * (input.motionBias?.[m] ?? 1);
+  const motion = weightedOrder(motW, r)[0] ?? "drift";
   const arousal = Math.min(1, Math.max(0, input.arousal ?? 0.5));
   return {
     form,
@@ -210,6 +283,27 @@ function textureGlsl(t: TextureId, amount: number): string {
   }
 }
 
+/**
+ * An instrumental has no words to carry the sparse sections, so the picture itself breathes with
+ * the music: slow motes rising through the frame in every mode but the open chorus, and every 8 s
+ * a soft band of light crossing the frame, as strong as the energy of the moment (never a flash:
+ * an 8 s period is far under the flicker limits, and the band is a few percent of the luminance).
+ */
+const QUIET_LAYER = `
+vec3 quiet(vec2 fc, vec2 uv, vec3 col) {
+  float sparse = 1.0 - smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
+  vec2 g = fc / min(uRes.x, uRes.y) * 22.0 + vec2(0.0, -T() * 0.1);
+  vec2 cell = floor(g);
+  vec2 o = (hash22(cell) - 0.5) * 0.7;
+  float mote = smoothstep(0.07, 0.0, length(fract(g) - 0.5 - o) - 0.008) * step(0.84, hash12(cell + 7.0));
+  col += mix(uPri, uAcc, 0.5) * mote * (0.16 + 0.26 * uEnergy) * (0.35 + 0.65 * sparse);
+  float ph = fract(uSongTime / 8.0);
+  float sweep = exp(-abs(uv.x * aspect() - ph * (aspect() + 0.8) + 0.4) * 2.2) * sin(ph * PI);
+  col += mix(uPri, uAcc, 0.35) * sweep * (0.035 + 0.09 * uEnergy);
+  return col;
+}
+`;
+
 function formGlsl(form: FormId, r: () => number): { code: string; recipe: string } {
   switch (form) {
     case "horizon": {
@@ -255,16 +349,16 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   }
   if (uv.y < hz) {
     float depth = sat((hz - uv.y) / max(hz, 0.05));
-    vec3 ground = mix(uBg * 0.5 + uPri * 0.05, uBg * 0.22, pow(depth, 0.6));
-    ${
-      refl
-        ? `float lanes = pow(depth, 0.45) * 80.0;
+    // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
+    // reflection (a full one on water, a faint sheen on a road or a floor)
+    vec3 ground = mix(uBg * 1.1 + uPri * 0.18, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
+    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
+    float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
     float wid = r * (0.5 + uParams.x) * (1.0 + depth * 0.6);
     float rf = (1.0 - smoothstep(wid * 0.55, wid, abs(p.x - c.x))) * step(0.5, rip) * (1.0 - depth * 0.8);
-    ground += disc * rf * (0.2 + 0.55 * light) * (uMode > 2.5 ? 0.25 : 1.0);`
-        : `ground *= 0.9 + 0.1 * vnoise(vec2(uv.x * 40.0, depth * 90.0));`
-    }
+    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
+    ${refl ? "" : "ground *= 0.92 + 0.08 * vnoise(vec2(uv.x * 40.0, depth * 90.0));"}
     col = ground;
   }
   col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light);
@@ -283,17 +377,23 @@ const float K_W = ${f(w)};
 vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float fy = aspect() < 0.8 ? (zoneCenter().y > 0.5 ? 0.1 : 0.42) : 0.18;
   float light = uParams.z;
+  float open = smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
   vec2 base = toP(vec2(focalUv().x, fy)) + vec2(mo().x, 0.0);
   float h = (aspect() < 0.8 ? 0.32 : 0.5) * K_SCALE * br();
-  vec3 col = uBg * (0.5 + 0.3 * uv.y);
-  float fog = smoothstep(fy + 0.2, fy - 0.05, uv.y) * (0.4 + 0.3 * fbm3(vec2(uv.x * 3.0 * aspect() + T() * 0.03, uv.y * 6.0)));
-  col = mix(col, mix(uBg, uPri, 0.35), fog);
+  // the sky is dark but never black: a gradient of the background, the primary low in the fog
+  vec3 col = mix(uBg * 0.7, uBg * 1.1 + uPri * 0.05, uv.y);
+  float fog = smoothstep(fy + 0.22, fy - 0.05, uv.y) * (0.45 + 0.3 * fbm3(vec2(uv.x * 3.0 * aspect() + T() * 0.03, uv.y * 6.0)));
+  col = mix(col, mix(uBg, uPri, 0.3 + 0.12 * light), fog);
+  // the ground the slabs stand on: a thin line of light at their feet (the verse has this to look at)
+  col += mix(uPri, uAcc, 0.3) * exp(-abs(uv.y - fy) * uRes.y * 0.08) * (0.08 + 0.1 * light);
+  // the light behind the slabs is the song's accent, never white: a short halo, and in the chorus a
+  // fan of rays that reaches a third of the frame at most (the audit's white-out is the thing to avoid)
   vec2 lp = base + vec2(0.0, h * 0.75);
   float r = length(p - lp);
-  vec3 lc = mix(uAcc, vec3(1.0), 0.4);
+  vec3 lc = mix(uAcc, uPri, 0.2);
   float ang = atan(p.y - lp.y, p.x - lp.x);
-  float rays = pow(vnoise(vec2(ang * 6.0 + uSeed, T() * 0.06)), 3.0) * exp(-r * 1.7) * smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
-  col += lc * (exp(-r * (7.0 - 3.5 * light)) * (0.18 + 0.85 * light) + rays * (0.9 + 0.3 * kick()));
+  float rays = pow(vnoise(vec2(ang * 6.0 + uSeed, T() * 0.06)), 3.0) * exp(-r * 3.4) * open;
+  col += lc * (exp(-r * (8.0 - 3.0 * light)) * (0.14 + 0.42 * light) + rays * (0.55 + 0.25 * kick()));
   float front = 0.0;
   float rim = 0.0;
   for (int i = 0; i < 3; i++) {
@@ -308,10 +408,11 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     rim = max(rim, exp(-abs(d) * (150.0 - 90.0 * uParams.x)));
   }
   col = mix(col, uBg * 0.16 + vec3(0.01), front);
-  col += lc * rim * (1.0 - front * 0.7) * (0.15 + 0.85 * uParams.x) * (0.5 + 0.5 * light);
+  col += lc * rim * (1.0 - front * 0.7) * (0.2 + 0.8 * uParams.x) * (0.55 + 0.45 * light);
   gFront = front;
+  // dust in the light, rising slowly: the sparse sections keep a little life around the slabs
   vec2 dp = fc / min(uRes.x, uRes.y) * 80.0 + vec2(0.0, -T() * (0.2 + uParams.x));
-  col += lc * step(0.986, hash12(floor(dp))) * smoothstep(0.4, 0.0, length(fract(dp) - 0.5)) * exp(-r * 1.6) * (0.1 + 0.5 * uParams.x);
+  col += lc * step(0.984, hash12(floor(dp))) * smoothstep(0.4, 0.0, length(fract(dp) - 0.5)) * exp(-r * 1.4) * (0.22 + 0.4 * uParams.x);
   return col;
 }`,
       };
@@ -350,9 +451,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     vec2 mp = vec2(cos(a), sin(a)) * rr;
     moons += fill(length(q - mp) - 0.006) * on;
   }
-  // the orbits fade out where they would cross the words' block
-  lines *= 1.0 - zoneMask(uv, 0.05) * 0.9;
-  moons *= 1.0 - zoneMask(uv, 0.02);
+  // the orbits give way to the words on screen (and only then: an empty zone shows the rings)
+  lines *= 1.0 - wordsMask(uv, 0.03) * 0.9;
+  moons *= 1.0 - wordsMask(uv, 0.02);
   col += lc * lines * (0.5 + 0.6 * light);
   col = mix(col, lc, sat(moons));
   vec2 pq = p - c;
@@ -437,11 +538,17 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float sy = r.y * segF + hash11(id) * 3.0 + shift;
   vec2 cr = vec2((id + duty * 0.5) / freq, (floor(sy) + 0.61 - hash11(id) * 3.0 - shift) / segF);
   vec2 cuv = ((rot(-ang) * cr - mo()) * min(uRes.x, uRes.y) + 0.5 * uRes) / uRes;
-  float inZone = step(0.5, zoneMask(cuv, 0.0));
-  float keep = mix(1.0 - inZone, 1.0 - inZone * step(0.5, hash11(id * 5.3 + floor(sy))), open);
-  // the words' block is cut clean: nothing crosses it in the verse, a few thin segments in the chorus
-  float through = open * step(0.72, hash11(id * 5.3 + floor(sy) + 0.5)) * step(fract(s), duty * 0.55);
-  keep *= 1.0 - zoneMask(uv, 0.01) * (1.0 - through);
+  // the words' zone is an attractor the pattern thins towards: a segment is kept with a
+  // probability that falls from one well outside the zone to none deep inside it — a density
+  // gradient along the bars, never a cut rectangle; the chorus runs the bars right through
+  float gap = zoneCenter().x < 0.5 ? cuv.x - uZone.z : uZone.x - cuv.x;
+  float density = aspect() < 0.8 ? 1.0 : smoothstep(-0.35, 0.25, gap);
+  float keep = step(1.0 - mix(density, 1.0, open), hash11(id * 5.3 + floor(sy)));
+  // under the line on screen the segments give way whole, one by one as it fades in (uTypeAmt)
+  vec2 wlo = uTypeBox.xy - 0.015;
+  vec2 whi = uTypeBox.zw + 0.015;
+  float under = step(0.001, uTypeBox.z - uTypeBox.x) * step(wlo.x, cuv.x) * step(wlo.y, cuv.y) * step(cuv.x, whi.x) * step(cuv.y, whi.y);
+  keep *= 1.0 - under * step(hash11(id * 2.9 + floor(sy) * 1.3), uTypeAmt);
   float bar = step(fract(s), duty) * present * step(0.2, fract(sy)) * keep;
   vec3 col = uBg * 0.92;
   float accent = step(K_ACC - 0.5, mod(id, K_ACC));
@@ -495,8 +602,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
   }
-  // the stroke lifts off the paper before it would cross the words' block
-  ink *= 1.0 - zoneMask(uv, 0.04) * (1.0 - around);
+  // the stroke lifts off the paper under the words on screen (never under an empty zone)
+  ink *= 1.0 - wordsMask(uv, 0.03) * (1.0 - around);
   col = mix(col, mix(uInk, vec3(1.0), 0.08) * (0.8 + 0.2 * uParams.z), ink);
   vec2 sun = c + vec2(R * 0.55, -R * 0.3);
   col = mix(col, uAcc, fill(length(p - sun) - (0.026 + 0.01 * uParams.z)));
@@ -534,7 +641,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float fold = 0.5 + 0.5 * sin(x * K_F * 2.0 + ph * 2.0 + slope * 3.0);
     vec3 rc = mix(mix(uPri, uAcc, fi / max(1.0, K_N)), mix(uAcc, vec3(1.0), 0.3), pow(fold, 3.0) * (0.3 + 0.6 * light));
     float fade = smoothstep(0.0, 0.25, abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0)));
-    float away = 1.0 - zoneMask(uv, 0.08) * 0.97;
+    // the ribbons thin under the words on screen (they light them: a lit relation)
+    float away = 1.0 - wordsMask(uv, 0.05) * 0.9;
     col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y));
     col += rc * exp(-d / max(wd, 1e-3) * 1.5) * 0.06 * light * fade * away;
   }
@@ -562,8 +670,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float y = fract(uv.y * 0.6 + T() * speed * 0.2 + hash11(id + 7.0));
   float thread = smoothstep(0.08, 0.0, abs(fx - 0.5) - 0.02) * smoothstep(len, 0.0, y) * smoothstep(0.0, 0.02, y);
   float on = step(0.3, hash11(id * 1.37 + uSeed));
-  // the words' window stays clear of rain
-  float clear = 1.0 - zoneMask(uv, 0.05) * (1.0 - 0.5 * step(1.5, uMode));
+  // the rain thins around the words on screen (an empty zone rains like the rest of the frame)
+  float clear = 1.0 - wordsMask(uv, 0.04) * 0.85;
   vec3 lc = mix(uPri, mix(uAcc, vec3(1.0), 0.4), 0.3 + 0.5 * light);
   col += lc * thread * on * clear * step(floorY, uv.y) * (0.7 + 0.8 * uParams.x);
   // ripples where the threads land
@@ -647,19 +755,20 @@ export function composeSceneProgram(input: ComposerInput): SceneProgram {
   const r = rng((input.seed * 2654435761 + (input.salt ?? 0) * 97) >>> 0);
   const form = formGlsl(choice.form, r);
   const textureAmount = 0.3 + r() * 0.5;
-  const source = `// ${input.title ?? ""} — 離線作曲器：${FORM_LABELS[choice.form]} × ${TEXTURE_LABELS[choice.texture]} × ${MOTION_LABELS[choice.motion]}
+  const instrumental = input.lyrics === false;
+  const source = `// ${input.title ?? ""} — 離線作曲器：${FORM_LABELS[choice.form]} × ${TEXTURE_LABELS[choice.texture]} × ${MOTION_LABELS[choice.motion]}${instrumental ? "（器樂曲）" : ""}
 ${COMMON(choice)}
 ${motionGlsl(choice.motion)}
 ${form.code}
 ${textureGlsl(choice.texture, textureAmount)}
-
+${instrumental ? QUIET_LAYER : ""}
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
   vec3 col = form(fc, uv, p);
   // a lit relation: the image's light gathers behind the words
   if (uRelation > 2.5) col += mix(uPri, uAcc, 0.6) * typeGlow(uv, 0.016) * 0.12;
-  vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
+${instrumental ? "  col = quiet(fc, uv, col);\n" : ""}  vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
   col *= mix(0.7, 1.0, smoothstep(1.15, 0.3, length(vq)));
   return surface(col, fc, uv);
 }
@@ -669,7 +778,7 @@ vec3 scene(vec2 fc) {
     version: 1,
     engine: "offline",
     title,
-    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；形狀永遠站在字的另一側，主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
+    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；${instrumental ? "沒有歌詞，畫面自己呼吸：安靜的段落有緩緩上升的微塵，每八秒一道光慢慢掃過，隨能量變亮；" : "形狀永遠站在字的另一側，"}主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
     source,
     sections: sectionStates(input, choice, r),
     keyMoment: null,

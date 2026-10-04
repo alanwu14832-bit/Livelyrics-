@@ -13,7 +13,7 @@
 import type { SceneId } from "../../types";
 import type { RGB } from "../color";
 import type { ActiveTransitionKind } from "../director";
-import { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS } from "../scenes/composite";
+import { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS, TRANSITION_CODE } from "../scenes/composite";
 import { MEDIA_FRAGMENT, MEDIA_UNIFORMS } from "../scenes/media";
 import {
   DOWNSAMPLE_FACTOR,
@@ -26,7 +26,7 @@ import {
   SAFETY_PRESENT_FRAGMENT,
   SAFETY_PRESENT_UNIFORMS,
 } from "../scenes/safety";
-import { TYPE_FRAGMENT, TYPE_UNIFORMS } from "../scenes/type";
+import { TYPE_FRAGMENT, TYPE_TARGETS, TYPE_UNIFORMS } from "../scenes/type";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
 import { PROGRAM_UNIFORMS, buildProgramFragment, tidyCompileLog } from "../program/contract";
@@ -188,6 +188,10 @@ export interface TypeDraw {
   relation?: number;
   /** where the type can be (GL uv x0, y0, x1, y1, padded); the legibility taps run only there */
   area?: [number, number, number, number];
+  /** round 12: the section transition the words on screen enter with (TRANSITION_CODE, progress 0–1); null = none */
+  transition?: { kind: number; progress: number } | null;
+  /** the display word's box (GL uv, padded), or null: the full ink colour and the display contrast target there */
+  display?: [number, number, number, number] | null;
 }
 
 export interface RenderRequest {
@@ -242,7 +246,6 @@ interface Target {
   h: number;
 }
 
-const TRANSITION_CODE: Record<ActiveTransitionKind, number> = { fade: 1, flash: 2, wipe: 3, bloom: 4 };
 const COMPLETION_STATUS_KHR = 0x91b1;
 
 export interface RendererOptions {
@@ -1097,6 +1100,13 @@ export class StageRenderer {
     const ua = L.get("uTypeArea");
     const area = t.area ?? [0, 0, 1, 1];
     if (ua) gl.uniform4f(ua, area[0], area[1], area[2], area[3]);
+    f1("uTransition", t.transition ? t.transition.kind : 0);
+    f1("uTransitionP", t.transition ? t.transition.progress : 1);
+    const ud = L.get("uDisplayBox");
+    const disp = t.display ?? [0, 0, 0, 0];
+    if (ud) gl.uniform4f(ud, disp[0], disp[1], disp[2], disp[3]);
+    f1("uTarget", TYPE_TARGETS.readable);
+    f1("uDisplayTarget", TYPE_TARGETS.display);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     for (const unit of [3, 6]) {
       gl.activeTexture(gl.TEXTURE0 + unit);

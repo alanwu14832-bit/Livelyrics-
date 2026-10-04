@@ -1,6 +1,6 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, BandBible, CollectedVisual, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SongArcDirective, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, BandBible, CollectedVisual, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SceneId, SongArcDirective, SongMeta } from "@/lib/types";
 import type { VisionImage } from "./moodboard";
 
 export interface DesignerInput {
@@ -29,6 +29,28 @@ export interface DesignerInput {
    * the genre from it. Absent / null = none (lyrics and audio only).
    */
   publicInfo?: PublicInfo | null;
+  /** key-visual titles already used in the library: the offline designer picks another one */
+  takenTitles?: string[];
+  /** the project id: the composer's seed mixes it in, so two songs with one title and artist differ */
+  songId?: string;
+  /**
+   * Round 12: the band's other songs (most recently designed first): their programs' recipes
+   * (form/texture/motion#salt) and their last chorus scene, so consecutive songs of one band never
+   * wear the same form + texture and never climax on the same built-in scene.
+   */
+  bandSongs?: BandSongSummary[];
+  /**
+   * The forms the library's most recently designed other songs wear (most recent first, any band):
+   * a soft nudge — the two most recent forms weigh less — so a catalogue of different bands does
+   * not come out as the same picture three times in a row.
+   */
+  recentForms?: string[];
+}
+
+export interface BandSongSummary {
+  id: string;
+  recipe?: string | null;
+  chorusScene?: SceneId | null;
 }
 
 export interface DesignerCallbacks {
