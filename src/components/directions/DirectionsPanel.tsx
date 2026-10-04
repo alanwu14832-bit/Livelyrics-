@@ -97,7 +97,7 @@ export function FrameCarousel({
         ))}
         {current && (
           <>
-            <span className="absolute bottom-2 left-2 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white">{current.label}</span>
+            <span className="absolute bottom-2 left-2 rounded-xs bg-black/65 px-1.5 py-0.5 text-[12px] leading-none font-semibold text-white">{current.label}</span>
             {frames.length > 1 && (
               <>
                 <button
@@ -206,7 +206,7 @@ function Palette({ direction }: { direction: DesignDirection }) {
       {colors.map((c) => (
         <li key={c.hex} className="flex min-w-0 flex-col items-center gap-1" title={`${c.name}（${c.role}）${c.hex}`}>
           <span className="size-7 rounded-full shadow-[0_0_0_var(--hairline)_var(--separator)]" style={{ background: c.hex }} data-testid="direction-swatch" data-hex={c.hex} />
-          <span className="max-w-12 truncate text-[11px] leading-3 text-label-2">{c.role}</span>
+          <span className="max-w-12 truncate text-[12px] leading-4 text-label-2">{c.role}</span>
         </li>
       ))}
     </ul>
@@ -225,7 +225,7 @@ function Specimen({ project, direction }: { project: Project; direction: DesignD
       <p className="truncate text-[22px] leading-[30px]" style={{ fontFamily: fontStack(t.cjkFont, t.latinFont), fontWeight: t.weight, letterSpacing: `${t.letterSpacing}em` }}>
         {specimenLine(project)}
       </p>
-      <p className="mt-0.5 truncate text-[11px] leading-4 opacity-75">
+      <p className="mt-0.5 truncate text-[12px] leading-4 opacity-75">
         {FONTS[t.cjkFont]?.label ?? t.cjkFont}＋{FONTS[t.latinFont]?.label ?? t.latinFont}，字重 {t.weight}
       </p>
     </div>

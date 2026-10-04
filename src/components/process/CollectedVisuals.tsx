@@ -232,8 +232,8 @@ export function CollectedVisuals({ projectId, items, onChange, compact = false, 
             >
               <span className={cx("relative block aspect-square shrink-0 overflow-hidden", compact ? "w-24 self-start" : "max-sm:w-28 max-sm:self-start sm:w-full")}>
                 <Thumb url={api.collectedUrl(projectId, item.id)} alt={item.name} />
-                <span className="absolute top-1.5 left-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white">{kind}</span>
-                {item.use === "stage" && <span className="absolute top-1.5 right-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-medium text-white">上台</span>}
+                <span className="absolute top-1.5 left-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[12px] leading-none font-semibold text-white">{kind}</span>
+                {item.use === "stage" && <span className="absolute top-1.5 right-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[12px] leading-none font-medium text-white">上台</span>}
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-1.5 px-2.5 pt-2 pb-2.5">
                 <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-label">{item.name}</span>

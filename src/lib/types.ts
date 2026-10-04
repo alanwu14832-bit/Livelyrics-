@@ -173,6 +173,12 @@ export interface Research {
    * poster, logo, live photos). The research step downloads what it can into `Project.collected`.
    */
   visualCandidates?: VisualCandidate[];
+  /**
+   * Claude's brief was cut short (output limit, context window or the search continuations ran out):
+   * the reason in Traditional Chinese. The design used the part that was written; the process page
+   * tells the customer.
+   */
+  truncated?: string;
 }
 
 // ---------------------------------------------------------------------------

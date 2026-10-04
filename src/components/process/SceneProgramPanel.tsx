@@ -16,6 +16,13 @@ import type { Project, SceneProgram, TypeRelation } from "@/lib/types";
 import { saveThumb, useKeyStill } from "./key-still";
 
 const ENGINE_LABEL: Record<SceneProgram["engine"], string> = { claude: "Claude 撰寫", offline: "離線作曲器", example: "範例程式", manual: "手動貼上" };
+
+/** 「Claude（claude-sonnet-5-5）」: the model that wrote a Claude program, when it was recorded. */
+export function programAuthor(program: Pick<SceneProgram, "engine" | "model">): string {
+  if (program.engine !== "claude") return ENGINE_LABEL[program.engine];
+  const model = program.model?.trim();
+  return model ? `Claude（${model}）` : "Claude";
+}
 const RELATION_LABEL: Record<TypeRelation, string> = { plain: "字在留白裡", knockout: "字切開畫面", behind: "字從形狀後面經過", lit: "畫面照亮字" };
 const SUGGESTIONS = ["更安靜、留白更多", "主角形狀再小一點", "副歌的光再打開一些", "更貼近專輯封面的質感", "橋段換一個完全不同的規則"];
 
@@ -72,7 +79,12 @@ export function SceneProgramPanel({ project, actions }: { project: Project; acti
         <h3 id={headId} className="text-title-3 text-label">
           專屬畫面{program ? `「${program.title}」` : ""}
         </h3>
-        {program && <Tag tone={program.engine === "claude" ? "tint" : "neutral"}>{ENGINE_LABEL[program.engine]}</Tag>}
+        {program && (
+          // who wrote this program: the model for Claude (the customer knows what they paid for), 離線作曲器 otherwise
+          <Tag tone={program.engine === "claude" ? "tint" : "neutral"} data-testid="scene-author" title={program.engine === "claude" ? `這支畫面程式由 ${programAuthor(program)} 撰寫` : undefined}>
+            {program.engine === "claude" ? `${programAuthor(program)} 撰寫` : ENGINE_LABEL[program.engine]}
+          </Tag>
+        )}
         {program && program.enabled === false && <Tag tone="orange">目前用內建場景</Tag>}
       </div>
       {program ? (

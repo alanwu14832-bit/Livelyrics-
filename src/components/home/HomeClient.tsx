@@ -95,8 +95,10 @@ export function HomeClient({
         </section>
         {!setup && (
           <>
-            <BandShelf className="mt-16 md:mt-20" />
-            <ProjectLibrary className="mt-16" initialProjects={initialProjects} serverNow={serverNow} />
+            {/* the songs first: a returning operator opens one; the bands (or one quiet row when there
+                are none) follow */}
+            <ProjectLibrary className="mt-14 md:mt-16" initialProjects={initialProjects} serverNow={serverNow} />
+            <BandShelf className="mt-16" />
           </>
         )}
       </main>

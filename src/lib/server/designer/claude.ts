@@ -295,6 +295,7 @@ export async function claudeResearch(input: DesignerInput, cb: Callbacks, opts: 
     brief,
     sources,
     ...(split.candidates.length ? { visualCandidates: split.candidates } : {}),
+    ...(truncated ? { truncated: describeStop(result.stopReason) } : {}),
     engine: "claude",
     model: String(result.message.model || opts.model),
     createdAt: (opts.now?.() ?? new Date()).toISOString(),

@@ -130,6 +130,26 @@ export function BandShelf({ className }: { className?: string }) {
 
   const bands = state.kind === "ok" ? state.bands : [];
 
+  // no band yet (a first visit): one quiet row, so the library stays near the top of the page
+  if (state.kind === "ok" && bands.length === 0) {
+    return (
+      <section aria-labelledby="bands-title" className={className} data-bands-empty="">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl bg-fill-4 px-5 py-4">
+          <div className="min-w-0">
+            <h2 id="bands-title" className="text-[17px] leading-6 font-semibold text-label">
+              樂團
+            </h2>
+            <p className="text-[13px] leading-5 text-label-2">建立樂團後，旗下每首歌共用一本視覺聖經、同一套素材，整場演出活在同一個世界。</p>
+          </div>
+          <Button variant="gray" icon={PlusIcon} onClick={() => setCreating(true)}>
+            新樂團
+          </Button>
+        </div>
+        <NewBandSheet open={creating} onClose={() => setCreating(false)} />
+      </section>
+    );
+  }
+
   return (
     <section aria-labelledby="bands-title" className={className}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">

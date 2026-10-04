@@ -14,7 +14,7 @@
 //                              warms the next item's fonts and media without showing them.
 //
 // Everything else is shared: cursor auto-hide, F / double-click fullscreen, the pong heartbeat
-// with the viewport size, the 「等待控制台連線…」 hint, defensive message parsing, a screen wake lock.
+// with the viewport size, the 「等待控制台連線…」 hint (≤ 5 s on the wall, see waiting-hint.ts), defensive message parsing, a screen wake lock.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
@@ -24,6 +24,7 @@ import { createStageStore, initialStageState, parseStageMessage, type StageMessa
 import type { Project } from "@/lib/types";
 import { projectSafety } from "@/lib/stage/safety";
 import { useWakeLock } from "@/lib/use-wake-lock";
+import { WAITING_HINT_MS, waitingHintVisible } from "@/lib/stage/waiting-hint";
 import { StageView, type StageStats } from "./StageView";
 import { ProjectWarmer, warmFonts } from "./warm";
 
@@ -88,6 +89,13 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
   const [project, setProject] = useState<Project | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [connected, setConnected] = useState(false);
+  // 「等待控制台連線…」 is on the wall itself: at most WAITING_HINT_MS after the window opens
+  const [hintExpired, setHintExpired] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setHintExpired(true), WAITING_HINT_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+  const hintVisible = waitingHintVisible(connected, hintExpired ? WAITING_HINT_MS : 0);
   const [cursorHidden, setCursorHidden] = useState(false);
   const [store] = useState(() => createStageStore(initialStageState(projectId ?? "")));
   const [outputId] = useState(randomId);
@@ -459,7 +467,8 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
       <div
         aria-live="polite"
         className="pointer-events-none absolute inset-x-0 bottom-[3vh] flex justify-center transition-opacity duration-1000"
-        style={{ opacity: connected ? 0 : 1 }}
+        style={{ opacity: hintVisible ? 1 : 0 }}
+        data-waiting-hint={hintVisible ? "on" : "off"}
       >
         <span className="rounded-full bg-black/40 px-3 py-1 text-[11px] tracking-wide text-white/40">等待控制台連線…</span>
       </div>

@@ -6,7 +6,7 @@
 // header copy turns plain). Kept for the e2e: role="status" containing 「設計完成」, ?run=1 stripped.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, cx, pageContainerClass } from "@/components/ui";
+import { AppHeader, Banner, Button, Disclosure, EmptyState, Skeleton, SkeletonGroup, SkeletonText, Tooltip, cx, pageContainerClass } from "@/components/ui";
 import { ExportIcon, FileTextIcon, MonitorPlayIcon, PencilSimpleIcon, SparkleIcon, SwatchesIcon, TextAaIcon, WarningCircleIcon } from "@/components/ui/Icon";
 import { api, type ProcessRequest } from "@/lib/api-client";
 import { retryFrom } from "@/lib/process-runner";
@@ -47,6 +47,9 @@ export interface ProcessHeaderInfo {
 }
 
 type LoadState = { kind: "loading" } | { kind: "ok" } | { kind: "error"; message: string; notFound: boolean };
+
+/** below this the analysis is unreliable (the offline designer's SHORT_SONG_SECONDS, src/lib/server/designer/concept.ts) */
+const SHORT_CLIP_SECONDS = 20;
 
 const STEP_NAME: Record<string, string> = { lyrics: "歌詞", research: "研究", design: "設計", scene: "畫面", analyze: "分析", done: "完成" };
 
@@ -350,7 +353,11 @@ export function ProcessClient({
   const design = runState.steps.design;
   const showResearchStream = running || (phase === "error" && (research.text || research.status === "error"));
   const showDone = justFinished && plan != null && phase === "done";
-  const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || /粗略/.test(runState.steps.lyrics.message ?? ""));
+  const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || project.lyrics.timing === "estimated" || /粗略/.test(runState.steps.lyrics.message ?? ""));
+  // honesty (round 13): a Claude brief that was cut short, and a clip too short to analyse
+  const briefCut = showSummary && project.research?.engine === "claude" ? (project.research.truncated ?? (/（簡報未完成：([^）]+)）/.exec(project.research.brief)?.[1] || null)) : null;
+  const songSeconds = project.meta.duration || project.analysis?.duration || 0;
+  const shortClip = showSummary && songSeconds > 0 && songSeconds < SHORT_CLIP_SECONDS;
   // 設計方向 (phase 4): the comparison spans the page once directions exist; before that a compact block in the main column
   const hasDirections = !!project.directions?.directions.length;
   const directions = !running ? (
@@ -375,9 +382,15 @@ export function ProcessClient({
             </Button>
           )}
           {!running && (
-            <Button href={hasDirections ? `/p/${encodeURIComponent(id)}/proposal` : "#directions"} transitionTypes={hasDirections ? PUSH : undefined} variant="gray" icon={hasDirections ? FileTextIcon : SwatchesIcon}>
-              {hasDirections ? "一頁提案" : "設計方向"}
-            </Button>
+            // 一頁提案 needs 設計方向 first: without them the button says so and goes to that section
+            <Tooltip
+              content={hasDirections ? "一頁提案：把設計方向排成一頁，給樂團確認、列印或存成 PDF" : "一頁提案要先有設計方向：在下方提出 2 到 3 個方向，就能排成一頁給樂團確認"}
+              placement="bottom-end"
+            >
+              <Button href={hasDirections ? `/p/${encodeURIComponent(id)}/proposal` : "#directions"} transitionTypes={hasDirections ? PUSH : undefined} variant="gray" icon={hasDirections ? FileTextIcon : SwatchesIcon} data-testid="proposal-link">
+                {hasDirections ? "一頁提案" : "設計方向"}
+              </Button>
+            </Tooltip>
           )}
           {plan && !running && (
             <Button href={exportHref} transitionTypes={PUSH} variant="gray" icon={ExportIcon}>
@@ -449,6 +462,23 @@ export function ProcessClient({
                   進入控制台
                 </Button>
               }
+            />
+          )}
+
+          {shortClip && (
+            <Banner
+              tone="warning"
+              title="音檔太短，分析不可靠"
+              description={`這段音檔只有 ${Math.round(songSeconds)} 秒：速度、段落與能量都讀不準，所以只設計了一個安靜的單一畫面。上傳完整的歌曲後再重新設計。`}
+              className="max-w-full"
+            />
+          )}
+
+          {briefCut && (
+            <Banner
+              tone="warning"
+              title="Claude 的研究簡報沒有寫完"
+              description={`原因：${briefCut}。設計用的是已經寫好的部分，可能漏掉樂團或歌曲的重要資訊。可以用「重新設計」重跑研究，或改用 claude.ai 研究。`}
             />
           )}
 
