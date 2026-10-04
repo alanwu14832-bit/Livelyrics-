@@ -316,7 +316,8 @@ describe("distributeLines", () => {
 
   it("without analysis spreads lines over 8%..92% of the song", () => {
     const l = distributeLines(plain, null, 100);
-    expect(l.synced).toBe(true);
+    expect(l.synced).toBe(false); // every line has a time, but the times are estimated
+    expect(l.timing).toBe("estimated");
     expect(l.lines[0].start).toBeCloseTo(8, 5);
     const last = l.lines[l.lines.length - 1];
     expect(last.end).toBeCloseTo(92, 5);
@@ -373,7 +374,7 @@ describe("distributeLines", () => {
     expect(l.lines[2].start!).toBeLessThan(20);
     expect(l.lines[4].start!).toBeGreaterThan(20);
     expect(l.lines[4].start!).toBeLessThan(40);
-    expect(l.synced).toBe(true);
+    expect(l.timing).toBe("estimated");
     expect(texts(l)).toEqual(["anchor one", "u1", "u2", "anchor two", "tail"]);
   });
 
@@ -397,7 +398,7 @@ describe("distributeLines", () => {
     const synced = parseLrc(demoLrc);
     expect(distributeLines(synced, null, 73)).toEqual(synced);
     const l = distributeLines(parsePlainLyrics("a\nb\nc"), null, 0);
-    expect(l.synced).toBe(true);
+    expect(l.timing).toBe("estimated");
     expect(l.lines.every((x) => Number.isFinite(x.start!))).toBe(true);
     expect(distributeLines({ source: "none", synced: false, lines: [] }, null, 60).lines).toEqual([]);
   });
