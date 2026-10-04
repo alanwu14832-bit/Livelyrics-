@@ -651,7 +651,7 @@ export function DirectionsSection({
               </li>
             ))}
           </ul>
-          {offline && <p className="text-[12px] leading-4 text-label-2">離線設計師只看得懂簡單的意見，例如「更熱血」「更安靜」「藍一點」「直排」。</p>}
+          {offline && <p className="text-[12px] leading-4 text-label-2">基本模式的內建設計師只聽得懂簡單的意見，例如「更熱血」「更安靜」「藍一點」「直排」。</p>}
         </div>
       </Sheet>
       <ManualClaudeSheet

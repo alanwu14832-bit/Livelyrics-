@@ -132,7 +132,7 @@ describe("offlineResearch", () => {
     expect(r.engine).toBe("offline");
     expect(r.sources).toEqual([]);
     for (const h of ["## 樂團視覺識別", "## 歌曲意象與情緒", "## 現場表演觀察", "## 設計方向建議", "## 參考來源"]) expect(r.brief).toContain(h);
-    expect(r.brief).toContain("ANTHROPIC_API_KEY");
+    expect(r.brief).toContain("API 金鑰");
     expect(r.brief).toContain("120 BPM");
     // never reproduces full lyric lines
     for (const l of demoLyrics().lines) expect(r.brief).not.toContain(l.text);

@@ -180,7 +180,7 @@ describe("researchSong with Claude", () => {
     const r = recorder();
     const research = await researchSong(input, r.cb, { configured: false, fetch: noNetwork });
     expect(research.engine).toBe("free");
-    expect(r.logs[0]).toContain("ANTHROPIC_API_KEY");
+    expect(r.logs[0]).toContain("API 金鑰");
     expect(r.deltas.join("")).toContain("查詢 MusicBrainz");
     expect(r.deltas.join("")).toContain("## 樂團視覺識別");
   });

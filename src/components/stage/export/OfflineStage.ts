@@ -50,6 +50,25 @@ import { LyricPainter } from "./LyricPainter";
 
 /** Seconds re-run before a jump so smoothing and lyric animations are settled. */
 export const PREROLL_SECONDS = 3;
+
+/** The single-frame preview was cancelled. */
+export class RenderCanceled extends Error {
+  constructor() {
+    super("已取消");
+    this.name = "AbortError";
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RenderCanceled();
+}
+
+/** One macrotask (input, paint) between heavy frames; throws once the signal is aborted. */
+function yieldToMain(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => (signal.aborted ? reject(new RenderCanceled()) : resolve()), 0);
+  });
+}
 /**
  * LED 安全模式: the last part of the pre-roll also renders the scene through the flash limiter, so
  * its one-second history and the low-pass are settled (covers the detection window and the hold).
@@ -374,7 +393,7 @@ export class OfflineStage {
   }
 
   /** Reset the stateful parts and replay the PREROLL_SECONDS before t at the frame rate. */
-  private async preroll(t: number, fps: number) {
+  private async preroll(t: number, fps: number, signal?: AbortSignal) {
     this.mixer = new AudioFeatureMixer();
     this.painter = null;
     this.lyrics.destroy();
@@ -396,7 +415,10 @@ export class OfflineStage {
       if (k <= limiterFrames && this.renderer && !this.renderer.lost) {
         await this.renderScene(stepped.frame, stepped.audio, tk, d);
         if (this.typeMode && this.wantBackground) await this.renderScene(stepped.frame, stepped.audio, tk, d, 1);
-      }
+        // a cancellable caller (the single-frame preview) gets the main thread back between the
+        // rendered pre-roll frames: the page stays responsive and 「取消」 can land
+        if (signal) await yieldToMain(signal);
+      } else if (signal && k % 30 === 0) await yieldToMain(signal);
     }
   }
 
@@ -515,12 +537,13 @@ export class OfflineStage {
    * Render song time t. Consecutive calls one frame apart step the animations by exactly one
    * frame; anything else pre-rolls first. `fps` is the export frame rate.
    */
-  async renderFrame(t: number, fps: number, req: OfflineFrameRequest): Promise<void> {
+  async renderFrame(t: number, fps: number, req: OfflineFrameRequest, opts: { signal?: AbortSignal } = {}): Promise<void> {
     if (this.destroyed) throw new Error("renderer destroyed");
     const dt = 1 / fps;
     const last = this.lastT;
     this.wantBackground = req.background ?? req.scene;
-    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps);
+    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps, opts.signal);
+    throwIfAborted(opts.signal);
     const d = this.lastT == null ? 0 : t - this.lastT;
     const { frame, audio } = this.step(t, d);
 

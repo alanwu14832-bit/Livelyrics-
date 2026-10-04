@@ -85,7 +85,7 @@ export function RedesignBox({
       </div>
       <p id={hintId} className="mt-1.5 px-4 text-[12px] leading-4 text-label-2">
         像跟設計師開會一樣給指示；沒寫也可以直接重新設計。
-        {noApi && "離線設計師只看得懂簡單的指示，例如「更熱血」「更安靜」「直排」。"}
+        {noApi && "基本模式的內建設計師只聽得懂簡單的指示，例如「更熱血」「更安靜」「直排」。"}
       </p>
     </section>
   );
