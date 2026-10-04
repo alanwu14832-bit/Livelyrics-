@@ -138,6 +138,23 @@ describe("type engine: colour roles", () => {
     expect(compose(TEXTS[1], "window", CANVASES["16:9"], { color: "auto", energy: 0.8 }).windowFill).toBe(1);
     expect(compose(TEXTS[1], "giant-word", CANVASES["16:9"], { color: "window", energy: 0.3, motionWord: "風" }).windowFill).toBe(1);
   });
+
+  it("round 13: under a 專屬畫面 zone the automatic knockout never fills the frame over the picture", () => {
+    const lines: LyricLine[] = [{ id: "l0", text: TEXTS[2], start: 10, end: 14 }];
+    const h = hint("giant-word", { color: "auto", energy: 0.9 });
+    const lt = prepareLineText(lines, 0, h.emphasis, 60)!;
+    const { system } = normalizeTypeSystem({ voice: "title-sequence" }, { lines, sections: [], duration: 60, voice: "title-sequence" });
+    const sys = resolveSystem({ ...system, color: "knockout" });
+    const ctx = { lineIndex: 0, lineCount: 1, sectionIndex: 0, sectionKind: "chorus" as const, sectionLabel: "", songTitle: "示範之歌", first: true };
+    const plain = composeLine({ lt, lineId: "l0", hint: h, system: sys, canvas: CANVASES["16:9"], ctx, measure: approxMeasure });
+    const zoned = composeLine({ lt, lineId: "l0", hint: h, system: sys, canvas: CANVASES["16:9"], ctx: { ...ctx, zone: { x: 0.5, y: 0.14, w: 0.42, h: 0.56 } }, measure: approxMeasure });
+    expect(plain.windowFill).toBeGreaterThan(0.4);
+    expect(zoned.window).toBe(false);
+    expect(zoned.windowFill).toBe(0);
+    // an explicit 鏤空 still opens it
+    const explicit = composeLine({ lt, lineId: "l0", hint: { ...h, color: "window" }, system: sys, canvas: CANVASES["16:9"], ctx: { ...ctx, zone: { x: 0.5, y: 0.14, w: 0.42, h: 0.56 } }, measure: approxMeasure });
+    expect(explicit.windowFill).toBe(1);
+  });
 });
 
 const overlap = (a: Box, b: Box) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
