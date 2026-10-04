@@ -31,6 +31,8 @@ import { mediaLayerDraw, mediaLyricBox, mediaVideoTime } from "@/lib/stage/media
 import { TREATMENT_CODE, beatAt, resolveMediaFrame, type BeatInfo } from "@/lib/stage/media/model";
 import { hashString, rasterizeMotif } from "@/lib/stage/motif";
 import { beatIndexAt, buildSceneClock, offlineSceneFrame, type OfflineSceneFrame, type SceneClock } from "@/lib/stage/offline";
+import { TRANSITION_SECONDS } from "@/lib/stage/director";
+import { TRANSITION_CODE } from "@/lib/stage/scenes/composite";
 import { clampWeight } from "@/lib/stage/lyrics/layout";
 import { resolveLineDesign } from "@/lib/stage/resolve";
 import { resolveTypography, type StageTypography } from "@/lib/stage/typography";
@@ -334,6 +336,7 @@ export class OfflineStage {
     this.lyricAmt += ((showing ? 1 : 0) - this.lyricAmt) * (dt > 0 ? 1 - Math.exp(-dt / 0.25) : 1);
     if (this.typeMode) {
       // the type layer runs on the same clock (now = song time)
+      const sec = frame.look.section;
       this.typeDraw = this.type.update({
         project,
         state,
@@ -346,6 +349,7 @@ export class OfflineStage {
         width: this.width,
         height: this.height,
         output: this.output,
+        transition: frame.transition && sec ? { kind: TRANSITION_CODE[frame.transition.kind], progress: frame.transition.progress, sectionStart: sec.start, seconds: TRANSITION_SECONDS[frame.transition.kind] } : null,
       });
       this.lastT = t;
       return { frame, audio };

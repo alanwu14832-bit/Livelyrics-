@@ -15,6 +15,7 @@
 // is attenuated until the lyric colour meets the contrast target (legibility.ts).
 // Common GLSL ES 1.00 / 3.00 subset.
 
+import { WIPE_GLSL } from "./composite";
 import { DISPLAY_TARGET, LEGIBILITY_GLSL, LEGIBLE_TARGET } from "./legibility";
 
 /** The type pass' contrast targets (the renderer sets the uniforms from these). */
@@ -53,6 +54,8 @@ export const TYPE_UNIFORMS = [
   "uDisplayBox",
   "uTarget",
   "uDisplayTarget",
+  "uTransition",
+  "uTransitionP",
 ] as const;
 
 export const TYPE_FRAGMENT = /* glsl */ `
@@ -88,6 +91,8 @@ uniform vec4 uTypeArea;   // where the type can be (uv, y up, padded): the legib
 uniform vec4 uDisplayBox; // the display word's box (uv, y up, padded; x1 <= x0 = none): the full ink colour and uDisplayTarget there
 uniform float uTarget;        // the legibility target around readable text (WCAG ratio)
 uniform float uDisplayTarget; // …and around the display word
+uniform float uTransition;    // round 12: the section transition the words enter with (0 none, 1 fade, 2 flash, 3 wipe, 4 bloom)
+uniform float uTransitionP;   // …and its progress 0–1
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
@@ -115,6 +120,7 @@ vec3 softenC(vec3 x, float s) {
 
 vec4 plates(vec2 uv) { return TEX(uType, clamp(uv, 0.0, 1.0)); }
 ${LEGIBILITY_GLSL}
+${WIPE_GLSL}
 
 void main() {
   vec2 fc = gl_FragCoord.xy;
@@ -191,6 +197,33 @@ void main() {
     inkB *= 1.0 - e;
     acc *= 1.0 - e * 0.8;
   }
+  // the section transition reaches the words that enter with it: a wipe reveals them along the
+  // picture's edge, a fade brings them in with it, a flash or bloom flares their halo and settles
+  // (LED 安全模式 already turned flash and bloom into fades upstream, so no new light appears there)
+  float tGlow = 0.0;
+  if (uTransition > 0.5 && uTransitionP < 1.0) {
+    float tp = clamp(uTransitionP, 0.0, 1.0);
+    float keep = 1.0;
+    if (uTransition < 1.5) {
+      keep = smoothstep(0.0, 0.75, tp);
+    } else if (uTransition < 2.5) {
+      tGlow = pow(1.0 - tp, 2.0) * 0.9;
+    } else if (uTransition < 3.5) {
+      vec2 wf = wipeFront(uv, uRes.x / uRes.y, tp);
+      keep = smoothstep(wf.y + WIPE_SOFT, wf.y - WIPE_SOFT, wf.x);
+      tGlow = exp(-abs(wf.x - wf.y) * 32.0) * sin(tp * 3.14159265) * 0.6;
+    } else {
+      keep = smoothstep(0.0, 0.6, tp);
+      tGlow = sin(tp * 3.14159265) * 0.6;
+    }
+    ink *= keep;
+    inkR *= keep;
+    inkB *= keep;
+    acc *= keep;
+    spot *= keep;
+    halo *= keep;
+    haloRaw *= keep;
+  }
   float a = clamp(uAlpha, 0.0, 1.0);
   ink *= a;
   inkR *= a;
@@ -254,8 +287,8 @@ void main() {
   // picture gives way to the background tone (a printed knockout), the letters keep the lyric colour
   if (uRelation > 0.5 && uRelation < 1.5) col = mix(col, uFill * 0.9 + col * 0.06, cover * 0.9);
   if (cover > 0.001) col = mix(col, legibleBgT(col, inkC, uSoften, uGain, target), cover);
-  // glow: the halo turned into light (bloom entrances, 光; a lit relation glows a little)
-  col += inkC * halo * (uGlow * 0.55 + (uRelation > 2.5 ? 0.16 : 0.0));
+  // glow: the halo turned into light (bloom entrances, 光, the transition's flare; a lit relation glows a little)
+  col += inkC * halo * (uGlow * 0.55 + tGlow * 0.5 + (uRelation > 2.5 ? 0.16 : 0.0));
   // knockout: the frame fills with the background; the window letters are the display word, so
   // they are set in the full ink colour (pushed until it meets the display target against the
   // fill) — the picture only lights their texture a little, never dims them (B3)

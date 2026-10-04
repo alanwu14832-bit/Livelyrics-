@@ -494,16 +494,42 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   return out;
 }
 
-function autoEnter(voice: TypeVoiceId, recipe: TypeRecipeId, motion: MotionKind): Exclude<TypeEnterId, "auto"> {
-  if (recipe === "whisper") return "fade";
-  if (recipe === "brush-write") return "write";
-  const v = VOICES[voice].enter;
-  if (v === "cut" || v === "glitch") return recipe === "window" && voice === "mv-card" ? "fade" : (v as "cut" | "glitch");
-  if (voice === "ink") return recipe === "scatter" ? (motion === "fall" ? "fall" : "fade") : recipe === "vertical-column" || recipe === "cross" ? "write" : motion === "bloom" ? "bloom" : "fade";
-  if (motion === "fall") return "fall";
-  if (motion === "rise") return "rise";
-  if (motion === "bloom") return recipe === "window" ? "wipe" : "bloom";
-  return v === "auto" ? "fade" : (v as Exclude<TypeEnterId, "auto">);
+/**
+ * The entrance a recipe asks for (round 12: never a plain fade for a composed line). The voice
+ * bends it — MV cards cut on the beat, the ink voice writes, the glitch voice tears in — and the
+ * motion word only where the recipe leaves room (a whisper may rise, a scatter may fall).
+ */
+export function autoEnter(voice: TypeVoiceId, recipe: TypeRecipeId, motion: MotionKind): Exclude<TypeEnterId, "auto"> {
+  switch (recipe) {
+    case "whisper":
+      return motion === "rise" ? "rise" : "fade";
+    case "brush-write":
+      return "write";
+    case "giant-word":
+      // the hook word lands: a hard cut on the beat for the snapping voices, else it swells in
+      return voice === "mv-card" ? "cut" : voice === "glitch" ? "glitch" : motion === "bloom" ? "bloom" : "scale";
+    case "vertical-column":
+      // a mask wipe down the column (the ink voice writes it)
+      return voice === "ink" ? "write" : voice === "glitch" ? "glitch" : "wipe";
+    case "cross":
+      return voice === "ink" ? "write" : voice === "mv-card" ? "cut" : voice === "glitch" ? "glitch" : "wipe";
+    case "grid-poem":
+      return voice === "glitch" ? "glitch" : motion === "fall" ? "fall" : "rise";
+    case "echo":
+      return voice === "glitch" ? "glitch" : "scale";
+    case "window":
+      return "bloom";
+    case "title-card":
+    case "poster":
+    case "bleed":
+      return voice === "glitch" ? "glitch" : "wipe";
+    case "split":
+      return voice === "glitch" ? "glitch" : "wipe";
+    case "scatter":
+      return motion === "rise" ? "rise" : "fall";
+    default:
+      return "fade";
+  }
 }
 
 function autoExit(voice: TypeVoiceId, recipe: TypeRecipeId, motion: MotionKind): Exclude<TypeExitId, "auto"> {

@@ -31,6 +31,7 @@ import type {
   ProjectSummary,
   SongMeta,
 } from "@/lib/types";
+import type { BandSongSummary } from "@/lib/server/designer/types";
 import { THUMB_MAX_CHARS } from "@/lib/types";
 import { docs, files, type DocWrite, type StoredDoc, type StoredFile } from "./store";
 import { StorageError } from "./store/errors";
@@ -48,7 +49,7 @@ const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const STATUSES: readonly ProjectStatus[] = ["new", "processing", "ready", "error"];
 const STALE_TEMP_MS = 12 * 60 * 60 * 1000;
 /** bump when summarize() changes: stored cloud summaries of another version are recomputed */
-const SUMMARY_VERSION = 3;
+const SUMMARY_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // paths (local mode)
@@ -279,6 +280,11 @@ function summarize(project: Project): ProjectSummary {
   if (project.status === "error" && project.error) summary.error = project.error;
   const kvTitle = project.plan?.keyVisual?.title;
   if (typeof kvTitle === "string" && kvTitle.trim()) summary.keyVisualTitle = kvTitle.trim();
+  // round 12: what the band's next song must not repeat (the composer's recipe, the climax scene)
+  const recipe = project.plan?.sceneProgram?.recipe;
+  if (typeof recipe === "string" && recipe) summary.sceneRecipe = recipe;
+  const lastChorus = [...(project.plan?.sections ?? [])].reverse().find((x) => x?.kind === "chorus");
+  if (lastChorus?.scene) summary.chorusScene = lastChorus.scene;
   // only a still of the current plan: after a re-design the card falls back to the drawn artwork
   if (project.thumb && project.plan && project.thumb.plan === planHash(project.plan)) summary.thumb = project.thumb.url;
   return summary;
@@ -454,6 +460,27 @@ export async function listKeyVisualTitles(exceptId?: string): Promise<string[]> 
     if (!out.includes(p.keyVisualTitle)) out.push(p.keyVisualTitle);
   }
   return out;
+}
+
+/**
+ * The band's other songs, most recently updated first: their program recipes and last chorus
+ * scenes (the designer keeps consecutive songs of a band apart). [] without a band.
+ */
+export async function listBandSongs(bandId: string | undefined, exceptId?: string): Promise<BandSongSummary[]> {
+  if (!bandId) return [];
+  return (await listProjects())
+    .filter((p) => p.bandId === bandId && p.id !== exceptId && p.hasPlan)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .map((p) => ({ id: p.id, recipe: p.sceneRecipe ?? null, chorusScene: p.chorusScene ?? null }));
+}
+
+/** The forms the library's other designed songs wear, most recently updated first (from their program recipes). */
+export async function listRecentForms(exceptId?: string): Promise<string[]> {
+  return (await listProjects())
+    .filter((p) => p.id !== exceptId && p.sceneRecipe)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .map((p) => (p.sceneRecipe ?? "").split("/")[0])
+    .filter(Boolean);
 }
 
 /** Every file a project owns (its audio and its own assets). */

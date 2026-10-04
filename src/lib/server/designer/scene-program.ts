@@ -14,9 +14,10 @@ import { z } from "zod";
 import { formatTimeShort } from "@/lib/timeline";
 import { TYPE_RELATIONS } from "@/lib/schema";
 import { PROGRAM_CONTRACT_DOC } from "@/lib/stage/program/contract";
-import { composeSceneProgram, FORM_IDS, type FormId } from "@/lib/stage/program/composer";
+import { composeSceneProgram, FORM_IDS, TEXTURE_IDS, type ComposerPair, type FormId, type MotionId, type TextureId } from "@/lib/stage/program/composer";
 import { EXAMPLE_PROGRAMS } from "@/lib/stage/program/examples";
 import { normalizeSceneProgram } from "@/lib/stage/program/model";
+import { probePlanProgram, type ProbeResult } from "@/lib/stage/program/probe";
 import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hashString } from "./svg";
@@ -45,51 +46,260 @@ const FORMS_BY_SCENE: Record<SceneId, FormId[]> = {
   blackout: ["pillars", "strata"],
 };
 
-const FORMS_BY_GENRE: Record<string, FormId[]> = {
-  "post-rock": ["pillars", "strata"],
-  shoegaze: ["ribbons", "threads"],
-  "dream-pop": ["ribbons", "horizon"],
-  "city-pop": ["horizon", "ribbons"],
-  "indie-rock": ["bars", "horizon"],
-  "indie-pop": ["ribbons", "horizon"],
-  folk: ["strata", "brush"],
-  metal: ["pillars", "bars"],
-  punk: ["bars", "threads"],
-  "post-punk": ["bars", "pillars"],
-  electronic: ["orbits", "bars"],
-  "hip-hop": ["bars", "pillars"],
-  rnb: ["ribbons", "orbits"],
-  jazz: ["ribbons", "horizon"],
-  "math-rock": ["bars", "orbits"],
-  emo: ["threads", "pillars"],
-  psychedelic: ["orbits", "ribbons"],
-  "alt-rock": ["pillars", "bars"],
-  ambient: ["strata", "orbits"],
-  pop: ["horizon", "ribbons"],
+
+/**
+ * Round 12: the form table as weights. The genre family sets the base (every form keeps a small
+ * weight, so a song is never locked to one shape; the ones that look worse than the genre's own
+ * stay low rather than forbidden), the imagery families add theirs (雨 → threads, 河／路 →
+ * ribbons, 牆 → pillars / strata, 光 → orbits / horizon, 手寫 → brush, 城市 → bars…), the energy
+ * shape bends it, and an instrumental leans to shapes that hold a frame without words.
+ */
+const FORM_WEIGHTS_BY_GENRE: Record<string, Partial<Record<FormId, number>>> = {
+  "post-rock": { pillars: 3.2, strata: 2, horizon: 1.2, orbits: 1, threads: 0.8, ribbons: 0.5, bars: 0.4, brush: 0.3 },
+  shoegaze: { ribbons: 3, threads: 2, orbits: 1.2, horizon: 1, strata: 0.8, brush: 0.5, pillars: 0.4, bars: 0.2 },
+  "dream-pop": { ribbons: 3, horizon: 2, orbits: 1.5, threads: 1, strata: 0.6, brush: 0.5, pillars: 0.3, bars: 0.15 },
+  "city-pop": { horizon: 3, ribbons: 2, bars: 1.5, orbits: 1.2, threads: 0.6, pillars: 0.5, strata: 0.5, brush: 0.2 },
+  "indie-rock": { bars: 2.2, horizon: 1.6, pillars: 1.4, threads: 1.2, orbits: 1.2, strata: 1, ribbons: 0.8, brush: 0.6 },
+  "indie-pop": { ribbons: 2.5, horizon: 2, orbits: 1.5, threads: 1, bars: 0.8, strata: 0.6, brush: 0.6, pillars: 0.3 },
+  folk: { strata: 3.2, brush: 2.2, horizon: 1.5, threads: 0.9, ribbons: 0.8, orbits: 0.6, pillars: 0.5, bars: 0.25 },
+  metal: { pillars: 3, bars: 2.2, threads: 1, strata: 0.8, orbits: 0.5, horizon: 0.4, brush: 0.15, ribbons: 0.15 },
+  punk: { bars: 3.2, threads: 1.6, pillars: 1.4, orbits: 0.7, strata: 0.5, horizon: 0.4, brush: 0.35, ribbons: 0.2 },
+  "post-punk": { bars: 2.5, pillars: 2, threads: 1.2, orbits: 1, strata: 0.6, horizon: 0.5, ribbons: 0.3, brush: 0.3 },
+  electronic: { orbits: 2.5, bars: 2, threads: 1.2, ribbons: 1, horizon: 0.9, pillars: 0.8, strata: 0.4, brush: 0.2 },
+  "hip-hop": { bars: 2.5, pillars: 2, orbits: 1, threads: 0.8, horizon: 0.6, ribbons: 0.5, brush: 0.5, strata: 0.4 },
+  rnb: { ribbons: 2.5, orbits: 2, horizon: 1.5, threads: 0.8, brush: 0.6, pillars: 0.5, strata: 0.4, bars: 0.4 },
+  jazz: { ribbons: 2.5, horizon: 1.8, brush: 1.5, orbits: 1.2, strata: 0.6, threads: 0.5, pillars: 0.5, bars: 0.4 },
+  "math-rock": { bars: 2.5, orbits: 2.2, threads: 1, pillars: 0.8, ribbons: 0.6, strata: 0.4, horizon: 0.4, brush: 0.3 },
+  emo: { threads: 2.5, pillars: 1.8, bars: 1.2, horizon: 1, orbits: 0.8, ribbons: 0.6, strata: 0.5, brush: 0.4 },
+  psychedelic: { orbits: 3, ribbons: 2.2, brush: 1, horizon: 1, threads: 0.6, strata: 0.6, bars: 0.5, pillars: 0.4 },
+  "alt-rock": { pillars: 2.4, bars: 2, horizon: 1.2, threads: 1, orbits: 0.9, strata: 0.8, ribbons: 0.5, brush: 0.4 },
+  ambient: { strata: 2.5, orbits: 2, horizon: 1.5, ribbons: 1.2, threads: 0.8, brush: 0.6, pillars: 0.6, bars: 0.1 },
+  pop: { horizon: 2.5, ribbons: 2, orbits: 1.4, threads: 0.9, bars: 0.8, strata: 0.7, brush: 0.5, pillars: 0.5 },
 };
 
-/** Forms that suit the song, best first: the genre's, the strongest image's own form, then the scene family's and the audio mood's. */
-export function sceneForms(findings: Findings): FormId[] {
-  const out: FormId[] = [];
-  const add = (list: readonly FormId[] | undefined) => {
-    for (const f of list ?? []) if (!out.includes(f)) out.push(f);
-  };
-  if (findings.genre) add(FORMS_BY_GENRE[findings.genre.id]);
-  // the strongest lyric image with a form of its own (牆 → pillars / strata) speaks before the scene family
-  for (const h of findings.imagery.slice(0, 2)) add(h.family.forms?.filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f)));
-  for (const s of findings.hints.scenes.slice(0, 2)) add(FORMS_BY_SCENE[s]);
-  const q = findings.audio.quadrant;
-  add(findings.audio.arousal > 0.62 ? ["bars", "pillars"] : findings.audio.light > 0.55 ? ["horizon", "ribbons"] : q ? ["strata", "orbits"] : []);
-  add(FORM_IDS);
+/** Forms an imagery family calls for (most typical first) when the lexicon entry names none. */
+const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
+  rain: ["threads", "strata"],
+  tears: ["threads", "horizon"],
+  snow: ["threads", "strata"],
+  storm: ["threads", "pillars"],
+  fire: ["threads", "pillars"],
+  sea: ["horizon", "ribbons"],
+  river: ["ribbons", "strata"],
+  wind: ["ribbons", "threads"],
+  road: ["ribbons", "horizon"],
+  harbor: ["horizon", "ribbons"],
+  wings: ["ribbons", "orbits"],
+  freedom: ["ribbons", "orbits"],
+  dream: ["ribbons", "orbits"],
+  smoke: ["ribbons", "strata"],
+  breath: ["ribbons", "brush"],
+  wall: ["pillars", "strata"],
+  door: ["pillars", "horizon"],
+  window: ["horizon", "pillars"],
+  home: ["strata", "horizon"],
+  light: ["orbits", "horizon"],
+  moon: ["horizon", "orbits"],
+  dawn: ["horizon", "strata"],
+  dusk: ["horizon", "strata"],
+  summer: ["horizon", "orbits"],
+  heaven: ["orbits", "horizon"],
+  stars: ["orbits", "threads"],
+  universe: ["orbits", "horizon"],
+  night: ["orbits", "horizon"],
+  writing: ["brush", "strata"],
+  memory: ["brush", "strata"],
+  autumn: ["brush", "threads"],
+  flower: ["brush", "orbits"],
+  spring: ["brush", "ribbons"],
+  city: ["bars", "pillars"],
+  neon: ["bars", "orbits"],
+  train: ["bars", "ribbons"],
+  signal: ["bars", "orbits"],
+  screen: ["bars", "pillars"],
+  dance: ["orbits", "bars"],
+  metal: ["bars", "pillars"],
+  glass: ["bars", "pillars"],
+  forest: ["strata", "pillars"],
+  desert: ["strata", "horizon"],
+  world: ["strata", "horizon"],
+  blood: ["pillars", "threads"],
+  war: ["pillars", "bars"],
+  heart: ["orbits", "brush"],
+  voice: ["orbits", "ribbons"],
+  eyes: ["orbits", "horizon"],
+  embrace: ["brush", "ribbons"],
+  lonely: ["pillars", "horizon"],
+  youth: ["bars", "threads"],
+  dark: ["pillars", "strata"],
+  ash: ["threads", "strata"],
+  mirror: ["pillars", "horizon"],
+};
+
+/** What the strongest image adds to its first and second form (the genre family sets 2–3.2 for its own). */
+export const IMAGERY_LEAD = 3.0;
+export const IMAGERY_SECOND = 1.5;
+
+export interface FormWeightOptions {
+  /** the song has lyrics (false: an instrumental) */
+  lyrics?: boolean;
+  /** the library's most recent forms (most recent first): the latest weigh RECENT_FORM_FACTORS, a repeat RECENT_REPEAT_FACTOR more */
+  recentForms?: readonly string[];
+}
+
+/** How much the forms the library's last songs wear are weighed down, by recency (a nudge, never a ban). */
+export const RECENT_FORM_FACTORS = [0.55, 0.55, 0.8, 0.8] as const;
+/** …and once more when a form was worn twice among the last five songs. */
+export const RECENT_REPEAT_FACTOR = 0.5;
+
+/** Weights over the forms for a song (exported for the tests and the stage lab). */
+export function formWeights(findings: Findings, opts: FormWeightOptions = {}): Record<FormId, number> {
+  const w = Object.fromEntries(FORM_IDS.map((f) => [f, 1])) as Record<FormId, number>;
+  const genre = findings.genre ? FORM_WEIGHTS_BY_GENRE[findings.genre.id] : null;
+  if (genre) for (const f of FORM_IDS) w[f] = genre[f] ?? 0.3;
+  // the imagery families, by their share of the strongest
+  const top = findings.imagery.slice(0, 4);
+  const max = top[0]?.weight || 1;
+  for (const h of top) {
+    const share = Math.min(1, h.weight / max);
+    const forms = (h.family.forms?.filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f)) ?? []).concat(FORMS_BY_IMAGERY[h.family.id] ?? []);
+    if (forms[0]) w[forms[0]] += IMAGERY_LEAD * share;
+    if (forms[1]) w[forms[1]] += IMAGERY_SECOND * share;
+  }
+  // the energy shape
+  const a = findings.audio;
+  if (a.arousal > 0.62) {
+    w.bars += 0.8;
+    w.pillars += 0.6;
+    w.threads += 0.4;
+  }
+  if (a.light > 0.55) {
+    w.horizon += 0.8;
+    w.ribbons += 0.5;
+    w.orbits += 0.4;
+  }
+  if (a.quadrant === "dark-slow" || a.quadrant === "gentle-float") {
+    w.strata += 0.6;
+    w.brush += 0.5;
+    w.orbits += 0.4;
+  }
+  if (a.quadrant === "release") {
+    w.pillars += 0.5;
+    w.horizon += 0.3;
+  }
+  // an instrumental: shapes that hold a frame without words (bars are a backdrop for type)
+  if (opts.lyrics === false) {
+    w.pillars += 0.5;
+    w.strata += 0.4;
+    w.orbits += 0.3;
+    w.bars *= 0.6;
+  }
+  const recent = (opts.recentForms ?? []).slice(0, 5).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
+  recent.forEach((f, i) => {
+    if (i < RECENT_FORM_FACTORS.length) w[f] *= RECENT_FORM_FACTORS[i];
+  });
+  for (const f of new Set(recent)) if (recent.filter((x) => x === f).length >= 2) w[f] *= RECENT_REPEAT_FACTOR;
+  for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.05, w[f]) * 1000) / 1000;
+  return w;
+}
+
+/** Forms that suit the song, best first (the weights' order; what the directions and the stage lab list). */
+export function sceneForms(findings: Findings, opts: FormWeightOptions = {}): FormId[] {
+  const w = formWeights(findings, opts);
+  return [...FORM_IDS].sort((a, b) => w[b] - w[a] || FORM_IDS.indexOf(a) - FORM_IDS.indexOf(b));
+}
+
+const SURFACE_BY_GENRE: Record<string, Partial<Record<TextureId, number>>> = {
+  punk: { halftone: 2.2, scan: 1.2, paper: 0.5 },
+  "post-punk": { halftone: 1.6, scan: 1.6 },
+  "hip-hop": { halftone: 1.8 },
+  metal: { halftone: 1.4, scan: 1.2, paper: 0.4 },
+  electronic: { scan: 2.4, halftone: 1.2, paper: 0.3 },
+  "math-rock": { scan: 1.6, halftone: 1.2 },
+  "city-pop": { scan: 1.8, halftone: 1.2 },
+  folk: { paper: 2.4, film: 1.2, scan: 0.3, halftone: 0.4 },
+  jazz: { paper: 1.6, film: 1.3 },
+  ambient: { paper: 1.5, film: 1.3, halftone: 0.4 },
+  "dream-pop": { film: 1.4, paper: 1.2, halftone: 0.5 },
+  shoegaze: { film: 1.5, scan: 1.1 },
+  pop: { film: 1.3 },
+};
+const SURFACE_BY_IMAGERY: Record<string, Partial<Record<TextureId, number>>> = {
+  writing: { paper: 2 },
+  memory: { paper: 1.6, film: 1.3 },
+  neon: { scan: 1.8 },
+  signal: { scan: 2 },
+  screen: { scan: 2 },
+  city: { scan: 1.3, halftone: 1.2 },
+  rain: { scan: 1.3 },
+  wall: { halftone: 1.5, paper: 1.2 },
+  dark: { film: 1.3 },
+};
+
+/** Texture weights the song suggests (the composer multiplies the voice's surfaces by these). */
+export function surfaceWeights(findings: Findings): Partial<Record<TextureId, number>> {
+  const w: Partial<Record<TextureId, number>> = Object.fromEntries(TEXTURE_IDS.map((t) => [t, 1]));
+  const g = findings.genre ? SURFACE_BY_GENRE[findings.genre.id] : null;
+  if (g) for (const [t, k] of Object.entries(g) as Array<[TextureId, number]>) w[t] = (w[t] ?? 1) * k;
+  const top = findings.imagery.slice(0, 2);
+  const max = top[0]?.weight || 1;
+  for (const h of top) {
+    const sw = SURFACE_BY_IMAGERY[h.family.id];
+    if (!sw) continue;
+    const share = Math.min(1, h.weight / max);
+    for (const [t, k] of Object.entries(sw) as Array<[TextureId, number]>) w[t] = (w[t] ?? 1) * (1 + (k - 1) * share);
+  }
+  return w;
+}
+
+const MOTION_BY_IMAGERY: Record<string, Partial<Record<MotionId, number>>> = {
+  flow: { drift: 1.5, sweep: 1.2 },
+  fall: { drift: 1.4, rise: 0.6 },
+  rise: { rise: 1.8 },
+  pulse: { breathe: 1.8 },
+  spin: { orbit: 1.8 },
+  rush: { sweep: 1.8 },
+  burst: { sweep: 1.4, breathe: 1.2 },
+  flicker: { breathe: 1.2 },
+  still: { breathe: 1.3, drift: 0.8 },
+  drift: { drift: 1.3 },
+};
+
+/** Motion weights the strongest image suggests (rain falls, a river flows, a planet orbits). */
+export function motionBias(findings: Findings): Partial<Record<MotionId, number>> {
+  const top = findings.imagery[0];
+  return top ? { ...(MOTION_BY_IMAGERY[top.family.motion] ?? {}) } : {};
+}
+
+/** The form + texture pairs the band's other songs wear (most recent first), from their program recipes. */
+export function bandPairs(req: DesignerInput): ComposerPair[] {
+  const out: ComposerPair[] = [];
+  for (const s of req.bandSongs ?? []) {
+    const m = /^([a-z]+)\/([a-z]+)\//.exec(s.recipe ?? "");
+    if (m && (FORM_IDS as readonly string[]).includes(m[1]) && (TEXTURE_IDS as readonly string[]).includes(m[2])) out.push({ form: m[1] as FormId, texture: m[2] as TextureId });
+  }
   return out;
+}
+
+/** The song's seed: the project id when known (two songs with one title and artist still differ), else title | artist. */
+export function songSeed(req: Pick<DesignerInput, "meta" | "songId">): number {
+  const base = hashString(`${req.meta?.title ?? ""}|${req.meta?.artist ?? ""}`);
+  return req.songId ? (base ^ hashString(req.songId)) >>> 0 : base;
 }
 
 /** The offline composer's program for a request (salt: 「重新產生畫面」 without Claude draws another). */
 export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt = 0, findings?: Findings): SceneProgram {
   const f = findings ?? analyzeFindings(req);
+  const lyrics = (req.lyrics?.lines ?? []).some((l) => typeof l?.text === "string" && l.text.trim());
+  const wopts: FormWeightOptions = { lyrics, recentForms: req.recentForms };
   const program = composeSceneProgram({
-    seed: hashString(`${req.meta?.title ?? ""}|${req.meta?.artist ?? ""}`),
-    forms: sceneForms(f),
+    seed: songSeed(req),
+    forms: sceneForms(f, wopts),
+    weights: formWeights(f, wopts),
+    avoid: bandPairs(req),
+    surface: surfaceWeights(f),
+    motionBias: motionBias(f),
+    lyrics,
     sections: plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy })),
     voice: plan.typeSystem?.voice ?? null,
     // phase 8: the band's real cover sets the temperature of the picture when it has one
@@ -133,12 +343,21 @@ export function composerSalt(program: SceneProgram | null | undefined): number {
  * Claude / claude.ai program carried over (it adapts to new sections by kind), else the offline
  * composer's. The operator's choice to switch it off is kept.
  */
-export function ensureSceneProgram(req: DesignerInput & { previous?: DesignPlan | null }, plan: DesignPlan): DesignPlan {
+export function ensureSceneProgram(req: DesignerInput & { previous?: DesignPlan | null }, plan: DesignPlan, repairs: string[] = []): DesignPlan {
   const own = plan.sceneProgram;
   const prev = req.previous?.sceneProgram ?? null;
   let program: SceneProgram | null = null;
-  if (own && (own.engine === "claude" || own.engine === "manual")) program = normalizeSceneProgram(own, { sections: plan.sections });
-  if (!program && prev && (prev.engine === "claude" || prev.engine === "manual")) program = normalizeSceneProgram(prev, { sections: plan.sections });
+  // a written program (Claude's, claude.ai's, a pasted one) must also pass the luminance probe
+  const written = (p: SceneProgram | null | undefined): SceneProgram | null => {
+    if (!p || !(p.engine === "claude" || p.engine === "manual")) return null;
+    const n = normalizeSceneProgram(p, { sections: plan.sections, repairs });
+    if (!n) return null;
+    const probe = probePlanProgram(n, plan);
+    if (probe.ok) return n;
+    repairs.push(`專屬畫面「${n.title}」太亮，改用離線作曲器：${probe.errors.slice(0, 2).join("；")}`);
+    return null;
+  };
+  program = written(own) ?? written(prev);
   if (!program && own) program = normalizeSceneProgram(own, { sections: plan.sections });
   if (!program) program = offlineSceneProgram(req, plan, composerSalt(prev));
   if (prev && prev.enabled === false) program = { ...program, enabled: false };
@@ -302,5 +521,10 @@ export function programFromDraft(raw: unknown, plan: DesignPlan, meta: { model: 
     },
     { sections: plan.sections, repairs },
   );
-  return { program, errors: program ? [] : ["程式沒有通過檢查"] };
+  if (!program) return { program: null, errors: ["程式沒有通過檢查"] };
+  // the luminance probe: a program that whites out the wall is sent back like any other failure
+  const probe: ProbeResult = probePlanProgram(program, plan);
+  if (!probe.ok) return { program: null, errors: probe.errors };
+  for (const w of probe.warnings) repairs.push(w);
+  return { program, errors: [] };
 }

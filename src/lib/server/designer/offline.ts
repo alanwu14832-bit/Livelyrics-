@@ -211,6 +211,55 @@ interface SectionPlanCtx {
   voice: VoiceChoice;
   /** a calm song (isCalmSong): no flash, no 「推到 1.2」 */
   calm: boolean;
+  /** round 12: the built-in scene this song's last chorus climaxes on (drawn per song, never the band's previous) */
+  climax: SceneId;
+  /** the band's most recently designed other song's climax scene (never repeated in a row) */
+  bandClimax: SceneId | null;
+  /** whether the song's brief calls for the motif to close it (the band has a symbol, or one strong recurring image) */
+  wantsMotif: boolean;
+  /** the first section's scene once chosen (the outro may return to it) */
+  opening: SceneId | null;
+}
+
+const CLIMAX_SALT = 0xe9b5dba5;
+
+/** How big a chorus scene is: the ladder climbs this rank towards the song's climax. */
+const CHORUS_RANK: Partial<Record<SceneId, number>> = { particles: 1, waves: 1.5, grid: 2, shards: 3, tunnel: 4 };
+const rankOf = (sc: SceneId): number => CHORUS_RANK[sc] ?? 2;
+
+/** A well-mixed 0..1 from a seed and a salt (one mulberry32 step), so neighbouring seeds spread. */
+function unit(seed: number, salt: number): number {
+  let t = (seed ^ salt) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/**
+ * The scene a song's last chorus climaxes on. Drawn per song from the chorus scenes the genre
+ * allows — the genre's own family first when it names one of them, otherwise by the seed — and
+ * never the band's previous song's climax, so the catalogue does not end every song in 隧道.
+ */
+export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, chorusCount = 2, salt = CLIMAX_SALT): SceneId {
+  // a calm song never climaxes on a tunnel or on shards: its biggest chorus is still a quiet
+  // picture (particles, the grid's horizon, the waves' bands)
+  const base = calm ? [...ladder.filter((sc) => sc !== "tunnel" && sc !== "shards"), "waves" as SceneId] : [...ladder];
+  // three or more choruses need room to climb: the climax is then one of the bigger scenes
+  const roomy = chorusCount >= 3 ? base.filter((sc) => rankOf(sc) >= 2) : base;
+  const pool = (roomy.length ? roomy : base).filter((sc) => sc !== bandClimax);
+  const list = pool.length ? pool : roomy.length ? roomy : base;
+  if (!list.length) return "particles";
+  // a weighted draw: the genre's own scenes count three times, the rest once (so a genre leans
+  // but does not lock, and the seed spreads a catalogue of one genre over the ladder)
+  const preferred = new Set(findings.genre ? findings.hints.scenes.slice(0, 3) : []);
+  const weights = list.map((sc) => (preferred.has(sc) ? 3 : 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let u = unit(seed, salt) * total;
+  for (let k = 0; k < list.length; k++) {
+    u -= weights[k];
+    if (u < 0) return list[k];
+  }
+  return list[list.length - 1];
 }
 
 function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal: number, ctx: SectionPlanCtx): SceneId {
@@ -231,13 +280,20 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   const e = s.energy;
   const cands = (k: SectionKind) => songCandidates(k, ctx);
   if (s.kind === "chorus") {
-    // choruses escalate: particles -> grid / shards -> tunnel on the last one (avoided scenes left out)
+    // choruses escalate along a ladder that ends on this song's climax scene (round 12: drawn per
+    // song, not always 隧道); avoided scenes are left out
     const avoided = new Set([...(ctx.bible?.sceneAvoid ?? []), ...ctx.findings.hints.avoidScenes]);
     const kept = SCENE_CANDIDATES.chorus.filter((sc) => !avoided.has(sc));
-    const ladder = kept.length ? kept : cands("chorus");
-    // a genre that prefers one of the ladder's scenes starts its first chorus there
-    const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
-    const base = genreStart >= 0 ? Math.min(genreStart, Math.max(0, ladder.length - 2)) : ctx.mood.mood === "explosive" ? 1 : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % 2;
+    const base0 = kept.length ? kept : cands("chorus");
+    const climax = base0.includes(ctx.climax) || ctx.climax === "waves" ? ctx.climax : base0[base0.length - 1];
+    // the rungs below the climax, smallest first: the choruses climb to it (a song whose climax is
+    // the smallest scene keeps every chorus there — restraint, not a drop-back)
+    const rest = [...base0, ...(ctx.calm ? (["waves"] as SceneId[]) : [])].filter((sc, k, a) => sc !== climax && rankOf(sc) < rankOf(climax) && a.indexOf(sc) === k).sort((a, b) => rankOf(a) - rankOf(b));
+    const ladder = [...rest, climax];
+    // a genre that prefers one of the lower rungs starts its first chorus there
+    const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => sc !== climax && ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
+    const base0idx = genreStart >= 0 ? Math.min(genreStart, ladder.length - 2) : ctx.mood.mood === "explosive" ? Math.min(1, ladder.length - 2) : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % Math.max(1, ladder.length - 1);
+    const base = Math.max(0, Math.min(ladder.length - 1, base0idx));
     let idx = Math.min(ladder.length - 1, base + ordinal);
     if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
     const pick = ladder[idx];
@@ -256,7 +312,23 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
   if (lexScene && (s.kind === "verse" || s.kind === "bridge" || s.kind === "breakdown")) return lexScene;
   const pool = kindList.filter((sc) => fits(sc, e) && sc !== prev);
   const list = pool.length ? pool : kindList.filter((sc) => sc !== prev);
-  if (s.kind === "intro" || s.kind === "outro") return list.includes("motif") ? "motif" : list[0];
+  if (s.kind === "intro") {
+    // the motif opens the song when the brief calls for it; otherwise the song's own quiet scene
+    if (ctx.wantsMotif && list.includes("motif")) return "motif";
+    const quiet = list.filter((sc) => sc !== "motif");
+    return quiet[(ctx.seed >>> 11) % quiet.length] ?? list[0] ?? "motif";
+  }
+  if (s.kind === "outro") {
+    // round 12: three ways to close — the motif only for songs whose brief calls for it, a return
+    // to the opening scene, or the climax scene dying down (its energy is already low here)
+    const variants: SceneId[] = [];
+    if (ctx.wantsMotif && list.includes("motif")) variants.push("motif");
+    if (ctx.opening && ctx.opening !== prev && ctx.opening !== "blackout") variants.push(ctx.opening);
+    if (ctx.climax !== prev) variants.push(ctx.climax);
+    for (const sc of list) if (sc !== prev && !variants.includes(sc)) variants.push(sc);
+    const uniq = variants.filter((sc, k) => variants.indexOf(sc) === k);
+    return uniq[(ctx.seed >>> 7) % Math.min(3, uniq.length)] ?? list[0] ?? "motif";
+  }
   return list[(ctx.seed + i * 7 + ordinal) % list.length] ?? "nebula";
 }
 
@@ -402,7 +474,9 @@ function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, pl
     case "interlude":
       return `器樂段落交給「${sc}」與燈光，歌詞隱藏，畫面隨節拍反應。`;
     case "outro":
-      return `回到「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
+      return scene === "motif"
+        ? `回到主視覺「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`
+        : `「${sc}」慢慢暗下去收尾，畫面退回安靜；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
   }
 }
 
@@ -426,6 +500,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
     const total = counts.get(s.kind) ?? 1;
     const scene = chooseScene(s, i, prevScene, ordinal, ctx);
     prevScene = scene;
+    if (i === 0) ctx.opening = scene;
     const last = s.kind === "chorus" && ordinal === total - 1 && total > 1;
     const { style, placement, scale } = applyLyricPolicy(
       chooseLyrics(s, ordinal, ctx),
@@ -680,7 +755,19 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     findings,
     voice: chooseVoice(findings, st.cjk),
     calm: isCalmSong(findings),
+    climax: "tunnel",
+    bandClimax: input.bandSongs?.[0]?.chorusScene ?? null,
+    wantsMotif: !!bible?.motifs.length || (findings.imagery[0]?.weight ?? 0) >= 4,
+    opening: null,
   };
+  ctx.climax = chooseClimax(
+    SCENE_CANDIDATES.chorus.filter((sc) => !(bible?.sceneAvoid ?? []).includes(sc) && !hints.avoidScenes.includes(sc)),
+    findings,
+    seed,
+    ctx.bandClimax,
+    ctx.calm,
+    ctx.chorusCount,
+  );
   // the band's uploads as before; the research's collected material with restraint (one or two sections)
   const collectedIds = new Set((input.collected ?? []).map((c) => c.id));
   const uploaded = (input.assets ?? []).filter((a) => !collectedIds.has(a.id));

@@ -482,7 +482,17 @@ remain available.
   `offlineDesign` takes palette, scheme, saturation, fonts, scene family, lyric styles, transitions
   (soft genres and calm songs — `isCalmSong`: soft motion, a genre that says 不要閃爍, a slow / floating
   audio mood, a 平靜內斂 / 憂傷低迴 lyric — never flash), motifs, the 「免費研究的發現」 notes, the sing-along
-  emphasis and cues from the findings (the bible and the mood board still come first);
+  emphasis and cues from the findings (the bible and the mood board still come first). **Built-in
+  scenes rotate per song** (round 12): the last chorus climaxes on a scene drawn per song
+  (`chooseClimax`: the chorus candidates the genre allows, the genre's own family counting three
+  times, a calm song never on 隧道 or 碎片 — 波形 joins its pool —, three or more choruses only on the
+  bigger scenes so there is room to climb, never the band's previous song's climax from
+  `bandSongs[0].chorusScene`); the choruses climb a ladder of the smaller scenes (`CHORUS_RANK`:
+  particles < waves < grid < shards < tunnel) up to it. The intro opens on the motif only when the
+  brief calls for it (the band has motifs, or one recurring image weighs ≥ 4), else on one of the
+  song's quiet scenes; the outro closes one of three ways by the seed — the motif (when called for),
+  a return to the opening scene, or the climax scene dying down (its rationale says 「慢慢暗下去收尾」);
+  nothing is 主視覺符號 by default any more.
   `offlineDirectionSpecs` keeps film / collage / minimal but takes each direction's colours, scenes,
   motifs and wording from the song, and the genre's native axis takes the genre's colours and lyric
   habit (folk → a warm earth-toned film, punk → the collage).
@@ -755,7 +765,11 @@ plan whose operator forces a lyric style in the console (`typeModeActive`).
   text): the recipe's place when free, else under the block, beside its foot, under everything, over
   it, re-set in two balanced rows for the measure, then the block moves up, then it shrinks (never
   below the minimum); the editor's scale, rotation and nudge (fractions of the whole canvas) applied
-  after the layout and fitted back into the canvas; entrance / exit timing), `animate.ts`
+  after the layout and fitted back into the canvas; entrance / exit timing — the entrance follows
+  the recipe (round 12, `autoEnter`): a giant word cuts on the beat in MV cards and swells in
+  elsewhere, a vertical column and a cross take a mask wipe (the ink voice writes them), posters,
+  title cards and bled words wipe in, a grid poem rises, a window blooms, a scatter falls, the glitch
+  voice tears everything in; only a whisper fades), `animate.ts`
   (per-glyph and per-piece frames: entrances, exits, the motion word's motion, the glitch stutter on
   beats — at most 3 a second with LED 安全模式 on, a shake while the line holds (the entrance and
   the exit may tear it apart), a torn row of 撕裂 keeps its tear — and the type-pass uniforms),
@@ -954,6 +968,22 @@ uniform（全部由系統提供，不能自己宣告）：
   before the scene when a program reads them (`typeMask` / `typeGlow`); otherwise an empty 1 × 1
   texture is bound. The director carries the outgoing slot's last program values through a section
   transition; the offline frame (`offlineSceneFrame`) transitions when the program's mode changes too.
+  **Transitions follow the song clock** (round 12): in track playback `StageEngine` hands the
+  director `anchor` (seconds since the section boundary), so a section change starts its transition
+  that far in — and while the anchor is given the progress follows the song clock (never behind the
+  wall clock live, so a console paused on a seek to a section start still settles within the
+  transition's length; the stage lab sets `inspect`, and a paused lab holds the anchored moment, so
+  a frame capture (`stage-lab?t=`) and the export show the same moment of it; `data-transition` on
+  the stage root reports `kind:progress`); a stage that opens inside the window gets the previous
+  section's look as `previousTarget` and the director synthesizes the outgoing slot. Cues and live
+  mode (no anchor) stay on the wall clock. The compositor's wipe is a visible event — a soft diagonal
+  edge (`WIPE_GLSL` `wipeFront`), a leading line of the accent and a breath of light on the incoming
+  side — and the **type pass takes the same transition** (`TypeDraw.transition`, `uTransition` /
+  `uTransitionP`): the words that enter with the section (`entersWithSection`: a timed line starting
+  at the boundary, a cue inside the transition; a pickup from the previous section is left alone) are
+  revealed along the wipe's edge, come in with a fade, or flare their halo and settle on a flash or
+  bloom. LED 安全模式 converts flash and bloom to fades upstream (`safeTransition`), so the fade branch
+  adds no light; the pass still runs before the safety chain.
   The media pass and the transition compositor pass the foreground alpha through. `programFrame`
   builds the values from the project, the look and the clock (section index / kind / energy /
   progress, bar phase, tempo, palette ×6, the section colourway and lyric colour, the zone in GL uv,
@@ -1088,15 +1118,61 @@ uniform（全部由系統提供，不能自己宣告）：
   textures `film` / `halftone` / `paper` / `scan` (by the type voice); motions `drift` / `breathe` /
   `rise` / `orbit` / `sweep`; the composition puts the form at least a fifth of the frame away from the
   words, on the other side (or half, on a tall canvas), and alternates the words' side when the song
-  turns a page (verse after chorus, pre-chorus, bridge). The form comes from the 免費研究 findings
-  (`sceneForms`: the genre's forms, then the lyric imagery's scene family, then the audio mood), the
-  rest from the song's seed; the chorus takes the form's relation (horizon / orbits / ribbons lit,
-  pillars behind, bars / brush knockout). Why this and not templates with colour swaps: the old
+  turns a page (verse after chorus, pre-chorus, bridge). **The form is a weighted draw** (round 12,
+  `designer/scene-program.ts` `formWeights`): the genre family sets a base over all eight forms
+  (`FORM_WEIGHTS_BY_GENRE`: every form keeps a small weight — the ones that look worse than the
+  genre's own stay low rather than forbidden), the imagery families add theirs (the lexicon's own
+  `forms`, else `FORMS_BY_IMAGERY`: 雨／淚／雪 → threads, 河／路／風／夢 → ribbons, 牆／門 → pillars /
+  strata, 光／月／星 → orbits / horizon, 筆墨／時光／花 → brush, 城市／霓虹／列車 → bars…), the energy
+  shape bends it (driving → bars / pillars, bright → horizon / ribbons, slow → strata / brush) and an
+  instrumental leans to shapes that hold a frame without words (the strongest image adds
+  `IMAGERY_LEAD` 3.0 / `IMAGERY_SECOND` 1.5 × its share, so 雨 beats a pop genre's horizon).
+  `chooseComposition` takes the best-fitting form; when the top two are within `TIE_BAND` (20 %) the
+  song's seed settles it (`songSeed`: title | artist mixed with the project id, so two indie-rock
+  songs — or two songs with one title — can differ, but only between forms the evidence rates
+  alike), and the rest follow in a weighted order the salt (「重新產生畫面」) walks, so a regenerate
+  never repeats the form. The draw is deterministic and explainable: evidence first, then what the
+  band and the library just wore. The texture is the
+  voice's surfaces weighted by the genre's (`surfaceWeights`: punk → halftone, electronic / city pop →
+  scan, folk → paper) and the imagery's; the motion is the form's own ways of moving bent by the
+  strongest image (`motionBias`: rain falls → drift, a river flows → drift / sweep, a planet → orbit).
+  **Per band**: `DesignerInput.bandSongs` (the band's other songs, most recently updated first, from
+  `storage.ts` `listBandSongs` over `ProjectSummary.sceneRecipe` / `chorusScene`) gives
+  `ComposerInput.avoid`: the previous song's form + texture pair is never worn again (another texture,
+  or the next form when it wore them all). **Across the library** (any band) the forms the last songs
+  wear weigh less by recency (`RECENT_FORM_FACTORS` 0.55, 0.55, 0.8, 0.8; a form worn twice among the
+  last five `RECENT_REPEAT_FACTOR` 0.5 more) — a nudge, never a ban — through
+  `DesignerInput.recentForms` (`storage.ts` `listRecentForms`), so a catalogue of different bands does
+  not come out as one picture three times in a row (the seven audit songs, designed in order, wear
+  五 forms with none more than twice; `round12.test.ts`). The chorus takes the form's relation (horizon / orbits /
+  ribbons lit, pillars behind, bars / brush knockout). **An instrumental** (`lyrics: false`) gets the
+  `quiet()` layer: slow motes rising through the frame in every mode but the open chorus and, every
+  8 s, a soft band of light crossing the frame as strong as `uEnergy` — the energy curve drives
+  something visible, and a verse is never a black screen; the `pillars` form (the audit's white-out)
+  now lights its slabs with the accent (`mix(uAcc, uPri, 0.2)`, never white), a short halo and a fan
+  of rays that reaches a third of the frame at most, over a sky that is dark but never black, with a
+  line of light at the slabs' feet. Why this and not templates with colour swaps: the old
   problem was "the same effect in another colour"; here the structure of the picture (what stands
   where, what surface, how it moves, how the words meet it) changes with the song, while each module
   is still hand-designed and safe. Directions get one per direction (`directionSceneProgram`: forms
   from the direction's scene families, seeded by its letter), so the three style-frame sets show three
   worlds.
+- **Luminance probe** (`src/lib/stage/program/probe.ts` over `glsl-eval.ts`, round 12). The server
+  has no GL, so a program is rendered on the CPU: `glsl-eval.ts` compiles the scene-program subset of
+  GLSL ES 1.00 (scalars, vec2–4, mat2–4, functions with in / out / inout, if / for / break / return,
+  swizzles read and write, constructors, the common built-ins) to closures and implements the prelude
+  natively (hash, noise, fbm, sdf, zone and type masks; the samplers read as empty, like a frame with
+  no lyric). `probeSceneProgram` evaluates a 32 × 18 grid for every section state (the plan's palette
+  and colourways, the mode and parameters, no words) and measures the mean sRGB luma and the lit-area
+  fraction (luma > 0.5): a state over `PROBE_LIT_MAX` (35 %) or `PROBE_MEAN_MAX` (0.42) fails with
+  the section and the numbers in 繁中; a near-black state is a warning. Calibrated against the audit's
+  rendered frames (the instrumental's chorus: probe mean 0.23 / lit 6.5 %, frame 0.21 / 7.5 %). It
+  runs in `programFromDraft` (a white-out goes back to Claude for its repair turn like a validator
+  error) and in `ensureSceneProgram` (a Claude / pasted program kept across a re-design that fails it
+  is replaced by the composer, with a repair note); never in PATCH or `normalizeSceneProgram` (the
+  legibility scripts PATCH deliberately flat or hostile programs). A program the evaluator cannot run
+  (a struct) is reported as 「無法評估」 and passes. Every composer form × state and every example
+  passes (`probe.test.ts`).
 - **Examples** (`src/lib/stage/program/examples/`): five hand-written programs of the quality the
   prompt asks for — 夜航 (city pop: a setting sun, a city line, its reflection; the bridge an eclipse),
   潮間帶 (folk: a tidal flat under a low moon; the chorus floods it; the bridge a mirror), 碑 (post-rock:
@@ -1128,8 +1204,11 @@ uniform（全部由系統提供，不能自己宣告）：
   stage root, not over the channel). The frame-time watchdog is a heuristic on the page's frame
   interval (it cannot separate the program's cost from the rest of the frame) and only acts at the
   adaptive-resolution floor. Programs have no access to the band's media textures. The composer's
-  forms are eight hand-written families: songs of the same genre and imagery share a form (their
-  seed still changes the parameters, texture, motion and composition).
+  forms are eight hand-written families; the weighted draw spreads a catalogue over them, but a
+  form that fits a song badly can still be drawn when its weight is low and the seed lands there.
+  The luminance probe measures a program without words on screen and without the LED safety pass
+  (which only darkens), on doubles rather than the GPU's floats: a program that is bright only
+  under the lyric mask or only at one moment can pass it.
 
 ### 研究找到的素材 (phase 8)
 
@@ -1273,7 +1352,8 @@ one-time acknowledgement before anything goes on stage.
   (`preserveDrawingBuffer`, `ensureReady()` compiles the plan's shaders first) fed by
   `src/lib/stage/offline.ts` (`trackStateAt`, `buildSceneClock`: the director's speed × smoothed-energy
   integral precomputed on a 20 Hz grid so frame t is the same from any range start; `offlineSceneFrame`:
-  section transitions by song time; beat index from the analysis grid). Audio uniforms: the live
+  section transitions by song time, handed to the type layer too so the words that enter with a
+  section take its transition in the video; beat index from the analysis grid). Audio uniforms: the live
   `AudioFeatureMixer` over the analysis envelopes, stepped at the export frame rate. Media: the shared
   `src/lib/stage/media/draw.ts` (also used by StageEngine) with `ExactMedia` (images decoded up front, videos
   seeked to the exact frame and used after `seeked`). Lyrics: the live `LyricLayer` in a hidden host at the
@@ -1450,7 +1530,8 @@ keeps every contract above and changes only where things are kept and how long w
   rAF loop (no React re-render per frame). Extrapolates time with `stageTime()`.
 - One GLSL fragment shader per `SceneId` sharing uniforms (time, resolution, 3 colorway colors,
   speed, density, intensity, reactivity, live level/bass/onset, beat phase, analysis energy at t,
-  motif texture). Section changes transition per `transitionIn` (cut/fade/flash/wipe/bloom).
+  motif texture). Section changes transition per `transitionIn` (cut/fade/flash/wipe/bloom), anchored
+  to the song clock in track playback (round 12) and reaching the type pass.
   Overrides: scene, freeze, intensity, blackout (smooth ~0.4 s fade). Handles context loss, resize,
   devicePixelRatio, never throws into React.
 - Lyric layer implements every `LyricStyleId` & `LyricPlacement`, plan typography via `fontStack`,

@@ -103,7 +103,8 @@ describe("offline designer: songs differ structurally", () => {
     const byId = Object.fromEntries(SONG_FIXTURES.map((f) => [f.id, sceneForms(analyzeFindings(fixtureInput(f)))[0]]));
     expect(byId["last-light"]).toBe("pillars");
     expect(byId["static-youth"]).toBe("bars");
-    expect(byId.tide).toBe("strata");
+    // folk lays strata unless its own images say otherwise: 潮汐之間's sea and moon stand a disc over a horizon
+    expect(["strata", "horizon"]).toContain(byId.tide);
   });
 
   it("a regenerate without Claude draws another composition (salt + 1)", () => {
