@@ -17,6 +17,7 @@ import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/Proje
 import { useServerStatus } from "@/components/home/ServerStatus";
 import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
+import { estimatedCount } from "@/lib/lyrics/lrc";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { DirectionsSection } from "@/components/directions/DirectionsPanel";
 import { ManualClaudeSheet } from "@/components/manual/ManualClaudeSheet";
@@ -353,7 +354,9 @@ export function ProcessClient({
   const design = runState.steps.design;
   const showResearchStream = running || (phase === "error" && (research.text || research.status === "error"));
   const showDone = justFinished && plan != null && phase === "done";
-  const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || project.lyrics.timing === "estimated" || /粗略/.test(runState.steps.lyrics.message ?? ""));
+  // round 14: how many lines still have an estimated start
+  const estimatedLines = estimatedCount(project.lyrics);
+  const needsLyrics = showSummary && (project.lyrics.lines.length === 0 || estimatedLines > 0 || /粗略/.test(runState.steps.lyrics.message ?? ""));
   // honesty (round 13): a Claude brief that was cut short, and a clip too short to analyse
   const briefCut = showSummary && project.research?.engine === "claude" ? (project.research.truncated ?? (/（簡報未完成：([^）]+)）/.exec(project.research.brief)?.[1] || null)) : null;
   const songSeconds = project.meta.duration || project.analysis?.duration || 0;
@@ -486,11 +489,13 @@ export function ProcessClient({
             <Banner
               tone="info"
               icon={<PencilSimpleIcon size={20} className="text-label-2" />}
-              title={project.lyrics.lines.length === 0 ? "這首歌還沒有歌詞" : "歌詞的時間是粗略分配的"}
+              title={project.lyrics.lines.length === 0 ? "這首歌還沒有歌詞" : estimatedLines > 0 ? `還有 ${estimatedLines} 句時間是估的，先到歌詞編輯器對拍` : "歌詞的時間是粗略分配的"}
               description={
                 project.lyrics.lines.length === 0
                   ? "畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
-                  : "時間是依音訊能量估的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"
+                  : project.analysis?.vocal?.length
+                    ? "時間是依人聲估的，大致落在唱的地方，但不一定準。上台前到歌詞編輯器對拍：拍過的句子是真的，其餘的會跟著重新估算。"
+                    : "時間是依音訊能量估的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"
               }
               actions={
                 <Button href={lyricsHref} transitionTypes={PUSH} variant="gray">

@@ -29,6 +29,7 @@ import { buildConcept, chooseSkeleton, conceptKeywords, conceptMotifs, makeTitle
 import { capCues, suggestCues } from "./cues";
 import { analyzeFindings, type DesignHints, type Findings } from "./findings";
 import { findImagery, type ImageryHit } from "./imagery";
+import { sensitiveWords } from "./lyric-analysis";
 import { normalizePlan } from "./normalize";
 import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
@@ -557,14 +558,17 @@ function buildLines(ctx: SectionPlanCtx, sections: SectionDesign[]): LineDesign[
     const sec = sectionOf(l.id);
     if (!sec || sec.lyricStyle === "hidden") continue;
     const emphasis: string[] = [];
+    // round 14: a dark word (blood, a weapon, death…) is never blown up, nor a phrase carrying one
+    const dark = sensitiveWords(l.text);
+    const safe = (w: string) => !dark.some((d) => w.includes(d) || d.includes(w));
     const chant = CHANT.exec(l.text)?.[0];
     if (chant) emphasis.push(chant);
     // the phrase the crowd sings back (free research), when it is only part of the line
     const phrase = !chant ? singalong.find((p) => !p.chant && p.lineIds.includes(l.id) && Array.from(p.text).length <= Array.from(l.text).length * 0.6) : undefined;
-    if (phrase && l.text.includes(phrase.text)) emphasis.push(phrase.text);
+    if (phrase && l.text.includes(phrase.text) && safe(phrase.text)) emphasis.push(phrase.text);
     for (const w of words) {
       if (emphasis.length >= 2) break;
-      if (l.text.includes(w) && !emphasis.some((e) => e.includes(w) || w.includes(e))) emphasis.push(w);
+      if (l.text.includes(w) && safe(w) && !emphasis.some((e) => e.includes(w) || w.includes(e))) emphasis.push(w);
     }
     const hook = sec.kind === "chorus" && l.repeats >= 2;
     const short = readingUnits(l.text) <= 6;

@@ -156,7 +156,7 @@ export const GENRE_RULES: readonly GenreRule[] = [
     label: "金屬",
     tags: ["metal", "heavy metal", "metalcore", "death metal", "black metal", "thrash metal", "doom metal", "nu metal", "progressive metal", "djent", "symphonic metal", "deathcore", "power metal", "sludge metal"],
     zh: ["金屬", "重金屬", "金屬核", "死亡金屬", "黑金屬", "鞭擊金屬"],
-    palette: { hues: [0, 210], saturation: 0.8, scheme: "complementary", light: "dark", note: "黑、血紅與鋼鐵灰" },
+    palette: { hues: [0, 210], saturation: 0.8, scheme: "complementary", light: "dark", note: "黑、暗紅與鋼鐵灰" },
     scenes: ["shards", "ink", "tunnel", "blackout"],
     avoid: ["bokeh", "gradient"],
     lyrics: { verse: "line-fade", chorus: "impact", density: "dense", note: "嘶吼聽不清楚：主歌的字小而克制，大合唱段落給巨字" },

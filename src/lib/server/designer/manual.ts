@@ -534,6 +534,7 @@ function checks(target: ManualTarget, st: SongStructure, lyrics: boolean): strin
       "- 2 到 3 個方向，名字與配色彼此明顯不同；每個方向的 palette 4–6 色、第一色是最深的背景色。",
       "- scenes、lyrics 的 kind 與各個 id 都用上面清單裡的值；cjkFont 是中文字體、latinFont 是拉丁字體。",
       "- 每個方向的 typeVoice（字體語言）都不同；lyrics 的 style 不用 karaoke 或 subtitle。",
+      SENSITIVE_CHECK,
       "- 所有給人看的文字都是繁體中文，把範本中（…）的內容全部換成你的設計。",
     ];
   }
@@ -550,9 +551,13 @@ function checks(target: ManualTarget, st: SongStructure, lyrics: boolean): strin
         ]
       : ["- 沒有歌詞：每段 lyricStyle 用 hidden，lines 與 typeSystem.lines 用 []。"]),
     "- motifSvg 只用 svg、g、path、circle、rect、polygon、polyline、line、ellipse，fill／stroke 用 currentColor，沒有文字與漸層。",
+    SENSITIVE_CHECK,
     "- 所有給人看的文字都是繁體中文，把範本中（…）的內容全部換成你的設計。",
   ];
 }
+
+/** Round 14: the dark-lyrics rule (SENSITIVE_LYRICS_RULE in the design rules) as one last check. */
+const SENSITIVE_CHECK = "- 歌詞寫到暴力、自傷、毒品或性時，畫面只用象徵（暴風雨、碎玻璃、凋零的花、斷裂的鎖鏈）：沒有血腥、血、傷口、屍體、骷髏、對著觀眾的武器或自傷的樣子；全場都看得到，包括未成年的觀眾。";
 
 /**
  * The design rules without principle 6 (how to use the band's material) and the material

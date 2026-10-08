@@ -2,6 +2,7 @@
 
 import type { PipelineEvent, PipelineStepId, Project } from "@/lib/types";
 import { researchEngineLabel } from "@/lib/research-labels";
+import { estimatedCount } from "@/lib/lyrics/lrc";
 import { LYRICS_SOURCE_LABEL } from "./labels";
 import { PROCESS_STEPS, type ProcessStep } from "./steps";
 
@@ -187,12 +188,13 @@ export function runningStep(state: RunState): ProcessStep | null {
 export function stepsFromProject(project: Project): Record<ProcessStep, StepState> {
   const lines = project.lyrics?.lines ?? [];
   const timed = lines.filter((l) => l.start != null).length;
+  const estimated = estimatedCount(project.lyrics);
   const lyrics: StepState =
     lines.length > 0
       ? {
           status: "done",
           text: "",
-          message: `${LYRICS_SOURCE_LABEL[project.lyrics.source] ?? "歌詞"}，${lines.length} 行${project.lyrics.synced ? "，已同步" : project.lyrics.timing === "estimated" && timed === lines.length ? "，時間是估的（請到歌詞編輯器對拍）" : timed > 0 ? `，${timed} 行有時間` : "，未定時"}`,
+          message: `${LYRICS_SOURCE_LABEL[project.lyrics.source] ?? "歌詞"}，${lines.length} 行${project.lyrics.synced ? "，已同步" : estimated > 0 ? `，還有 ${estimated} 句時間是估的（請到歌詞編輯器對拍）` : timed > 0 ? `，${timed} 行有時間` : "，未定時"}`,
         }
       : { status: "kept", text: "", message: "尚無歌詞，可到歌詞編輯器加入" };
   const r = project.research;

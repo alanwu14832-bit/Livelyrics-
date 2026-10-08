@@ -6,6 +6,7 @@
 import type { AudioAnalysis } from "../types";
 import { ANALYSIS_RATE, analyzeSamples } from "./analysis";
 import { parseTags } from "./metadata";
+import { sideRateFor, sideSignal } from "./vocal";
 import { isWorkerResponse, type AnalyzeRequest } from "./worker-protocol";
 
 export { analyzeSamples, ANALYSIS_RATE, ENVELOPE_RATE, PROGRESS_LABELS } from "./analysis";
@@ -116,19 +117,31 @@ export async function analyzeFile(
   const onAnalysis = (p: number, label: string) => report(0.3 + 0.7 * p, label);
 
   let samples = downmix(buffer);
+  // round 14: the side signal lets the 人聲 curve tell centre-panned vocals from wide guitars and pads
+  let side = sideOf(buffer);
+  const sideRate = sideRateFor(buffer.sampleRate);
   const WorkerCtor = (globalThis as WebAudioGlobals).Worker;
   if (options.worker !== false && typeof WorkerCtor === "function") {
-    const outcome = await runInWorker(samples, buffer.sampleRate, sourceSampleRate, onAnalysis, signal);
+    const outcome = await runInWorker(samples, side, buffer.sampleRate, sideRate, sourceSampleRate, onAnalysis, signal);
     if (outcome.ok) return outcome.analysis;
     if (outcome.aborted) throw abortError();
     if (typeof console !== "undefined") console.warn("[livelyrics] 背景分析失敗，改在主執行緒分析：", outcome.error);
     // the samples were handed to the worker (detached): rebuild them from the decoded buffer
-    if (outcome.transferred) samples = downmix(buffer);
+    if (outcome.transferred) {
+      samples = downmix(buffer);
+      side = sideOf(buffer);
+    }
   }
   // let the UI paint the progress label before the synchronous analysis blocks the thread
   await delay(30);
   throwIfAborted(signal);
-  return analyzeSamples(samples, buffer.sampleRate, { sourceSampleRate, onProgress: onAnalysis });
+  return analyzeSamples(samples, buffer.sampleRate, { sourceSampleRate, onProgress: onAnalysis, side, sideRate });
+}
+
+/** (L − R) / 2 of a stereo buffer at the vocal pass rate; null for mono or over 20 minutes. */
+export function sideOf(buffer: AudioBuffer): Float32Array<ArrayBuffer> | null {
+  if (buffer.numberOfChannels < 2) return null;
+  return sideSignal(buffer.getChannelData(0), buffer.getChannelData(1), buffer.sampleRate);
 }
 
 /** Average all channels into one new, transferable buffer. */
@@ -228,7 +241,9 @@ function looksLikeAnalysis(v: unknown): v is AudioAnalysis {
  */
 function runInWorker(
   samples: Float32Array<ArrayBuffer>,
+  side: Float32Array<ArrayBuffer> | null,
   sampleRate: number,
+  sideRate: number,
   sourceSampleRate: number | undefined,
   onProgress: (p: number, label: string) => void,
   signal?: AbortSignal,
@@ -265,9 +280,9 @@ function runInWorker(
       if (!isWorkerResponse(msg)) return;
       if (msg.type === "ready") {
         if (transferred) return;
-        const request: AnalyzeRequest = { type: "analyze", id, samples, sampleRate, sourceSampleRate };
+        const request: AnalyzeRequest = { type: "analyze", id, samples, sampleRate, sourceSampleRate, ...(side ? { side, sideRate } : {}) };
         try {
-          worker.postMessage(request, [samples.buffer]);
+          worker.postMessage(request, side ? [samples.buffer, side.buffer] : [samples.buffer]);
           transferred = true;
         } catch (error) {
           finish({ ok: false, aborted: false, transferred: false, error });

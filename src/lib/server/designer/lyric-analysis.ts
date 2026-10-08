@@ -14,7 +14,7 @@
 // positions), so every phrase and word reported is an exact substring of the original line.
 
 import { toTraditional } from "@/lib/zh-variants";
-import { IMAGERY_FAMILIES, STOP_WORDS, type ImageryFamily } from "./lexicon/imagery";
+import { IMAGERY_FAMILIES, SENSITIVE_WORDS, STOP_WORDS, type ImageryFamily } from "./lexicon/imagery";
 import { CHANTS, INTENSIFIERS, NEGATORS, SENTIMENT } from "./lexicon/sentiment";
 import type { SongStructure } from "./structure";
 
@@ -106,6 +106,15 @@ export interface ImageryMatch {
   surfaces: string[];
   /** lines it appears in */
   lines: number;
+}
+
+const SENSITIVE_SET: ReadonlySet<string> = new Set(SENSITIVE_WORDS.map((w) => w.toLowerCase()));
+
+/** The dark words of a line, as written (see SENSITIVE_WORDS): never an emphasis, never a motion word. */
+export function sensitiveWords(text: string): string[] {
+  return tokenize(text)
+    .filter((t) => SENSITIVE_SET.has(t.key))
+    .map((t) => t.surface);
 }
 
 export function findImageryFamilies(lines: readonly string[], title = ""): ImageryMatch[] {

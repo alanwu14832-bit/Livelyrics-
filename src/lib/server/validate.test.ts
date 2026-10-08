@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SongMeta } from "@/lib/types";
 import { HttpError } from "./http";
-import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, parseThumbPatch, parseTimecodePatch, sanitizeAnalysis } from "./validate";
+import { applyMetaPatch, parseAnalysis, parseCreateMeta, parseLyricsPatch, parsePlanPatch, parseProcessRequest, parseThumbPatch, parseTimecodePatch, parseVocalPatch, sanitizeAnalysis } from "./validate";
 
 const file = { fileName: "告五人 - 愛人錯過.mp3", mimeType: "audio/mpeg" };
 
@@ -57,6 +57,26 @@ describe("analysis", () => {
     expect(a.sections.map((s) => s.start)).toEqual([0, 8]);
     expect(sanitizeAnalysis({ duration: 0 })).toBeNull();
     expect(sanitizeAnalysis([1, 2])).toBeNull();
+  });
+
+  it("keeps the round-14 人聲 curve when there is one (and older analyses without it)", () => {
+    const withVocal = sanitizeAnalysis({ duration: 10, envelopeRate: 20, energy: [0.1, 0.2], vocal: [0.123456, 1.5, -2, "x"] })!;
+    expect(withVocal.vocal).toEqual([0.1235, 1, 0, 0]);
+    const old = sanitizeAnalysis({ duration: 10, envelopeRate: 20, energy: [0.1, 0.2] })!;
+    expect("vocal" in old).toBe(false);
+    expect("vocal" in sanitizeAnalysis({ duration: 10, vocal: [] })!).toBe(false);
+  });
+
+  it("PATCH vocal: a curve on the stored analysis's grid", () => {
+    const a = sanitizeAnalysis({ duration: 10, envelopeRate: 20, energy: [0.1, 0.2, 0.3, 0.4] })!;
+    expect(parseVocalPatch([0.5, 0.25, 2, -1], a)).toEqual([0.5, 0.25, 1, 0]);
+    // a frame of rounding either way lands on the grid
+    expect(parseVocalPatch([0.5, 0.25, 0.75], a)).toEqual([0.5, 0.25, 0.75, 0.75]);
+    expect(parseVocalPatch([0.5, 0.25, 0.75, 1, 1], a)).toEqual([0.5, 0.25, 0.75, 1]);
+    expect(() => parseVocalPatch([0.5], a)).toThrow(HttpError);
+    expect(() => parseVocalPatch([0.5, "x", 0.2, 0.1], a)).toThrow(HttpError);
+    expect(() => parseVocalPatch("nope", a)).toThrow(HttpError);
+    expect(() => parseVocalPatch([0.5, 0.5, 0.5, 0.5], null)).toThrow(HttpError);
   });
 });
 

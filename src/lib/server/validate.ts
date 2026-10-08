@@ -169,6 +169,8 @@ export function sanitizeAnalysis(value: unknown): AudioAnalysis | null {
         .sort((x, y) => x.start - y.start)
     : [];
   const envelopeRate = finite(a.envelopeRate);
+  // round 14: the 人聲 curve (absent in older analyses — they stay valid without it)
+  const vocal = Array.isArray(a.vocal) && a.vocal.length > 0 ? numberArray(a.vocal, true) : null;
   return {
     duration: Math.round(duration * 1000) / 1000,
     sampleRate: Math.max(0, Math.round(finite(a.sampleRate))),
@@ -180,9 +182,27 @@ export function sanitizeAnalysis(value: unknown): AudioAnalysis | null {
     onset: numberArray(a.onset, true),
     brightness: numberArray(a.brightness, true),
     bass: numberArray(a.bass, true),
+    ...(vocal ? { vocal } : {}),
     peaks: numberArray(a.peaks, true, 20_000),
     sections,
   };
+}
+
+/**
+ * A PATCH `vocal` value: the 人聲 curve the lyric editor computed for a project analysed before
+ * round 14. It must be a number array on the stored analysis's envelope grid (one value per
+ * energy frame, a frame or two of rounding either way); values are clamped to 0..1 and rounded.
+ */
+export function parseVocalPatch(raw: unknown, analysis: AudioAnalysis | null): number[] {
+  if (!analysis || !(analysis.envelopeRate > 0) || analysis.energy.length === 0) throw new HttpError(400, "這首歌還沒有音訊分析，不能存人聲曲線");
+  if (!Array.isArray(raw) || raw.length === 0) throw new HttpError(400, "vocal 必須是數字陣列");
+  if (raw.some((v) => typeof v !== "number" || !Number.isFinite(v))) throw new HttpError(400, "vocal 只能包含數字");
+  if (Math.abs(raw.length - analysis.energy.length) > 2) throw new HttpError(400, "人聲曲線的長度和音訊分析對不上");
+  const out = numberArray(raw, true);
+  // exactly on the analysis's grid: pad with the last value or trim
+  while (out.length < analysis.energy.length) out.push(out[out.length - 1]);
+  out.length = analysis.energy.length;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +222,8 @@ const LyricLineInput = z.object({
   start: z.number().nullable().optional(),
   end: z.number().nullable().optional(),
   words: z.array(LyricWordInput).max(1000).nullable().optional(),
+  /** round 14: the start is a guess (LyricLine.estimated); false / null = real */
+  estimated: z.boolean().nullable().optional(),
 });
 
 const LyricsInput = z.object({
@@ -227,6 +249,7 @@ export function parseLyricsPatch(raw: unknown): Lyrics {
       start: line.start ?? null,
       end: line.end ?? null,
       words: line.words ?? undefined,
+      ...(line.estimated === true ? { estimated: true as const } : {}),
     })),
   };
   if (l.language) lyrics.language = l.language;
