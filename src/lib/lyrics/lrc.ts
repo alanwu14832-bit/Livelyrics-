@@ -2,6 +2,7 @@
 // shared with the browser (the lyrics editor imports it), so no Node APIs here.
 
 import type { AudioAnalysis, LyricLine, LyricWord, Lyrics, LyricsSource } from "../types";
+import { alignRun, DEFAULT_ALIGN, sungSeconds, type AlignParams } from "./align";
 
 /** A derived line end (from the next line's start) never lingers longer than this; matches timeline.lineSpan. */
 const MAX_DERIVED_LINE_SECONDS = 10;
@@ -540,8 +541,21 @@ function placeRun(lines: LyricLine[], regions: Region[], from: number, to: numbe
   }
 }
 
+export interface DistributeOptions {
+  /** the aligner's parameters (the evaluation harness tunes them) */
+  align?: Partial<AlignParams>;
+}
+
+/** The analysis's 人聲 curve when it can carry an alignment, else null. */
+function usableVocal(analysis: AudioAnalysis | null, duration: number): { curve: number[]; rate: number } | null {
+  const curve = analysis?.vocal;
+  const rate = analysis?.envelopeRate ?? 0;
+  if (!Array.isArray(curve) || !(rate > 0) || curve.length < Math.min(duration * rate * 0.5, rate * 8)) return null;
+  return { curve, rate };
+}
+
 /** Give untimed lines rough start/end times spread across the vocal-looking parts of the song. */
-export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, duration: number): Lyrics {
+export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, duration: number, options: DistributeOptions = {}): Lyrics {
   const lines: LyricLine[] = (lyrics?.lines ?? []).map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
   if (!lines.some((l) => l.start == null)) return normalizeLyrics({ ...lyrics, lines });
 
@@ -550,11 +564,72 @@ export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
   const lastTimed = Math.max(0, ...lines.map((l) => (l.start == null ? 0 : l.end ?? l.start)));
   if (!dur) dur = Math.max(lastTimed + 10, (lines.length * 4) / 0.84);
 
+  // today's proportional spread: the result without a 人聲 curve, and with one the aligner's prior
+  // (a misleading curve never moves a whole song) and its fallback for a run it cannot carry
+  const spread = lines.map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
+  spreadRuns(spread, analysis, dur);
+  const vocal = usableVocal(analysis, dur);
+  if (!vocal) return normalizeLyrics({ ...lyrics, lines: spread, timing: "estimated" });
+
+  const alignParams: AlignParams = { ...DEFAULT_ALIGN, ...options.align };
+  // the song's singing rate (sung seconds per weight unit) over every line, timed or not
+  const allWeight = lines.reduce((s, l) => s + lineWeight(l.text), 0);
+  const songRate = allWeight > 0 ? sungSeconds(vocal.curve, vocal.rate, 0, dur, alignParams) / allWeight : 0;
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].start != null) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < lines.length && lines[j + 1].start == null) j++;
+    const run = lines.slice(i, j + 1);
+    const prev = i > 0 ? lines[i - 1] : null;
+    const next = j + 1 < lines.length ? lines[j + 1] : null;
+    // the 人聲 curve: lay the run over the phrases between its timed neighbours, in order
+    const ps = prev ? (prev.start as number) : 0;
+    const to = next ? (next.start as number) : dur;
+    const prevEnds = prev != null && prev.end != null && prev.end > ps && prev.end < to;
+    const res =
+      to > ps
+        ? alignRun(
+            {
+              curve: vocal.curve,
+              rate: vocal.rate,
+              from: prevEnds ? (prev.end as number) : ps,
+              to,
+              prev: prev && !prevEnds ? { weight: lineWeight(prev.text) } : null,
+              hasNext: next != null,
+              // an open run (no timed line on one side) keeps near the proportional spread; between
+              // two timed lines the window itself bounds it
+              lines: run.map((l, k) => ({ weight: lineWeight(l.text), prior: prev && next ? undefined : (spread[i + k].start ?? undefined) })),
+              songRate: songRate > 0 ? songRate : undefined,
+            },
+            alignParams,
+          )
+        : null;
+    run.forEach((l, k) => {
+      l.start = res ? res.starts[k] : spread[i + k].start;
+      l.end = res ? res.ends[k] : spread[i + k].end;
+      delete l.words;
+    });
+    if (prev && !prevEnds) {
+      if (res && res.prevEnd != null) prev.end = res.prevEnd;
+      else if (!res) prev.end = spread[i - 1].end;
+    }
+    i = j + 1;
+  }
+
+  // the times are a guess: the song is not synced until the operator taps it (對拍)
+  return normalizeLyrics({ ...lyrics, lines, timing: "estimated" });
+}
+
+/** Today's proportional spread of every untimed run over the loudness-based vocal regions (mutates `lines`). */
+function spreadRuns(lines: LyricLine[], analysis: AudioAnalysis | null, dur: number): void {
   const regions = vocalRegions(analysis, dur);
   const vocalStart = regions[0].start;
   const vocalEnd = regions[regions.length - 1].end;
   const MIN_PER_LINE = 1.5;
-
   let i = 0;
   while (i < lines.length) {
     if (lines[i].start != null) {
@@ -590,9 +665,6 @@ export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
     placeRun(run, regions, from, Math.max(from, to));
     i = j + 1;
   }
-
-  // the spread times are a guess: the song is not synced until the operator taps it (對拍)
-  return normalizeLyrics({ ...lyrics, lines, timing: "estimated" });
 }
 
 // ---------------------------------------------------------------------------

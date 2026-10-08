@@ -71,6 +71,14 @@ export interface AudioAnalysis {
   brightness: number[];
   /** 0..1 normalized low-band (bass) energy per envelope frame */
   bass: number[];
+  /**
+   * 0..1 人聲 curve per envelope frame (round 14, `src/lib/audio/vocal.ts`): how much the frame
+   * sounds like the lead voice — centre-panned, tonal energy in the vocal band and its syllabic
+   * rhythm, against the song's own level and a ±3 s local median. Used to lay untimed lyric lines
+   * over the singing (`src/lib/lyrics/align.ts`). Absent in analyses made before round 14 (the
+   * lyric editor computes it from the audio and saves it with PATCH `vocal`).
+   */
+  vocal?: number[];
   /** waveform peaks for drawing the timeline: max |sample| per bucket, 0..1 */
   peaks: number[];
   /** structural boundaries from novelty detection (unlabeled) */

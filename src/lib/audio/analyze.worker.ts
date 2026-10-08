@@ -25,6 +25,8 @@ scope.addEventListener("message", (event: MessageEvent<AnalyzeRequest>) => {
     let lastLabel = "";
     const analysis = analyzeSamples(req.samples, req.sampleRate, {
       sourceSampleRate: req.sourceSampleRate,
+      side: req.side instanceof Float32Array ? req.side : null,
+      sideRate: req.sideRate,
       onProgress: (progress, label) => {
         // at most ~30 messages per second, but never drop a stage change
         const now = Date.now();

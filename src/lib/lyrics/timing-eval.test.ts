@@ -15,7 +15,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { analyzeSamples } from "../audio/analysis";
+import { ANALYSIS_RATE, analyzeSamples } from "../audio/analysis";
+import { downsample, removeDc } from "../audio/resample";
+import { analyzeVocal, sideRateFor, sideSignal } from "../audio/vocal";
 import type { AudioAnalysis, LyricLine, Lyrics } from "../types";
 import { distributeLines, normalizeLyrics } from "./lrc";
 import {
@@ -161,14 +163,31 @@ function analyse(stem: string, key: string): { analysis: AudioAnalysis; seconds:
   const cacheFile = path.join(CACHE, `${stem}.analysis-${key}.json`);
   if (fs.existsSync(cacheFile)) return { analysis: JSON.parse(fs.readFileSync(cacheFile, "utf8")) as AudioAnalysis, seconds: 0, cached: true };
   const wav = readWav(path.join(CACHE, `${stem}.wav`));
-  const mono = new Float32Array(wav.left.length);
-  if (wav.right) for (let i = 0; i < mono.length; i++) mono[i] = 0.5 * (wav.left[i] + wav.right[i]);
-  else mono.set(wav.left);
+  const mono = monoOf(wav);
   const t0 = performance.now();
-  const analysis = analyzeSamples(mono, wav.rate);
+  // the upload's own path: the mono downmix, and the side signal of a stereo file (analyzeFile)
+  const side = wav.right ? sideSignal(wav.left, wav.right, wav.rate) : null;
+  const analysis = analyzeSamples(mono, wav.rate, { side, sideRate: sideRateFor(wav.rate) });
   const seconds = (performance.now() - t0) / 1000;
   fs.writeFileSync(cacheFile, JSON.stringify(analysis));
   return { analysis, seconds, cached: false };
+}
+
+function monoOf(wav: Wav): Float32Array {
+  const mono = new Float32Array(wav.left.length);
+  if (wav.right) for (let i = 0; i < mono.length; i++) mono[i] = 0.5 * (wav.left[i] + wav.right[i]);
+  else mono.set(wav.left);
+  return mono;
+}
+
+/** The same song's curve without the side signal (what a mono upload gets), reusing its envelopes. */
+function monoCurve(stem: string, a: AudioAnalysis): number[] {
+  const wav = readWav(path.join(CACHE, `${stem}.wav`));
+  const mono = monoOf(wav);
+  const x = wav.rate > ANALYSIS_RATE ? downsample(mono, wav.rate, ANALYSIS_RATE) : mono;
+  const sr = Math.min(wav.rate, ANALYSIS_RATE);
+  const n = a.energy.length;
+  return Array.from(analyzeVocal(removeDc(x, sr), sr, null, sr, a, n, a.envelopeRate), (v) => Math.round(v * 10000) / 10000);
 }
 
 /** The input of an estimator: untimed lines, or the anchors' annotated starts with the rest untimed. */
@@ -200,11 +219,12 @@ function uniform(lyrics: Lyrics, duration: number): Lyrics {
   return normalizeLyrics({ ...lyrics, lines });
 }
 
-type EstimatorId = "uniform" | "current" | "new" | "oracle";
+type EstimatorId = "uniform" | "current" | "new" | "newMono" | "oracle";
 const ESTIMATOR_LABEL: Record<EstimatorId, string> = {
   uniform: "uniform (no audio)",
   current: "current distributeLines (loudness)",
   new: "new (人聲 curve + phrase alignment)",
+  newMono: "new, mono model (no side signal)",
   oracle: "oracle (annotated sung spans as the curve)",
 };
 
@@ -266,6 +286,10 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
       };
       if (vocal) {
         estimators.new = (l) => distributeLines(l, analysis, duration);
+        if (process.env.LIVELYRICS_TIMING_EVAL_MONO !== "off") {
+          const mono = { ...analysis, vocal: monoCurve(stem, analysis) };
+          estimators.newMono = (l) => distributeLines(l, mono, duration);
+        }
         estimators.oracle = (l) => distributeLines(l, { ...analysis, vocal: oracleVocal(ann, duration, analysis.envelopeRate) } as AudioAnalysis, duration);
       }
       const m = meta.get(stem) ?? { language: "?", polyphonic: false };
@@ -314,6 +338,26 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
       return out.join("\n");
     };
 
+    // a song is "catastrophically worse" when its median error grows by more than max(5 s, the
+    // current median) untimed, or by more than max(1 s, the current median) with anchors
+    const catastrophes = (songs: SongResult[], mode: "plain" | "anchored") =>
+      songs.flatMap((r) => {
+        const cur = r.scores.current?.[mode];
+        const nw = r.scores.new?.[mode];
+        if (!cur || !nw) return [];
+        const c = songMedian(cur);
+        const n = songMedian(nw);
+        return n > c + Math.max(mode === "plain" ? 5 : 1, c) ? [`${r.stem} (${c.toFixed(2)} → ${n.toFixed(2)} s)`] : [];
+      });
+    const catLines = ids.includes("new")
+      ? (["dev", "held-out"] as const).flatMap((split) =>
+          (["plain", "anchored"] as const).map((mode) => {
+            const list = catastrophes(results.filter((r) => r.split === split), mode);
+            return `- ${split}, ${mode === "plain" ? "untimed" : "anchors"}: ${list.length}${list.length ? ` — ${list.join("; ")}` : ""}`;
+          }),
+        )
+      : [];
+
     const aucs = results.map((r) => r.auc).filter(Number.isFinite);
     const md: string[] = [
       "# Lyric timing evaluation (JamendoLyrics MultiLang)",
@@ -338,6 +382,9 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
       "",
       table(groups, "anchored"),
       "",
+      ...(catLines.length
+        ? ["## Songs catastrophically worse with the new estimator", "", "Median error grown by more than max(5 s, the current median) untimed, or by more than max(1 s, the current median) with anchors.", "", ...catLines, ""]
+        : []),
       "## By language and Polyphonic (no anchors)",
       "",
       table(byFacet, "plain"),
@@ -361,7 +408,7 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
     ];
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, md.join("\n"));
-    console.log(`\n${table(groups, "plain")}\n\nanchors:\n${table(groups, "anchored")}\n\nreport: ${OUT}`);
+    console.log(`\n${table(groups, "plain")}\n\nanchors:\n${table(groups, "anchored")}\n\ncatastrophically worse:\n${catLines.join("\n")}\n\nreport: ${OUT}`);
   }, 3_600_000);
 });
 
