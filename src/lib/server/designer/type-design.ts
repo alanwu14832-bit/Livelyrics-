@@ -11,6 +11,7 @@ import { textKey } from "@/lib/type/sequence";
 import { RECIPES, VOICES, voiceFonts } from "@/lib/type/vocab";
 import type { BandBible, FontId, LineDesign, LyricLine, SectionDesign, TypeParams, TypeRecipeId, TypeSystem, TypeVoiceId } from "@/lib/types";
 import type { Findings } from "./findings";
+import { sensitiveWords } from "./lyric-analysis";
 
 export interface VoiceChoice {
   voice: TypeVoiceId;
@@ -65,14 +66,17 @@ const CHANT = /\b(hey|oh+|yeah|woah|whoa|la+|na+|go)\b|嘿|喔|哦|啦啦/i;
 export function lineEmphasis(line: LyricLine, f: Findings): string[] {
   const text = line.text ?? "";
   const out: string[] = [];
+  // round 14: a dark word (blood, a weapon, death…) is never blown up, nor a phrase that carries one
+  const dark = sensitiveWords(text);
+  const safe = (w: string) => !dark.some((d) => w.includes(d) || d.includes(w));
   const chant = CHANT.exec(text)?.[0];
   if (chant) out.push(chant);
   const phrase = f.hints.singalong.find((p) => !p.chant && p.lineIds.includes(line.id) && Array.from(p.text).length <= Array.from(text).length * 0.6);
-  if (phrase && text.includes(phrase.text) && !out.some((e) => e.includes(phrase.text) || phrase.text.includes(e))) out.push(phrase.text);
+  if (phrase && text.includes(phrase.text) && safe(phrase.text) && !out.some((e) => e.includes(phrase.text) || phrase.text.includes(e))) out.push(phrase.text);
   const surfaces = f.imagery.flatMap((h) => h.surfaces).sort((a, b) => Array.from(b).length - Array.from(a).length);
   for (const w of surfaces) {
     if (out.length >= 2) break;
-    if (w && text.includes(w) && !out.some((e) => e.includes(w) || w.includes(e))) out.push(w);
+    if (w && text.includes(w) && safe(w) && !out.some((e) => e.includes(w) || w.includes(e))) out.push(w);
   }
   return out.slice(0, 2);
 }
@@ -80,6 +84,8 @@ export function lineEmphasis(line: LyricLine, f: Findings): string[] {
 /** The line's motion word: the motion table first, then its image when the lexicon says it moves. */
 export function lineMotion(line: LyricLine, f: Findings): string {
   const text = line.text ?? "";
+  // round 14: a line with a dark word holds still (no dripping, no splatter)
+  if (sensitiveWords(text).length) return "";
   const own = findMotionWord(text);
   if (own) return own;
   for (const h of f.imagery) {

@@ -321,6 +321,14 @@ export function typeCatalogBlock(): string {
   ].join("\n");
 }
 
+/**
+ * Round 14 (after chrimage/ai-lyric-video-generator, MIT: its prompts turn sensitive lyrics into
+ * broadcast-safe symbolic imagery): what the wall shows when the words are dark. One sentence set,
+ * shared by the design, directions and 專屬畫面 rules and the claude.ai prompt.
+ */
+export const SENSITIVE_LYRICS_RULE =
+  "敏感歌詞用象徵呈現：歌詞寫到暴力、自傷、毒品或性時，不要照字面畫出來——用隱喻、顏色、光與象徵物件表達（暴風雨、碎玻璃、凋零的花、斷裂的鎖鏈、在黑暗裡亮著的一盞燈）。畫面絕對不出現血腥、血、傷口、屍體、骷髏、對著觀眾的武器或自傷的樣子；這類字眼也不要做成放大的強調字或滴落、噴濺的動態。這面牆全場都看得到，包括未成年的觀眾。唱到的歌詞照常出現，只是畫面不跟著寫實。";
+
 export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，要為一首歌設計音樂祭／演唱會 LED 大螢幕的完整視覺方案（DesignPlan）。方案會被即時渲染器逐段播放：底層是 GLSL 場景動畫，上層是字體引擎依你的構圖排好的歌詞；現場的視覺操作員會依照你寫的 cue 操作。
 
 # 設計原則
@@ -346,6 +354,7 @@ export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，�
    - 沒有提供素材時，每段的 media 一律是 null。
 7. 樂團視覺聖經：如果提供了「樂團視覺聖經」，它是這個樂團所有歌共用的世界觀，屬於硬性規範：配色取自聖經色盤、字體用聖經字體、避免的場景不用、遵守歌詞政策與禁忌。歌詞政策決定字的份量（例如「副歌才放大」＝主歌用安靜的小字構圖），唱到的每一句仍然要出現。偏離時要在 rationale 寫出理由。如果提供了「整場弧線中的位置」，依它調整這首歌的整體強度與配色重心。
 8. 給操作員的 cue：在大的能量上升（drop）、大合唱、安靜段、以及容易出錯的地方（樂團可能延長、即興、突然停）寫提示，說清楚「什麼時候、做什麼」，例如「最後一拍後按 B 全黑」「強度可推到 1.2」「主唱把麥克風交給觀眾時保持歌詞在畫面上」。
+9. ${SENSITIVE_LYRICS_RULE}
 
 ${catalogBlock()}
 

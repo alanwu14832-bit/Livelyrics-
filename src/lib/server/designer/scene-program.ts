@@ -22,7 +22,7 @@ import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hashString } from "./svg";
 import { analyzeFindings, type Findings } from "./findings";
-import { bibleBlock, energyCurveBlock, songBlock, trimBrief } from "./prompts";
+import { bibleBlock, energyCurveBlock, SENSITIVE_LYRICS_RULE, songBlock, trimBrief } from "./prompts";
 import { collectedBlock, leadPalette, leadTemperature } from "./collected";
 import { analyzeStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
@@ -123,7 +123,9 @@ const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
   forest: ["strata", "pillars"],
   desert: ["strata", "horizon"],
   world: ["strata", "horizon"],
-  blood: ["pillars", "threads"],
+  wither: ["threads", "brush"],
+  chains: ["bars", "pillars"],
+  candle: ["orbits", "ribbons"],
   war: ["pillars", "bars"],
   heart: ["orbits", "brush"],
   voice: ["orbits", "ribbons"],
@@ -400,6 +402,7 @@ export const SCENE_SYSTEM = `你是這個樂團的專職舞台視覺總監，也
 6. 直式畫面（aspect() < 0.8）也要成立：系統會把左右的文字區改成上下的帶狀區（左→上、右→下），你的主角形狀放在 uZone 的另一半。
 7. 顏色只用 uniform 提供的配色（uBg、uPri、uAcc、uInk、uPal0…uPal5），不要寫死色相，這樣樂團的色盤與 LED 安全的調整才會生效。
 8. 效能：這支程式每一格、每個像素都要跑，大螢幕是 1920×1080 以上。保持簡單：幾個距離場、兩三層雜訊就夠了。
+9. ${SENSITIVE_LYRICS_RULE}
 
 用繁體中文寫 title、concept、rationale 與每段的 note；程式碼只用 ASCII（註解可以中文）。`;
 
