@@ -157,10 +157,12 @@ async function api(method, url, body) {
     await page.keyboard.press("Space");
     await page.waitForTimeout(400);
     await page.keyboard.press("Escape");
-    const toast = page.getByText(/已標記 2 句；其餘 4 句依.+重新估算（仍是估的）/);
+    // (this song has no analysis: the rest is spread evenly between the taps)
+    const toast = page.getByText(/已標記 2 句；其餘 4 句(依.+重新估算|在對好的句子之間重新平均分配)（仍是估的）/);
     await toast.first().waitFor({ timeout: 10000 }).catch(() => {});
     check("ending the tap session says what was re-estimated", (await toast.count()) > 0);
-    await page.waitForTimeout(300);
+    // (the toast's entrance is a short blur-in)
+    await page.waitForTimeout(1000);
     await shot(page, "r14-reestimate-toast");
     check("partial 對拍 keeps the warning, with a count", (await editorNote()).includes("還有 4 句時間是估的"), await editorNote());
     check("the tapped rows lost 「估」", (await marks()) === 4, `${await marks()} marks`);
@@ -227,6 +229,22 @@ async function api(method, url, body) {
     const done = page.getByText(/已依人聲估算 6 句的時間（仍是估的）/);
     await done.first().waitFor({ timeout: 60000 }).catch(() => {});
     check("the editor computed the 人聲 curve and re-estimated with it", (await done.count()) > 0);
+    check("the timelines show the 人聲 lane", (await page.locator('canvas[data-vocal-lane="on"]').count()) === 2);
+    await page.waitForTimeout(400);
+    await shot(page, "r14-vocal-lane");
+    // with the curve, a partial 對拍 re-estimates the rest 依人聲
+    await page.getByRole("button", { name: "開始對拍", exact: true }).click();
+    await page.waitForTimeout(1500);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(700);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Escape");
+    const vocalToast = page.getByText(/已標記 2 句；其餘 4 句依人聲重新估算（仍是估的）/);
+    await vocalToast.first().waitFor({ timeout: 10000 }).catch(() => {});
+    check("…and a partial 對拍 re-estimates the rest 依人聲", (await vocalToast.count()) > 0);
+    await page.waitForTimeout(1000);
+    await shot(page, "r14-reestimate-toast-vocal");
     p = (await api("GET", `/api/projects/${old.id}`)).json;
     check("…and saved the curve with the project", Array.isArray(p.analysis?.vocal) && p.analysis.vocal.length === frames, `vocal ${p.analysis?.vocal?.length} / ${frames}`);
     check("the lyrics themselves were not saved behind the operator's back", p.lyrics.lines.every((l) => l.estimated === true));

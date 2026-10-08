@@ -84,9 +84,9 @@ const LEAVE_MESSAGE = "歌詞有尚未儲存的變更，確定要離開嗎？";
 /** a nudge (↑/↓, ±0.1 s) re-estimates the estimated lines once the operator pauses this long */
 const NUDGE_RELAYOUT_MS = 700;
 
-/** How the estimated lines were laid out, for the toasts. */
-function estimateSource(a: AudioAnalysis | null): string {
-  return a?.vocal?.length ? "人聲" : a ? "音訊能量" : "平均分配";
+/** How the estimated lines were laid out again, for the toasts. */
+function reestimated(a: AudioAnalysis | null): string {
+  return a?.vocal?.length ? "依人聲重新估算" : a ? "依音訊能量重新估算" : "在對好的句子之間重新平均分配";
 }
 
 /** Lines whose start differs between two layouts of the same rows. */
@@ -304,7 +304,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       const a = analysisRef.current;
       const next = reestimate(current, a, durationRef.current, "estimated");
       if (toast && movedLines(current, next) > 0) {
-        pushToast({ id: "reestimate", tone: "info", message: `其餘 ${estimatedCount(next)} 句依${estimateSource(a)}重新估算（仍是估的）`, duration: 3200 });
+        pushToast({ id: "reestimate", tone: "info", message: `其餘 ${estimatedCount(next)} 句${reestimated(a)}（仍是估的）`, duration: 3200 });
       }
       return next;
     },
@@ -431,7 +431,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         dispatch({ type: "apply", fn: (l) => (estimatedCount(l) > 0 ? reestimate(l, a, dur, "estimated") : l), record: false, source: "user" });
         setTimeout(() => {
           const n = estimatedCount(linesRef.current);
-          if (n > 0) pushToast({ id: "reestimate", tone: "info", message: `其餘 ${n} 句依${estimateSource(a)}重新估算（仍是估的）`, duration: 3200 });
+          if (n > 0) pushToast({ id: "reestimate", tone: "info", message: `其餘 ${n} 句${reestimated(a)}（仍是估的）`, duration: 3200 });
         }, 0);
       }
     },
@@ -477,7 +477,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       linesRef.current = next;
       dispatch({ type: "edit", lines: next, record: false, source: "user" });
     }
-    pushToast({ id: "reestimate", tone: "ok", message: `已標記 ${marked} 句；其餘 ${estimatedCount(next)} 句依${estimateSource(analysisRef.current)}重新估算（仍是估的）`, duration: 5000 });
+    pushToast({ id: "reestimate", tone: "ok", message: `已標記 ${marked} 句；其餘 ${estimatedCount(next)} 句${reestimated(analysisRef.current)}（仍是估的）`, duration: 5000 });
   }, [playhead, setTap, showToast, pushToast, relayoutEstimated]);
 
   const markTap = useCallback(() => {
