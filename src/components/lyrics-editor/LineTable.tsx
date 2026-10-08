@@ -66,6 +66,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
   };
   const caret = (el: HTMLInputElement) => h.rememberCaret(line.key, el.selectionStart);
   const n = index + 1;
+  const estimated = line.start != null && !!line.estimated;
   // while tapping, everything but the target steps back
   const dim = tapActive && !tapTarget;
 
@@ -93,19 +94,31 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
           n
         )}
       </div>
-      <div role="cell" className="flex items-center">
+      <div role="cell" className="relative flex items-center">
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行提早 0.1 秒`} icon={<MinusIcon size={14} />} onClick={() => h.nudge(index, -0.1)} disabled={line.start == null} />
         <TimeInput
           value={line.start}
-          aria-label={`第 ${n} 行開始時間`}
+          aria-label={`第 ${n} 行開始時間${estimated ? "（估的）" : ""}`}
           data-row={index}
           data-field="time"
           warn={outOfOrder}
           dim={dim}
+          estimated={estimated}
           onCommit={(t) => h.setStart(index, t)}
           onNudge={(d) => h.nudge(index, d)}
           onEnter={(shift) => h.focusCell(shift ? index - 1 : index + 1, "time")}
         />
+        {estimated && (
+          // round 14: the start is a guess (人聲 / 自動分配) until it is tapped, dragged or typed
+          <span
+            aria-hidden="true"
+            data-estimated
+            title="時間是估的：對拍、拖曳標記或輸入時間後就是真的"
+            className={cx("pointer-events-none absolute top-1/2 left-9 inline-flex h-4 -translate-y-1/2 items-center rounded-[4px] bg-orange-soft px-1 text-[11px] leading-none font-medium", SOFT_TEXT.orange)}
+          >
+            估
+          </span>
+        )}
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行延後 0.1 秒`} icon={<PlusIcon size={14} />} onClick={() => h.nudge(index, 0.1)} disabled={line.start == null} />
       </div>
       <div role="cell" className="relative flex min-w-0 items-center gap-1 max-md:col-span-full max-md:row-start-2 max-md:pl-9">

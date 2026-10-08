@@ -109,18 +109,26 @@ export interface LyricLine {
   end: number | null;
   /** optional word/character-level timing */
   words?: LyricWord[];
+  /**
+   * Round 14: the start is a guess — placed by `distributeLines` (the 人聲 curve or the loudness
+   * spread), not taken from an LRC file, LRCLIB or the operator. Tapping, dragging or typing the
+   * line's start makes it real (the flag goes); the editor re-estimates the lines still flagged
+   * between the real ones. Only on timed lines.
+   */
+  estimated?: true;
 }
 
 export type LyricsSource = "lrclib-synced" | "lrclib-plain" | "user" | "embedded" | "none";
 
 export interface Lyrics {
   source: LyricsSource;
-  /** true when every line has a start time that was not estimated (see `timing`) */
+  /** true when every line has a start time and none is estimated (see `timing`) */
   synced: boolean;
   /**
-   * "estimated": the start times were spread over the song by `distributeLines` (untimed lyrics),
-   * not taken from an LRC file, LRCLIB or the operator's 對拍. `synced` is then false; the console
-   * says so and starts in 手動切換. The lyric editor's 對拍 clears it. Absent = real timings.
+   * "estimated": at least one line's start is a guess (`LyricLine.estimated`); `synced` is then
+   * false, the console says how many and starts in 手動切換. Cleared only when no line is
+   * estimated. Data from before round 14 has the flag without per-line flags: every timed line
+   * counts as estimated (`estimatedFlags` in lrc.ts). Absent = real timings.
    */
   timing?: "estimated";
   lines: LyricLine[];

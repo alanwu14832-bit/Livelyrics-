@@ -213,6 +213,8 @@ export const api = {
       timecode: SongTimecode | null;
       /** the library card's picture: a small key still of the current plan */
       thumb: ProjectThumb | null;
+      /** round 14: the 人聲 curve for a song analysed before it existed (on the analysis's envelope grid) */
+      vocal: number[];
     }>,
   ) =>
     fetch(`/api/projects/${id}`, {

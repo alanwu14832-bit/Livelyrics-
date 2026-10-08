@@ -38,8 +38,8 @@ import {
 } from "@/components/ui/Icon";
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { api } from "@/lib/api-client";
-import { distributeLines, normalizeLyrics, toLrc } from "@/lib/lyrics/lrc";
-import type { Lyrics, Project } from "@/lib/types";
+import { normalizeLyrics, toLrc } from "@/lib/lyrics/lrc";
+import type { AudioAnalysis, Lyrics, Project } from "@/lib/types";
 import { formatRelativeTime } from "@/components/home/relative-time";
 import { LYRICS_SOURCE_LABEL } from "@/components/process/labels";
 import { processHref } from "@/components/process/steps";
@@ -49,14 +49,15 @@ import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
 import { clearDraft, draftToLines, loadDraft, saveDraft, type LyricsDraft } from "./draft";
 import {
-  clearAllTimes,
   contentKey,
+  estimatedCount,
   fromLyrics,
   insertLine,
   lineAt,
   mergeWithNext,
   nudge,
   outOfOrderFlags,
+  reestimate,
   removeLine,
   setStart,
   sortByTime,
@@ -65,6 +66,7 @@ import {
   toLyrics,
   updateText,
   type EditorLine,
+  type ReestimateMode,
 } from "./editor-model";
 import { editorReducer, initialEditorState } from "./editor-state";
 import { ImportDialog } from "./ImportDialog";
@@ -79,6 +81,20 @@ type LoadState = { kind: "loading" } | { kind: "ok" } | { kind: "error"; message
 
 const LATENCY_KEY = "livelyrics:tap-latency";
 const LEAVE_MESSAGE = "歌詞有尚未儲存的變更，確定要離開嗎？";
+/** a nudge (↑/↓, ±0.1 s) re-estimates the estimated lines once the operator pauses this long */
+const NUDGE_RELAYOUT_MS = 700;
+
+/** How the estimated lines were laid out, for the toasts. */
+function estimateSource(a: AudioAnalysis | null): string {
+  return a?.vocal?.length ? "人聲" : a ? "音訊能量" : "平均分配";
+}
+
+/** Lines whose start differs between two layouts of the same rows. */
+function movedLines(a: readonly EditorLine[], b: readonly EditorLine[]): number {
+  let n = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i].start !== b[i].start) n++;
+  return n;
+}
 
 function readLatency(): number {
   try {
@@ -151,6 +167,9 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const [latency, setLatency] = useState(readLatency);
   const [importOpen, setImportOpen] = useState(false);
   const [distributeOpen, setDistributeOpen] = useState(false);
+  /** 人聲 curve computed in this session for a song analysed before round 14 (see ensureVocal) */
+  const [sessionAnalysis, setSessionAnalysis] = useState<AudioAnalysis | null>(null);
+  const [vocalBusy, setVocalBusy] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
   const toasts = useToasts();
   const [playhead] = useState(() => new Playhead());
@@ -170,12 +189,22 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const pendingFocus = useRef<{ index: number; field: CellField } | null>(null);
   const loadedRef = useRef(false);
   const actionsRef = useRef<EditorActions>(NOOP_ACTIONS);
+  const analysisRef = useRef<AudioAnalysis | null>(null);
+  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lines = state.lines;
   const duration = project ? project.meta.duration || project.analysis?.duration || 0 : 0;
-  const dirty = useMemo(() => load.kind === "ok" && contentKey(lines, state.source, state.estimated) !== savedKey, [load.kind, lines, state.source, state.estimated, savedKey]);
+  const dirty = useMemo(() => load.kind === "ok" && contentKey(lines, state.source) !== savedKey, [load.kind, lines, state.source, savedKey]);
   const flags = useMemo(() => outOfOrderFlags(lines), [lines]);
   const timed = useMemo(() => timedCount(lines), [lines]);
+  const estimated = useMemo(() => estimatedCount(lines), [lines]);
+  // what the estimator works with: the stored analysis, with this session's 人聲 curve when it had none
+  const estimationAnalysis = useMemo<AudioAnalysis | null>(() => {
+    const stored = project?.analysis ?? null;
+    if (stored?.vocal?.length || !sessionAnalysis) return stored;
+    if (!stored) return sessionAnalysis;
+    return sessionAnalysis.vocal && Math.abs(sessionAnalysis.vocal.length - stored.energy.length) <= 2 ? { ...stored, vocal: sessionAnalysis.vocal } : sessionAnalysis;
+  }, [project?.analysis, sessionAnalysis]);
   const anyOutOfOrder = flags.some(Boolean);
   const currentIndex = usePlayheadSelector(playhead, (t) => lineAt(lines, t, duration), null);
   const playing = usePlayheadPlaying(playhead);
@@ -188,6 +217,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     latencyRef.current = latency;
     dirtyRef.current = dirty;
     loadedRef.current = load.kind === "ok";
+    analysisRef.current = estimationAnalysis;
   });
 
   const pushToast = toasts.push;
@@ -202,11 +232,10 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         if (cancelled) return;
         const loaded = fromLyrics(p.lyrics);
         setProject(p);
-        const estimated = p.lyrics.timing === "estimated";
-        dispatch({ type: "load", lines: loaded, source: p.lyrics.source, language: p.lyrics.language, estimated });
-        setSavedKey(contentKey(loaded, p.lyrics.source, estimated));
+        dispatch({ type: "load", lines: loaded, source: p.lyrics.source, language: p.lyrics.language });
+        setSavedKey(contentKey(loaded, p.lyrics.source));
         const d = loadDraft(id);
-        if (d && contentKey(draftToLines(d), d.source, d.estimated === true) !== contentKey(loaded, p.lyrics.source, estimated)) setDraft(d);
+        if (d && contentKey(draftToLines(d), d.source) !== contentKey(loaded, p.lyrics.source)) setDraft(d);
         else if (d) clearDraft(id);
         setLoad({ kind: "ok" });
       })
@@ -236,9 +265,9 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       clearDraft(id);
       return;
     }
-    const t = setTimeout(() => saveDraft(id, { lines: state.lines, source: state.source, estimated: state.estimated, baseUpdatedAt: project.updatedAt, savedAt: Date.now() }), 600);
+    const t = setTimeout(() => saveDraft(id, { lines: state.lines, source: state.source, baseUpdatedAt: project.updatedAt, savedAt: Date.now() }), 600);
     return () => clearTimeout(t);
-  }, [dirty, state.lines, state.source, state.estimated, load.kind, project, draft, id]);
+  }, [dirty, state.lines, state.source, load.kind, project, draft, id]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -267,6 +296,54 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     dispatch({ type: "apply", fn, source: "user", ...opts });
   }, []);
 
+  // ---- re-estimation (round 14): the estimated lines follow the real ones ------------------------
+  /** Lay the still-estimated lines out again between the real ones (never moves a real line). */
+  const relayoutEstimated = useCallback(
+    (current: EditorLine[], toast = true): EditorLine[] => {
+      if (estimatedCount(current) === 0) return current;
+      const a = analysisRef.current;
+      const next = reestimate(current, a, durationRef.current, "estimated");
+      if (toast && movedLines(current, next) > 0) {
+        pushToast({ id: "reestimate", tone: "info", message: `其餘 ${estimatedCount(next)} 句依${estimateSource(a)}重新估算（仍是估的）`, duration: 3200 });
+      }
+      return next;
+    },
+    [pushToast],
+  );
+
+  /** Re-lay the estimated lines now, as part of the current undo step. */
+  const relayoutNow = useCallback(() => {
+    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+    nudgeTimer.current = null;
+    const before = linesRef.current;
+    const next = relayoutEstimated(before);
+    if (next === before) return;
+    linesRef.current = next;
+    dispatch({ type: "edit", lines: next, record: false, source: "user" });
+  }, [relayoutEstimated]);
+
+  /** A manual timing edit (typed, set to the playhead): the line becomes real, the estimated ones follow. */
+  const retime = useCallback(
+    (fn: (l: EditorLine[]) => EditorLine[]) => {
+      setSavedInfo(null);
+      if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+      nudgeTimer.current = null;
+      const before = linesRef.current;
+      const timedLines = fn(before);
+      if (timedLines === before) return;
+      const next = relayoutEstimated(timedLines);
+      linesRef.current = next;
+      dispatch({ type: "edit", lines: next, source: "user" });
+    },
+    [relayoutEstimated],
+  );
+  useEffect(
+    () => () => {
+      if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+    },
+    [],
+  );
+
   const focusCell = useCallback((index: number, field: CellField) => {
     requestAnimationFrame(() => {
       const root = scrollRef.current;
@@ -289,15 +366,20 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
 
   const handlers = useMemo<RowHandlers>(
     () => ({
-      setStart: (i, t) => edit((l) => setStart(l, i, t, durationRef.current)),
-      nudge: (i, d) => edit((l) => nudge(l, i, d, durationRef.current)),
+      setStart: (i, t) => retime((l) => setStart(l, i, t, durationRef.current)),
+      nudge: (i, d) => {
+        edit((l) => nudge(l, i, d, durationRef.current));
+        // the estimated lines follow once the operator stops nudging
+        if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+        nudgeTimer.current = setTimeout(relayoutNow, NUDGE_RELAYOUT_MS);
+      },
       setText: (i, field, value) => {
         const key = linesRef.current[i]?.key ?? String(i);
         edit((l) => updateText(l, i, field, value), { tag: `${field}:${key}`, at: Date.now() });
       },
       setToPlayhead: (i) => {
         const t = playhead.now();
-        edit((l) => setStart(l, i, t, durationRef.current));
+        retime((l) => setStart(l, i, t, durationRef.current));
       },
       playFrom: (i) => {
         const s = linesRef.current[i]?.start;
@@ -329,7 +411,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         caretRef.current.set(key, caret);
       },
     }),
-    [edit, focusCell, playhead, showToast],
+    [edit, focusCell, playhead, showToast, retime, relayoutNow],
   );
 
   const onDragMarker = useCallback(
@@ -341,8 +423,19 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         return;
       }
       if (phase === "move") dispatch({ type: "apply", fn: (l) => setStart(l, index, t, durationRef.current), record: false, source: "user" });
+      if (phase === "end") {
+        // the dragged line is real now: the estimated lines between the real ones follow (applied
+        // to the latest rows, in the drag's undo step)
+        const a = analysisRef.current;
+        const dur = durationRef.current;
+        dispatch({ type: "apply", fn: (l) => (estimatedCount(l) > 0 ? reestimate(l, a, dur, "estimated") : l), record: false, source: "user" });
+        setTimeout(() => {
+          const n = estimatedCount(linesRef.current);
+          if (n > 0) pushToast({ id: "reestimate", tone: "info", message: `其餘 ${n} 句依${estimateSource(a)}重新估算（仍是估的）`, duration: 3200 });
+        }, 0);
+      }
     },
-    [],
+    [pushToast],
   );
 
   // ---- tap-sync ----------------------------------------------------------------
@@ -371,8 +464,21 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     if (!cur) return;
     setTap(null);
     playhead.pause();
-    if (cur.marked.length) showToast(`已標記 ${cur.marked.length} 句的開始時間`, "ok");
-  }, [playhead, setTap, showToast]);
+    const marked = cur.marked.length;
+    if (!marked) return;
+    // the taps are anchors: the lines still estimated are laid out again between them (same undo step)
+    const before = linesRef.current;
+    if (estimatedCount(before) === 0) {
+      showToast(`已標記 ${marked} 句的開始時間`, "ok");
+      return;
+    }
+    const next = relayoutEstimated(before, false);
+    if (next !== before) {
+      linesRef.current = next;
+      dispatch({ type: "edit", lines: next, record: false, source: "user" });
+    }
+    pushToast({ id: "reestimate", tone: "ok", message: `已標記 ${marked} 句；其餘 ${estimatedCount(next)} 句依${estimateSource(analysisRef.current)}重新估算（仍是估的）`, duration: 5000 });
+  }, [playhead, setTap, showToast, pushToast, relayoutEstimated]);
 
   const markTap = useCallback(() => {
     const cur = sessionRef.current;
@@ -380,8 +486,8 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     const r = tapMark(linesRef.current, cur, playhead.now(), latencyRef.current, durationRef.current);
     if (r.session === cur) return;
     linesRef.current = r.lines;
-    // a tapped time is real: the song is no longer "estimated" (Lyrics.timing)
-    dispatch({ type: "edit", lines: r.lines, record: false, source: "user", estimated: false });
+    // a tapped time is real: that line is no longer estimated (the others stay until they are tapped)
+    dispatch({ type: "edit", lines: r.lines, record: false, source: "user" });
     setTap(r.session);
     // one sweep of tint over the row that was just marked (never a loop)
     const markedIndex = cur.pointer;
@@ -435,7 +541,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const save = useCallback(async () => {
     if (savingRef.current || !loadedRef.current) return;
     const before = stateRef.current;
-    const lyrics = normalizeLyrics(toLyrics(before.lines, { source: before.source, language: before.language, estimated: before.estimated }));
+    const lyrics = normalizeLyrics(toLyrics(before.lines, { source: before.source, language: before.language }));
     savingRef.current = true;
     setSaving(true);
     setSaveError(null);
@@ -443,13 +549,12 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       const saved = await api.updateProject(id, { lyrics });
       setProject(saved);
       const savedLines = fromLyrics(saved.lyrics);
-      const savedEstimated = saved.lyrics.timing === "estimated";
-      const key = contentKey(savedLines, saved.lyrics.source, savedEstimated);
-      const beforeKey = contentKey(before.lines, before.source, before.estimated);
+      const key = contentKey(savedLines, saved.lyrics.source);
+      const beforeKey = contentKey(before.lines, before.source);
       const latest = stateRef.current;
       // replace the rows with the normalized result unless the user kept typing meanwhile
-      if (contentKey(latest.lines, latest.source, latest.estimated) === beforeKey && key !== beforeKey) {
-        dispatch({ type: "replace", lines: savedLines, source: saved.lyrics.source, language: saved.lyrics.language, estimated: savedEstimated });
+      if (contentKey(latest.lines, latest.source) === beforeKey && key !== beforeKey) {
+        dispatch({ type: "replace", lines: savedLines, source: saved.lyrics.source, language: saved.lyrics.language });
       }
       setSavedKey(key);
       setDraft(null);
@@ -466,24 +571,62 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const importLyrics = (lyrics: Lyrics) => {
     if (sessionRef.current) setTap(null);
     setSavedInfo(null);
-    dispatch({ type: "edit", lines: fromLyrics(lyrics), source: lyrics.source === "none" ? "user" : lyrics.source, estimated: lyrics.timing === "estimated" });
+    dispatch({ type: "edit", lines: fromLyrics(lyrics), source: lyrics.source === "none" ? "user" : lyrics.source });
     showToast(`已匯入 ${lyrics.lines.length} 行${lyrics.synced ? "（含時間碼）" : ""}`, "ok");
   };
 
-  const distribute = (mode: "untimed" | "all") => {
+  /**
+   * The 人聲 curve for estimating: the stored one, else computed now from the project's audio in
+   * the browser (the same analysis code, in its worker) for a song analysed before round 14. The
+   * curve is saved with the project when it lands on the stored analysis's envelope grid
+   * (PATCH vocal); otherwise it is used for this session only.
+   */
+  const ensureVocal = useCallback(async (): Promise<AudioAnalysis | null> => {
+    const current = analysisRef.current;
+    if (current?.vocal?.length || !project) return current;
+    setVocalBusy("讀取音檔…");
+    try {
+      const res = await fetch(api.audioUrl(id));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const { analyzeFile } = await import("@/lib/audio/analyze");
+      const fresh = await analyzeFile(new File([blob], "audio", { type: blob.type || "audio/mpeg" }), (p, label) => setVocalBusy(`${label}（${Math.round(p * 100)}%）`));
+      setSessionAnalysis(fresh);
+      const stored = project.analysis;
+      if (stored && fresh.vocal?.length && Math.abs(fresh.vocal.length - stored.energy.length) <= 2) {
+        try {
+          setProject(await api.updateProject(id, { vocal: fresh.vocal }));
+        } catch {
+          /* kept for this session */
+        }
+        return { ...stored, vocal: fresh.vocal };
+      }
+      return fresh;
+    } catch {
+      showToast("無法分析人聲，改用音訊能量估算", "warn");
+      return current;
+    } finally {
+      setVocalBusy(null);
+    }
+  }, [id, project, showToast]);
+
+  const distribute = async (mode: ReestimateMode) => {
+    const a = await ensureVocal();
     const cur = stateRef.current;
-    const base = mode === "all" ? clearAllTimes(cur.lines) : cur.lines;
-    const result = distributeLines(toLyrics(base, { source: cur.source, language: cur.language }), project?.analysis ?? null, duration);
+    const next = reestimate(cur.lines, a, durationRef.current, mode);
+    let placed = 0;
+    for (let i = 0; i < next.length; i++) if (next[i] !== cur.lines[i] && next[i].start != null) placed++;
     setSavedInfo(null);
-    dispatch({ type: "edit", lines: fromLyrics(result), source: "user", estimated: result.timing === "estimated" });
+    dispatch({ type: "edit", lines: next, source: "user" });
     setDistributeOpen(false);
-    showToast(project?.analysis ? "已依音訊能量粗略分配時間，建議再對拍校正" : "已平均分配時間（沒有音訊分析），建議再對拍校正");
+    const how = a?.vocal?.length ? "依人聲估算" : a ? "依音訊能量粗略分配" : "平均分配（沒有音訊分析）";
+    showToast(`已${how} ${placed} 句的時間（仍是估的），建議再對拍校正`);
   };
 
   const exportLrc = () => {
     if (!project) return;
     const cur = stateRef.current;
-    const lyrics = normalizeLyrics(toLyrics(cur.lines, { source: cur.source, language: cur.language, estimated: cur.estimated }));
+    const lyrics = normalizeLyrics(toLyrics(cur.lines, { source: cur.source, language: cur.language }));
     const m = project.meta;
     const header = [
       `[ti:${lrcHeaderValue(m.title)}]`,
@@ -647,7 +790,11 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       <span>
         共 <span className="t-latin tabular">{lines.length}</span> 行，
         {timed === lines.length ? "全部已定時" : timed === 0 ? "都還沒有時間" : `${timed} 行已定時，${untimed} 行未定時`}
-        {state.estimated && timed > 0 && <span data-testid="timing-estimated">（時間是估的，對拍後才算同步）</span>}
+        {estimated > 0 && (
+          <span data-testid="timing-estimated" title="標著「估」的行是估的時間：對拍、拖曳標記或輸入時間後就是真的">
+            ；還有 <span className="t-latin tabular">{estimated}</span> 句時間是估的
+          </span>
+        )}
       </span>
       <span>歌詞來源：{LYRICS_SOURCE_LABEL[state.source] ?? state.source}</span>
     </div>
@@ -680,7 +827,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             <Button
               variant="tinted"
               onClick={() => {
-                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source, estimated: draft.estimated === true });
+                dispatch({ type: "edit", lines: draftToLines(draft), source: draft.source });
                 setDraft(null);
               }}
             >
@@ -775,7 +922,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             <Button variant="gray" icon={FileTextIcon} onClick={() => setImportOpen(true)} disabled={tapActive}>
               匯入
             </Button>
-            <Tooltip content="依音訊能量粗略分配開始時間">
+            <Tooltip content="依人聲（或音訊能量）估算開始時間">
               <Button variant="gray" icon={MagicWandIcon} onClick={() => setDistributeOpen(true)} disabled={tapActive || lines.length === 0}>
                 自動分配
               </Button>
@@ -863,6 +1010,8 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
           window="full"
           tapPointer={tapPointer}
           onDragMarker={tapActive ? undefined : onDragMarker}
+          vocal={estimationAnalysis?.vocal}
+          vocalRate={estimationAnalysis?.envelopeRate}
           className="h-12"
           label="全曲時間軸：點擊跳轉，拖曳標記調整該行開始時間"
         />
@@ -876,6 +1025,8 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
           tapPointer={tapPointer}
           labels
           onDragMarker={tapActive ? undefined : onDragMarker}
+          vocal={estimationAnalysis?.vocal}
+          vocalRate={estimationAnalysis?.envelopeRate}
           className="h-20"
           label="局部時間軸（跟著播放位置）：拖曳標記精細調整，按住 Alt 更精細"
         />
@@ -938,10 +1089,13 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       <DistributeAlert
         open={distributeOpen}
         onCancel={() => setDistributeOpen(false)}
-        onConfirm={distribute}
-        hasAnalysis={!!project.analysis}
+        onConfirm={(mode) => void distribute(mode)}
+        hasAnalysis={!!estimationAnalysis}
+        hasVocal={!!estimationAnalysis?.vocal?.length}
         timed={timed}
+        estimated={estimated}
         total={lines.length}
+        busy={vocalBusy}
       />
     </EditorRoot>
   );
@@ -1033,42 +1187,72 @@ function ShortcutsPopover() {
   );
 }
 
-/** Auto-distribute: a yes/no Alert; a Switch decides whether already timed lines are redone. */
+/**
+ * 自動分配: which lines to (re-)estimate — the untimed ones, the estimated ones (keeping what was
+ * tapped), or everything. For a song analysed before round 14 the 人聲 curve is computed first.
+ */
 function DistributeAlert({
   open,
   onCancel,
   onConfirm,
   hasAnalysis,
+  hasVocal,
   timed,
+  estimated,
   total,
+  busy,
 }: {
   open: boolean;
   onCancel: () => void;
-  onConfirm: (mode: "untimed" | "all") => void;
+  onConfirm: (mode: ReestimateMode) => void;
   hasAnalysis: boolean;
+  hasVocal: boolean;
   timed: number;
+  /** timed lines whose start is a guess */
+  estimated: number;
   total: number;
+  /** progress of the on-demand 人聲 analysis, null when idle */
+  busy: string | null;
 }) {
-  const [redoAll, setRedoAll] = useState(false);
   const untimed = total - timed;
-  const mixed = timed > 0 && untimed > 0;
-  const all = untimed === 0 || (mixed && redoAll);
-  const how = hasAnalysis ? "依音訊的能量起伏找出有人聲的段落，按每行的長短粗略分配開始時間。" : "這首歌沒有音訊分析資料，會在整首歌裡平均分配。";
+  const real = timed - estimated;
+  const options: Array<{ mode: ReestimateMode; label: string; detail: string }> = [];
+  if (untimed > 0) options.push({ mode: "untimed", label: `分配 ${untimed} 行未定時的`, detail: "已有時間的行都不動。" });
+  if (estimated > 0) options.push({ mode: "estimated+untimed", label: "重新估算『估的』行（保留已對好的）", detail: `${estimated + untimed} 行重新估算，已對好的 ${real} 行不動。` });
+  options.push({ mode: "all", label: `全部重新分配（${total} 行）`, detail: real > 0 ? `已對好的 ${real} 行也會清除。` : "所有行都重新估算。" });
+  const preferred: ReestimateMode = estimated > 0 && real > 0 ? "estimated+untimed" : untimed > 0 ? "untimed" : estimated > 0 ? "estimated+untimed" : "all";
+  const [picked, setPicked] = useState<ReestimateMode | null>(null);
+  const mode = picked && options.some((o) => o.mode === picked) ? picked : preferred;
+  const how = hasVocal
+    ? "依人聲的段落估算每行的開始時間（按每行的長短排進唱的地方）。"
+    : hasAnalysis
+      ? "先分析這首歌的人聲（需要幾秒鐘），再依人聲的段落估算每行的開始時間。"
+      : "這首歌沒有音訊分析資料：會先試著分析人聲；不行的話在整首歌裡平均分配。";
+  const choice = options.find((o) => o.mode === mode)!;
   return (
     <Alert
       open={open}
       title="自動分配時間"
-      message={`${how}${untimed === 0 ? "所有行都已定時，會清除後重新分配。" : ""}之後建議用對拍或拖曳標記校正。`}
-      confirmLabel={all ? `重新分配全部 ${total} 行` : `分配 ${untimed} 行`}
+      message={busy ? `分析人聲中：${busy}` : `${how}估的時間會標「估」，之後用對拍或拖曳標記校正。`}
+      confirmLabel={mode === "untimed" ? `分配 ${untimed} 行` : mode === "all" ? `重新分配全部 ${total} 行` : `重新估算 ${estimated + untimed} 行`}
       onCancel={onCancel}
-      onConfirm={() => onConfirm(all ? "all" : "untimed")}
+      onConfirm={() => onConfirm(mode)}
+      busy={busy != null}
     >
-      {mixed && (
-        <label htmlFor="distribute-all" className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-md bg-fill-4 px-3 py-2 text-left text-[13px] leading-5 text-label">
-          同時清除已定時的 {timed} 行
-          <Switch id="distribute-all" checked={redoAll} onChange={setRedoAll} />
-        </label>
+      {options.length > 1 && (
+        <div role="radiogroup" aria-label="要分配哪些行" className="mt-4 overflow-hidden rounded-md bg-fill-4 text-left">
+          {options.map((o) => (
+            <label key={o.mode} className="flex cursor-pointer items-start gap-2.5 px-3 py-2 text-[13px] leading-5 text-label has-[:focus-visible]:bg-fill-3">
+              <input type="radio" name="distribute-mode" value={o.mode} checked={mode === o.mode} onChange={() => setPicked(o.mode)} disabled={busy != null} className="mt-1 accent-(--tint)" />
+              <span className="min-w-0">
+                <span className="block font-medium">{o.label}</span>
+                <span className="block text-label-2">{o.detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
       )}
+      {options.length === 1 && <p className="mt-3 text-[13px] leading-5 text-label-2">{choice.detail}</p>}
     </Alert>
   );
 }

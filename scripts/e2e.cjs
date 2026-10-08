@@ -143,6 +143,11 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, `${name}.p
     }
     check("lyrics saved from paste (14 synced lines)", project.lyrics.lines.length === 14 && project.lyrics.synced, `${project.lyrics.lines.length} lines synced=${project.lyrics.synced}`);
     check("analysis stored", !!project.analysis && Math.round(project.analysis.bpm) === 120, `bpm=${project.analysis?.bpm}`);
+    check(
+      "the analysis carries a 人聲 curve on its envelope grid (round 14)",
+      Array.isArray(project.analysis?.vocal) && project.analysis.vocal.length === project.analysis.energy.length,
+      `vocal ${project.analysis?.vocal?.length} / energy ${project.analysis?.energy?.length}`,
+    );
 
     // ------------------------------------------------------------- console
     await page.goto(`${BASE}/p/${id}`, { waitUntil: "networkidle" });

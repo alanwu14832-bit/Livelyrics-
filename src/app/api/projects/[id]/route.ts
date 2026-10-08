@@ -5,7 +5,7 @@ import { isValidBandId } from "@/lib/band";
 import { getBand, withBandAssets } from "@/lib/server/band-storage";
 import { withLiveProjectJob } from "@/lib/server/jobs";
 import { deleteProject, getProject, updateProject } from "@/lib/server/storage";
-import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch, parseThumbPatch, parseTimecodePatch } from "@/lib/server/validate";
+import { applyMetaPatch, applyOutputPatch, parseLyricsPatch, parsePlanPatch, parseThumbPatch, parseTimecodePatch, parseVocalPatch } from "@/lib/server/validate";
 import type { DesignPlan, Lyrics, ProjectOutput, ProjectThumb, SongMeta, SongTimecode } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const id = requireProjectId((await ctx.params).id);
   const body = await readJson(req, MAX_PATCH_BYTES);
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output?, timecode?, thumb? }");
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "請求內容必須是物件 { meta?, lyrics?, plan?, output?, timecode?, thumb?, vocal? }");
   const patch = body as Record<string, unknown>;
 
   // validate everything before touching the file
@@ -58,7 +58,11 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   if (patch.meta !== undefined) meta = applyMetaPatch(existing.meta, patch.meta);
   let output: ProjectOutput | undefined;
   if (patch.output !== undefined) output = applyOutputPatch(existing.output, patch.output);
-  if (!meta && !lyrics && !plan && !output && bandId === undefined && timecode === undefined && thumb === undefined) return json(withLiveStatus(await withBandAssets(existing)));
+  // round 14: the 人聲 curve the lyric editor computed for a song analysed before it existed
+  // (validated against the stored analysis's envelope grid; nothing else in the analysis changes)
+  let vocal: number[] | undefined;
+  if (patch.vocal !== undefined) vocal = parseVocalPatch(patch.vocal, existing.analysis);
+  if (!meta && !lyrics && !plan && !output && bandId === undefined && timecode === undefined && thumb === undefined && !vocal) return json(withLiveStatus(await withBandAssets(existing)));
 
   const saved = await updateProject(id, (p) => {
     if (meta) p.meta = applyMetaPatch(p.meta, patch.meta);
@@ -68,6 +72,7 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
       p.lyrics = lyrics;
     }
     if (plan) p.plan = plan;
+    if (vocal && p.analysis) p.analysis = { ...p.analysis, vocal: parseVocalPatch(vocal, p.analysis) };
     if (output) p.output = applyOutputPatch(p.output, patch.output);
     if (timecode !== undefined) {
       if (timecode) p.timecode = timecode;

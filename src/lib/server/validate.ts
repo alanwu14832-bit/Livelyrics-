@@ -222,6 +222,8 @@ const LyricLineInput = z.object({
   start: z.number().nullable().optional(),
   end: z.number().nullable().optional(),
   words: z.array(LyricWordInput).max(1000).nullable().optional(),
+  /** round 14: the start is a guess (LyricLine.estimated); false / null = real */
+  estimated: z.boolean().nullable().optional(),
 });
 
 const LyricsInput = z.object({
@@ -247,6 +249,7 @@ export function parseLyricsPatch(raw: unknown): Lyrics {
       start: line.start ?? null,
       end: line.end ?? null,
       words: line.words ?? undefined,
+      ...(line.estimated === true ? { estimated: true as const } : {}),
     })),
   };
   if (l.language) lyrics.language = l.language;
