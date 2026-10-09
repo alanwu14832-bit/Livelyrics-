@@ -93,7 +93,7 @@ export function useAsrTiming(deps: AsrTimingDeps) {
     runRef.current = null;
   }, []);
 
-  // the remembered choice (else 快速 on a low-memory computer), and which device would run it
+  // the remembered choice (else 快速 on a low-memory computer)
   useEffect(() => {
     const stored = readStored(CHOICE_KEY);
     const initial: AsrChoice = stored === "fast" || stored === "accurate" ? stored : lowMemory() != null ? "fast" : "accurate";
@@ -102,14 +102,22 @@ export function useAsrTiming(deps: AsrTimingDeps) {
     queueMicrotask(() => {
       if (alive) setChoiceState(initial);
     });
-    void detectAsrDevice().then((d) => {
-      if (alive) setDevice(d);
-    });
     return () => {
       alive = false;
       stopAll();
     };
   }, [stopAll]);
+
+  /** Which device would run it (for the sheet's sizes) — asked only when the sheet opens: opening the
+   *  editor never wakes the GPU (and a browser without WebGPU logs a warning for every probe). A run
+   *  probes again by itself. */
+  const probed = useRef(false);
+  const openSheet = useCallback(() => {
+    setIntroOpen(true);
+    if (probed.current) return;
+    probed.current = true;
+    void detectAsrDevice().then(setDevice);
+  }, []);
 
   const setChoice = useCallback((c: AsrChoice) => {
     setChoiceState(c);
@@ -182,9 +190,9 @@ export function useAsrTiming(deps: AsrTimingDeps) {
   /** The toolbar button: the sheet the first time, afterwards straight to work with the remembered model. */
   const requestStart = useCallback(() => {
     if (state.kind === "running") return;
-    if (readStored(INTRO_KEY) !== "1") setIntroOpen(true);
+    if (readStored(INTRO_KEY) !== "1") openSheet();
     else void start(choice);
-  }, [state.kind, start, choice]);
+  }, [state.kind, start, choice, openSheet]);
 
   const cancel = useCallback(() => {
     stopAll();
@@ -195,7 +203,7 @@ export function useAsrTiming(deps: AsrTimingDeps) {
     state,
     running: state.kind === "running",
     introOpen,
-    openIntro: () => setIntroOpen(true),
+    openIntro: openSheet,
     closeIntro: () => setIntroOpen(false),
     choice,
     setChoice,
