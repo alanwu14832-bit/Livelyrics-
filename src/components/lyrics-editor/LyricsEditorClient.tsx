@@ -44,11 +44,13 @@ import { formatRelativeTime } from "@/components/home/relative-time";
 import { LYRICS_SOURCE_LABEL } from "@/components/process/labels";
 import { processHref } from "@/components/process/steps";
 import { readAppearance, useAppearance, type Appearance } from "./appearance";
-import { MagicWandIcon, SortByTimeIcon } from "./icons";
+import { AiTimingIcon, MagicWandIcon, SortByTimeIcon } from "./icons";
+import { AsrIntroSheet, AsrStatus, ConfirmAllAlert, useAsrTiming } from "./AsrTiming";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
 import { NOT_FOUND_HEADER_TITLE, ProjectNotFound } from "@/components/home/ProjectNotFound";
 import { clearDraft, draftToLines, loadDraft, saveDraft, type LyricsDraft } from "./draft";
 import {
+  confirmAllTimes,
   contentKey,
   estimatedCount,
   fromLyrics,
@@ -167,6 +169,7 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   const [latency, setLatency] = useState(readLatency);
   const [importOpen, setImportOpen] = useState(false);
   const [distributeOpen, setDistributeOpen] = useState(false);
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   /** 人聲 curve computed in this session for a song analysed before round 14 (see ensureVocal) */
   const [sessionAnalysis, setSessionAnalysis] = useState<AudioAnalysis | null>(null);
   const [vocalBusy, setVocalBusy] = useState<string | null>(null);
@@ -610,6 +613,29 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     }
   }, [id, project, showToast]);
 
+  // ---- 「AI 自動對時」 (round 15): Whisper in a worker, the lines aligned to what it heard ------------
+  const asr = useAsrTiming({
+    audioUrl: api.audioUrl(id),
+    getLines: () => linesRef.current,
+    getAnalysis: ensureVocal,
+    getDuration: () => durationRef.current,
+    apply: (next) => {
+      setSavedInfo(null);
+      linesRef.current = next;
+      dispatch({ type: "edit", lines: next, source: "user" });
+    },
+    toast: (t) => pushToast({ id: "asr", tone: t.tone, message: t.message, duration: t.duration }),
+  });
+
+  /** 確認全部時間: every estimated start becomes real, one undo step. */
+  const confirmAll = () => {
+    const n = estimatedCount(linesRef.current);
+    setConfirmAllOpen(false);
+    if (n === 0) return;
+    edit((l) => confirmAllTimes(l));
+    showToast(`已確認 ${n} 句的時間（可以復原）；儲存後控制台就能用「跟音檔」播放`, "ok");
+  };
+
   const distribute = async (mode: ReestimateMode) => {
     const a = await ensureVocal();
     const cur = stateRef.current;
@@ -781,6 +807,8 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
   }
 
   const tapActive = session != null;
+  /** every line is timed by the operator: 「AI 自動對時」 has nothing to place */
+  const allReal = lines.length > 0 && timed === lines.length && estimated === 0;
   const redesignHref = processHref(id, { run: true, steps: project.research ? ["design", "scene"] : ["research", "design", "scene"] });
   const analysisPeaks = project.analysis?.peaks ?? [];
   const canSave = dirty || !!saveError;
@@ -795,12 +823,20 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             ；還有 <span className="t-latin tabular">{estimated}</span> 句時間是估的
           </span>
         )}
+        {estimated > 0 && !tapActive && (
+          <Button variant="plain" size="sm" className="ml-2 align-baseline" onClick={() => setConfirmAllOpen(true)} data-testid="confirm-all">
+            確認全部時間
+          </Button>
+        )}
       </span>
       <span>歌詞來源：{LYRICS_SOURCE_LABEL[state.source] ?? state.source}</span>
     </div>
   );
 
   const banners: ReactNode[] = [];
+  if (asr.state.kind !== "idle") {
+    banners.push(<AsrStatus key="asr" state={asr.state} onCancel={asr.cancel} onRetry={asr.start} onDismiss={asr.dismissError} />);
+  }
   if (project.status === "processing") {
     banners.push(
       <Banner key="processing" tone="warning" title="這首歌正在處理中" description="處理的歌詞步驟可能會覆寫你在這裡儲存的內容，建議等處理完成再儲存。" />,
@@ -925,6 +961,11 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             <Tooltip content="依人聲（或音訊能量）估算開始時間">
               <Button variant="gray" icon={MagicWandIcon} onClick={() => setDistributeOpen(true)} disabled={tapActive || lines.length === 0}>
                 自動分配
+              </Button>
+            </Tooltip>
+            <Tooltip content={allReal ? "每一句都已經對好了：AI 不會移動已對好的時間" : "讓 AI 聽這首歌，把每句歌詞對到唱的位置（在這台電腦上執行，歌曲不會上傳）"}>
+              <Button variant="gray" icon={AiTimingIcon} onClick={asr.requestStart} disabled={tapActive || lines.length === 0 || allReal || asr.running} data-testid="asr-start">
+                AI 自動對時
               </Button>
             </Tooltip>
             <Tooltip content="下載 .lrc 檔">
@@ -1086,10 +1127,30 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
         hasLines={lines.length > 0}
       />
 
+      <AsrIntroSheet
+        open={asr.introOpen}
+        onClose={asr.closeIntro}
+        onStart={asr.start}
+        choice={asr.choice}
+        onChoice={asr.setChoice}
+        device={asr.device}
+        realLines={timed - estimated}
+      />
+
+      <ConfirmAllAlert open={confirmAllOpen} count={estimated} onCancel={() => setConfirmAllOpen(false)} onConfirm={confirmAll} />
+
       <DistributeAlert
         open={distributeOpen}
         onCancel={() => setDistributeOpen(false)}
         onConfirm={(mode) => void distribute(mode)}
+        onAi={
+          asr.running
+            ? undefined
+            : () => {
+                setDistributeOpen(false);
+                asr.openIntro();
+              }
+        }
         hasAnalysis={!!estimationAnalysis}
         hasVocal={!!estimationAnalysis?.vocal?.length}
         timed={timed}
@@ -1201,10 +1262,13 @@ function DistributeAlert({
   estimated,
   total,
   busy,
+  onAi,
 }: {
   open: boolean;
   onCancel: () => void;
   onConfirm: (mode: ReestimateMode) => void;
+  /** round 15: open 「AI 自動對時」 instead (undefined while it runs) */
+  onAi?: () => void;
   hasAnalysis: boolean;
   hasVocal: boolean;
   timed: number;
@@ -1253,6 +1317,14 @@ function DistributeAlert({
         </div>
       )}
       {options.length === 1 && <p className="mt-3 text-[13px] leading-5 text-label-2">{choice.detail}</p>}
+      {onAi && (
+        <div className="mt-4 flex items-center gap-3 rounded-md bg-fill-4 px-3 py-2.5 text-left text-[13px] leading-5 text-label-2">
+          <span className="min-w-0 flex-1">想對得更準？讓 AI 在這台電腦上聽歌，把每句對到唱的位置。</span>
+          <Button variant="tinted" size="sm" icon={AiTimingIcon} onClick={onAi} disabled={busy != null} data-testid="distribute-asr">
+            AI 自動對時
+          </Button>
+        </div>
+      )}
     </Alert>
   );
 }

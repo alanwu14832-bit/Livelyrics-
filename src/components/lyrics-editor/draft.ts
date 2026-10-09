@@ -76,6 +76,7 @@ export function parseDraft(raw: unknown): LyricsDraft | null {
     const w = start != null ? words(l.words) : undefined;
     if (w) line.words = w;
     if (start != null && (legacy || l.estimated === true)) line.estimated = true;
+    if (line.estimated && l.aligned === true) line.aligned = true;
     lines.push(line);
   }
   const source = SOURCES.includes(d.source as LyricsSource) ? (d.source as LyricsSource) : "user";
@@ -107,6 +108,7 @@ export function saveDraft(
       const out: Omit<EditorLine, "key"> = { text: l.text, translation: l.translation, start: l.start, end: l.end };
       if (l.words) out.words = l.words;
       if (l.start != null && l.estimated) out.estimated = true;
+      if (l.start != null && l.estimated && l.aligned) out.aligned = true;
       return out;
     }),
   };

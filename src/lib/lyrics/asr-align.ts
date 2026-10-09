@@ -550,9 +550,10 @@ const ANCHOR_END_GAP = 2;
 
 /**
  * The lines with the AI anchors applied: real lines (timed, not estimated) keep their times; the
- * anchored lines take the AI's start (and end) and stay estimated; every other line is laid out
- * again by `placeUntimed` (the 人聲 aligner) between the real lines and the anchors, estimated too.
- * Returns the lines in the same order (not normalized) and which ones the AI matched.
+ * anchored lines take the AI's start (and end) and stay estimated, flagged `aligned`; every other
+ * line is laid out again by `placeUntimed` (the 人聲 aligner) between the real lines and the
+ * anchors, estimated too. Returns the lines in the same order (not normalized) and which ones the
+ * AI matched.
  */
 export function applyAnchors(
   input: readonly LyricLine[],
@@ -570,7 +571,11 @@ export function applyAnchors(
     const copy: LyricLine = { ...l, start: a ? a.start : null, end: a ? a.end : null };
     delete copy.words;
     delete copy.estimated;
-    if (a) copy.estimated = true;
+    delete copy.aligned;
+    if (a) {
+      copy.estimated = true;
+      copy.aligned = true;
+    }
     return copy;
   });
   const placed = placeUntimed(prepared, analysis, duration, options);
