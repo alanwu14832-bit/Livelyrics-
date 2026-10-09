@@ -3,7 +3,7 @@
 上傳一首歌，AI 會以「樂團專職舞台視覺設計師」的角度研究歌曲與樂團，設計**主視覺**、每一段的**背景動畫**，以及**歌詞如何跟著主視覺呈現**。演出時，你在自己的電腦上用**控制台**操作（完整資訊、跳歌詞、黑場、覆寫場景），投影機上的**投影視窗**只顯示動畫與歌詞。
 
 - 音訊分析（BPM、節拍、能量、段落、波形）在瀏覽器完成。在本機執行時音檔只存在你的電腦上；部署到 Vercel 時存在你自己的 Vercel Blob 儲存空間。
-- 歌詞：自動從 [LRCLIB](https://lrclib.net) 找同步歌詞，或貼上 LRC／純文字，再用「對拍」功能自己對時間。
+- 歌詞：自動從 [LRCLIB](https://lrclib.net) 找同步歌詞，或貼上 LRC／純文字，再用「**AI 自動對時**」或「對拍」對時間。AI 自動對時在你的電腦上用語音辨識（Whisper）聽歌，把每一句對到唱出來的位置，**歌曲不會上傳**；第一次使用要下載模型（「準確」約 250 MB、「快速」約 80 MB，之後留在瀏覽器裡）。
 - 設計：有 Claude API 金鑰時由 Claude 上網研究再設計；沒有金鑰時使用**基本模式**（免費研究）（查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象、情緒與音訊，由內建設計師依這些發現產生方案），一樣能完整使用。想要 Claude 的研究又不想付 API 費用，可以用「**用 claude.ai 研究**」：把提示詞貼到自己的 claude.ai 對話，再把回覆貼回來。
 
 ## 在本機執行
@@ -102,7 +102,7 @@ node scripts/seed-demo.mjs
    - 按快捷鍵時，預覽下方會短暫顯示提示（HUD），頂欄的狀態膠囊顯示黑場、歌詞隱藏、凍結等目前狀態；這些只在控制台出現，不會出現在投影視窗
    - 「重新設計」：輸入指示（例如「副歌更熱血」「換成冷色調」），AI 會依指示重新設計
 4. **投影視窗**：按控制台的「開啟投影視窗」（或按 `O`），把新視窗拖到投影機／LED 螢幕，再在那個視窗**按 `F` 或雙擊**進入全螢幕。滑鼠停 2 秒後游標會自動隱藏。
-5. **歌詞編輯器** `/p/<id>/lyrics`：修改歌詞與時間、對拍（播放時按空白鍵標記每一句開始）、±0.1 秒微調、匯出 LRC。右上角「⋯」選單可以切換外觀（跟隨系統／淺色／深色）。
+5. **歌詞編輯器** `/p/<id>/lyrics`：修改歌詞與時間、「AI 自動對時」（AI 聽歌後把歌詞對上；結果都還標著「估」，播放檢查、對拍修正幾句後按「確認全部時間」，就能在控制台用「跟音檔」播放）、對拍（播放時按空白鍵標記每一句開始）、±0.1 秒微調、匯出 LRC。右上角「⋯」選單可以切換外觀（跟隨系統／淺色／深色）。
 
 ### 樂團、視覺聖經與演出
 
@@ -299,6 +299,7 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-sync.cjs        # �
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-type.cjs        # 字體藝術：構圖、排版編輯器（電腦與手機）、匯出
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-scene.cjs       # 專屬畫面：投影與預覽、編譯失敗的退回、LED 安全、重新產生與開關
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-onboarding.cjs  # 設定的金鑰（假金鑰，存入、遮罩、移除）、估的歌詞時間與對拍、投影的等待提示（伺服器不可有 ANTHROPIC_API_KEY）
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-asr.cjs         # AI 自動對時：第一次的說明、進度、結果與「估」、確認全部時間（假的辨識引擎，不下載模型）
 BASE=http://localhost:3100 node scripts/legibility.cjs [作品 id…]           # 可讀性：每一句 ≥ 4.5:1、主字 ≥ 7:1（沒給 id 就檢查伺服器上所有作品）
 ```
 
@@ -315,5 +316,9 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 ```
 
 commit 訊息以 `WIP:` 開頭的推送不會在 Vercel 建置（`vercel.json` 的 `ignoreCommand`），用來保存進行中的工作，不會把做到一半的版本放上預覽網址。
+
+`npm install` 會讀取專案的 `.npmrc`（`onnxruntime-node-install=skip`）：語音辨識套件附帶的 `onnxruntime-node` 只在本機評估時用到，不會去下載 CUDA 檔案。
+
+第三方元件：語音辨識用 [Whisper](https://github.com/openai/whisper)（OpenAI，MIT）、[transformers.js](https://github.com/huggingface/transformers.js)（Hugging Face，Apache-2.0）與 [ONNX Runtime Web](https://github.com/microsoft/onnxruntime)（Microsoft，MIT）；中文繁簡對照與讀音資料取自 Unicode 的 [Unihan](https://www.unicode.org/reports/tr38/) 資料庫（Unicode License v3，`scripts/build-han-data.mjs` 產生）。
 
 架構、模組分工與資料契約見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。產品設計依據的業界研究見 [`reports/音樂祭大螢幕歌詞與視覺設計.md`](reports/音樂祭大螢幕歌詞與視覺設計.md)。

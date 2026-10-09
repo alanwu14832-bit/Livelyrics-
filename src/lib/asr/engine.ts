@@ -223,6 +223,7 @@ export function transcribeSong(options: AsrRunOptions): AsrRun {
     if (cancelled) throw new AsrError("cancelled", "已取消");
     const fake = fakeHook();
     let device = fake ? (options.device ?? "wasm") : (options.device ?? (await detectAsrDevice()));
+    let emptyOnGpu = false;
     for (;;) {
       // WebGPU may fail and the run starts again on WebAssembly: keep a copy of the samples
       const samples = device === "webgpu" ? audio.slice() : audio;
@@ -233,6 +234,14 @@ export function transcribeSong(options: AsrRunOptions): AsrRun {
         const result = await job.promise;
         // the model holds a gigabyte or more: let it go (a next run reads it from the browser cache)
         dropWorker();
+        if (device === "webgpu" && !fake && result.words.length === 0 && result.audioSeconds >= 20) {
+          // nothing heard through the GPU: check on WebAssembly before trusting that (a GPU that
+          // computes garbage does not throw)
+          emptyOnGpu = true;
+          device = "wasm";
+          continue;
+        }
+        if (emptyOnGpu && result.words.length > 0) rememberWebgpuFailed();
         return result;
       } catch (err) {
         if (cancelled) throw new AsrError("cancelled", "已取消");
