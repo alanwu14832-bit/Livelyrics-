@@ -10,9 +10,9 @@
 //   - with safe mode off the output flashes more than 3 times a second;
 //   - with safe mode on (default) it flashes at most 3 times a second, and the console says
 //     「已抑制閃爍」 (its own preview's limiter, measured with the projection window parked: two
-//     windows on one software GPU can starve each other of frames, and a strobe sampled a few
-//     times a second no longer strobes), and the projection window's own damping report (pong)
-//     reaches a freshly opened console;
+//     windows on one software GPU slow each other down, and the detail reports how many frames a
+//     second the preview's limiter measured), and the projection window's own damping report
+//     (pong) reaches a freshly opened console;
 //   - the brightness presets lower the peak luminance (室內 100 % > LED 牆 70 % > 戶外 55 %);
 //   - LED 模擬 appears on the console preview only, never in the projection window;
 //   - the pre-show check lists the sections safe mode changes; the export page applies it by default.
@@ -336,13 +336,13 @@ async function measure(popup, seconds) {
     await page.locator("[data-safety-switch]").click();
     await page.waitForTimeout(800);
     check("turning safe mode on needs no confirm", (await page.locator("dialog[open]").count()) === 0 && (await page.locator('[data-safety-tile="on"]').count()) === 1);
-    // with the console open: the operator sees the limiter at work (the hard-cut strobe). Both
-    // windows share one software GPU here: with the projection drawing too, a busy machine renders
-    // the two at a few frames a second, and a strobe sampled that rarely no longer strobes (nothing
-    // to damp — the limiter is right, the check flaked). So the projection window is parked for this
-    // check: the console's own preview limiter is what the control tab and the capsule show without
-    // an output (the projection's limiter is checked on its own below). The detail says how many
-    // frames a second the preview's limiter measured.
+    // with the console open: the operator sees the limiter at work (the hard-cut strobe). The
+    // console preview's own limiter is checked here, with the projection window parked: both
+    // windows share the container's one software GPU, the preview then drops to a few frames a
+    // second, and its limiter only measures the frames whose readback came back (this flaked when
+    // the readback ring had 3 slots: a 4 Hz strobe measured 3–4 times a second can slip by
+    // unmeasured). The projection's own limiter and its report (pong) are checked below. The
+    // detail says how many frames a second the preview's limiter measured.
     const outputUrl = popup.url();
     await popup.goto("about:blank");
     await page.bringToFront();

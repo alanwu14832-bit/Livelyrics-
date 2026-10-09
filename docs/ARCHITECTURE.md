@@ -277,7 +277,7 @@ All of it is pure logic in `src/lib/stage/safety.ts` (tests: `safety.test.ts`) p
   F = mix(F_prev, soften(S) × gain, α) into a ping-pong pair (8-bit feedback moves at least one code
   value so it always converges; a static dither under the cap); present = `blitFramebuffer` (WebGL2) or
   a copy shader (WebGL1). Readback: WebGL2 reads the tiny grid into a pixel-pack buffer with a fence and
-  collects it 1–2 frames later (`takeGrids`, ring of 3, no GPU stall); WebGL1 and the export read it
+  collects it 1–2 frames later (`takeGrids`, a ring of 8 — `READ_RING` —, no GPU stall); WebGL1 and the export read it
   synchronously (a stall on a 32 × 18 target). `StageEngine` asks `limiter.alphaFor(dt)` before
   rendering, records α per render serial and feeds each grid to `limiter.observe` with the combined α of
   the frames since the last observed one. Off = the old path (scene straight to the screen). Cost: two
@@ -317,15 +317,17 @@ All of it is pure logic in `src/lib/stage/safety.ts` (tests: `safety.test.ts`) p
 - **Stage lab**: `?safe=0` shows the designed flash / bloom at full brightness.
 - **E2E**: `scripts/e2e-led.cjs` (strobe designs: flash transitions and hard cuts at 4 flashes a second;
   the projection canvas sampled every frame; the confirm dialogs; the presets' luminance; LED 模擬 only
-  in the console; the pre-show check; the export default). Round 15 removed a flake in 「已抑制閃爍」: the
-  status was never lost — on a busy machine the console preview and the projection window, both drawn by
-  the container's one software GPU, starved each other, the preview's limiter measured a frame now and
-  then, and a strobe sampled that rarely does not strobe (nothing to damp). The suite now parks the
-  projection window while it checks the console's own limiter (the detail reports how many frames a
-  second the preview's limiter measured: 3.5–8 here, while the projection alone renders 46–60), and checks the
-  projection's damping report (pong) on a fresh console separately. `StageEngine` exposes
-  `data-limiter-measured` / `data-limiter-lost` (grid readbacks used / dropped) and `data-fps`, and keeps a
-  late readback's α for 30 frames (was 12).
+  in the console; the pre-show check; the export default). Round 15 removed a flake in 「已抑制閃爍」. The status was
+  never lost: the console preview's limiter had measured too few frames. A readback is collected when its
+  fence signals; on the container's software GPU, with the console and the projection window both
+  drawing, that takes several frames, the preview dropped to 7–34 frames a second, and with 3 readback
+  slots the limiter saw only every third frame — 3.5–8 measured frames a second (the failing runs: 3.5
+  and 4.4), too few to see a 4 Hz strobe reliably. The ring now holds 8 (each slot is a 32 × 18 RGBA buffer); the
+  preview measures 7–15 frames a second there. The suite parks the projection window while it checks the
+  console's own limiter (the detail reports the preview's measured rate) and checks the projection's
+  damping report (pong) on a fresh console separately. `StageEngine` exposes `data-limiter-measured` /
+  `data-limiter-lost` (grid readbacks used / dropped) and `data-fps`, and keeps a late readback's α for
+  30 frames (was 12).
 - **Known limits.** Not a certified PSE test: the grid is 32 × 18 (small patterns and thin lines
   average out), the DOM lyric layer is estimated rather than measured, luminance is relative (the
   wall's nits, gamma and processor brightness are unknown to the app), and the live limiter reacts

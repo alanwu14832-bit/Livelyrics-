@@ -143,6 +143,12 @@ export interface SafetyDraw {
   chain?: 0 | 1;
 }
 
+/** Grid readbacks in flight at once. A fence signals a frame or two later on a real GPU, but several
+ *  frames later on a slow or shared one (two windows on a software GPU: 3 slots let the limiter see
+ *  only every third frame, and a 4 Hz strobe sampled that rarely can slip by unmeasured). Each slot
+ *  is a tiny pixel-pack buffer (cols × rows × 4 bytes). */
+const READ_RING = 8;
+
 /** A luminance grid read back from the GPU: RGBA8, bottom row first (GL order). */
 export interface GridReadback {
   /** the render serial it belongs to */
@@ -289,6 +295,7 @@ export class StageRenderer {
   private feedbackIndex: [4 | 5, 8 | 9] = [4, 8];
   private feedbackValid: [boolean, boolean] = [false, false];
   private serial = 0;
+  /** in-flight grid readbacks (at most READ_RING) */
   private reads: PendingRead[] = [];
   private completed: GridReadback[] = [];
   private pendingCompose: { soften: number; gain: number; chain: 0 | 1 } | null = null;
@@ -1317,9 +1324,9 @@ export class StageRenderer {
     // WebGL2: into a pixel-pack buffer, fenced; collected a frame or two later (no GPU stall)
     let slot = this.reads.find((r) => !r.busy);
     if (!slot) {
-      if (this.reads.length >= 3) {
+      if (this.reads.length >= READ_RING) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        return; // all three in flight: skip this frame's measurement
+        return; // all in flight: skip this frame's measurement
       }
       const buf = gl2.createBuffer();
       if (!buf) return;
@@ -1361,7 +1368,7 @@ export class StageRenderer {
       r.busy = false;
       this.completed.push({ serial: r.serial, cols: r.cols, rows: r.rows, data });
     }
-    if (this.completed.length > 8) this.completed.splice(0, this.completed.length - 8);
+    if (this.completed.length > 2 * READ_RING) this.completed.splice(0, this.completed.length - 2 * READ_RING);
   }
 
   /** The scene (with its section transition) into `out` (null = the screen). */
