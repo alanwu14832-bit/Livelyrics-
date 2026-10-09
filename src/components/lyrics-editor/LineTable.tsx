@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Button, Menu, MenuItem, MenuSeparator, Tooltip, cx } from "@/components/ui";
+import { Button, Menu, MenuItem, MenuSeparator, Tag, Tooltip, cx } from "@/components/ui";
 import { ArrowsMergeIcon, CrosshairIcon, DotsThreeIcon, HandTapIcon, MinusIcon, PlayIcon, PlusIcon, ScissorsIcon, TrashIcon, WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
 import { SOFT_TEXT } from "@/components/ui/Tag";
 import { isLongLine } from "@/lib/type/text";
@@ -66,6 +66,7 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
   };
   const caret = (el: HTMLInputElement) => h.rememberCaret(line.key, el.selectionStart);
   const n = index + 1;
+  const estimated = line.start != null && !!line.estimated;
   // while tapping, everything but the target steps back
   const dim = tapActive && !tapTarget;
 
@@ -97,11 +98,12 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行提早 0.1 秒`} icon={<MinusIcon size={14} />} onClick={() => h.nudge(index, -0.1)} disabled={line.start == null} />
         <TimeInput
           value={line.start}
-          aria-label={`第 ${n} 行開始時間`}
+          aria-label={`第 ${n} 行開始時間${estimated ? "（估的）" : ""}`}
           data-row={index}
           data-field="time"
           warn={outOfOrder}
           dim={dim}
+          estimated={estimated}
           onCommit={(t) => h.setStart(index, t)}
           onNudge={(d) => h.nudge(index, d)}
           onEnter={(shift) => h.focusCell(shift ? index - 1 : index + 1, "time")}
@@ -109,6 +111,12 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行延後 0.1 秒`} icon={<PlusIcon size={14} />} onClick={() => h.nudge(index, 0.1)} disabled={line.start == null} />
       </div>
       <div role="cell" className="relative flex min-w-0 items-center gap-1 max-md:col-span-full max-md:row-start-2 max-md:pl-9">
+        {estimated && (
+          // round 14: the start is a guess (人聲 / 自動分配) until it is tapped, dragged or typed
+          <Tag tone="orange" data-estimated title="時間是估的：對拍、拖曳標記或輸入時間後就是真的" className="cursor-default">
+            估<span className="sr-only">：這行的時間是估的</span>
+          </Tag>
+        )}
         {outOfOrder && (
           <span title="時間早於前一行：儲存時會依時間重新排序" className="flex shrink-0 text-red">
             <WarningCircleIcon size={16} weight="fill" aria-label="時間早於前一行" />

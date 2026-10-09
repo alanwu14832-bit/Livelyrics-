@@ -71,6 +71,14 @@ export interface AudioAnalysis {
   brightness: number[];
   /** 0..1 normalized low-band (bass) energy per envelope frame */
   bass: number[];
+  /**
+   * 0..1 人聲 curve per envelope frame (round 14, `src/lib/audio/vocal.ts`): how much the frame
+   * sounds like the lead voice — centre-panned, tonal energy in the vocal band and its syllabic
+   * rhythm, against the song's own level and a ±3 s local median. Used to lay untimed lyric lines
+   * over the singing (`src/lib/lyrics/align.ts`). Absent in analyses made before round 14 (the
+   * lyric editor computes it from the audio and saves it with PATCH `vocal`).
+   */
+  vocal?: number[];
   /** waveform peaks for drawing the timeline: max |sample| per bucket, 0..1 */
   peaks: number[];
   /** structural boundaries from novelty detection (unlabeled) */
@@ -101,14 +109,28 @@ export interface LyricLine {
   end: number | null;
   /** optional word/character-level timing */
   words?: LyricWord[];
+  /**
+   * Round 14: the start is a guess — placed by `distributeLines` (the 人聲 curve or the loudness
+   * spread), not taken from an LRC file, LRCLIB or the operator. Tapping, dragging or typing the
+   * line's start makes it real (the flag goes); the editor re-estimates the lines still flagged
+   * between the real ones. Only on timed lines.
+   */
+  estimated?: true;
 }
 
 export type LyricsSource = "lrclib-synced" | "lrclib-plain" | "user" | "embedded" | "none";
 
 export interface Lyrics {
   source: LyricsSource;
-  /** true when every line has a start time */
+  /** true when every line has a start time and none is estimated (see `timing`) */
   synced: boolean;
+  /**
+   * "estimated": at least one line's start is a guess (`LyricLine.estimated`); `synced` is then
+   * false, the console says how many and starts in 手動切換. Cleared only when no line is
+   * estimated. Data from before round 14 has the flag without per-line flags: every timed line
+   * counts as estimated (`estimatedFlags` in lrc.ts). Absent = real timings.
+   */
+  timing?: "estimated";
   lines: LyricLine[];
   /** e.g. "zh-Hant", "en", "ja" */
   language?: string;
@@ -167,6 +189,12 @@ export interface Research {
    * poster, logo, live photos). The research step downloads what it can into `Project.collected`.
    */
   visualCandidates?: VisualCandidate[];
+  /**
+   * Claude's brief was cut short (output limit, context window or the search continuations ran out):
+   * the reason in Traditional Chinese. The design used the part that was written; the process page
+   * tells the customer.
+   */
+  truncated?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -86,7 +86,8 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/p/[id]/type` | HOME | 排版 (phase 6): the song's 字體語言 and every line's composition, desktop and phone (edits live on the projection) |
 | `/stage-lab` | STAGE | dev gallery of every scene × lyric style with a demo plan (`?voice=&aspect=&project=`: 字體藝術 in a voice on a canvas; `?program=`: 專屬畫面) |
 | `/login` | HOME | password page (only with `LIVELYRICS_PASSWORD`; `?next=` = where to go after signing in) |
-| `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth }` (never touches storage) |
+| `/api/status` | SERVER | `{ claude, model, dataDir, storage: { mode, cloudConfigured, missing, onVercel }, auth, keySource, keyEditable }` (never touches storage; never the key, not even masked) |
+| `/api/settings/api-key` GET/PUT/DELETE | SERVER | round 13 「設定」: `KeyStatus { configured, source: env \| settings \| null, masked, editable }` / PUT `{ key }` (sk-ant-…, same-origin only) / DELETE 移除金鑰 (local mode; 409 on Vercel) |
 | `/api/auth/login` POST, `/api/auth/logout` POST | SERVER | password gate: JSON `{ password, next? }` or a plain form post → session cookie / clear it |
 | `/api/blob/upload` POST | SERVER | cloud: signs one browser upload to Vercel Blob (`@vercel/blob/client` `handleUpload`, see "Cloud mode") |
 | `/api/projects` GET/POST | SERVER | list summaries / create (local: multipart `audio`, `meta` JSON, `analysis` JSON; cloud: JSON `{ blob, fileName, meta, analysis, bandId? }` after the browser uploaded to Blob) |
@@ -1371,6 +1372,143 @@ one-time acknowledgement before anything goes on stage.
   design overview header has 「匯出影片」. Dev builds expose `window.__livelyricsExport` (`debugStage`,
   `exportToOpfs`) for the render checks.
 
+### Round 13: 設定, estimated lyric timing, honest copy
+
+- **API key settings** (`src/lib/server/api-key.ts`, route `/api/settings/api-key`). Local mode only (not on
+  Vercel / cloud: the sheet explains the project's Environment Variables in two sentences instead). The key
+  pasted into the home page's 「設定」 sheet is validated (`KEY_PATTERN`), written atomically to
+  `<data dir>/settings/anthropic-key.json` with mode 0600 (no route serves that folder) and cached in memory.
+  `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` in the environment always win (`storedApiKey()` is then null and
+  the SDK reads the environment). `isClaudeConfigured()` = `hasApiKey()`; the designer's SDK client passes the
+  stored key as `apiKey` and is rebuilt when it changes (`defaultTransport`). No route returns the key: the
+  settings route a masked form (`sk-ant-…` + last 4), `/api/status` only `claude` / `keySource`; nothing logs it;
+  writes need the page's own origin. Only `api-key.ts` and `designer/index.ts` read it (tested). The header
+  badge is 「基本模式」 (tooltip: what it does and what a key adds); 「免費研究」 stays the research engine label.
+- **Estimated lyric timing** (`Lyrics.timing?: "estimated"`; per line since round 14, see below). `distributeLines`
+  (untimed lyrics pasted at upload, an LRCLIB plain result, the editor's 自動分配) sets it; `normalizeLyrics`
+  reports `synced: false` while it is set (`allLinesTimed`, `timingEstimated` in `lrc.ts`); the PATCH validator
+  accepts it. The pipeline's lyric step treats an estimated song like a timed one (no LRCLIB search over the user's
+  lyrics). The console starts such a song in 手動切換, the top bar subtitle links 「歌詞時間是估的・去對拍」 and
+  the 歌詞 pane shows the banner 「歌詞時間是估的，先到歌詞編輯器對拍」. The lyric editor carries the flag in its
+  undoable state, its drafts and its dirty key; a 對拍 mark clears it, so the save is synced. (Round 14 made the
+  flag per line: a tap makes only that line real.)
+- **Console preview diagnostics**: the resolution, renderer / fps readout and the 歌詞安全區 guides show only
+  with 測試圖 on (a lost / fallback renderer and the window-mismatch warning always show); the badges share one
+  bottom row with LED 模擬 so nothing clips on a phone.
+- **Projection waiting pill** (`src/lib/stage/waiting-hint.ts`): 「等待控制台連線…」 is on the wall for at most
+  `WAITING_HINT_MS` (5 s) after the window opens and never comes back (the console says 投影未連線 itself).
+- **Export**: the 單格預覽 cannot leave the main thread (the OfflineStage needs the page's DOM lyric layer,
+  next/font faces and media), so it runs through `PreviewRunner` (one at a time, cancellable: the pre-roll
+  yields between frames and checks the signal), with 「正在算這一格…」 and 取消 over the frame; an export
+  estimated above 2 GB (`exportNeedsSizeConfirm`) asks first; the hints are plain language (MP4 / WebM,
+  黑底白字 for the VJ) with the technical term once in parentheses.
+- **Honesty on the process page**: `Research.truncated` (Claude's brief cut by max_tokens / pause_turn) shows
+  「Claude 的研究簡報沒有寫完」; a clip under 20 s shows 「音檔太短，分析不可靠」; the 專屬畫面 panel names who
+  wrote the program (`Claude（model）` or 離線作曲器); the home library backfills missing key-still thumbnails
+  (`thumb-backfill.ts`, a few per visit), lists the songs before the bands, and an empty 樂團 is one quiet row.
+- **Chorus floor in the luminance probe** (`probe.ts`): every state is also measured with the words on screen
+  (the type box over its zone) around the words (`ProbeSample.around`); a chorus below `PROBE_CHORUS_FLOOR`
+  (0.08) or darker than the song's brightest verse fails. The composer's orbits (ring halos, a wider core),
+  threads (brighter rain, light from the floor), brush and ribbons open up in the chorus to pass on every
+  audit song (`chorus-floor.test.ts`). The demo chorus was in fact hidden by the type engine: the knockout
+  treatment's automatic window filled the frame (`windowFill` 0.52–0.84) over the program; under a 專屬畫面 zone
+  (`LineContext.zone`) the automatic knockout no longer opens the display word (an explicit 鏤空 still does).
+
+### Round 14: lyrics that land on the singing
+
+The ideas come from two MIT-licensed lyric-video tools (read, not copied): **tuidra-musicvideo-maker**
+(`lyrics_matcher.py` fixes the high-confidence matches of the user's lines to recognised speech first, keeps
+their order, and interpolates the lines in between) and **chrimage/ai-lyric-video-generator** (instrumental
+intros, breaks and outros are their own segments; prompts turn sensitive lyrics into symbolic imagery). We ship
+no speech recogniser: a 人聲 curve says where the voice is, an order-preserving aligner lays the lines over it,
+and the operator's taps are the high-confidence anchors.
+
+- **人聲 curve** (`AudioAnalysis.vocal?: number[]`, 0..1 per envelope frame, rounded like the other
+  envelopes; `src/lib/audio/vocal.ts`). `analyzeFile` passes the analysis worker the side signal
+  (L − R) / 2 of a stereo file as well as the mono mix (`sideOf`; decimated to 11 025 Hz, `VOCAL_RATE`; none
+  past 20 minutes, `MAX_SIDE_SECONDS`, so memory stays bounded). Per STFT frame (512 / hop 256 at 11 025 Hz)
+  of mid M and side S: the vocal band's (200–4000 Hz) centre excess Σ max(0, |M|² − |S|²), its share of the
+  mid, the spectral flatness of the centre spectrum (tonality) and twelve log-spaced sub-band levels; at the
+  envelope rate these are taken against the song's own level (90th percentile), a ±3 s sliding median (a loud
+  chorus does not read as "all vocals") and ±0.5 / ±1.5 s averages, plus the syllabic modulation (std of the
+  centre level over ±0.3 s) and the analysis's loudness, onset, brightness and bass. A logistic model whose
+  weights were fitted on the dev half of the evaluation set (below) turns them into a probability. A
+  **centre-share gate** then cuts what cannot be a lead voice: uncorrelated (wide) material has a centre
+  share of about 0.5, so the share — median-filtered over ±0.15 s (a centred drum hit is not a voice), with
+  dips shorter than 1.2 s filled (a voice does not leave the centre for a breath) — maps 0.5 → 0 and 0.7 → 1;
+  a mix whose share never reaches 0.7 (95th percentile) has nothing centred and reads as no voice at all. A
+  mono or dual-mono file uses a mono model (no centre features). `analyzeSamples(mono, rate)` without a side
+  channel keeps working (tests, old callers). `validate.ts` keeps the optional array (`sanitizeAnalysis`);
+  analyses from before round 14 stay valid without it.
+- **Phrase-aligned estimation** (`src/lib/lyrics/align.ts`, pure). `detectPhrases`: hysteresis 0.5 / 0.32,
+  phrases under 0.3 s dropped, gaps under 0.25 s merged. `alignRun` lays one untimed run over the phrases
+  between its timed neighbours, in order, by dynamic programming: a line starts at a phrase onset (free), at a
+  clear dip inside a long phrase or on a 0.5 s grid inside it (both cost); its sung time follows `lineWeight`
+  at the song's sung rate (`sungSeconds` / all line weights), σ = 0.6 + 0.35 × expected; a vocal gap of more
+  than 1.2 s inside a line costs; a line may stop at a phrase end and leave a solo / ad-libs unassigned (cheap
+  for 8 sung seconds, steep beyond, never 25 between two lines); an open run (no timed line on one side) stays
+  near today's proportional spread (beyond 10 s). A line ends with its sung part (+ 0.4 s) when a real gap of
+  2 s or more follows, so the stage clears the words over an interlude. Bounded: a 60-line song aligns in about
+  0.1 s. `distributeLines` (`lrc.ts`) uses it when the analysis has a curve and falls back, per run, to the old
+  loudness spread (`vocalRegions` + `placeRun`) when the curve has no phrase there or too few starts.
+- **Per-line provenance** (`LyricLine.estimated?: true`; `Lyrics.timing: "estimated"` = at least one line is
+  estimated, cleared only when none is). `distributeLines` flags only the lines it places; `normalizeLyrics`
+  keeps the flags on timed lines and derives `timing` and `synced` from them; the PATCH validator accepts
+  `estimated` per line. Round-13 data (the song flag without line flags) counts every timed line as estimated
+  (`estimatedFlags`, `estimatedCount`, `timingEstimated`). `placeUntimed` is the placement without
+  normalizing (the editor lays its rows out in place); `reestimateLines` re-lays the estimated lines between
+  the real ones.
+- **Lyric editor**: the flags live on the rows (`EditorLine.estimated`), so undo / redo, drafts (round-13
+  drafts read as before) and the dirty key carry them. Tapping, dragging, nudging or typing a start makes that
+  line real (`retimeLine`; Enter on an unchanged estimated time confirms it; focus + blur changes nothing);
+  inserting a line between two timed ones or a proportional split gives an estimated start. When a tap
+  session ends (Esc / 結束 / 完成) the still-estimated lines are re-estimated between the taps in the same undo
+  step, with the toast 「已標記 2 句；其餘 4 句依人聲重新估算（仍是估的）」; a typed, dragged or nudged time
+  does the same (toast 「其餘 N 句依人聲重新估算（仍是估的）」). Estimated rows carry a subtle 「估」 tag, the
+  header says 「還有 N 句時間是估的」, estimated markers on the timelines are fainter. 自動分配 offers
+  分配 N 行未定時的 / 重新估算『估的』行（保留已對好的） / 全部重新分配 (`reestimate` modes). For a song
+  analysed before round 14 it first computes the 人聲 curve from the project's audio in the browser (the same
+  `analyzeFile`, in its worker) and saves it with PATCH `vocal` (`parseVocalPatch`: a number array on the
+  stored analysis's envelope grid, ± 2 frames; nothing else in the analysis changes); a curve off the grid, or
+  a song without an analysis, uses it for the session only.
+- **人聲 lane** (`Timeline` `vocal` / `vocalRate`): a faint band under the waveform of both editor timelines —
+  the curve as an area, the detected phrases as a line — so the operator sees where singing is while dragging.
+- **Console and process copy** count: 「還有 N 句時間是估的，先到歌詞編輯器對拍」 (歌詞 pane banner, top bar link
+  「N 句時間是估的・去對拍」, process page banner and lyric step message). The console still starts a song in
+  手動切換 while any line is estimated (`timingEstimated` in the controller).
+- **Sensitive lyrics → symbolic visuals** (`SENSITIVE_LYRICS_RULE` in `designer/prompts.ts`, in the design,
+  directions and scene-program system prompts and, with a self-check line, the claude.ai manual prompt):
+  violence, self-harm, drugs or sex are shown through metaphor, colour, light and symbolic objects, never gore,
+  blood, wounds, corpses, skulls, weapons aimed at the audience or depicted self-harm (the wall is seen by
+  everyone in the room, minors included). The offline designer's lexicon maps such words to symbolic families
+  (凋零 withered petals, 斷裂的鎖鏈, 燭光, storm, broken glass, smoke); they are never emphasis words and get no
+  motion (`sensitiveWords`, `sensitive.test.ts`).
+
+#### Lyric timing evaluation (local only)
+
+How the curve and the aligner were chosen, and how to check a change. The data is JamendoLyrics MultiLang
+(79 CC-licensed songs in English, French, German and Spanish with human line annotations; download it
+yourself — its audio is CC BY-ND / BY-NC-ND, so **nothing of it goes into the repo or test fixtures**; unit
+tests use synthetic signals).
+
+1. `node scripts/timing-eval/decode.cjs <dataset dir> <cache dir>` decodes every mp3 with WebAudio in headless
+   Chromium (Playwright) into a 16-bit stereo 22 050 Hz WAV in the cache (skips cached files).
+2. `LIVELYRICS_TIMING_EVAL_DIR=<dataset dir> LIVELYRICS_TIMING_EVAL_CACHE=<cache dir> npx vitest run
+   src/lib/lyrics/timing-eval.test.ts` (skipped without the variable) runs the real `analyzeSamples` + vocal
+   pass on each song (analyses are cached per hash of `src/lib/audio/*.ts`) and the estimators: uniform (no
+   audio), the old loudness `distributeLines`, the new one, the new one with the mono model, and an oracle that
+   feeds the annotated sung spans as the curve (the upper bound of the approach: what a speech recogniser could
+   add). Metrics per song and pooled: median / mean |Δstart|, lines within 0.5 / 1 / 2 s, and "right line on
+   screen" (share of annotated sung time the stage's `lineIndexAt` shows the annotated line), by language and
+   Polyphonic; the partial-對拍 simulation anchors the first line of every paragraph and scores the others.
+   Songs are split into a dev half (tuning) and a held-out half by an FNV-1a hash of the file name. The report
+   goes to `scratch/round14/timing-eval.md` (`LIVELYRICS_TIMING_EVAL_OUT`), with the songs catastrophically
+   worse than the old method (median grown by more than max(5 s, old) untimed, max(1 s, old) with anchors).
+3. Round 14's numbers on the held-out half (44 songs): untimed median |Δstart| 6.99 s → 5.05 s, within 1 s
+   10.0 % → 17.4 %, right line on screen 25.2 % → 30.1 %; with paragraph anchors 0.86 s → 0.56 s,
+   55.0 % → 64.6 %, 61.0 % → 71.0 %; no song catastrophically worse. The oracle reaches 2.31 s / 44.1 %
+   untimed and 0.05 s / 93.5 % anchored: a better voice detector (or a recogniser) is where the rest is.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
@@ -1449,7 +1587,10 @@ keeps every contract above and changes only where things are kept and how long w
 
 ### SERVER — `src/lib/server/**` (except `designer/`), `src/lib/lyrics/**`, `src/app/api/**`
 - Storage with atomic JSON writes, list summaries (accent = plan palette[1] or [0]), delete folder.
-- LRC/plain parsing & serialization, `distributeLines`, `normalizeLyrics` (ids `l0..`, `synced`).
+- LRC/plain parsing & serialization, `distributeLines` (the 人聲 curve's phrase alignment, `align.ts`, else
+  the loudness spread; flags the lines it places `estimated`), `normalizeLyrics` (ids `l0..`, `synced`, the
+  per-line `estimated` flags and `timing`), `estimatedFlags` / `estimatedCount`, `placeUntimed`,
+  `reestimateLines`. PATCH `vocal` attaches a 人聲 curve to a stored analysis (round 14).
 - LRCLIB client (`https://lrclib.net/api/search`, `/api/get`), `User-Agent: Livelyrics/0.1 (+https://github.com/alanwu14832-bit/Livelyrics-)`,
   prefer synced results whose duration is within ±3 s; timeout + graceful failure.
 - Pipeline `lyrics → research → design → scene` (phase 7: the song's scene program), saving the project after each step; status
@@ -1513,12 +1654,14 @@ keeps every contract above and changes only where things are kept and how long w
 - Only the SDK may call Anthropic. Never log API keys.
 
 ### AUDIO — `src/lib/audio/**`
-- `analyzeSamples(mono, sampleRate)` pure & deterministic: STFT (own FFT), RMS energy, spectral-flux
-  onset, centroid brightness, bass band, tempo (autocorrelation of onset envelope, 70–180 BPM with
+- `analyzeSamples(mono, sampleRate, { side?, sideRate? })` pure & deterministic: STFT (own FFT), RMS energy,
+  spectral-flux onset, centroid brightness, bass band, tempo (autocorrelation of onset envelope, 70–180 BPM with
   octave-error handling), beat tracking (DP), novelty segmentation (min section ~8 s), waveform peaks
-  (~2000 buckets), envelopes at `envelopeRate` 20 Hz normalized 0..1.
-- `analyzeFile(file, onProgress)`: decode with Web Audio, downmix, run in a Web Worker
-  (`new Worker(new URL("./analyze.worker.ts", import.meta.url))`), fall back to main thread.
+  (~2000 buckets), envelopes at `envelopeRate` 20 Hz normalized 0..1, and (round 14) the 人聲 curve
+  `vocal` from `vocal.ts` (with the side signal when given, else the mono model).
+- `analyzeFile(file, onProgress)`: decode with Web Audio, downmix (+ the side signal (L − R) / 2 of a stereo
+  file, `sideOf`), run in a Web Worker (`new Worker(new URL("./analyze.worker.ts", import.meta.url))`), fall
+  back to main thread. The lyric editor also runs it on a stored song's audio to add a missing 人聲 curve.
 - `readAudioMetadata(file)` via `music-metadata` `parseBlob`, fallback to file-name parsing.
 - `live.ts`: `createMediaElementAnalyser(el)` (cached per element; must not break normal playback
   — connect analyser → destination), `createMicAnalyser()`, tap tempo; features 0..1.
@@ -1592,8 +1735,9 @@ keeps every contract above and changes only where things are kept and how long w
 - Process page: step timeline, streamed research (Markdown), search chips, logs, error + retry, and a
   final key-visual summary (palette, concept, motif) with "進入控制台" / "編輯歌詞".
 - Lyrics editor: table of lines (time, text, translation), paste / import LRC / LRCLIB picker,
-  tap-sync mode (play, Space marks the current line start and advances), ±0.1 s nudge, auto-distribute,
-  export LRC, save → `api.updateProject`, offer to re-run design.
+  tap-sync mode (play, Space marks the current line start and advances), ±0.1 s nudge, auto-distribute
+  (untimed / re-estimate the 「估」 lines / all), export LRC, save → `api.updateProject`, offer to re-run
+  design. Round 14: per-line 「估」 provenance, re-estimation around taps and manual edits, the 人聲 lane.
 
 ## Design system
 

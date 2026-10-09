@@ -11,6 +11,11 @@ export interface LyricsDraft {
   /** project.updatedAt the draft was based on */
   baseUpdatedAt: string;
   source: LyricsSource;
+  /**
+   * round 13 drafts: the song's times were estimated (自動分配), without per-line flags — every
+   * timed line of such a draft is estimated. Newer drafts flag the lines (EditorLine.estimated).
+   */
+  estimated?: boolean;
   lines: Array<Omit<EditorLine, "key">>;
 }
 
@@ -56,6 +61,7 @@ export function parseDraft(raw: unknown): LyricsDraft | null {
   const savedAt = num(d.savedAt);
   if (savedAt == null) return null;
   const lines: LyricsDraft["lines"] = [];
+  const legacy = d.estimated === true && !d.lines.some((item) => !!item && typeof item === "object" && (item as Record<string, unknown>).estimated === true);
   for (const item of d.lines.slice(0, 5000)) {
     if (!item || typeof item !== "object") continue;
     const l = item as Record<string, unknown>;
@@ -69,6 +75,7 @@ export function parseDraft(raw: unknown): LyricsDraft | null {
     };
     const w = start != null ? words(l.words) : undefined;
     if (w) line.words = w;
+    if (start != null && (legacy || l.estimated === true)) line.estimated = true;
     lines.push(line);
   }
   const source = SOURCES.includes(d.source as LyricsSource) ? (d.source as LyricsSource) : "user";
@@ -99,6 +106,7 @@ export function saveDraft(
     lines: data.lines.map((l) => {
       const out: Omit<EditorLine, "key"> = { text: l.text, translation: l.translation, start: l.start, end: l.end };
       if (l.words) out.words = l.words;
+      if (l.start != null && l.estimated) out.estimated = true;
       return out;
     }),
   };

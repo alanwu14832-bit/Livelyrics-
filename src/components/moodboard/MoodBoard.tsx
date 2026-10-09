@@ -57,8 +57,8 @@ function Card({ index, image, url, onOpen, readOnly }: { index: number; image: M
     <>
       <span className="relative block aspect-[4/3] w-full overflow-hidden">
         <Thumb url={url} className="absolute inset-0 size-full" />
-        <span className="absolute top-1.5 left-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-semibold text-white tabular">圖 {index}</span>
-        {readOnly && <span className="absolute top-1.5 right-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[11px] leading-none font-medium text-white">樂團</span>}
+        <span className="absolute top-1.5 left-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[12px] leading-none font-semibold text-white tabular">圖 {index}</span>
+        {readOnly && <span className="absolute top-1.5 right-1.5 rounded-xs bg-black/65 px-1.5 py-0.5 text-[12px] leading-none font-medium text-white">樂團</span>}
       </span>
       <span className="flex min-w-0 flex-col gap-1 px-2.5 py-2">
         <Swatches colors={image.stats?.palette ?? []} />

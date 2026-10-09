@@ -27,6 +27,7 @@ import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeT
 import { applyInstruction } from "./instruction";
 import { describeError } from "./messages";
 import { backupModelName, withRetries, type RetryOptions } from "./retry";
+import { hasApiKey, storedApiKey } from "@/lib/server/api-key";
 import { normalizePlan } from "./normalize";
 import { offlineDesign } from "./offline";
 import { freeResearch, type FreeResearchOptions } from "./free-research";
@@ -48,7 +49,8 @@ export type { VisionImage } from "./moodboard";
 
 /** true when an Anthropic credential is configured (otherwise the offline designer is used) */
 export function isClaudeConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim());
+  // the server's environment, or the key saved through 「設定」 (local mode; the environment wins)
+  return hasApiKey();
 }
 
 export function modelName(): string {
@@ -118,11 +120,15 @@ function isCancellation(err: unknown, signal?: AbortSignal): boolean {
   return Boolean(signal?.aborted) || err instanceof Anthropic.APIUserAbortError;
 }
 
-let sharedTransport: ClaudeTransport | null = null;
+let sharedTransport: { key: string | null; transport: ClaudeTransport } | null = null;
 function defaultTransport(): ClaudeTransport {
-  // created lazily: the SDK reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the environment
-  sharedTransport ??= sdkTransport(new Anthropic(clientOptions()));
-  return sharedTransport;
+  // created lazily: the SDK reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the environment;
+  // without them the key saved through 「設定」 is passed in (a new client when it changes)
+  const stored = storedApiKey();
+  if (!sharedTransport || sharedTransport.key !== stored) {
+    sharedTransport = { key: stored, transport: sdkTransport(new Anthropic({ ...clientOptions(), ...(stored ? { apiKey: stored } : {}) })) };
+  }
+  return sharedTransport.transport;
 }
 
 function resolveDeps(deps: DesignerDeps) {
@@ -166,7 +172,7 @@ export async function researchSong(input: DesignerInput, cb: DesignerCallbacks =
 
   if (!d.configured) {
     cbs.onLog(
-      `${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude（ANTHROPIC_API_KEY）"}，改用免費研究：查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象與音訊，不使用 API。`,
+      `${d.optedOut ? "這次不呼叫 Claude API" : "沒有 Anthropic API 金鑰"}，改用免費研究：查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象與音訊，不使用 API。`,
     );
     return freeResearch(input, tracked, d.free);
   }
@@ -212,7 +218,7 @@ function offlinePlan(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolea
         cb.onDelta(planSummary(plan));
         return plan;
       }
-      cb.onLog("離線設計師看不懂這個指示，保留目前的設計。設定 ANTHROPIC_API_KEY 後即可用自然語言重新設計。");
+      cb.onLog("離線設計師看不懂這個指示，保留目前的設計。在首頁的「設定」加入 Anthropic API 金鑰後，就能用一句話重新設計。");
     } else {
       cb.onLog("保留目前的設計方案（已重新對齊歌曲長度與歌詞）。");
     }
@@ -249,7 +255,7 @@ export async function designSong(
 
   if (!d.configured) {
     cbs.onLog(
-      `${d.optedOut ? "這次不呼叫 Claude API" : "未設定 Claude（ANTHROPIC_API_KEY）"}，使用離線設計師：依免費研究的發現（曲風的視覺語法、歌詞意象與情緒、音訊情緒）、段落結構與能量產生方案。`,
+      `${d.optedOut ? "這次不呼叫 Claude API" : "沒有 Anthropic API 金鑰"}，使用離線設計師：依免費研究的發現（曲風的視覺語法、歌詞意象與情緒、音訊情緒）、段落結構與能量產生方案。`,
     );
     return ensureSceneProgram(req, offlinePath(req, cbs, false));
   }

@@ -69,7 +69,7 @@ export function SharedStageView({ stage, project, store }: { stage: SharedStage;
     [id, report],
   );
   return createPortal(
-    <StageView project={project} store={store} showGuides renderScale={0.5} onStats={onStats} className="h-full w-full" style={{ aspectRatio: "auto", width: "100%", height: "100%" }} />,
+    <StageView project={project} store={store} renderScale={0.5} onStats={onStats} className="h-full w-full" style={{ aspectRatio: "auto", width: "100%", height: "100%" }} />,
     stage.host,
   );
 }

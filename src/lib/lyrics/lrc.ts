@@ -2,6 +2,7 @@
 // shared with the browser (the lyrics editor imports it), so no Node APIs here.
 
 import type { AudioAnalysis, LyricLine, LyricWord, Lyrics, LyricsSource } from "../types";
+import { alignRun, DEFAULT_ALIGN, sungSeconds, type AlignParams } from "./align";
 
 /** A derived line end (from the next line's start) never lingers longer than this; matches timeline.lineSpan. */
 const MAX_DERIVED_LINE_SECONDS = 10;
@@ -540,21 +541,124 @@ function placeRun(lines: LyricLine[], regions: Region[], from: number, to: numbe
   }
 }
 
-/** Give untimed lines rough start/end times spread across the vocal-looking parts of the song. */
-export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, duration: number): Lyrics {
-  const lines: LyricLine[] = (lyrics?.lines ?? []).map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
-  if (!lines.some((l) => l.start == null)) return normalizeLyrics({ ...lyrics, lines });
+export interface DistributeOptions {
+  /** the aligner's parameters (the evaluation harness tunes them) */
+  align?: Partial<AlignParams>;
+}
+
+/** The analysis's 人聲 curve when it can carry an alignment, else null. */
+function usableVocal(analysis: AudioAnalysis | null, duration: number): { curve: number[]; rate: number } | null {
+  const curve = analysis?.vocal;
+  const rate = analysis?.envelopeRate ?? 0;
+  if (!Array.isArray(curve) || !(rate > 0) || curve.length < Math.min(duration * rate * 0.5, rate * 8)) return null;
+  return { curve, rate };
+}
+
+/**
+ * Give untimed lines rough start/end times: laid over the phrases of the 人聲 curve between their
+ * timed neighbours (`alignRun`), or spread across the loudness-based vocal regions when the
+ * analysis has no usable curve. Every line placed here is flagged `estimated`; the timed lines keep
+ * their times and their own flags.
+ */
+export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, duration: number, options: DistributeOptions = {}): Lyrics {
+  // per-line provenance first (a legacy song-wide flag marks every timed line), so the result's
+  // `timing` follows the lines
+  const flags = estimatedFlags(lyrics);
+  const lines: LyricLine[] = (lyrics?.lines ?? []).map((l, k) => {
+    const copy: LyricLine = { ...l, words: l.words?.map((w) => ({ ...w })) };
+    if (flags[k]) copy.estimated = true;
+    else delete copy.estimated;
+    return copy;
+  });
+  const base: Lyrics = { ...lyrics, lines };
+  delete base.timing;
+  if (!lines.some((l) => l.start == null)) return normalizeLyrics(base);
+  return normalizeLyrics({ ...base, lines: placeUntimed(lines, analysis, duration, options) });
+}
+
+/**
+ * The placement behind `distributeLines`, without normalizing (the lyric editor lays its rows out
+ * in place): the same lines in the same order, each untimed one given a start (and an end when a
+ * real gap follows its sung part) and flagged `estimated`. Timed lines keep their starts; the one
+ * right before a run may get an end. Expects the timed lines in time order.
+ */
+export function placeUntimed(input: readonly LyricLine[], analysis: AudioAnalysis | null, duration: number, options: DistributeOptions = {}): LyricLine[] {
+  const lines: LyricLine[] = input.map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
+  if (!lines.some((l) => l.start == null)) return lines;
+  const placed = lines.map((l) => l.start == null);
 
   let dur = Number.isFinite(duration) && duration > 0 ? duration : 0;
   if (!dur && analysis && analysis.duration > 0) dur = analysis.duration;
   const lastTimed = Math.max(0, ...lines.map((l) => (l.start == null ? 0 : l.end ?? l.start)));
   if (!dur) dur = Math.max(lastTimed + 10, (lines.length * 4) / 0.84);
 
+  // today's proportional spread: the result without a 人聲 curve, and with one the aligner's prior
+  // (a misleading curve never moves a whole song) and its fallback for a run it cannot carry
+  const spread = lines.map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
+  spreadRuns(spread, analysis, dur);
+  const vocal = usableVocal(analysis, dur);
+  if (!vocal) return spread.map((l, k) => (placed[k] ? { ...l, estimated: true } : l));
+
+  const alignParams: AlignParams = { ...DEFAULT_ALIGN, ...options.align };
+  // the song's singing rate (sung seconds per weight unit) over every line, timed or not
+  const allWeight = lines.reduce((s, l) => s + lineWeight(l.text), 0);
+  const songRate = allWeight > 0 ? sungSeconds(vocal.curve, vocal.rate, 0, dur, alignParams) / allWeight : 0;
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].start != null) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < lines.length && lines[j + 1].start == null) j++;
+    const run = lines.slice(i, j + 1);
+    const prev = i > 0 ? lines[i - 1] : null;
+    const next = j + 1 < lines.length ? lines[j + 1] : null;
+    // the 人聲 curve: lay the run over the phrases between its timed neighbours, in order
+    const ps = prev ? (prev.start as number) : 0;
+    const to = next ? (next.start as number) : dur;
+    const prevEnds = prev != null && prev.end != null && prev.end > ps && prev.end < to;
+    const res =
+      to > ps
+        ? alignRun(
+            {
+              curve: vocal.curve,
+              rate: vocal.rate,
+              from: prevEnds ? (prev.end as number) : ps,
+              to,
+              prev: prev && !prevEnds ? { weight: lineWeight(prev.text) } : null,
+              hasNext: next != null,
+              // an open run (no timed line on one side) keeps near the proportional spread; between
+              // two timed lines the window itself bounds it
+              lines: run.map((l, k) => ({ weight: lineWeight(l.text), prior: prev && next ? undefined : (spread[i + k].start ?? undefined) })),
+              songRate: songRate > 0 ? songRate : undefined,
+            },
+            alignParams,
+          )
+        : null;
+    run.forEach((l, k) => {
+      l.start = res ? res.starts[k] : spread[i + k].start;
+      l.end = res ? res.ends[k] : spread[i + k].end;
+      l.estimated = true;
+      delete l.words;
+    });
+    if (prev && !prevEnds) {
+      if (res && res.prevEnd != null) prev.end = res.prevEnd;
+      else if (!res) prev.end = spread[i - 1].end;
+    }
+    i = j + 1;
+  }
+
+  // the placed times are a guess: those lines stay "estimated" until the operator taps them (對拍)
+  return lines;
+}
+
+/** Today's proportional spread of every untimed run over the loudness-based vocal regions (mutates `lines`). */
+function spreadRuns(lines: LyricLine[], analysis: AudioAnalysis | null, dur: number): void {
   const regions = vocalRegions(analysis, dur);
   const vocalStart = regions[0].start;
   const vocalEnd = regions[regions.length - 1].end;
   const MIN_PER_LINE = 1.5;
-
   let i = 0;
   while (i < lines.length) {
     if (lines[i].start != null) {
@@ -590,8 +694,6 @@ export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
     placeRun(run, regions, from, Math.max(from, to));
     i = j + 1;
   }
-
-  return normalizeLyrics({ ...lyrics, lines });
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +723,63 @@ function sanitizeWords(words: unknown, start: number): LyricWord[] | undefined {
   return out;
 }
 
-/** Recompute `synced` and ids ("l0".."lN") after edits. */
+/** Every line has a start time (real or estimated). */
+export function allLinesTimed(lyrics: Pick<Lyrics, "lines"> | null | undefined): boolean {
+  const lines = lyrics?.lines ?? [];
+  return lines.length > 0 && lines.every((l) => l.start != null);
+}
+
+/**
+ * Per line: is its start a guess (`LyricLine.estimated`)? Data from before round 14 carries
+ * `timing: "estimated"` without per-line flags — then every timed line is estimated. Untimed lines
+ * are never "estimated" (there is no time to doubt).
+ */
+export function estimatedFlags(lyrics: Pick<Lyrics, "timing" | "lines"> | null | undefined): boolean[] {
+  const lines = lyrics?.lines ?? [];
+  const legacy = lyrics?.timing === "estimated" && !lines.some((l) => l?.estimated === true);
+  return lines.map((l) => l?.start != null && (legacy || l.estimated === true));
+}
+
+/** How many lines have an estimated start (see `estimatedFlags`). */
+export function estimatedCount(lyrics: Pick<Lyrics, "timing" | "lines"> | null | undefined): number {
+  return estimatedFlags(lyrics).filter(Boolean).length;
+}
+
+/** At least one line's start is a guess (spread by `distributeLines`, not yet tapped / imported). */
+export function timingEstimated(lyrics: Pick<Lyrics, "timing" | "lines"> | null | undefined): boolean {
+  return estimatedCount(lyrics) > 0;
+}
+
+/**
+ * Re-estimate the lines whose start is a guess, between the real ones (taps, typed or dragged
+ * times, LRC): the estimated lines are cleared and laid out again by `distributeLines` — with the
+ * 人聲 curve when the analysis has one. Real lines never move. Returns the lyrics unchanged when
+ * nothing is estimated.
+ */
+export function reestimateLines(lyrics: Lyrics, analysis: AudioAnalysis | null, duration: number, options: DistributeOptions = {}): Lyrics {
+  const flags = estimatedFlags(lyrics);
+  if (!flags.some(Boolean)) return normalizeLyrics(lyrics);
+  const lines: LyricLine[] = lyrics.lines.map((l, k) => {
+    if (!flags[k]) {
+      const copy: LyricLine = { ...l };
+      delete copy.estimated;
+      return copy;
+    }
+    const copy: LyricLine = { ...l, start: null, end: null };
+    delete copy.words;
+    delete copy.estimated;
+    return copy;
+  });
+  const cleared: Lyrics = { ...lyrics, lines };
+  delete cleared.timing;
+  return distributeLines(cleared, analysis, duration, options);
+}
+
+/**
+ * Recompute `synced` and ids ("l0".."lN") after edits. Per-line `estimated` flags are kept on
+ * timed lines (legacy `timing: "estimated"` without flags marks every timed line); `timing` then
+ * says whether any line is estimated.
+ */
 export function normalizeLyrics(lyrics: Lyrics): Lyrics {
   const source: LyricsSource = lyrics && VALID_SOURCES.includes(lyrics.source) ? lyrics.source : "user";
   const input: unknown[] = Array.isArray(lyrics?.lines) ? lyrics.lines.slice(0, MAX_LINES) : [];
@@ -629,6 +787,8 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
   type Work = LyricLine & { order: number; key: number };
   const work: Work[] = [];
   let lastKey = -1;
+  // before round 14 the flag was song-wide: every timed line of such data is estimated
+  const legacyEstimated = lyrics?.timing === "estimated" && !input.some((raw) => !!raw && typeof raw === "object" && (raw as Partial<LyricLine>).estimated === true);
   input.forEach((raw, order) => {
     if (!raw || typeof raw !== "object") return;
     const l = raw as Partial<LyricLine>;
@@ -644,6 +804,7 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
     if (start != null) {
       const words = sanitizeWords(l.words, start);
       if (words) line.words = words;
+      if (legacyEstimated || l.estimated === true) line.estimated = true;
     }
     work.push(line);
   });
@@ -655,6 +816,7 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
     const line: LyricLine = { id: `l${idx}`, text: w.text, start: w.start, end: w.end };
     if (w.translation) line.translation = w.translation;
     if (w.words) line.words = w.words;
+    if (w.estimated) line.estimated = true;
     return line;
   });
 
@@ -685,7 +847,10 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
   }
 
   const language = typeof lyrics?.language === "string" && lyrics.language.trim() ? lyrics.language.trim().slice(0, 20) : detectLanguage(lines.map((l) => l.text));
-  const out: Lyrics = { source, synced: lines.length > 0 && lines.every((l) => l.start != null), lines };
+  const allTimed = lines.length > 0 && lines.every((l) => l.start != null);
+  const estimated = lines.some((l) => l.estimated === true);
+  const out: Lyrics = { source, synced: allTimed && !estimated, lines };
+  if (estimated) out.timing = "estimated";
   if (language) out.language = language;
   return out;
 }

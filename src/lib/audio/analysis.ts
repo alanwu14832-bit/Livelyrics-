@@ -7,6 +7,7 @@ import { downsample, removeDc, sanitizeSamples } from "./resample";
 import { detectSections } from "./segment";
 import { clamp01, normalizeBetween, normalizeDb, quantile, round } from "./stats";
 import { combinedStrength, estimateTempo, gridBeats, trackBeats } from "./tempo";
+import { analyzeVocal } from "./vocal";
 
 export type ProgressCallback = (progress: number, label: string) => void;
 
@@ -18,6 +19,13 @@ export interface AnalyzeOptions {
    * caller already converted the samples (e.g. decoded straight to 22.05 kHz)
    */
   sourceSampleRate?: number;
+  /**
+   * round 14: the side signal (L − R) / 2 of a stereo recording (`sideSignal` in ./vocal, usually at
+   * VOCAL_RATE) for the 人聲 curve; without it the curve uses the mono model
+   */
+  side?: Float32Array | null;
+  /** the side signal's sample rate (default: `sampleRate`) */
+  sideRate?: number;
 }
 
 export const ENVELOPE_RATE = 20;
@@ -41,6 +49,7 @@ export const PROGRESS_LABELS = {
   onsets: "偵測起音",
   tempo: "分析節奏",
   sections: "偵測段落",
+  vocal: "偵測人聲",
   done: "分析完成",
 } as const;
 
@@ -248,6 +257,11 @@ export function analyzeSamples(mono: Float32Array, sampleRate: number, options: 
     bpm,
   });
 
+  // round 14: the 人聲 curve (centre-panned, voice-shaped energy against its local context)
+  report(0.9, PROGRESS_LABELS.vocal);
+  const side = options.side instanceof Float32Array && options.side.length > 0 ? sanitizeSamples(options.side) : null;
+  const vocal = analyzeVocal(x, sr, side, side ? (options.sideRate && options.sideRate > 0 ? options.sideRate : sampleRate) : sr, { energy: energy.norm, onset, brightness, bass }, nEnv, ENVELOPE_RATE);
+
   const result: AudioAnalysis = {
     duration: round(duration, 3),
     sampleRate: reportedRate,
@@ -259,6 +273,7 @@ export function analyzeSamples(mono: Float32Array, sampleRate: number, options: 
     onset: roundArray(onset),
     brightness: roundArray(brightness),
     bass: roundArray(bass),
+    vocal: roundArray(vocal),
     peaks,
     sections: sections.map((s) => ({ start: round(s.start, 3), end: round(s.end, 3), energy: round(s.energy, 4) })),
   };

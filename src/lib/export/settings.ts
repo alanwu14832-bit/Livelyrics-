@@ -229,3 +229,11 @@ export function formatBytes(n: number): string {
 }
 
 export { fpsOf };
+
+/** An export estimated above this asks first (a 60-minute set at high quality runs into many GB). */
+export const EXPORT_SIZE_CONFIRM_BYTES = 2e9;
+
+/** The 「開始匯出」 guard: true when the estimated size needs the operator's OK. */
+export function exportNeedsSizeConfirm(bytes: number): boolean {
+  return Number.isFinite(bytes) && bytes > EXPORT_SIZE_CONFIRM_BYTES;
+}

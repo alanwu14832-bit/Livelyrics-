@@ -1,7 +1,8 @@
 // Pure editing operations for the lyrics editor. Lines keep a local React key; ids
 // ("l0"...) are only assigned by normalizeLyrics when saving.
 
-import type { LyricWord, Lyrics, LyricsSource } from "@/lib/types";
+import { estimatedFlags, placeUntimed, type DistributeOptions } from "@/lib/lyrics/lrc";
+import type { AudioAnalysis, LyricLine, LyricWord, Lyrics, LyricsSource } from "@/lib/types";
 
 export interface EditorLine {
   /** local, stable React key (not the saved line id) */
@@ -16,6 +17,11 @@ export interface EditorLine {
    */
   end: number | null;
   words?: LyricWord[];
+  /**
+   * the start is a guess (自動分配 / 人聲估算, LyricLine.estimated): tapping, dragging or typing
+   * the start makes the line real
+   */
+  estimated?: boolean;
 }
 
 /** a line end closer than this to the next start counts as "contiguous" (derived) */
@@ -63,6 +69,7 @@ function prevTimedStart(lines: readonly EditorLine[], index: number): number | n
 
 export function fromLyrics(lyrics: Lyrics | null | undefined): EditorLine[] {
   const src = lyrics?.lines ?? [];
+  const flags = estimatedFlags(lyrics);
   const out: EditorLine[] = [];
   for (let i = 0; i < src.length; i++) {
     const l = src[i];
@@ -79,12 +86,13 @@ export function fromLyrics(lyrics: Lyrics | null | undefined): EditorLine[] {
     }
     const line: EditorLine = { key: newLineKey(), text: l.text ?? "", translation: l.translation ?? "", start: l.start ?? null, end };
     if (l.start != null && l.words && l.words.length) line.words = l.words.map((w) => ({ ...w }));
+    if (flags[i]) line.estimated = true;
     out.push(line);
   }
   return out;
 }
 
-/** Raw Lyrics for saving (pass the result through normalizeLyrics). */
+/** Raw Lyrics for saving (pass the result through normalizeLyrics); `timing` follows the per-line flags. */
 export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSource; language?: string }): Lyrics {
   const out: Lyrics = {
     source: base.source,
@@ -99,18 +107,20 @@ export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSou
       const tr = l.translation.trim();
       if (tr) line.translation = tr;
       if (l.start != null && l.words && l.words.length) line.words = l.words;
+      if (l.start != null && l.estimated) line.estimated = true;
       return line;
     }),
   };
   if (base.language) out.language = base.language;
+  if (out.lines.some((l) => l.estimated)) out.timing = "estimated";
   return out;
 }
 
-/** Stable fingerprint of the saved content (dirty tracking). */
+/** Stable fingerprint of the saved content (dirty tracking); a tap that lands on the estimated time still counts. */
 export function contentKey(lines: readonly EditorLine[], source: LyricsSource): string {
   return JSON.stringify([
     source,
-    lines.map((l) => [l.text.trim(), l.translation.trim(), l.start, l.start != null ? l.end : null, l.words?.length ?? 0]),
+    lines.map((l) => [l.text.trim(), l.translation.trim(), l.start, l.start != null ? l.end : null, l.words?.length ?? 0, l.start != null && l.estimated ? 1 : 0]),
   ]);
 }
 
@@ -118,20 +128,31 @@ export function contentKey(lines: readonly EditorLine[], source: LyricsSource): 
 // timing
 // ---------------------------------------------------------------------------
 
-/** Move a line to `start` (null = untimed). Explicit end and word timings move with it. */
+function real(line: EditorLine): EditorLine {
+  if (!line.estimated) return line;
+  const copy = { ...line };
+  delete copy.estimated;
+  return copy;
+}
+
+/**
+ * Move a line to `start` (null = untimed). Explicit end and word timings move with it. A time set
+ * here comes from the operator (typed, dragged, nudged, tapped): the line is no longer estimated,
+ * even when the time lands where the estimate was.
+ */
 export function retimeLine(line: EditorLine, start: number | null, duration?: number): EditorLine {
   if (start == null || !Number.isFinite(start)) {
-    if (line.start == null && !line.words && line.end == null) return line;
-    return withoutWords({ ...line, start: null, end: null });
+    if (line.start == null && !line.words && line.end == null && !line.estimated) return line;
+    return real(withoutWords({ ...line, start: null, end: null }));
   }
   let s = Math.max(0, start);
   if (duration && duration > 0) s = Math.min(s, duration);
   s = round3(s);
-  if (line.start == null) return withoutWords({ ...line, start: s, end: null });
-  if (s === line.start) return line;
+  if (line.start == null) return real(withoutWords({ ...line, start: s, end: null }));
+  if (s === line.start) return real(line);
   const d = s - line.start;
   const end = line.end != null && line.end + d > s + MIN_LINE_SECONDS ? round3(line.end + d) : null;
-  const next: EditorLine = { ...line, start: s, end };
+  const next: EditorLine = real({ ...line, start: s, end });
   if (line.words) next.words = line.words.map((w) => ({ text: w.text, start: round3(Math.max(0, w.start + d)), end: round3(Math.max(0, w.end + d)) }));
   return next;
 }
@@ -195,6 +216,60 @@ export function timedCount(lines: readonly EditorLine[]): number {
   return n;
 }
 
+/** Lines whose start is still a guess. */
+export function estimatedCount(lines: readonly EditorLine[]): number {
+  let n = 0;
+  for (const l of lines) if (l.start != null && l.estimated) n++;
+  return n;
+}
+
+export type ReestimateMode =
+  /** the estimated lines between the real ones (untimed lines stay untimed) — after 對拍 or a manual edit */
+  | "estimated"
+  /** the estimated and the untimed lines (重新估算『估的』行) */
+  | "estimated+untimed"
+  /** only the untimed lines (分配未定時的行) */
+  | "untimed"
+  /** every line, real ones too (重新分配全部) */
+  | "all";
+
+/**
+ * Lay lines out again with `distributeLines`' estimator (the 人聲 curve when the analysis has one,
+ * else the loudness spread), in place: the rows keep their keys, order and text; real lines never
+ * move (except in "all"). The re-laid lines are flagged estimated.
+ */
+export function reestimate(lines: readonly EditorLine[], analysis: AudioAnalysis | null, duration: number, mode: ReestimateMode = "estimated", options: DistributeOptions = {}): EditorLine[] {
+  const redo = lines.map((l) => mode === "all" || (l.start == null ? mode !== "estimated" : !!l.estimated && mode !== "untimed"));
+  // untimed rows take part in the layout (they are sung too) but stay untimed in "estimated" mode
+  const layout = lines.map((l, i) => redo[i] || l.start == null);
+  if (!redo.some(Boolean)) return lines as EditorLine[];
+  const raw: LyricLine[] = lines.map((l, i) => ({ id: l.key, text: l.text, start: layout[i] ? null : l.start, end: layout[i] ? null : l.end }));
+  const placed = placeUntimed(raw, analysis, duration, options);
+  const out = lines.map((l, i) => {
+    if (!redo[i]) return l;
+    const start = placed[i]?.start ?? null;
+    if (start == null) return retimeLine(l, null);
+    const line: EditorLine = withoutWords({ ...l, start: round3(start), end: null, estimated: true });
+    return line;
+  });
+  // explicit ends only where a gap follows (the same rule as fromLyrics)
+  for (let i = 0; i < out.length; i++) {
+    if (!redo[i] || out[i].start == null) continue;
+    const end = placed[i]?.end;
+    const start = out[i].start as number;
+    if (end == null || !(end > start)) continue;
+    let nextStart: number | null = null;
+    for (let k = i + 1; k < out.length; k++) {
+      if (out[k].start != null) {
+        nextStart = out[k].start;
+        break;
+      }
+    }
+    if (nextStart == null || end < nextStart - CONTIGUOUS_EPS) out[i] = { ...out[i], end: round3(end) };
+  }
+  return out;
+}
+
 /** Effective end of a line for display/playback (explicit, next start, or a capped default). */
 export function effectiveEnd(lines: readonly EditorLine[], index: number, duration?: number): number | null {
   const l = lines[index];
@@ -225,7 +300,10 @@ export function insertLine(lines: readonly EditorLine[], position: number, durat
   else if (prev != null && pos > 0 && lines[pos - 1].start != null) start = prev + 2;
   if (start != null && duration && duration > 0) start = Math.min(start, duration);
   const out = lines.slice();
-  out.splice(pos, 0, blankLine(start));
+  const line = blankLine(start);
+  // a start placed between the neighbours is a guess until the operator times the line
+  if (line.start != null) line.estimated = true;
+  out.splice(pos, 0, line);
   return { lines: out, index: pos };
 }
 
@@ -257,6 +335,7 @@ export function mergeWithNext(lines: readonly EditorLine[], index: number): Edit
     start,
     end: start != null && b.end != null && b.end > start ? b.end : null,
   };
+  if (start != null && (a.start != null ? a.estimated : b.estimated)) merged.estimated = true;
   if (a.start != null && b.start != null && a.words?.length && b.words?.length && a.text.trim() && b.text.trim()) {
     const first = a.words.map((w) => ({ ...w }));
     first[first.length - 1].text = first[first.length - 1].text.replace(/\s*$/, " ");
@@ -334,6 +413,7 @@ export function splitLine(lines: readonly EditorLine[], index: number, caret?: n
 
   const first: EditorLine = { key: line.key, text: left, translation: line.translation, start: line.start, end: null };
   if (leftWords) first.words = leftWords;
+  if (line.estimated && line.start != null) first.estimated = true;
   const second: EditorLine = {
     key: newLineKey(),
     text: right,
@@ -342,6 +422,8 @@ export function splitLine(lines: readonly EditorLine[], index: number, caret?: n
     end: rightStart != null && line.end != null && line.end > rightStart ? line.end : null,
   };
   if (rightWords) second.words = rightWords;
+  // a word boundary keeps the line's provenance; a proportional split point is a guess
+  if (rightStart != null && (line.estimated || !rightWords)) second.estimated = true;
   const out = lines.slice();
   out.splice(index, 1, first, second);
   return { lines: out, index: index + 1 };

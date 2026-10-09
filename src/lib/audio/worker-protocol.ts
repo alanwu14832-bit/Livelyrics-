@@ -9,6 +9,9 @@ export interface AnalyzeRequest {
   samples: Float32Array;
   sampleRate: number;
   sourceSampleRate?: number;
+  /** round 14: the side signal (L − R) / 2 for the 人聲 curve (stereo files up to 20 minutes), transferred */
+  side?: Float32Array;
+  sideRate?: number;
 }
 
 export type WorkerResponse =

@@ -387,14 +387,14 @@ function SectionStrip({ plan, duration, selected, onSelect, grow }: { plan: Desi
               <span className="block truncate text-[12px] leading-4 font-semibold" style={{ color: s.lyricColor, textShadow: "0 1px 3px rgba(0,0,0,.6)" }}>
                 {s.label}
               </span>
-              <span className="block truncate text-[11px] leading-4 text-white/85" style={{ textShadow: "0 1px 2px rgba(0,0,0,.7)" }}>
+              <span className="block truncate text-[12px] leading-4 text-white/85" style={{ textShadow: "0 1px 2px rgba(0,0,0,.7)" }}>
                 {SCENE_LABEL[s.scene]}
               </span>
             </button>
           );
         })}
       </div>
-      <div className="relative mt-1.5 h-4 text-[11px] leading-4 text-label-2 tabular" aria-hidden="true">
+      <div className="relative mt-1.5 h-4 text-[12px] leading-4 text-label-2 tabular" aria-hidden="true">
         {plan.sections.map((s, i) => {
           const left = (s.start / total) * 100;
           // skip ticks that would collide with the previous one or the end label

@@ -8,7 +8,7 @@ import { ClipWriter, decodeSongAudio, planAudioCodec, planVideoCodec, sliceAudio
 import { FRAME_RATES, frameCount, frameTime, fpsOf, type FrameRateId } from "@/lib/export/frames";
 import { VARIANT_INFO, exportBaseName, songDuration, targetBitrate, variantFileName, type ExportSettings, type ExportVariant, type VideoCodecChoice } from "@/lib/export/settings";
 import type { Project } from "@/lib/types";
-import { OfflineStage } from "@/components/stage/export/OfflineStage";
+import { OfflineStage, RenderCanceled } from "@/components/stage/export/OfflineStage";
 
 export interface ExportProgress {
   phase: "prepare" | "render" | "finalize";
@@ -254,11 +254,20 @@ export async function runExport(job: ExportJob): Promise<ExportResult> {
 }
 
 /** One frame at song time t (the 單格預覽): scene, lyric layer and matte as PNG data. */
-export async function renderPreview(project: Project, t: number, fps: number): Promise<{ full: string; background: string; matte: string; warnings: string[]; width: number; height: number }> {
+export async function renderPreview(
+  project: Project,
+  t: number,
+  fps: number,
+  signal?: AbortSignal,
+): Promise<{ full: string; background: string; matte: string; warnings: string[]; width: number; height: number }> {
   const stage = new OfflineStage(project);
   try {
     const { warnings } = await stage.prepare();
-    await stage.renderFrame(t, fps, { scene: true, background: true, lyrics: true, matte: true });
+    if (signal?.aborted) throw new RenderCanceled();
+    // the stage needs the page's DOM (the lyric layer, next/font faces, media elements), so it
+    // cannot move to a worker; with a signal it yields between pre-roll frames and can be cancelled
+    await stage.renderFrame(t, fps, { scene: true, background: true, lyrics: true, matte: true }, { signal });
+    if (signal?.aborted) throw new RenderCanceled();
     const out = document.createElement("canvas");
     out.width = stage.width;
     out.height = stage.height;

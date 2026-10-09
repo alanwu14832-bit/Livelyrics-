@@ -57,7 +57,7 @@ import { collectedBlock, combinedMood } from "./collected";
 import { normalizePlan } from "./normalize";
 import { offlineDesign } from "./offline";
 import { buildPalette, type PaletteEntry } from "./palette";
-import { analysisSummary, bibleBlock, catalogBlock, lyricExcerpt, songBlock, trimBrief } from "./prompts";
+import { analysisSummary, bibleBlock, catalogBlock, lyricExcerpt, SENSITIVE_LYRICS_RULE, songBlock, trimBrief } from "./prompts";
 import { analyzeStructure, clamp } from "./structure";
 import { EMBLEM_STYLES, generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { chooseVoice, designTypeSystem, topRecipes } from "./type-design";
@@ -792,6 +792,7 @@ export const DIRECTIONS_SYSTEM = `你是這個樂團的專職舞台視覺總監�
 - 歌詞是視覺藝術：每一句歌詞都會排成一張設計過的構圖（字體藝術），不是卡拉 OK 或字幕。四種字體語言——mv-card 日系 MV 字卡（極端字級對比、直橫混排、大留白、拍點硬切、「」當圖形）、title-sequence 電影片頭／動態海報（字就是形狀、出血、瑞士網格、細線與編號、遮罩擦出）、ink 書法與水墨（楷書依筆順寫出、直排、暈染飛白、紅色印章）、glitch 實驗／故障感（切片錯位、RGB 分離、殘影、疊印與顆粒）——三個方向各選一個不同的。
 - 三個方向都必須成立：適合這首歌、這個樂團，都能在 LED 大螢幕上讀得清楚；不要做一個明顯是湊數的方向。
 - 視覺是配角、托起樂團：唱到的每一句都會出現，但主歌小而安靜、副歌才大；歌詞色與背景對比至少 4.5:1；字重 600 以上。
+- ${SENSITIVE_LYRICS_RULE}
 
 # 理由要有根據
 - 引用研究簡報裡的具體發現（專輯封面、MV、招牌色、現場習慣），不要空泛的形容詞。

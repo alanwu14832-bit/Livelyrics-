@@ -16,6 +16,7 @@ export function TimeInput({
   invalidHint,
   warn,
   dim,
+  estimated,
   className,
   "aria-label": ariaLabel,
   ...data
@@ -29,6 +30,8 @@ export function TimeInput({
   warn?: boolean;
   /** secondary text (rows that are not the tap-sync target) */
   dim?: boolean;
+  /** the time is a guess: Enter on it unchanged confirms it (the line becomes real) */
+  estimated?: boolean;
   className?: string;
   "aria-label": string;
   [key: `data-${string}`]: string | number | undefined;
@@ -39,8 +42,16 @@ export function TimeInput({
   const parsed = draft != null ? parseTimeInput(draft) : value;
   const invalid = draft != null && parsed === undefined;
 
-  const commit = () => {
+  const commit = (confirm = false) => {
     if (draft == null) return true;
+    // focusing and leaving the cell changes nothing (and keeps an estimated time estimated);
+    // Enter on an unchanged estimated time confirms it
+    if (draft.trim() === formatTimeInput(value)) {
+      setDraft(null);
+      setError(false);
+      if (confirm && estimated && value != null) onCommit(value);
+      return true;
+    }
     const t = parseTimeInput(draft);
     if (t === undefined) {
       setError(true);
@@ -62,7 +73,7 @@ export function TimeInput({
       setDraft(null);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (commit()) onEnter?.(e.shiftKey);
+      if (commit(true)) onEnter?.(e.shiftKey);
     } else if (e.key === "Escape") {
       if (draft != null) {
         e.preventDefault();

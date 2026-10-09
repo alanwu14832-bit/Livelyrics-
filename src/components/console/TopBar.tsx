@@ -14,6 +14,8 @@ import { ExportIcon, MoonIcon, PauseIcon, SpeakerHighIcon, SpeakerSlashIcon, Pla
 import type { ConsoleController, ConsoleSnapshot, OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, useStageValue } from "@/lib/console/hooks";
 import { untimedCount } from "@/lib/console/navigation";
+import { estimatedCount } from "@/lib/lyrics/lrc";
+import Link from "next/link";
 import { designStatusLabel } from "@/lib/research-labels";
 import { formatTime } from "@/lib/timeline";
 import { ProjectHeading } from "@/components/home/ProjectHeading";
@@ -114,6 +116,23 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
     tone = "orange";
   } else if (untimed > 0) {
     status = `${untimed} 行未對時`;
+    tone = "orange";
+  } else if (project && estimatedCount(lyrics) > 0) {
+    // some times were estimated (人聲 / spread), not tapped: say how many and point at 對拍
+    status = (
+      <Tooltip content={`還有 ${estimatedCount(lyrics)} 句時間是估的，先到歌詞編輯器對拍；在那之前用手動切換逐句送出`} placement="bottom-start">
+        <Link
+          href={`/p/${encodeURIComponent(project.id)}/lyrics`}
+          data-testid="timing-estimated-link"
+          onClick={(e) => {
+            if (!controller.confirmLeave()) e.preventDefault();
+          }}
+          className="font-semibold text-orange-text underline-offset-2 hover:underline"
+        >
+          {estimatedCount(lyrics)} 句時間是估的・去對拍
+        </Link>
+      </Tooltip>
+    );
     tone = "orange";
   } else if (project) status = designStatusLabel(project);
 

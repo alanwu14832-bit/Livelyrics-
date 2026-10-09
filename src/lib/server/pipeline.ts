@@ -20,7 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ProcessRequest } from "@/lib/api-client";
-import { distributeLines, emptyLyrics, parseLyricsText } from "@/lib/lyrics/lrc";
+import { allLinesTimed, distributeLines, emptyLyrics, estimatedCount, parseLyricsText } from "@/lib/lyrics/lrc";
 import { remapPlanLines } from "@/lib/lyrics/remap";
 import { DesignPlanSchema } from "@/lib/schema";
 import * as designer from "@/lib/server/designer";
@@ -769,6 +769,8 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
   const log = (message: string) => emit(run, { type: "log", step: "lyrics", message });
   const duration = project.meta.duration || project.analysis?.duration || 0;
   const roughTiming = (l: Lyrics) => distributeLines(l, project.analysis, duration);
+  // round 14: with a 人聲 curve the untimed lines are laid over the singing, else spread by loudness
+  const how = project.analysis?.vocal?.length ? "依人聲估算時間" : "依音訊能量粗略分配";
   let lyrics: Lyrics | null = null;
   let message = "";
 
@@ -782,12 +784,18 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
       message = `使用貼上的同步歌詞（${parsed.lines.length} 行）`;
     } else {
       lyrics = roughTiming(parsed);
-      message = `使用貼上的歌詞（${parsed.lines.length} 行）；沒有時間碼，已依音訊能量粗略分配，建議到歌詞編輯器校正`;
+      message = `使用貼上的歌詞（${parsed.lines.length} 行）；沒有時間碼，已${how}（仍是估的），建議到歌詞編輯器對拍`;
     }
   }
 
-  if (!lyrics && project.lyrics.synced && project.lyrics.lines.length > 0) {
-    return { skipped: true, message: `沿用現有的同步歌詞（${project.lyrics.lines.length} 行）` };
+  if (!lyrics && allLinesTimed(project.lyrics)) {
+    return {
+      skipped: true,
+      message:
+        estimatedCount(project.lyrics) > 0
+          ? `沿用現有歌詞（${project.lyrics.lines.length} 行）；還有 ${estimatedCount(project.lyrics)} 句時間是估的，建議到歌詞編輯器對拍`
+          : `沿用現有的同步歌詞（${project.lyrics.lines.length} 行）`,
+    };
   }
 
   if (!lyrics) {
@@ -803,7 +811,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
           message = `LRCLIB 同步歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行）`;
         } else if (best?.kind === "plain") {
           lyrics = roughTiming(best.lyrics);
-          message = `LRCLIB 歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已粗略分配，建議到歌詞編輯器校正）`;
+          message = `LRCLIB 歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已${how}，建議到歌詞編輯器對拍）`;
         } else if (best?.kind === "instrumental") {
           lyrics = emptyLyrics("none");
           message = `LRCLIB 標示「${best.trackName}」為純音樂，這首歌以純視覺設計`;
@@ -819,7 +827,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
 
   if (!lyrics && project.lyrics.lines.length > 0) {
     lyrics = roughTiming(project.lyrics);
-    message = `沿用現有歌詞（${lyrics.lines.length} 行），已粗略分配時間`;
+    message = `沿用現有歌詞（${lyrics.lines.length} 行），已${how}`;
   }
 
   if (!lyrics) {

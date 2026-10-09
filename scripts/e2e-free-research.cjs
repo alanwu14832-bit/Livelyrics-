@@ -190,7 +190,7 @@ async function clipboard(page) {
 
 (async () => {
   const status = await api("GET", "/api/status");
-  check("server runs without an API key (免費研究模式)", status.claude === false, `claude=${status.claude}`);
+  check("server runs without an API key (基本模式)", status.claude === false, `claude=${status.claude}`);
 
   const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: "light" });
@@ -203,13 +203,14 @@ async function clipboard(page) {
     // ----------------------------------------------- 0. the home page status copy
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
     await page.waitForTimeout(600);
-    check("home says 免費研究模式", (await page.locator("body").innerText()).includes("目前使用免費研究模式"));
-    await page.getByRole("button", { name: "免費研究模式" }).click();
-    const connect = page.getByRole("dialog", { name: "連接 Claude" });
+    check("home says 基本模式", (await page.locator("body").innerText()).includes("目前是基本模式"));
+    await page.getByRole("button", { name: "基本模式" }).click();
+    const connect = page.getByRole("dialog", { name: "設定" });
     await connect.waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     const connectText = await connect.innerText();
-    check("the connect sheet explains the free mode and the claude.ai option", connectText.includes("MusicBrainz") && connectText.includes("用 claude.ai 研究") && connectText.includes("ANTHROPIC_API_KEY"));
+    check("the 設定 sheet explains the basic mode, the claude.ai option and where to get a key", connectText.includes("MusicBrainz") && connectText.includes("用 claude.ai 研究") && connectText.includes("到 Anthropic Console 建立金鑰"));
+    check("the 設定 sheet has no developer instructions", !/\.env\.local|npm run dev|ANTHROPIC_API_KEY/.test(connectText), connectText.slice(0, 80));
     await shot(page, "home-connect-sheet");
     await page.getByRole("button", { name: "關閉" }).click();
     await page.waitForTimeout(400);

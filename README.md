@@ -4,7 +4,7 @@
 
 - 音訊分析（BPM、節拍、能量、段落、波形）在瀏覽器完成。在本機執行時音檔只存在你的電腦上；部署到 Vercel 時存在你自己的 Vercel Blob 儲存空間。
 - 歌詞：自動從 [LRCLIB](https://lrclib.net) 找同步歌詞，或貼上 LRC／純文字，再用「對拍」功能自己對時間。
-- 設計：有 Claude API 金鑰時由 Claude 上網研究再設計；沒有金鑰時使用**免費研究模式**（查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象、情緒與音訊，由內建設計師依這些發現產生方案），一樣能完整使用。想要 Claude 的研究又不想付 API 費用，可以用「**用 claude.ai 研究**」：把提示詞貼到自己的 claude.ai 對話，再把回覆貼回來。
+- 設計：有 Claude API 金鑰時由 Claude 上網研究再設計；沒有金鑰時使用**基本模式**（免費研究）（查詢 MusicBrainz 與維基百科的公開資料，再分析歌詞意象、情緒與音訊，由內建設計師依這些發現產生方案），一樣能完整使用。想要 Claude 的研究又不想付 API 費用，可以用「**用 claude.ai 研究**」：把提示詞貼到自己的 claude.ai 對話，再把回覆貼回來。
 
 ## 在本機執行
 
@@ -22,7 +22,9 @@ npm run dev
 
 ### 啟用 Claude 研究與設計（選用）
 
-在專案根目錄建立 `.env.local`：
+最簡單的方式：首頁右上角按「基本模式」打開「設定」，到 Anthropic Console 建立金鑰，貼上後按「儲存金鑰」。金鑰存在這台電腦的資料夾（`<資料夾>/settings/anthropic-key.json`，只有自己能讀），頁面上只會顯示末四碼，「移除金鑰」可以刪掉；不需要重新啟動。在 Vercel 上請改用專案的 Environment Variables（設定頁會說明）。
+
+開發者也可以照舊在專案根目錄建立 `.env.local`（環境變數優先於「設定」裡存的金鑰）：
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
@@ -36,7 +38,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # LIVELYRICS_DATA_DIR=/path/to/livelyrics-data
 ```
 
-存檔後在終端機按 `Ctrl+C`，再重新執行 `npm run dev`。首頁右上角會從「免費研究模式」變成「Claude 已連線」。
+存檔後在終端機按 `Ctrl+C`，再重新執行 `npm run dev`。首頁右上角會從「基本模式」變成「Claude 已連線」。
 
 ### 先用示範歌曲試試
 
@@ -64,7 +66,7 @@ node scripts/seed-demo.mjs
    | 變數 | 說明 |
    |---|---|
    | `LIVELYRICS_PASSWORD` | 建議設定：整個網站需要先輸入這個密碼（登入後保持 30 天，改密碼會讓所有人登出）。沒設定時任何知道網址的人都能使用 |
-   | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用免費研究模式。建立金鑰時把它綁定到一個 workspace（例如 Default）最簡單 |
+   | `ANTHROPIC_API_KEY` | 選用：啟用 Claude 研究與設計；沒有時使用基本模式（免費研究）。建立金鑰時把它綁定到一個 workspace（例如 Default）最簡單 |
    | `ANTHROPIC_WORKSPACE_ID` | 只有金鑰沒有綁定單一 workspace 時才需要：填 `wrkspc_` 開頭的 workspace ID（Claude Console 的 **Settings › Workspaces**）。沒填時 Claude 會回應 400「沒有綁定 workspace」 |
    | `LIVELYRICS_MODEL` | 選用：換模型（預設 `claude-sonnet-5-5`；要最好的品質可改 `claude-opus-5-5`，費用約兩倍） |
    | `LIVELYRICS_BACKUP_MODEL` | 選用：Claude 暫時無法使用（503、529 過載）時，先等 3 秒、8 秒重試兩次，再改用這個備用模型試一次（預設 `claude-opus-5-5`，只在出錯時才用；填 `off` 關閉） |
@@ -296,6 +298,7 @@ BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-directions.cjs  # �
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-sync.cjs        # 同步與控制器：假的 MIDI 裝置、MIDI clock、MTC、LTC（假麥克風）
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-type.cjs        # 字體藝術：構圖、排版編輯器（電腦與手機）、匯出
 BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-scene.cjs       # 專屬畫面：投影與預覽、編譯失敗的退回、LED 安全、重新產生與開關
+BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-onboarding.cjs  # 設定的金鑰（假金鑰，存入、遮罩、移除）、估的歌詞時間與對拍、投影的等待提示（伺服器不可有 ANTHROPIC_API_KEY）
 BASE=http://localhost:3100 node scripts/legibility.cjs [作品 id…]           # 可讀性：每一句 ≥ 4.5:1、主字 ≥ 7:1（沒給 id 就檢查伺服器上所有作品）
 ```
 

@@ -39,6 +39,7 @@ import {
   type WritableStageStore,
 } from "@/lib/stage/protocol";
 import { beatPhaseAt, lineIndexAt, sectionIndexAt } from "@/lib/timeline";
+import { timingEstimated } from "@/lib/lyrics/lrc";
 import { patchOutput, type OutputPatch } from "@/lib/output";
 import { MANUAL_KEY } from "./hotkeys";
 import type { SafetyPatch } from "@/lib/stage/safety";
@@ -638,7 +639,8 @@ export class ConsoleController {
     if (!this.settingsFromStorage) {
       // lyrics without timing are cued by hand: start in LIVE mode; else the mode the operator last
       // chose by hand on any song (手動切換 once → every new song starts that way)
-      const untimed = !!project.lyrics && timedRatio(project.lyrics) < 0.5 && project.lyrics.lines.length > 0;
+      // estimated times (spread over the song, not tapped) are a guess too: cue them by hand until 對拍
+      const untimed = !!project.lyrics && project.lyrics.lines.length > 0 && (timedRatio(project.lyrics) < 0.5 || timingEstimated(project.lyrics));
       const mode: PlaybackMode = untimed ? "live" : (loadPreferredMode() ?? "track");
       this.settings = { ...this.settings, mode };
       this.set({ mode });

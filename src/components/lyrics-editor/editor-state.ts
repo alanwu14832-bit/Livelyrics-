@@ -1,4 +1,5 @@
-// Undoable editor state (useReducer).
+// Undoable editor state (useReducer). Which lines are estimated lives on the lines themselves
+// (EditorLine.estimated, round 14), so undo / redo bring the flags back with the times.
 
 import type { LyricsSource } from "@/lib/types";
 import type { EditorLine } from "./editor-model";

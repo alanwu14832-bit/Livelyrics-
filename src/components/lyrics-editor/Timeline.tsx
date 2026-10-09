@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { cx } from "@/components/ui";
+import { detectPhrases, type Phrase } from "@/lib/lyrics/align";
 import { formatTimeShort } from "@/lib/timeline";
 import type { DesignPlan } from "@/lib/types";
 import { drawWaveform, fitCanvas } from "@/components/upload/waveform";
@@ -35,7 +36,10 @@ function readPalette(el: Element) {
     span: t.tintSoft,
     spanCurrent: tokenAlpha(t.tint, 0.3),
     marker: t.tint,
+    markerEstimated: tokenAlpha(t.tint, 0.45),
     markerTap: t.red,
+    vocal: tokenAlpha(t.tint, 0.3),
+    phrase: tokenAlpha(t.tint, 0.7),
     playhead: t.label,
     text: t.label,
     muted: t.label2,
@@ -75,7 +79,15 @@ export interface TimelineProps {
   className?: string;
   /** a marker drag: commit=false while dragging, true on release */
   onDragMarker?: (index: number, t: number, phase: "start" | "move" | "end") => void;
+  /** round 14: the 人聲 curve (0..1 at vocalRate): a faint lane under the waveform with its phrases */
+  vocal?: readonly number[];
+  vocalRate?: number;
   label: string;
+}
+
+/** The lane's phrases, computed once per curve. */
+function usePhrases(vocal: readonly number[] | undefined, rate: number | undefined): Phrase[] {
+  return useMemo(() => (vocal?.length && rate && rate > 0 ? detectPhrases(vocal, rate) : []), [vocal, rate]);
 }
 
 /** Waveform timeline with lyric-line markers, playhead, click/drag seek and draggable markers. */
@@ -87,9 +99,12 @@ export function Timeline(props: TimelineProps) {
   const drawRef = useRef<() => void>(() => {});
   const rafRef = useRef(0);
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const phrases = usePhrases(props.vocal, props.vocalRate);
+  const phrasesRef = useRef(phrases);
 
   useEffect(() => {
     propsRef.current = props;
+    phrasesRef.current = phrases;
     drawRef.current();
   });
 
@@ -123,6 +138,8 @@ export function Timeline(props: TimelineProps) {
       const [a, b] = view();
       const x = (t: number) => ((t - a) / (b - a)) * W;
       const bandH = p.plan ? 5 : 0;
+      const vrate = p.vocalRate ?? 0;
+      const laneH = p.vocal?.length && vrate > 0 ? (p.window === "full" ? 6 : 9) : 0;
 
       // plan sections band
       if (p.plan) {
@@ -144,14 +161,33 @@ export function Timeline(props: TimelineProps) {
       }
 
       // waveform
-      drawWaveform(ctx, p.peaks, { x: 0, y: bandH + 2, width: W, height: H - bandH - 4, color: pal.wave, from: a / dur, to: b / dur, bar: 2, gap: 1 });
+      drawWaveform(ctx, p.peaks, { x: 0, y: bandH + 2, width: W, height: H - bandH - 4 - (laneH ? laneH + 2 : 0), color: pal.wave, from: a / dur, to: b / dur, bar: 2, gap: 1 });
+
+      // 人聲 lane: the curve as a faint area, its phrases as a line on top (where singing is)
+      if (laneH && p.vocal) {
+        const curve = p.vocal;
+        const y0 = H - laneH;
+        ctx.fillStyle = pal.vocal;
+        for (let px = 0; px < W; px += 2) {
+          const ta = a + (px / W) * (b - a);
+          const tb = a + ((px + 2) / W) * (b - a);
+          let v = 0;
+          for (let f = Math.max(0, Math.floor(ta * vrate)); f <= Math.min(curve.length - 1, Math.ceil(tb * vrate)); f++) v = Math.max(v, curve[f] ?? 0);
+          if (v > 0.02) ctx.fillRect(px, H - v * laneH, 2, v * laneH);
+        }
+        ctx.fillStyle = pal.phrase;
+        for (const ph of phrasesRef.current) {
+          if (ph.end < a || ph.start > b) continue;
+          ctx.fillRect(x(ph.start), y0, Math.max(1, x(ph.end) - x(ph.start)), 2);
+        }
+      }
 
       if (p.window !== "full") {
         ctx.font = `500 11px ${pal.fontNumeric}`;
         ctx.textBaseline = "bottom";
         ctx.fillStyle = pal.muted;
         for (let s = Math.ceil(a); s <= b; s++) {
-          if (s % 2 === 0) ctx.fillText(formatTimeShort(s), Math.round(x(s)) + 3, H - 3);
+          if (s % 2 === 0) ctx.fillText(formatTimeShort(s), Math.round(x(s)) + 3, H - 3 - (laneH ? laneH + 1 : 0));
         }
       }
 
@@ -175,7 +211,8 @@ export function Timeline(props: TimelineProps) {
         ctx.fillRect(x0, bandH, Math.max(1, x1 - x0), H - bandH);
         const d = drag.current;
         const isHover = hover.current?.marker === i || ((d?.kind === "marker" || d?.kind === "pending") && d.index === i);
-        ctx.fillStyle = p.tapPointer === i ? pal.markerTap : pal.marker;
+        // an estimated start (「估」) is a fainter marker until it is tapped or dragged
+        ctx.fillStyle = p.tapPointer === i ? pal.markerTap : l.estimated && !isHover ? pal.markerEstimated : pal.marker;
         ctx.fillRect(Math.round(x0) - (isHover ? 1 : 0), bandH, isHover ? 3 : 2, H - bandH);
         if (p.labels) {
           const next = timed[k + 1]?.l.start ?? e;
@@ -363,7 +400,13 @@ export function Timeline(props: TimelineProps) {
 
   return (
     <div className="relative">
-      <canvas ref={canvasRef} role="img" aria-label={props.label} className={cx("block w-full touch-none select-none rounded-sm", props.className)} />
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={props.vocal?.length ? `${props.label}；下方的淡色帶是人聲，線條是唱的段落` : props.label}
+        data-vocal-lane={props.vocal?.length ? "on" : undefined}
+        className={cx("block w-full touch-none select-none rounded-sm", props.className)}
+      />
       <div
         ref={bubbleRef}
         aria-hidden="true"
