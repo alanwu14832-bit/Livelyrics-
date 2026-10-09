@@ -43,14 +43,16 @@ show up in the product:
 - **Do not add dependencies** (package.json is frozen during parallel work). WebGL is hand-written GLSL.
   Exception agreed for phase 1b: `mediabunny` (MP4 / WebM muxing for the video export, browser only).
   Cloud mode: `@vercel/blob` (server: head / del; browser: `@vercel/blob/client` upload), `@neondatabase/serverless`
-  (server, SQL over HTTP), dev only `@electric-sql/pglite` (Postgres in WASM for the tests).
+  (server, SQL over HTTP), dev only `@electric-sql/pglite` (Postgres in WASM for the tests). Round 15:
+  `@huggingface/transformers` (pinned 4.3.1; browser worker only, plus the local evaluation in Node) for
+  「AI 自動對時」 — `.npmrc` skips its `onnxruntime-node` CUDA download.
 - UI language: **Traditional Chinese (繁體中文)** for all user-facing text.
 
 ## Shared contracts (already written — do not change without coordination)
 
 | File | What |
 |---|---|
-| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine`, `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 4b `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource`, phase 5a `SongTimecode` (`Project.timecode`, song `SetItem.timecode`) |
+| `src/lib/types.ts` | `Project`, `SongMeta`, `AudioAnalysis`, `Lyrics`/`LyricLine` (round 14 `estimated`, round 15 `aligned`), `Research`, `PipelineEvent` (incl. `attached`), `ProjectSummary` (accent, palette, error), phase 4 `MoodImage` / `DesignDirection` / `DirectionSet`, phase 4b `DesignEngine` (`claude` / `offline` / `free` / `manual-claude`), `PublicInfo`, `PlanSource`, phase 5a `SongTimecode` (`Project.timecode`, song `SetItem.timecode`) |
 | `src/lib/schema.ts` | zod `DesignPlanSchema` + closed vocabularies `SCENE_IDS`, `LYRIC_STYLE_IDS`, `LYRIC_PLACEMENTS`, `SECTION_KINDS`, `FONT_IDS`; phase 7 `SceneProgramSchema` (`DesignPlan.sceneProgram`), `TYPE_RELATIONS`, `ZoneSchema` |
 | `src/lib/stage/program/contract.ts` | phase 7: the scene program uniform contract (`PROGRAM_UNIFORMS`, the prelude / epilogue, `PROGRAM_CONTRACT_DOC`); `validate.ts` the program validator |
 | `src/lib/stage/protocol.ts` | `StageState`, `StageOverrides`, `StageMessage`, `channelName()`, `showChannelName()`, `StageTransition`, `LimiterReport` (phase 3), `LiveAudioFeatures.clock` (phase 5a), `parseStageMessage()`, `StageStore`, `createStageStore()`, `stageTime()` |
@@ -78,7 +80,7 @@ Cross-module stubs (owner replaces the implementation, **keeps the exported sign
 | `/s/[id]/live` | CONSOLE | 演出控制台: setlist rail with GO / standby, and the console of the item on air (song console or look console) |
 | `/s/[id]/output` | STAGE | the show's one projection window (show channel; performs the take transitions itself) |
 | `/p/[id]/process` | HOME | runs/observes the pipeline with live progress, then hands off to the console |
-| `/p/[id]/lyrics` | HOME | lyrics editor: import/paste/LRCLIB pick, tap-sync, nudge, auto-distribute |
+| `/p/[id]/lyrics` | HOME | lyrics editor: import/paste/LRCLIB pick, 「AI 自動對時」 (in-browser Whisper), tap-sync, nudge, auto-distribute, 確認全部時間 |
 | `/p/[id]` | CONSOLE | operator console |
 | `/p/[id]/output` | STAGE | projection window — animation + lyrics only |
 | `/p/[id]/export` | STAGE + HOME | pre-rendered video export for media servers (`?t=` = 單格預覽 time; the console passes its playhead) |
@@ -315,7 +317,15 @@ All of it is pure logic in `src/lib/stage/safety.ts` (tests: `safety.test.ts`) p
 - **Stage lab**: `?safe=0` shows the designed flash / bloom at full brightness.
 - **E2E**: `scripts/e2e-led.cjs` (strobe designs: flash transitions and hard cuts at 4 flashes a second;
   the projection canvas sampled every frame; the confirm dialogs; the presets' luminance; LED 模擬 only
-  in the console; the pre-show check; the export default).
+  in the console; the pre-show check; the export default). Round 15 removed a flake in 「已抑制閃爍」: the
+  status was never lost — on a busy machine the console preview and the projection window, both drawn by
+  the container's one software GPU, starved each other, the preview's limiter measured a frame now and
+  then, and a strobe sampled that rarely does not strobe (nothing to damp). The suite now parks the
+  projection window while it checks the console's own limiter (the detail reports how many frames a
+  second the preview's limiter measured: 3.5–8 here, while the projection alone renders 46–60), and checks the
+  projection's damping report (pong) on a fresh console separately. `StageEngine` exposes
+  `data-limiter-measured` / `data-limiter-lost` (grid readbacks used / dropped) and `data-fps`, and keeps a
+  late readback's α for 30 frames (was 12).
 - **Known limits.** Not a certified PSE test: the grid is 32 × 18 (small patterns and thin lines
   average out), the DOM lyric layer is estimated rather than measured, luminance is relative (the
   wall's nits, gamma and processor brightness are unknown to the app), and the live limiter reacts
@@ -1509,6 +1519,171 @@ tests use synthetic signals).
    55.0 % → 64.6 %, 61.0 % → 71.0 %; no song catastrophically worse. The oracle reaches 2.31 s / 44.1 %
    untimed and 0.05 s / 93.5 % anchored: a better voice detector (or a recogniser) is where the rest is.
 
+### Round 15: 「AI 自動對時」 (speech recognition in the browser)
+
+Round 14 laid untimed lyrics over the 人聲 curve; without taps that stays weak (held-out: 18 % of lines within 1 s).
+The lyric editor's **「AI 自動對時」** runs OpenAI's Whisper (MIT) in the browser with transformers.js (Apache-2.0)
+and ONNX Runtime Web (MIT), aligns what it heard to the user's lyric words in order, keeps the confident lines as
+anchors and lets round 14's aligner fill the rest. Everything happens on the operator's computer: **the song is
+never uploaded** (the only network traffic is the one-time model download).
+
+- **Models** (`src/lib/asr/models.json`, read by the worker and by the evaluation, so both run the same files):
+
+  | choice | model (revision) | WebAssembly (default) | WebGPU (an adapter with `shader-f16`) |
+  |---|---|---|---|
+  | 準確 (default) | `onnx-community/whisper-small_timestamped` @ `65caa70f294b46e1c33ff820aae6b16d048ab818` | encoder + merged decoder q8: 251.8 MB | encoder fp16 on WebGPU, decoder q8 on WASM: 336.0 MB |
+  | 快速 | `onnx-community/whisper-base_timestamped` @ `608c49e61301901684bc36cac8f74b95ff6b5a8e` | q8 + q8: 79.6 MB | fp16 + q8: 97.8 MB |
+
+  The sizes count every file the pipeline fetches (the ONNX files, `tokenizer.json`, `tokenizer_config.json`,
+  `config.json`, `generation_config.json`, `preprocessor_config.json`); the sheet rounds them (約 250 / 80 MB, or
+  約 340 / 100 MB where WebGPU runs). The `_timestamped` exports carry the cross-attentions that word timestamps
+  need. Pipeline options: `return_timestamps: "word"`, `chunk_length_s: 30`, `stride_length_s: 5`,
+  `task: "transcribe"`, `language` from `asrLanguage(lyrics)` (below). The repos hold no `encoder_model_q4f16`,
+  and transformers.js' own WebGPU Whisper examples avoid the fp16 decoder, so WebGPU runs only the encoder (fp16,
+  float32 in and out — checked) and the measured q8 decoder stays on WASM; without `shader-f16` everything runs
+  on WASM.
+- **Engine** (`src/lib/asr/engine.ts`, main thread): `transcribeSong` fetches the project's audio
+  (`api.audioUrl`, the same file the editor plays), `decodeForAsr` decodes it at 16 kHz (`OfflineAudioContext`,
+  the browser's resampler) and averages the channels, and transfers the samples to the worker. One run at a time
+  (`asrBusy`); cancel terminates the worker (the next run starts a new one; the model files stay in the browser's
+  cache). `detectAsrDevice` picks WebGPU for an adapter with `shader-f16` (asked only when the sheet opens or a run
+  starts, never when the editor loads); a WebGPU failure starts the run again
+  on WASM and is remembered (`livelyrics:asr:webgpu-failed`). Errors carry a code the UI turns into plain Chinese:
+  `download` (重試), `offline` (first use needs the network), `memory` (改用快速), `decode`, `unknown`.
+- **Worker** (`src/lib/asr/asr.worker.ts`, `new Worker(new URL("./asr.worker.ts", import.meta.url))`): imports
+  `@huggingface/transformers` lazily, so transformers.js and ONNX Runtime live only in the worker's chunks
+  (never in the server bundle, never on another page). `env.allowLocalModels = false`, browser cache on. Progress:
+  the download (`progress_total` bytes over the known total), the model load, and the listening position — the
+  pipeline calls `model.generate` once per 30 s window (wrapped to count the windows) and Whisper's timestamp
+  tokens (a duck-typed `streamer`) move the position inside a window. The e2e hook `window.__livelyricsFakeAsr`
+  (`FakeAsr`: a canned transcript, simulated progress, an optional failure) swaps the transcriber, so
+  `scripts/e2e-asr.cjs` never downloads a model.
+- **Hosting** (`next.config.ts`): ONNX Runtime's WebAssembly (`ort-wasm-simd-threaded.asyncify.{mjs,wasm}`,
+  27 MB) is self-hosted, not fetched from a CDN: copied from `node_modules/onnxruntime-web/dist` into the
+  git-ignored `public/ort/<version>/` whenever Next loads the config (dev, `next build` — Vercel's too — and
+  `next start`), served `Cache-Control: immutable`; the build passes its path to the worker
+  (`LIVELYRICS_ORT_WASM_BASE`), which sets `env.backends.onnx.wasm.wasmPaths`. Webpack aliases
+  `onnxruntime-web/webgpu` to `dist/ort.webgpu.min.mjs` (the build without the bundled wasm, so webpack emits no
+  second copy) and `onnxruntime-node` / `sharp` to nothing in client chunks; the server compilation swaps the
+  worker for `asr.worker.server.ts` (`NormalModuleReplacementPlugin`: the lyric page's SSR pass would otherwise
+  compile the worker and reference transformers.js), and `outputFileTracingExcludes` keeps `@huggingface/*`,
+  `onnxruntime-*` and `public/ort` out of the functions. `.npmrc` sets `onnxruntime-node-install=skip`
+  (`onnxruntime-node`, a dependency of transformers.js used only by the local evaluation, would otherwise try to
+  download CUDA binaries on every install). No COOP / COEP headers: the page is not cross-origin isolated, so the
+  WASM path runs single-threaded (a possible speed-up later, if the other pages' cross-origin loads allow it).
+- **Hosts the browser contacts**: `huggingface.co` (the pinned `resolve/<revision>/…` files, its
+  `api/resolve-cache/…` redirects for the small JSON files, and one-byte Range probes for sizes) and its file CDN
+  (`*.hf.co`, e.g. `us.aws.cdn.hf.co`), only until the model is cached; everything else is the app's own origin.
+  transformers.js 4.3.1 sends a few helper requests (the pipeline's file list and progress totals, the
+  tokenizer's `tokenizer_config.json` probe) to `resolve/main/…` whatever revision it is given, and never caches
+  them, so the worker sets `env.fetch` to `pinnedFetch` (`src/lib/asr/hub-fetch.ts`): our models' requests are
+  pinned to their revision and a file already in transformers.js' browser cache (`transformers-cache`, keyed by
+  the pinned URL) is answered from it. Measured in headless Chromium: the first run fetches only pinned URLs;
+  with the model cached a run makes no request off the app's origin and completes with https routed to a dead
+  proxy (offline at the venue works once the model has been downloaded). With the password gate on, the
+  worker's requests for `/ort/…` carry the session cookie (same origin). The Node evaluation does not use the
+  wrapper (its helper probes ask `main` for the file list; the files it loads are pinned).
+- **Alignment** (`src/lib/lyrics/asr-align.ts`, pure, unit-tested in `asr-align.test.ts`):
+  - tokens: Latin-like scripts → words (NFKC, then NFKD with the marks stripped, lowercase, punctuation and
+    apostrophes dropped, ß → ss …); Han, kana (katakana folded to hiragana) and hangul → one token per character;
+    a recognised word's characters share its time span.
+  - Chinese: both sides go through the Traditional → Simplified table, and a different character with the same
+    toneless pinyin scores 0.7 (a homophone), a near reading (zh~z, ch~c, sh~s, n~l, -ng~-n) 0.5; Latin words by
+    edit distance; hangul with the same initial and vowel 0.6.
+  - the recognised text is cleaned first: a token repeated more than 4 times in a row, or a 2–8-token phrase more
+    than 3 times, keeps only its first repeats (Whisper's "oh, oh, oh…" / "de la ville de la ville…" loops); with
+    an informative 人聲 curve, words where the curve stays under 0.05 within ±1.5 s are dropped (text in an
+    instrumental stretch).
+  - a semi-global, order-preserving alignment (free leading / trailing recogniser tokens; a match scores 2 × s at
+    s ≥ 0.8, s at s ≥ 0.5, else −1; gaps −0.6 / −0.4; one byte per cell, at most 24 M cells).
+  - a line is anchored at its first matched token among its first one to three (minus 0.06 s × (length + 1) per
+    skipped word or 0.25 s per skipped character) when at least half of its tokens matched; with `ends` its end is
+    the last matched token's end + 0.3 s. Anchors that contradict a real (tapped, typed, LRC) line by less than
+    0.3 s are dropped, then the longest increasing subsequence keeps them in order and ≥ 0.3 s apart.
+  - `applyAnchors`: real lines never move; anchored lines take the AI's start (and end, kept only before a real
+    gap of 2 s or more, so the stage never flickers), stay `estimated` and are flagged `aligned`; every other line
+    is laid out by `placeUntimed` (round 14's 人聲 aligner) between them.
+  - `asrLanguage(lyrics)` tells Whisper the language: zh / ja / ko by script, a Latin-script language by its most
+    common function words (en, es, fr, de, it, pt, nl), ru / th by script, else null (Whisper detects). It agrees
+    with JamendoLyrics' language on all 79 songs. `detectLanguage` (the lyrics' own label) is unchanged.
+- **Han data** (`src/lib/lyrics/han-data.json`, 55 KB, a lazy chunk loaded only for lyrics with Han
+  characters): 2 861 Traditional → Simplified pairs and 407 toneless syllables over 11 221 characters — the
+  8 105 of the 通用规范汉字表 (`kTGH`), Big5 level 1 (`kBigFive` A440–C67E) and their variants — generated by
+  `scripts/build-han-data.mjs` from Unicode's Unihan database 18.0.0 (`Unihan_Variants.txt`
+  kSimplifiedVariant / kTraditionalVariant; `Unihan_Readings.txt` kMandarin and the kHanyuPinlu readings with at
+  least 5 % of the character's most frequent one). Unihan data © Unicode, Inc., Unicode License v3
+  (<https://www.unicode.org/license.txt>); the file says so. Regenerate: download
+  `https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip` (`NODE_USE_ENV_PROXY=1` behind the proxy), unzip it,
+  `node scripts/build-han-data.mjs <dir>`.
+- **Lyric editor** (`src/components/lyrics-editor/AsrTiming.tsx`): the toolbar button 「AI 自動對時」 (disabled
+  when every line is already real) and an entry in the 自動分配 dialog. The first use opens a sheet: what it does,
+  that it runs on this computer and the song is not uploaded, the one-time download per choice
+  (「準確（約 250 MB，建議）」 / 「快速（約 80 MB）」, the WebGPU sizes where WebGPU runs), that the results are
+  suggestions to check, the credits. The choice is remembered (`livelyrics:asr:choice`, `livelyrics:asr:intro-done`;
+  later clicks start straight away, the 自動分配 entry reopens the choice); `navigator.deviceMemory` < 4 GB
+  preselects 快速 and says why. A progress card (讀取音檔 → 下載模型 nn %（loaded / total MB） → 載入模型 →
+  聽歌中 m:ss / m:ss → 對齊歌詞, 取消) sits above the table; the editor stays usable and the words are aligned to
+  the rows as they are when the run ends (taps made meanwhile count as real). The result is one undo step and a
+  toast: 「AI 對上 52 句（共 60 句），其餘 8 句依人聲估算；已對好的 N 句沒動；都還是『估』，播放檢查後可按
+  『確認全部時間』」 (no match: nothing changes and a warning says why). Every placed line stays 「估」; the AI's
+  lines carry a fainter one. **確認全部時間** (in the header, a confirm dialog) turns every estimated line real
+  (undoable), so a reviewed song runs in 跟音檔 and the console stops warning. For a song analysed before round 14
+  the 人聲 curve is computed first, as for 自動分配.
+- **Provenance** (`LyricLine.aligned?: true`, only with `estimated`): saved, validated (`parseLyricsPatch`),
+  drafted, part of the dirty key, kept by `normalizeLyrics`; `distributeLines` / `reestimateLines` never set it.
+  When the editor re-estimates around a tap, a drag or a typed time (`reestimate(…, "estimated")`), the aligned
+  lines stay where the AI put them unless they now contradict a real line by less than 0.3 s (those are re-laid
+  with the others); 重新估算『估的』行 / 全部重新分配 re-lay them too. Merging and splitting keep the flag of the
+  start they keep.
+- **Copy**: the console badge 「N 句時間是估的・去對時」, the 歌詞 pane, the process page and the lyric step point
+  at 「到歌詞編輯器用「AI 自動對時」或對拍」; the editor header says 「時間都是估的」 / 「都有時間；其中 N 句是估的」.
+
+#### 「AI 自動對時」 evaluation (local only)
+
+Same data and rules as round 14's harness (JamendoLyrics MultiLang, CC BY-ND / BY-NC-ND: **no audio, lyrics,
+annotations or transcripts in the repo**; dev / held-out split by file-name hash; parameters tuned on dev only).
+
+1. `node scripts/timing-eval/decode.cjs <dataset> <wav16k dir> --asr` decodes every mp3 the way the editor does
+   (16 kHz, channels averaged, 32-bit float WAV).
+2. `node scripts/timing-eval/transcribe.mjs <wav16k dir> <dataset> <out dir> --model=accurate|fast
+   [--variant=wasm|webgpu] [--split=…] [--cache=<model dir>]` runs the pinned model and options of `models.json` in
+   Node (onnxruntime-node, CPU, 4 cores) and caches the words per song (median 0.56 s per second of audio for
+   small, 0.27 s for base; measured while other work shared the machine).
+3. `LIVELYRICS_TIMING_EVAL_ASR="small=<dir>,base=<dir>"` (plus the round-14 variables) adds the `whisper`
+   estimators to `src/lib/lyrics/timing-eval.test.ts`: `alignTranscript` + `applyAnchors` untimed and with one tap
+   per paragraph, scored next to round 14 on the same songs; `LIVELYRICS_TIMING_EVAL_ASR_VARIANTS` scores parameter
+   variants on the dev half, `LIVELYRICS_TIMING_EVAL_SUBSET` a named subset.
+
+Held-out half (44 songs, 1 738 lines, never used for tuning; Node transcripts of the WASM dtypes):
+
+| held-out, 44 songs | lines | median \|Δstart\| | mean | ≤ 0.5 s | ≤ 1 s | ≤ 2 s | right line on screen |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| round 14 (人聲 + alignment), untimed | 1 738 | 5.05 s | 7.36 s | 11.0 % | 17.4 % | 26.2 % | 30.1 % |
+| round 14 + one tap per paragraph (taps not scored) | 1 377 | 0.56 s | 1.78 s | 46.6 % | 64.6 % | 78.9 % | 71.0 % |
+| whisper-base (快速) anchors + aligner, no taps | 1 738 | 0.11 s | 1.88 s | 74.1 % | 78.9 % | 83.0 % | 80.3 % |
+| whisper-base + one tap per paragraph | 1 377 | 0.10 s | 0.63 s | 80.6 % | 87.4 % | 92.4 % | 86.1 % |
+| **whisper-small (準確) anchors + aligner, no taps** | 1 738 | **0.08 s** | 0.81 s | 87.1 % | **90.0 %** | 92.8 % | **88.1 %** |
+| whisper-small + one tap per paragraph | 1 377 | 0.08 s | 0.43 s | 88.8 % | 92.1 % | 94.6 % | 89.6 % |
+
+On the experiment's 8 held-out songs (median / ≤ 1 s / right line, no taps): small 0.08 s / 91.3 % / 88.5 %
+(experiment 0.20 s / 88.2 % / 82.8 %), base 0.12 s / 79.8 % / 81.2 % (experiment 0.26 s / 70.8 % / 73.0 %).
+Small anchors 86.6 % of all 3 383 lines (79 songs), base 74.2 % of the held-out lines. Tuning (dev half only,
+35 songs, small): line ends from the last matched word (+ 0.3 s) and starts 0.15 s before Whisper's word (its
+word starts run late on singing) moved dev from 0.17 s / 87.0 % / 83.0 % to 0.07 s / 87.9 % / 86.4 %; the
+silence guard, the confidence threshold (0.4–0.6), the loop limit and the end pad were within noise and kept.
+Weak spots: mumbled or heavily produced vocals (Avercage – Embers: 18 of 42 lines anchored), where the anchors
+stay sparse and round 14 fills the gaps. `asrLanguage` agrees with the dataset on 79 / 79 songs. Chinese is not
+measured (no annotated data); the unit tests cover Simplified-for-Traditional and homophones.
+
+One real run in headless Chromium (production build, WASM, single-threaded — no cross-origin isolation —,
+4-core container, no GPU) on Quentin Hannappe – Keep On (3:09, 27 lines), 準確 with an empty browser profile:
+fetching and decoding the song, the 252 MB download and the model load took 12 s on this fast link, listening
+262 s (≈ 1.4 × the song; Node with 4 threads takes 0.27 ×), 274 s wall in all; the renderer process peaked at
+1.40 GB (VmHWM). The AI matched 24 of 27 lines; scored like the harness: median 0.06 s, 100 % within 1 s, 97.0 %
+right line (round 14: 4.90 s / 14.8 % / 44.1 %), the same as the Node transcript of the song. Again with the model
+cached and https routed to a dead proxy: 275 s, no request off the app's origin, the same result. Cross-origin
+isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next speed-up.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
@@ -1587,6 +1762,8 @@ keeps every contract above and changes only where things are kept and how long w
 
 ### SERVER — `src/lib/server/**` (except `designer/`), `src/lib/lyrics/**`, `src/app/api/**`
 - Storage with atomic JSON writes, list summaries (accent = plan palette[1] or [0]), delete folder.
+- `asr-align.ts` (round 15): the lyric ↔ speech-recogniser alignment of 「AI 自動對時」 and `han-data.json`
+  (Traditional → Simplified, toneless pinyin; generated by `scripts/build-han-data.mjs`).
 - LRC/plain parsing & serialization, `distributeLines` (the 人聲 curve's phrase alignment, `align.ts`, else
   the loudness spread; flags the lines it places `estimated`), `normalizeLyrics` (ids `l0..`, `synced`, the
   per-line `estimated` flags and `timing`), `estimatedFlags` / `estimatedCount`, `placeUntimed`,
@@ -1738,6 +1915,8 @@ keeps every contract above and changes only where things are kept and how long w
   tap-sync mode (play, Space marks the current line start and advances), ±0.1 s nudge, auto-distribute
   (untimed / re-estimate the 「估」 lines / all), export LRC, save → `api.updateProject`, offer to re-run
   design. Round 14: per-line 「估」 provenance, re-estimation around taps and manual edits, the 人聲 lane.
+  Round 15: 「AI 自動對時」 (`AsrTiming.tsx`, the engine in `src/lib/asr/**`: the in-browser Whisper worker,
+  owned by HOME), the `aligned` provenance, 確認全部時間.
 
 ## Design system
 
@@ -1828,6 +2007,8 @@ Operator UI only (home, process, lyrics editor, console, stage-lab chrome). The 
   `FORM_OVERHEAD_BYTES` (64 MB, `src/lib/server/audio-files.ts`); `upload-limit.test.ts` keeps the
   three and the dropzone's promise (`MAX_UPLOAD_BYTES`) in step. An upload that still ends early
   says how much arrived (`incompleteMessage`). `scripts/e2e.cjs` uploads a 24 MB silent WAV.
+- `next.config.ts` copies ONNX Runtime Web's WebAssembly into `public/ort/<version>/` (git-ignored) every
+  time Next loads it; an upgrade of `onnxruntime-web` gets a new versioned folder and the old one is removed.
 - Isolated dev servers (`NEXT_DIST_DIR=.next-<name> npx next dev --webpack -p <port>`) are ignored by
   ESLint and git, but `next dev` appends `.next-<name>/types/**` entries to `tsconfig.json` (it checks
   for exact strings, so a glob does not stop it). Restore `tsconfig.json` from git after stopping one.
