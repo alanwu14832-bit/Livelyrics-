@@ -80,10 +80,18 @@ export function useAsrTiming(deps: AsrTimingDeps) {
   const [choice, setChoiceState] = useState<AsrChoice>("accurate");
   const [device, setDevice] = useState<AsrDevice>("wasm");
   const runRef = useRef<AsrRun | null>(null);
+  /** bumped by every start and cancel: a run that finishes after it was cancelled changes nothing */
+  const generation = useRef(0);
   const depsRef = useRef(deps);
   useEffect(() => {
     depsRef.current = deps;
   });
+  /** leaving the editor stops a run (its result would have nowhere to go) */
+  const stopAll = useCallback(() => {
+    generation.current++;
+    runRef.current?.cancel();
+    runRef.current = null;
+  }, []);
 
   // the remembered choice (else 快速 on a low-memory computer), and which device would run it
   useEffect(() => {
@@ -99,9 +107,9 @@ export function useAsrTiming(deps: AsrTimingDeps) {
     });
     return () => {
       alive = false;
-      runRef.current?.cancel();
+      stopAll();
     };
-  }, []);
+  }, [stopAll]);
 
   const setChoice = useCallback((c: AsrChoice) => {
     setChoiceState(c);
@@ -110,6 +118,8 @@ export function useAsrTiming(deps: AsrTimingDeps) {
 
   const start = useCallback(async (picked: AsrChoice) => {
     if (asrBusy() || runRef.current) return;
+    const gen = ++generation.current;
+    const live = () => generation.current === gen;
     setIntroOpen(false);
     store(INTRO_KEY, "1");
     store(CHOICE_KEY, picked);
@@ -126,11 +136,13 @@ export function useAsrTiming(deps: AsrTimingDeps) {
     runRef.current = run;
     try {
       const result = await run.promise;
+      if (!live()) return;
       setState({ kind: "running", choice: picked, progress: { stage: "align" } });
       const analysis = await depsRef.current.getAnalysis();
+      const han = hasHan(depsRef.current.getLines().map((l) => l.text)) ? await loadHanTables() : null;
+      if (!live()) return;
       const lines = depsRef.current.getLines();
       const texts = lines.map((l) => l.text);
-      const han = hasHan(texts) ? await loadHanTables() : null;
       const fixed = lines.map((l) => (l.start != null && !l.estimated ? l.start : null));
       const vocal = analysis?.vocal?.length ? { curve: analysis.vocal, rate: analysis.envelopeRate } : null;
       const aligned = alignTranscript({ lines: texts, words: result.words, han, vocal, fixed });
@@ -155,6 +167,7 @@ export function useAsrTiming(deps: AsrTimingDeps) {
       });
       setState({ kind: "idle" });
     } catch (err) {
+      if (!live()) return;
       if (err instanceof AsrError && err.code === "cancelled") {
         setState({ kind: "idle" });
         return;
@@ -174,10 +187,9 @@ export function useAsrTiming(deps: AsrTimingDeps) {
   }, [state.kind, start, choice]);
 
   const cancel = useCallback(() => {
-    runRef.current?.cancel();
-    runRef.current = null;
+    stopAll();
     setState({ kind: "idle" });
-  }, []);
+  }, [stopAll]);
 
   return {
     state,

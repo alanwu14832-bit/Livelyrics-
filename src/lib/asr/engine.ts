@@ -1,6 +1,7 @@
 // 「AI 自動對時」 engine (round 15, browser main thread): reads the project's audio, decodes it at
 // 16 kHz mono, hands it to the Whisper worker (asr.worker.ts) and reports progress. One run at a
-// time; cancel terminates the worker. WebGPU (an adapter with shader-f16) runs the encoder when
+// time; cancel terminates the worker, and so does the end of a run (the model's memory goes back:
+// the console may be next on this computer). WebGPU (an adapter with shader-f16) runs the encoder when
 // available; if it fails, the run starts again on WebAssembly and WebGPU is not tried again in this
 // browser. The audio never leaves the computer: the only network traffic is the one-time model
 // download from huggingface.co (and its file CDN).
@@ -229,7 +230,10 @@ export function transcribeSong(options: AsrRunOptions): AsrRun {
       const job = runInWorker(req, [samples.buffer], progress);
       current = job;
       try {
-        return await job.promise;
+        const result = await job.promise;
+        // the model holds a gigabyte or more: let it go (a next run reads it from the browser cache)
+        dropWorker();
+        return result;
       } catch (err) {
         if (cancelled) throw new AsrError("cancelled", "已取消");
         if (err instanceof AsrError && err.code === "webgpu" && device === "webgpu") {

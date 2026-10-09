@@ -4,11 +4,13 @@
 //
 //   node scripts/timing-eval/decode.cjs <dataset> <wav16k dir> --asr          # once: 16 kHz mono float WAVs
 //   node scripts/timing-eval/transcribe.mjs <wav16k dir> <dataset> <out dir> \
-//     [--model=accurate|fast] [--split=dev|held-out|all] [--limit=N] [--only=<text>] [--cache=<model dir>]
+//     [--model=accurate|fast] [--variant=wasm|webgpu] [--split=dev|held-out|all] [--limit=N] [--only=<text>]
+//     [--cache=<model dir>]
 //
 // The model id, revision, dtypes and pipeline options come from src/lib/asr/models.json — the same
-// file the browser worker reads. Node runs the WASM configuration (q8 encoder and decoder) on the CPU
-// (onnxruntime-node); the browser's WebGPU variant (fp16 encoder) is not measured here.
+// file the browser worker reads. Node runs on the CPU (onnxruntime-node): the WASM configuration (q8
+// encoder and decoder) by default, or with --variant=webgpu the dtypes the browser uses on WebGPU
+// (fp16 encoder, q8 decoder) — the same files, though a GPU computes fp16 a little differently.
 // Writes <out dir>/<stem>.json { model, revision, dtype, language, words: [{ text, start, end }], text,
 // seconds, audioSeconds }. Existing outputs are kept (delete one to redo it).
 // Local measurement only: never commit dataset audio, lyrics, annotations or transcripts.
@@ -36,11 +38,17 @@ if (positional.length < 3) {
 }
 const [wavDir, datasetDir, outDir] = positional.map((p) => path.resolve(p));
 const choice = flag("model", "accurate");
+const variant = flag("variant", "wasm");
 const spec = CONFIG.models[choice];
 if (!spec) {
   console.error(`unknown --model=${choice} (one of ${Object.keys(CONFIG.models).join(", ")})`);
   process.exit(2);
 }
+if (!spec[variant]) {
+  console.error(`unknown --variant=${variant} (wasm or webgpu)`);
+  process.exit(2);
+}
+const dtype = spec[variant].dtype;
 const split = flag("split", "all");
 const limit = Number(flag("limit", "0")) || Infinity;
 const only = flag("only", "");
@@ -114,11 +122,11 @@ const stems = [...languageOf.keys()]
   .sort()
   .filter((s) => !fs.existsSync(path.join(outDir, `${s}.json`)))
   .slice(0, limit);
-console.log(`${choice}: ${spec.id}@${spec.revision.slice(0, 10)} (${JSON.stringify(spec.wasm.dtype)}), ${stems.length} songs to transcribe (${split})`);
+console.log(`${choice}: ${spec.id}@${spec.revision.slice(0, 10)} (${JSON.stringify(dtype)}), ${stems.length} songs to transcribe (${split})`);
 if (stems.length === 0) process.exit(0);
 
 const t0 = performance.now();
-const asr = await pipeline("automatic-speech-recognition", spec.id, { revision: spec.revision, dtype: spec.wasm.dtype, device: "cpu" });
+const asr = await pipeline("automatic-speech-recognition", spec.id, { revision: spec.revision, dtype, device: "cpu" });
 console.log(`loaded in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 
 let n = 0;
@@ -130,7 +138,7 @@ for (const stem of stems) {
   const result = await asr(audio, { ...CONFIG.pipeline, language });
   const seconds = (performance.now() - t1) / 1000;
   const words = (result.chunks ?? []).map((c) => ({ text: c.text, start: c.timestamp?.[0] ?? null, end: c.timestamp?.[1] ?? null }));
-  const record = { model: spec.id, revision: spec.revision, dtype: spec.wasm.dtype, language, words, text: result.text, seconds, audioSeconds: audio.length / CONFIG.sampleRate };
+  const record = { model: spec.id, revision: spec.revision, dtype, language, words, text: result.text, seconds, audioSeconds: audio.length / CONFIG.sampleRate };
   fs.writeFileSync(`${out}.tmp`, JSON.stringify(record));
   fs.renameSync(`${out}.tmp`, out);
   n++;
