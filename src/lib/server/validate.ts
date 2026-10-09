@@ -224,6 +224,8 @@ const LyricLineInput = z.object({
   words: z.array(LyricWordInput).max(1000).nullable().optional(),
   /** round 14: the start is a guess (LyricLine.estimated); false / null = real */
   estimated: z.boolean().nullable().optional(),
+  /** round 15: that guess came from 「AI 自動對時」 (LyricLine.aligned); only with estimated */
+  aligned: z.boolean().nullable().optional(),
 });
 
 const LyricsInput = z.object({
@@ -250,6 +252,7 @@ export function parseLyricsPatch(raw: unknown): Lyrics {
       end: line.end ?? null,
       words: line.words ?? undefined,
       ...(line.estimated === true ? { estimated: true as const } : {}),
+      ...(line.estimated === true && line.aligned === true ? { aligned: true as const } : {}),
     })),
   };
   if (l.language) lyrics.language = l.language;

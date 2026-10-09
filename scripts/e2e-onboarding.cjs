@@ -8,7 +8,8 @@
 //      it, /api/status only says "configured"; 移除金鑰 clears it.
 //   2. Untimed lyrics: a song created with plain lyrics gets estimated times, flagged line by line
 //      (timing "estimated", synced false); the console starts in 手動切換 and counts them
-//      (「還有 6 句時間是估的」) with a link; the lyric editor marks them 「估」. A partial 對拍 makes
+//      (「還有 6 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍」) with a link; the lyric editor says
+//      「時間都是估的」 and marks them 「估」. A partial 對拍 makes
 //      only the tapped lines real, re-estimates the rest and keeps the warning with a count;
 //      tapping every line clears it (saved: synced, no flag) and the console no longer warns.
 //   2b. A song analysed before round 14 (no 人聲 curve): 自動分配 › 重新估算 computes the curve in
@@ -133,7 +134,7 @@ async function api(method, url, body) {
     await page.goto(`${BASE}/p/${created.id}`, { waitUntil: "networkidle" });
     await page.locator('[data-testid="timing-estimated"]').first().waitFor({ timeout: 30000 });
     let banner = await page.locator('[data-testid="timing-estimated"]').first().innerText();
-    check("the console counts the estimated lines", banner.includes("還有 6 句時間是估的，先到歌詞編輯器對拍"), banner.slice(0, 40));
+    check("the console counts the estimated lines", banner.includes("還有 6 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍"), banner.slice(0, 40));
     check("the top bar links to the lyric editor", (await page.locator('[data-testid="timing-estimated-link"]').getAttribute("href")) === `/p/${created.id}/lyrics`);
     let live = await page.getByRole("radio", { name: "手動切換" }).first().getAttribute("aria-checked").catch(() => null);
     check("the console starts in 手動切換", live === "true", `aria-checked=${live}`);
@@ -145,7 +146,7 @@ async function api(method, url, body) {
     const marks = () => page.locator("[data-estimated]").count();
     await page.goto(`${BASE}/p/${created.id}/lyrics`, { waitUntil: "networkidle" });
     await page.locator('[data-testid="timing-estimated"]').waitFor({ timeout: 30000 });
-    check("the editor counts the estimated lines", (await editorNote()).includes("還有 6 句時間是估的"), await editorNote());
+    check("the editor counts the estimated lines", (await editorNote()).includes("時間都是估的"), await editorNote());
     check("every estimated row carries 「估」", (await marks()) === 6, `${await marks()} marks`);
     await shot(page, "r14-editor-estimated");
 
@@ -164,7 +165,7 @@ async function api(method, url, body) {
     // (the toast's entrance is a short blur-in)
     await page.waitForTimeout(1000);
     await shot(page, "r14-reestimate-toast");
-    check("partial 對拍 keeps the warning, with a count", (await editorNote()).includes("還有 4 句時間是估的"), await editorNote());
+    check("partial 對拍 keeps the warning, with a count", (await editorNote()).includes("都有時間；其中 4 句是估的"), await editorNote());
     check("the tapped rows lost 「估」", (await marks()) === 4, `${await marks()} marks`);
     await page.keyboard.press("Control+s");
     await page.waitForTimeout(2500);
@@ -177,7 +178,7 @@ async function api(method, url, body) {
     await page.goto(`${BASE}/p/${created.id}`, { waitUntil: "networkidle" });
     await page.locator('[data-testid="timing-estimated"]').first().waitFor({ timeout: 30000 });
     banner = await page.locator('[data-testid="timing-estimated"]').first().innerText();
-    check("the console now counts 4", banner.includes("還有 4 句時間是估的，先到歌詞編輯器對拍"), banner.slice(0, 40));
+    check("the console now counts 4", banner.includes("還有 4 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍"), banner.slice(0, 40));
     live = await page.getByRole("radio", { name: "手動切換" }).first().getAttribute("aria-checked").catch(() => null);
     check("手動切換 stays the default while a line is estimated", live === "true", `aria-checked=${live}`);
     await shot(page, "r14-console-estimated-count");

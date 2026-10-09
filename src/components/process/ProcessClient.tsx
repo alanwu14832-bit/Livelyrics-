@@ -489,13 +489,13 @@ export function ProcessClient({
             <Banner
               tone="info"
               icon={<PencilSimpleIcon size={20} className="text-label-2" />}
-              title={project.lyrics.lines.length === 0 ? "這首歌還沒有歌詞" : estimatedLines > 0 ? `還有 ${estimatedLines} 句時間是估的，先到歌詞編輯器對拍` : "歌詞的時間是粗略分配的"}
+              title={project.lyrics.lines.length === 0 ? "這首歌還沒有歌詞" : estimatedLines > 0 ? `還有 ${estimatedLines} 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍` : "歌詞的時間是粗略分配的"}
               description={
                 project.lyrics.lines.length === 0
                   ? "畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
                   : project.analysis?.vocal?.length
-                    ? "時間是依人聲估的，大致落在唱的地方，但不一定準。上台前到歌詞編輯器對拍：拍過的句子是真的，其餘的會跟著重新估算。"
-                    : "時間是依音訊能量估的。上台前建議到歌詞編輯器用對拍校正，歌詞才會準時出場。"
+                    ? "時間是依人聲估的，大致落在唱的地方，但不一定準。上台前到歌詞編輯器用「AI 自動對時」或對拍：對好的句子是真的，其餘的會跟著重新估算。"
+                    : "時間是依音訊能量估的。上台前建議到歌詞編輯器用「AI 自動對時」或對拍校正，歌詞才會準時出場。"
               }
               actions={
                 <Button href={lyricsHref} transitionTypes={PUSH} variant="gray">

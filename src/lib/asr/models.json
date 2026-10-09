@@ -1,0 +1,40 @@
+{
+  "$comment": "Round 15 「AI 自動對時」: the pinned Whisper models (transformers.js, ONNX). Read by the browser engine (src/lib/asr/models.ts) and the local evaluation (scripts/timing-eval/transcribe.mjs), so both run the same files and options. `bytes` = every file the pipeline downloads for that device (the ONNX files plus config.json, generation_config.json, preprocessor_config.json, tokenizer.json, tokenizer_config.json). The `_timestamped` exports carry the cross-attentions word timestamps need.",
+  "sampleRate": 16000,
+  "pipeline": {
+    "return_timestamps": "word",
+    "chunk_length_s": 30,
+    "stride_length_s": 5,
+    "task": "transcribe"
+  },
+  "models": {
+    "accurate": {
+      "id": "onnx-community/whisper-small_timestamped",
+      "revision": "65caa70f294b46e1c33ff820aae6b16d048ab818",
+      "wasm": {
+        "device": { "encoder_model": "wasm", "decoder_model_merged": "wasm" },
+        "dtype": { "encoder_model": "q8", "decoder_model_merged": "q8" },
+        "bytes": 251805856
+      },
+      "webgpu": {
+        "device": { "encoder_model": "webgpu", "decoder_model_merged": "wasm" },
+        "dtype": { "encoder_model": "fp16", "decoder_model_merged": "q8" },
+        "bytes": 336048928
+      }
+    },
+    "fast": {
+      "id": "onnx-community/whisper-base_timestamped",
+      "revision": "608c49e61301901684bc36cac8f74b95ff6b5a8e",
+      "wasm": {
+        "device": { "encoder_model": "wasm", "decoder_model_merged": "wasm" },
+        "dtype": { "encoder_model": "q8", "decoder_model_merged": "q8" },
+        "bytes": 79641437
+      },
+      "webgpu": {
+        "device": { "encoder_model": "webgpu", "decoder_model_merged": "wasm" },
+        "dtype": { "encoder_model": "fp16", "decoder_model_merged": "q8" },
+        "bytes": 97753001
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 // Pure editing operations for the lyrics editor. Lines keep a local React key; ids
 // ("l0"...) are only assigned by normalizeLyrics when saving.
 
+import { applyAnchors, type LineAnchor } from "@/lib/lyrics/asr-align";
 import { estimatedFlags, placeUntimed, type DistributeOptions } from "@/lib/lyrics/lrc";
 import type { AudioAnalysis, LyricLine, LyricWord, Lyrics, LyricsSource } from "@/lib/types";
 
@@ -22,6 +23,11 @@ export interface EditorLine {
    * the start makes the line real
    */
   estimated?: boolean;
+  /**
+   * round 15: the estimated start came from 「AI 自動對時」 (LyricLine.aligned): re-estimating
+   * around a tap keeps it unless it contradicts a real line
+   */
+  aligned?: boolean;
 }
 
 /** a line end closer than this to the next start counts as "contiguous" (derived) */
@@ -29,6 +35,8 @@ const CONTIGUOUS_EPS = 0.05;
 /** matches the stage/timeline rule: a derived line end never lingers past start + 10 s */
 const MAX_DERIVED_SECONDS = 10;
 const MIN_LINE_SECONDS = 0.2;
+/** an AI-aligned start this close to (or past) a real neighbour contradicts it */
+const ALIGNED_MIN_GAP = 0.3;
 
 let keySeq = 0;
 export function newLineKey(): string {
@@ -87,6 +95,7 @@ export function fromLyrics(lyrics: Lyrics | null | undefined): EditorLine[] {
     const line: EditorLine = { key: newLineKey(), text: l.text ?? "", translation: l.translation ?? "", start: l.start ?? null, end };
     if (l.start != null && l.words && l.words.length) line.words = l.words.map((w) => ({ ...w }));
     if (flags[i]) line.estimated = true;
+    if (flags[i] && l.aligned) line.aligned = true;
     out.push(line);
   }
   return out;
@@ -108,6 +117,7 @@ export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSou
       if (tr) line.translation = tr;
       if (l.start != null && l.words && l.words.length) line.words = l.words;
       if (l.start != null && l.estimated) line.estimated = true;
+      if (l.start != null && l.estimated && l.aligned) line.aligned = true;
       return line;
     }),
   };
@@ -120,7 +130,7 @@ export function toLyrics(lines: readonly EditorLine[], base: { source: LyricsSou
 export function contentKey(lines: readonly EditorLine[], source: LyricsSource): string {
   return JSON.stringify([
     source,
-    lines.map((l) => [l.text.trim(), l.translation.trim(), l.start, l.start != null ? l.end : null, l.words?.length ?? 0, l.start != null && l.estimated ? 1 : 0]),
+    lines.map((l) => [l.text.trim(), l.translation.trim(), l.start, l.start != null ? l.end : null, l.words?.length ?? 0, l.start != null && l.estimated ? (l.aligned ? 2 : 1) : 0]),
   ]);
 }
 
@@ -129,9 +139,10 @@ export function contentKey(lines: readonly EditorLine[], source: LyricsSource): 
 // ---------------------------------------------------------------------------
 
 function real(line: EditorLine): EditorLine {
-  if (!line.estimated) return line;
+  if (!line.estimated && !line.aligned) return line;
   const copy = { ...line };
   delete copy.estimated;
+  delete copy.aligned;
   return copy;
 }
 
@@ -223,6 +234,29 @@ export function estimatedCount(lines: readonly EditorLine[]): number {
   return n;
 }
 
+/** Estimated lines whose start came from 「AI 自動對時」. */
+export function alignedCount(lines: readonly EditorLine[]): number {
+  let n = 0;
+  for (const l of lines) if (l.start != null && l.estimated && l.aligned) n++;
+  return n;
+}
+
+/**
+ * The AI-aligned rows that still agree with the real ones: their start lies at least
+ * ALIGNED_MIN_GAP after the previous real start and before the next real start.
+ */
+function keptAligned(lines: readonly EditorLine[]): boolean[] {
+  const real = lines.map((l) => l.start != null && !l.estimated);
+  const nextReal: number[] = new Array(lines.length).fill(Infinity);
+  for (let i = lines.length - 2; i >= 0; i--) nextReal[i] = real[i + 1] ? (lines[i + 1].start as number) : nextReal[i + 1];
+  let prevReal = -Infinity;
+  return lines.map((l, i) => {
+    const keep = l.start != null && !!l.estimated && !!l.aligned && l.start >= prevReal + ALIGNED_MIN_GAP && l.start <= nextReal[i] - ALIGNED_MIN_GAP;
+    if (real[i]) prevReal = l.start as number;
+    return keep;
+  });
+}
+
 export type ReestimateMode =
   /** the estimated lines between the real ones (untimed lines stay untimed) — after 對拍 or a manual edit */
   | "estimated"
@@ -239,7 +273,9 @@ export type ReestimateMode =
  * move (except in "all"). The re-laid lines are flagged estimated.
  */
 export function reestimate(lines: readonly EditorLine[], analysis: AudioAnalysis | null, duration: number, mode: ReestimateMode = "estimated", options: DistributeOptions = {}): EditorLine[] {
-  const redo = lines.map((l) => mode === "all" || (l.start == null ? mode !== "estimated" : !!l.estimated && mode !== "untimed"));
+  // round 15: after a tap the lines 「AI 自動對時」 placed stay (unless a real line now contradicts them)
+  const soft = mode === "estimated" ? keptAligned(lines) : lines.map(() => false);
+  const redo = lines.map((l, i) => !soft[i] && (mode === "all" || (l.start == null ? mode !== "estimated" : !!l.estimated && mode !== "untimed")));
   // untimed rows take part in the layout (they are sung too) but stay untimed in "estimated" mode
   const layout = lines.map((l, i) => redo[i] || l.start == null);
   if (!redo.some(Boolean)) return lines as EditorLine[];
@@ -250,6 +286,7 @@ export function reestimate(lines: readonly EditorLine[], analysis: AudioAnalysis
     const start = placed[i]?.start ?? null;
     if (start == null) return retimeLine(l, null);
     const line: EditorLine = withoutWords({ ...l, start: round3(start), end: null, estimated: true });
+    delete line.aligned;
     return line;
   });
   // explicit ends only where a gap follows (the same rule as fromLyrics)
@@ -268,6 +305,45 @@ export function reestimate(lines: readonly EditorLine[], analysis: AudioAnalysis
     if (nextStart == null || end < nextStart - CONTIGUOUS_EPS) out[i] = { ...out[i], end: round3(end) };
   }
   return out;
+}
+
+/**
+ * 「AI 自動對時」 (round 15): apply the anchors of `alignTranscript` in place — the real rows never
+ * move, the anchored rows take the AI's start (estimated, `aligned`), every other row is laid out
+ * between them by the 人聲 aligner (estimated). Keys, order and text stay.
+ */
+export function applyAsrTiming(lines: readonly EditorLine[], anchors: readonly LineAnchor[], analysis: AudioAnalysis | null, duration: number): EditorLine[] {
+  const raw: LyricLine[] = lines.map((l) => {
+    const line: LyricLine = { id: l.key, text: l.text, start: l.start, end: l.start != null ? l.end : null };
+    if (l.start != null && l.estimated) line.estimated = true;
+    return line;
+  });
+  const { lines: placed } = applyAnchors(raw, anchors, analysis, duration);
+  const out = lines.map((l, i) => {
+    if (l.start != null && !l.estimated) return l;
+    const p = placed[i];
+    if (p?.start == null) return retimeLine(l, null);
+    const line: EditorLine = withoutWords({ ...l, start: round3(p.start), end: null, estimated: true });
+    if (p.aligned) line.aligned = true;
+    else delete line.aligned;
+    return line;
+  });
+  // explicit ends only where a gap follows (the same rule as fromLyrics)
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] === lines[i] || out[i].start == null) continue;
+    const end = placed[i]?.end;
+    const start = out[i].start as number;
+    if (end == null || !(end > start)) continue;
+    const nextStart = nextTimedStart(out, i);
+    if (nextStart == null || end < nextStart - CONTIGUOUS_EPS) out[i] = { ...out[i], end: round3(end) };
+  }
+  return out;
+}
+
+/** 確認全部時間: every estimated start becomes real (the song can then run in 跟音檔). */
+export function confirmAllTimes(lines: readonly EditorLine[]): EditorLine[] {
+  if (!lines.some((l) => l.estimated || l.aligned)) return lines as EditorLine[];
+  return lines.map(real);
 }
 
 /** Effective end of a line for display/playback (explicit, next start, or a capped default). */
@@ -336,6 +412,7 @@ export function mergeWithNext(lines: readonly EditorLine[], index: number): Edit
     end: start != null && b.end != null && b.end > start ? b.end : null,
   };
   if (start != null && (a.start != null ? a.estimated : b.estimated)) merged.estimated = true;
+  if (merged.estimated && (a.start != null ? a.aligned : b.aligned)) merged.aligned = true;
   if (a.start != null && b.start != null && a.words?.length && b.words?.length && a.text.trim() && b.text.trim()) {
     const first = a.words.map((w) => ({ ...w }));
     first[first.length - 1].text = first[first.length - 1].text.replace(/\s*$/, " ");
@@ -414,6 +491,7 @@ export function splitLine(lines: readonly EditorLine[], index: number, caret?: n
   const first: EditorLine = { key: line.key, text: left, translation: line.translation, start: line.start, end: null };
   if (leftWords) first.words = leftWords;
   if (line.estimated && line.start != null) first.estimated = true;
+  if (first.estimated && line.aligned) first.aligned = true;
   const second: EditorLine = {
     key: newLineKey(),
     text: right,

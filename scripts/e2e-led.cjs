@@ -9,7 +9,10 @@
 //   - turning safe mode off asks first (the confirm dialog), and the capsule turns orange;
 //   - with safe mode off the output flashes more than 3 times a second;
 //   - with safe mode on (default) it flashes at most 3 times a second, and the console says
-//     「已抑制閃爍」;
+//     「已抑制閃爍」 (its own preview's limiter, measured with the projection window parked: two
+//     windows on one software GPU slow each other down, and the detail reports how many frames a
+//     second the preview's limiter measured), and the projection window's own damping report
+//     (pong) reaches a freshly opened console;
 //   - the brightness presets lower the peak luminance (室內 100 % > LED 牆 70 % > 戶外 55 %);
 //   - LED 模擬 appears on the console preview only, never in the projection window;
 //   - the pre-show check lists the sections safe mode changes; the export page applies it by default.
@@ -333,7 +336,20 @@ async function measure(popup, seconds) {
     await page.locator("[data-safety-switch]").click();
     await page.waitForTimeout(800);
     check("turning safe mode on needs no confirm", (await page.locator("dialog[open]").count()) === 0 && (await page.locator('[data-safety-tile="on"]').count()) === 1);
-    // with the console open: the operator sees the limiter at work (the hard-cut strobe)
+    // with the console open: the operator sees the limiter at work (the hard-cut strobe). The
+    // console preview's own limiter is checked here, with the projection window parked: both
+    // windows share the container's one software GPU, the preview then drops to a few frames a
+    // second, and its limiter only measures the frames whose readback came back (this flaked when
+    // the readback ring had 3 slots: a 4 Hz strobe measured 3–4 times a second can slip by
+    // unmeasured). The projection's own limiter and its report (pong) are checked below. The
+    // detail says how many frames a second the preview's limiter measured.
+    const outputUrl = popup.url();
+    await popup.goto("about:blank");
+    await page.bringToFront();
+    await page.waitForTimeout(500);
+    const measured = () => page.evaluate(() => Number(document.querySelector("[data-stage-backend]")?.dataset.limiterMeasured ?? 0));
+    const measuredBefore = await measured();
+    const measuredAt = Date.now();
     await page.locator(`button[data-section-index="${cutStart}"]`).click();
     await page.waitForTimeout(300);
     await page.keyboard.press("Space");
@@ -343,11 +359,24 @@ async function measure(popup, seconds) {
       await page.waitForTimeout(500);
       consoleDamping ||= (await page.locator("[data-limiter-label]").count()) > 0 || (await capsule.getAttribute("data-safety-capsule")) === "damping";
       statusText = await page.locator("[data-limiter-status]").innerText().catch(() => "");
+      if (process.env.DEBUG_LED) {
+        const con = await page.evaluate(() => {
+          const root = document.querySelector("[data-stage-backend]");
+          return { fps: root?.dataset.fps, limiter: root?.dataset.limiter, engaged: root?.dataset.limiterEngaged, measured: root?.dataset.limiterMeasured, lost: root?.dataset.limiterLost };
+        });
+        console.log(`  console preview ${JSON.stringify(con)} status ${statusText.replace(/\s+/g, " ")}`);
+      }
     }
     await shot(page, "led-03-console-damping");
+    const previewRate = ((await measured()) - measuredBefore) / ((Date.now() - measuredAt) / 1000);
     await page.keyboard.press("Space");
-    check("the console says 「已抑制閃爍」 while the limiter damps", consoleDamping, statusText.replace(/\s+/g, " "));
+    check("the console says 「已抑制閃爍」 while the limiter damps", consoleDamping, `${statusText.replace(/\s+/g, " ")} (the preview measured ${previewRate.toFixed(1)} frames/s)`);
     check("the control tab counts the damping per section", /正在抑制閃爍|已抑制閃爍 \d+ 次/.test(statusText) && /\d+ 次/.test(statusText), statusText.replace(/\s+/g, " "));
+    // the projection window comes back and reconnects
+    await popup.goto(outputUrl);
+    await popup.waitForLoadState("load");
+    await popup.evaluate(SAMPLER);
+    await page.locator("text=投影已連線").first().waitFor({ timeout: 30000 });
     await page.waitForTimeout(1200);
     const on = await playStrobeAlone(5);
     console.log(`safe ON, flash strobe: ${on.samples.length} samples, ${on.fps.toFixed(1)} fps, ${on.flashes} flashes/s, peak ${on.peak.toFixed(3)}`);
@@ -362,6 +391,14 @@ async function measure(popup, seconds) {
     check("with safe mode on the hard-cut strobe flashes at most 3 times a second", cut.flashes <= 3 && cut.fps >= 14, `${cut.flashes} flashes/s at ${cut.fps.toFixed(1)} fps`);
     check("the output's limiter engaged on the hard-cut strobe", limiterOut.safety === "70" && limiterOut.engaged > 0 && limiterOut.limiter === "damping", JSON.stringify(limiterOut));
     await openConsole();
+    // …and its own report reaches the console (pong): this freshly opened console's preview has not
+    // damped anything, so a count here is the projection window's
+    let reported = "";
+    for (let k = 0; k < 12 && !/已抑制閃爍 [1-9]\d* 次|正在抑制閃爍/.test(reported); k++) {
+      await page.waitForTimeout(500);
+      reported = await page.locator("[data-limiter-status]").innerText().catch(() => "");
+    }
+    check("the console shows the projection window's damping (its pong report)", /已抑制閃爍 [1-9]\d* 次|正在抑制閃爍/.test(reported), reported.replace(/\s+/g, " "));
 
     // --- brightness cap on a steady white field
     await page.locator(`button[data-section-index="${whiteHold}"]`).click();

@@ -5,6 +5,10 @@
 //
 //   node scripts/timing-eval/decode.cjs <dataset dir (with mp3/) or a folder of .mp3> <cache dir> [--force] [--only=<text>]
 //
+// --asr (round 15) writes what the lyric editor's 「AI 自動對時」 hands the speech recogniser instead:
+// decodeAudioData at 16 kHz, the channels averaged to mono (decodeForAsr in src/lib/asr/audio.ts),
+// as 32-bit float WAV files — the input of scripts/timing-eval/transcribe.mjs.
+//
 // Local measurement only: the decoded audio is written to the cache dir (keep it out of the repo,
 // e.g. scratch/round14/wav). See "Lyric timing evaluation" in docs/ARCHITECTURE.md.
 const { chromium } = (() => {
@@ -22,13 +26,16 @@ const http = require("node:http");
 const path = require("node:path");
 
 const RATE = 22050;
+/** the speech recogniser's input rate (src/lib/asr/models.json sampleRate) */
+const ASR_RATE = 16000;
 
 const args = process.argv.slice(2);
 const positional = args.filter((a) => !a.startsWith("--"));
 const force = args.includes("--force");
+const asr = args.includes("--asr");
 const only = (args.find((a) => a.startsWith("--only=")) ?? "").slice("--only=".length);
 if (positional.length < 2) {
-  console.error("usage: node scripts/timing-eval/decode.cjs <dataset dir or mp3 folder> <cache dir> [--force] [--only=<text>]");
+  console.error("usage: node scripts/timing-eval/decode.cjs <dataset dir or mp3 folder> <cache dir> [--asr] [--force] [--only=<text>]");
   process.exit(2);
 }
 const source = path.resolve(positional[0]);
@@ -72,6 +79,32 @@ async function decodeOne(name, rate) {
       pcm[i * channels + c] = Math.round(s * 32767);
     }
   }
+  const put = await fetch("/wav/" + encodeURIComponent(name), { method: "POST", body: out });
+  if (!put.ok) throw new Error("upload " + put.status);
+  return { seconds: buf.duration, channels: buf.numberOfChannels, sourceRate: buf.sampleRate };
+}
+// decodeForAsr (src/lib/asr/audio.ts): decode at 16 kHz, average the channels; 32-bit float mono WAV
+async function decodeAsr(name, rate) {
+  const res = await fetch("/mp3/" + encodeURIComponent(name));
+  if (!res.ok) throw new Error("fetch " + res.status);
+  const data = await res.arrayBuffer();
+  const ctx = new OfflineAudioContext(1, 1, rate);
+  const buf = await ctx.decodeAudioData(data);
+  const n = buf.length;
+  const mono = new Float32Array(n);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const x = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += x[i];
+  }
+  if (buf.numberOfChannels > 1) for (let i = 0; i < n; i++) mono[i] /= buf.numberOfChannels;
+  const out = new ArrayBuffer(44 + n * 4);
+  const v = new DataView(out);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 4, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 3, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 32, true);
+  str(36, "data"); v.setUint32(40, n * 4, true);
+  new Float32Array(out, 44).set(mono);
   const put = await fetch("/wav/" + encodeURIComponent(name), { method: "POST", body: out });
   if (!put.ok) throw new Error("upload " + put.status);
   return { seconds: buf.duration, channels: buf.numberOfChannels, sourceRate: buf.sampleRate };
@@ -128,7 +161,9 @@ const server = http.createServer((req, res) => {
         continue;
       }
       try {
-        const info = await page.evaluate(([name, rate]) => window.decodeOne(name, rate), [f, RATE]);
+        const info = asr
+          ? await page.evaluate(([name, rate]) => window.decodeAsr(name, rate), [f, ASR_RATE])
+          : await page.evaluate(([name, rate]) => window.decodeOne(name, rate), [f, RATE]);
         done++;
         console.log(`${String(done).padStart(3)}/${files.length} ${f}  ${info.seconds.toFixed(1)} s, ${info.channels} ch`);
       } catch (err) {

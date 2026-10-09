@@ -111,10 +111,16 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
         <Button variant="quiet" size="icon-sm" aria-label={`第 ${n} 行延後 0.1 秒`} icon={<PlusIcon size={14} />} onClick={() => h.nudge(index, 0.1)} disabled={line.start == null} />
       </div>
       <div role="cell" className="relative flex min-w-0 items-center gap-1 max-md:col-span-full max-md:row-start-2 max-md:pl-9">
-        {estimated && (
+        {estimated && !line.aligned && (
           // round 14: the start is a guess (人聲 / 自動分配) until it is tapped, dragged or typed
           <Tag tone="orange" data-estimated title="時間是估的：對拍、拖曳標記或輸入時間後就是真的" className="cursor-default">
             估<span className="sr-only">：這行的時間是估的</span>
+          </Tag>
+        )}
+        {estimated && line.aligned && (
+          // round 15: 「AI 自動對時」 heard this line here — still a guess, a fainter one
+          <Tag tone="orange" data-estimated data-aligned title="AI 對上的時間（還是估的）：播放檢查，對拍、拖曳標記或輸入時間後就是真的" className="cursor-default opacity-55">
+            估<span className="sr-only">：這行的時間是 AI 對上的，還是估的</span>
           </Tag>
         )}
         {outOfOrder && (
@@ -240,7 +246,7 @@ export function LineTable({
   outOfOrder: boolean[];
   handlers: RowHandlers;
   empty?: ReactNode;
-  /** left of the column captions, e.g. 「14 行，全部已定時」 */
+  /** left of the column captions, e.g. 「共 14 行，全部已定時」 / 「共 14 行，時間都是估的」 */
   summary?: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);

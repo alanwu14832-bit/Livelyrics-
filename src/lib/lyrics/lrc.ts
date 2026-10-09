@@ -568,6 +568,7 @@ export function distributeLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
     const copy: LyricLine = { ...l, words: l.words?.map((w) => ({ ...w })) };
     if (flags[k]) copy.estimated = true;
     else delete copy.estimated;
+    if (!flags[k]) delete copy.aligned;
     return copy;
   });
   const base: Lyrics = { ...lyrics, lines };
@@ -597,7 +598,7 @@ export function placeUntimed(input: readonly LyricLine[], analysis: AudioAnalysi
   const spread = lines.map((l) => ({ ...l, words: l.words?.map((w) => ({ ...w })) }));
   spreadRuns(spread, analysis, dur);
   const vocal = usableVocal(analysis, dur);
-  if (!vocal) return spread.map((l, k) => (placed[k] ? { ...l, estimated: true } : l));
+  if (!vocal) return spread.map((l, k) => (placed[k] ? withoutAligned({ ...l, estimated: true }) : l));
 
   const alignParams: AlignParams = { ...DEFAULT_ALIGN, ...options.align };
   // the song's singing rate (sung seconds per weight unit) over every line, timed or not
@@ -640,6 +641,7 @@ export function placeUntimed(input: readonly LyricLine[], analysis: AudioAnalysi
       l.start = res ? res.starts[k] : spread[i + k].start;
       l.end = res ? res.ends[k] : spread[i + k].end;
       l.estimated = true;
+      delete l.aligned;
       delete l.words;
     });
     if (prev && !prevEnds) {
@@ -723,6 +725,13 @@ function sanitizeWords(words: unknown, start: number): LyricWord[] | undefined {
   return out;
 }
 
+function withoutAligned(line: LyricLine): LyricLine {
+  if (!line.aligned) return line;
+  const copy = { ...line };
+  delete copy.aligned;
+  return copy;
+}
+
 /** Every line has a start time (real or estimated). */
 export function allLinesTimed(lyrics: Pick<Lyrics, "lines"> | null | undefined): boolean {
   const lines = lyrics?.lines ?? [];
@@ -768,6 +777,7 @@ export function reestimateLines(lyrics: Lyrics, analysis: AudioAnalysis | null, 
     const copy: LyricLine = { ...l, start: null, end: null };
     delete copy.words;
     delete copy.estimated;
+    delete copy.aligned;
     return copy;
   });
   const cleared: Lyrics = { ...lyrics, lines };
@@ -804,7 +814,10 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
     if (start != null) {
       const words = sanitizeWords(l.words, start);
       if (words) line.words = words;
-      if (legacyEstimated || l.estimated === true) line.estimated = true;
+      if (legacyEstimated || l.estimated === true) {
+        line.estimated = true;
+        if (l.aligned === true) line.aligned = true;
+      }
     }
     work.push(line);
   });
@@ -817,6 +830,7 @@ export function normalizeLyrics(lyrics: Lyrics): Lyrics {
     if (w.translation) line.translation = w.translation;
     if (w.words) line.words = w.words;
     if (w.estimated) line.estimated = true;
+    if (w.estimated && w.aligned) line.aligned = true;
     return line;
   });
 

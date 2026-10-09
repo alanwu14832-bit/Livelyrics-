@@ -172,6 +172,9 @@ export class StageEngine {
   private limiter: FlashLimiter | null = null;
   /** α of every rendered frame whose grid has not been observed yet, by render serial */
   private pendingAlpha = new Map<number, { t: number; alpha: number; lyric: LyricEstimate | null }>();
+  /** limiter readbacks used / thrown away so far (e2e diagnostics: data-limiter-measured / -lost) */
+  private gridsMeasured = 0;
+  private gridsLost = 0;
   private gridBuf: Float32Array | null = null;
   private engagedBySection: Record<number, number> = {};
   private engagedTotal = 0;
@@ -880,6 +883,10 @@ export class StageEngine {
       this.root.dataset.transition = df.transition ? `${df.transition.kind}:${df.transition.progress.toFixed(2)}` : "none";
       this.root.dataset.limiter = damping ? "damping" : limiter ? "idle" : "off";
       this.root.dataset.limiterEngaged = String(this.engagedTotal);
+      // how many frames the limiter actually measured (and how many readbacks it had to drop)
+      this.root.dataset.limiterMeasured = String(this.gridsMeasured);
+      this.root.dataset.limiterLost = String(this.gridsLost);
+      this.root.dataset.fps = this.lastFps.toFixed(1);
       const st = limiter?.status;
       const safetyStats: SafetyStats | null = safety.on
         ? {
@@ -925,7 +932,11 @@ export class StageEngine {
         meta = m;
         this.pendingAlpha.delete(serial);
       }
-      if (!meta || g.cols !== limiter.cols || g.rows !== limiter.rows) continue;
+      if (!meta || g.cols !== limiter.cols || g.rows !== limiter.rows) {
+        this.gridsLost++;
+        continue;
+      }
+      this.gridsMeasured++;
       const n = g.cols * g.rows;
       if (!this.gridBuf || this.gridBuf.length !== n * 3) this.gridBuf = new Float32Array(n * 3);
       const buf = this.gridBuf;
@@ -945,9 +956,10 @@ export class StageEngine {
         if (sectionIndex != null) this.engagedBySection[sectionIndex] = (this.engagedBySection[sectionIndex] ?? 0) + 1;
       }
     }
-    // readbacks that never came back (context trouble) must not pile up
-    if (this.pendingAlpha.size > 12) {
-      const drop = [...this.pendingAlpha.keys()].slice(0, this.pendingAlpha.size - 12);
+    // readbacks that never came back (context trouble) must not pile up — but a busy GPU's come
+    // back many frames late, and the limiter still needs them (it used to drop them after 12 frames)
+    if (this.pendingAlpha.size > 30) {
+      const drop = [...this.pendingAlpha.keys()].slice(0, this.pendingAlpha.size - 30);
       for (const k of drop) this.pendingAlpha.delete(k);
     }
   }

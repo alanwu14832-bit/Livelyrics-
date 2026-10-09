@@ -45,3 +45,6 @@ next-env.d.ts
 /data/
 /.e2e-shots/
 /scratch/
+
+# ONNX Runtime Web WebAssembly, copied from node_modules by next.config.ts (round 15, 「AI 自動對時」)
+/public/ort/

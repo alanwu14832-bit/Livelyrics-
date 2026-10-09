@@ -118,9 +118,9 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
     status = `${untimed} 行未對時`;
     tone = "orange";
   } else if (project && estimatedCount(lyrics) > 0) {
-    // some times were estimated (人聲 / spread), not tapped: say how many and point at 對拍
+    // some times were estimated (人聲 / spread / AI), not confirmed: say how many and point at the editor
     status = (
-      <Tooltip content={`還有 ${estimatedCount(lyrics)} 句時間是估的，先到歌詞編輯器對拍；在那之前用手動切換逐句送出`} placement="bottom-start">
+      <Tooltip content={`還有 ${estimatedCount(lyrics)} 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍；在那之前用手動切換逐句送出`} placement="bottom-start">
         <Link
           href={`/p/${encodeURIComponent(project.id)}/lyrics`}
           data-testid="timing-estimated-link"
@@ -129,7 +129,7 @@ function Subtitle({ controller, snap }: { controller: ConsoleController; snap: C
           }}
           className="font-semibold text-orange-text underline-offset-2 hover:underline"
         >
-          {estimatedCount(lyrics)} 句時間是估的・去對拍
+          {estimatedCount(lyrics)} 句時間是估的・去對時
         </Link>
       </Tooltip>
     );

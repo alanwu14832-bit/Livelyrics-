@@ -116,6 +116,13 @@ export interface LyricLine {
    * between the real ones. Only on timed lines.
    */
   estimated?: true;
+  /**
+   * Round 15: this estimated start came from 「AI 自動對時」 — a word the speech recogniser heard
+   * (`asr-align.ts`), not the 人聲 curve. Only together with `estimated`. When the editor
+   * re-estimates around a tap, such lines stay where the AI put them unless they contradict a
+   * real line; tapping, dragging or typing the start (or 確認全部時間) makes the line real.
+   */
+  aligned?: true;
 }
 
 export type LyricsSource = "lrclib-synced" | "lrclib-plain" | "user" | "embedded" | "none";
