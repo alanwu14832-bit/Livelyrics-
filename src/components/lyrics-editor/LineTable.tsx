@@ -246,7 +246,7 @@ export function LineTable({
   outOfOrder: boolean[];
   handlers: RowHandlers;
   empty?: ReactNode;
-  /** left of the column captions, e.g. 「14 行，全部已定時」 */
+  /** left of the column captions, e.g. 「共 14 行，全部已定時」 / 「共 14 行，時間都是估的」 */
   summary?: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);

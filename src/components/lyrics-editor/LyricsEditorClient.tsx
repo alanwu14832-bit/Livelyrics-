@@ -817,11 +817,29 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[13px] leading-5 text-label-2">
       <span>
         共 <span className="t-latin tabular">{lines.length}</span> 行，
-        {timed === lines.length ? "全部已定時" : timed === 0 ? "都還沒有時間" : `${timed} 行已定時，${untimed} 行未定時`}
-        {estimated > 0 && (
-          <span data-testid="timing-estimated" title="標著「估」的行是估的時間：對拍、拖曳標記或輸入時間後就是真的">
-            ；還有 <span className="t-latin tabular">{estimated}</span> 句時間是估的
-          </span>
+        {timed === lines.length ? (
+          estimated === 0 ? (
+            "全部已定時"
+          ) : (
+            <span data-testid="timing-estimated" title="標著「估」的行是估的時間：對拍、拖曳標記或輸入時間後就是真的">
+              {estimated === lines.length ? (
+                "時間都是估的"
+              ) : (
+                <>
+                  都有時間；其中 <span className="t-latin tabular">{estimated}</span> 句是估的
+                </>
+              )}
+            </span>
+          )
+        ) : (
+          <>
+            {timed === 0 ? "都還沒有時間" : `${timed} 行已定時，${untimed} 行未定時`}
+            {estimated > 0 && (
+              <span data-testid="timing-estimated" title="標著「估」的行是估的時間：對拍、拖曳標記或輸入時間後就是真的">
+                ；還有 <span className="t-latin tabular">{estimated}</span> 句時間是估的
+              </span>
+            )}
+          </>
         )}
         {estimated > 0 && !tapActive && (
           <Button variant="plain" size="sm" className="ml-2 align-baseline" onClick={() => setConfirmAllOpen(true)} data-testid="confirm-all">

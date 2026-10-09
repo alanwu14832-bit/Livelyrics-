@@ -79,8 +79,12 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  webpack(config, { isServer }) {
-    if (!isServer) {
+  webpack(config, { isServer, webpack }) {
+    if (isServer) {
+      // the lyric editor's SSR pass compiles its 「AI 自動對時」 worker too (it only ever runs in the
+      // browser): an empty stand-in keeps transformers.js out of the server bundle and its tracing
+      config.plugins.push(new webpack.NormalModuleReplacementPlugin(/asr\.worker\.ts$/, path.join(process.cwd(), "src/lib/asr/asr.worker.server.ts")));
+    } else {
       config.resolve ??= {};
       config.resolve.alias = {
         ...config.resolve.alias,
