@@ -22,7 +22,7 @@ import {
 import { editorReducer, initialEditorState } from "@/components/lyrics-editor/editor-state";
 import { parseLyricsPatch } from "@/lib/server/validate";
 import type { AudioAnalysis, Lyrics } from "@/lib/types";
-import { alignTranscript, type AsrWord } from "./asr-align";
+import { DEFAULT_ASR_ALIGN, alignTranscript, type AsrWord } from "./asr-align";
 import { distributeLines, normalizeLyrics, reestimateLines } from "./lrc";
 
 /** a 20 Hz 人聲 curve: phrases of 4 s every 6 s from 4 s */
@@ -56,6 +56,9 @@ function words(): AsrWord[] {
   });
 }
 
+/** where the AI puts a line Whisper heard at t (its timestamp calibration) */
+const at = (t: number) => t + DEFAULT_ASR_ALIGN.offset;
+
 function aiRun(current: EditorLine[], analysis = vocalAnalysis()): EditorLine[] {
   const fixed = current.map((l) => (l.start != null && !l.estimated ? l.start : null));
   const r = alignTranscript({ lines: current.map((l) => l.text), words: words(), fixed, vocal: analysis.vocal ? { curve: analysis.vocal, rate: analysis.envelopeRate } : null });
@@ -65,7 +68,7 @@ function aiRun(current: EditorLine[], analysis = vocalAnalysis()): EditorLine[] 
 describe("「AI 自動對時」 in the editor", () => {
   it("the heard lines take the AI's start (estimated, aligned); the others are estimated by the 人聲 aligner", () => {
     const out = aiRun(rows());
-    expect(out.map((l) => l.start)).toEqual([expect.closeTo(4, 2), expect.closeTo(10, 2), expect.any(Number), expect.closeTo(22, 2), expect.any(Number), expect.closeTo(34, 2)]);
+    expect(out.map((l) => l.start)).toEqual([expect.closeTo(at(4), 2), expect.closeTo(at(10), 2), expect.any(Number), expect.closeTo(at(22), 2), expect.any(Number), expect.closeTo(at(34), 2)]);
     expect(out.map((l) => !!l.aligned)).toEqual([true, true, false, true, false, true]);
     expect(out.every((l) => l.estimated)).toBe(true);
     expect(estimatedCount(out)).toBe(6);

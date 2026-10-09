@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AudioAnalysis, LyricLine } from "../types";
 import {
+  DEFAULT_ASR_ALIGN,
   alignTranscript,
   applyAnchors,
   asrLanguage,
@@ -25,8 +26,9 @@ function say(text: string, at: number, step = 0.4): AsrWord[] {
   return parts.map((w, k) => ({ text: ` ${w}`, start: at + k * step, end: at + k * step + step * 0.8 }));
 }
 
+/** Anchor starts per line; without the timestamp calibration (`offset`), so the times read as said. */
 const startsOf = (lines: readonly string[], words: AsrWord[], extra: Partial<Parameters<typeof alignTranscript>[0]> = {}) => {
-  const r = alignTranscript({ lines, words, ...extra });
+  const r = alignTranscript({ lines, words, ...extra, params: { offset: 0, ...extra.params } });
   const out: Array<number | null> = lines.map(() => null);
   for (const a of r.anchors) out[a.line] = a.start;
   return { starts: out, result: r };
@@ -202,6 +204,15 @@ describe("alignTranscript", () => {
     const words = [...say("君の名前を呼んでいる", 12, 0.25), ...say("こころが叫んでる", 18, 0.25)];
     const { starts } = startsOf(lines, words, { han: HAN });
     expect(starts).toEqual([expect.closeTo(12, 2), expect.closeTo(18, 2)]);
+  });
+
+  it("the default calibration: a line starts 0.15 s before Whisper's word, and ends after its last word", () => {
+    expect(DEFAULT_ASR_ALIGN.offset).toBe(-0.15);
+    const r = alignTranscript({ lines: [verse[0], verse[1]], words: [...say(verse[0], 10), ...say(verse[1], 20)] });
+    expect(r.anchors[0].start).toBeCloseTo(9.85, 3);
+    expect(r.anchors[1].start).toBeCloseTo(19.85, 3);
+    // "Hey on your heart": the last word starts at 11.2 and lasts 0.32 s; + endPad 0.3
+    expect(r.anchors[0].end).toBeCloseTo(11.82, 3);
   });
 
   it("nothing recognised, or nothing to match: no anchors", () => {

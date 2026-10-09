@@ -14,7 +14,8 @@
 //      the console still warns.
 //   4. 確認全部時間 (confirm dialog) → every line real, undo / redo work, saved synced → the console
 //      no longer warns.
-//   5. Cancel, a failure (memory → 改用快速), the 自動分配 dialog's entry, a low-memory computer (快速 preselected).
+//   5. Cancel, a failure (memory → 改用快速), the 自動分配 dialog's entry, a low-memory computer (快速 preselected),
+//      a phone (no sideways scroll).
 const { chromium } = (() => {
   for (const id of ["playwright", "/opt/node22/lib/node_modules/playwright"]) {
     try {
@@ -33,6 +34,8 @@ const REPO = path.resolve(__dirname, "..");
 const SHOTS = process.env.SHOTS || path.join(REPO, ".e2e-shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 const WAV = fs.readFileSync(path.join(REPO, "fixtures/demo-song.wav"));
+/** DEFAULT_ASR_ALIGN.offset (src/lib/lyrics/asr-align.ts): a line starts this far from the word Whisper timed */
+const ASR_OFFSET = -0.15;
 const LINES = ["我們的歌會找到方向", "在每個夜裡唱著", "風吹過了城市", "啦啦啦啦", "你說的話還在耳邊", "一起走到天亮"];
 
 /** what the fake recogniser "heard": Simplified, 再 for 在, line 4 (啦啦啦啦) not understood */
@@ -174,7 +177,7 @@ async function rowStarts(page) {
     check("every line keeps 「估」 (the AI's lines a fainter one)", marks === 6 && aiMarks === 5, `${marks} 估, ${aiMarks} AI`);
     const after = await rowStarts(page);
     const expected = [8.2, 17.4, 26.1, null, 44.3, 53.6];
-    const near = expected.every((t, i) => t == null || (after[i] != null && Math.abs(after[i] - t) < 0.06));
+    const near = expected.every((t, i) => t == null || (after[i] != null && Math.abs(after[i] - (t + ASR_OFFSET)) < 0.06));
     check("the matched lines start where the AI heard them (Simplified + a homophone matched)", near, JSON.stringify(after));
     check("the unheard line is placed between its neighbours", after[3] != null && after[3] > after[2] && after[3] < after[4], JSON.stringify(after));
     check("the times changed from the 人聲 estimate", JSON.stringify(after) !== JSON.stringify(before));
@@ -291,6 +294,17 @@ async function rowStarts(page) {
     check("low memory: 快速 preselected, and why", (await lowSheet.getByRole("radio", { name: /快速/ }).isChecked()) && (await lowSheet.getByTestId("asr-low-memory").innerText()).includes("記憶體約 2 GB"));
     await lowPage.screenshot({ path: path.join(SHOTS, "asr-09-low-memory-sheet.png") });
     await low.close();
+
+    // a phone: the toolbar's extra button wraps, nothing scrolls sideways
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: "light" });
+    const phonePage = await phone.newPage();
+    watch(phonePage, "phone");
+    await phonePage.goto(`${BASE}/p/${created.id}/lyrics`, { waitUntil: "networkidle" });
+    await phonePage.locator('input[data-field="time"]').first().waitFor({ timeout: 30000 });
+    const overflow = await phonePage.evaluate(() => ({ w: document.documentElement.scrollWidth, c: document.documentElement.clientWidth }));
+    check("phone: the editor with 「AI 自動對時」 does not scroll sideways", overflow.w <= overflow.c && (await phonePage.getByTestId("asr-start").count()) === 1, `${overflow.w}/${overflow.c}`);
+    await phonePage.screenshot({ path: path.join(SHOTS, "asr-10-phone.png") });
+    await phone.close();
   } catch (err) {
     check("FATAL", false, err instanceof Error ? err.stack : String(err));
   } finally {

@@ -250,6 +250,8 @@ export interface AsrAlignParams {
   backoffChar: number;
   /** the anchors keep this far apart (seconds) */
   minGap: number;
+  /** added to every anchor's start (Whisper's word timestamps run a little early or late) */
+  offset: number;
   /** a repeated token (period 1) keeps at most this many repeats; a repeated phrase (period 2–8 tokens) this many */
   maxRepeat: number;
   maxPhraseRepeat: number;
@@ -274,11 +276,13 @@ export const DEFAULT_ASR_ALIGN: AsrAlignParams = {
   backoffWord: 0.06,
   backoffChar: 0.25,
   minGap: 0.3,
+  // tuned on the dev half (round 15): Whisper's word starts run about 0.15 s late
+  offset: -0.15,
   maxRepeat: 4,
   maxPhraseRepeat: 3,
   silence: 0.05,
   silenceWindow: 1.5,
-  ends: false,
+  ends: true,
   endPad: 0.3,
 };
 
@@ -491,7 +495,7 @@ export function alignTranscript(input: AsrAlignInput): AsrAlignResult {
       while (e >= Math.max(a, b - reach) && !map[e]) e--;
       if (e >= a && map[e]) end = rec[map[e]!.j].end + params.endPad;
     }
-    start = Math.max(0, start);
+    start = Math.max(0, start + params.offset);
     return { start, end: end != null && end > start + 0.2 ? end : null, confidence };
   });
 
