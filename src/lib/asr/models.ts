@@ -31,6 +31,11 @@ export function asrModel(choice: AsrChoice, device: AsrDevice): AsrModelSpec {
   return { id: m.id, revision: m.revision, device: variant.device as Record<string, AsrDevice>, dtype: variant.dtype, bytes: variant.bytes };
 }
 
+/** every model id → its pinned revision (the worker's env.fetch pins transformers.js' stray `main` requests) */
+export function asrHubPins(): Record<string, string> {
+  return Object.fromEntries(ASR_CHOICES.map((c) => [config.models[c].id, config.models[c].revision]));
+}
+
 /** "約 250 MB": the one-time download, rounded the way the sheet says it */
 export function downloadLabel(choice: AsrChoice, device: AsrDevice): string {
   const mb = asrModel(choice, device).bytes / 1e6;

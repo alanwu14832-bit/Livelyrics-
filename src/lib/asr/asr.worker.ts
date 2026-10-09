@@ -3,11 +3,13 @@
 // new Worker(new URL("./asr.worker.ts", import.meta.url)); transformers.js is imported lazily here,
 // so it lives only in this worker's chunks (never in the server bundle or on other pages).
 // The model files come from huggingface.co (pinned revisions, cached by the browser after the first
-// download); the ONNX Runtime WebAssembly files are self-hosted (next.config.ts copies them).
+// download — afterwards a run makes no network request: hub-fetch.ts); the ONNX Runtime WebAssembly
+// files are self-hosted (next.config.ts copies them).
 // The audio never leaves this computer.
 
 import type { AsrWord } from "../lyrics/asr-align";
-import { ASR_PIPELINE, ASR_SAMPLE_RATE, asrChunkCount, asrHeardAfter, asrModel, type AsrDevice } from "./models";
+import { pinnedFetch } from "./hub-fetch";
+import { ASR_PIPELINE, ASR_SAMPLE_RATE, asrChunkCount, asrHeardAfter, asrHubPins, asrModel, type AsrDevice } from "./models";
 import type { AsrErrorCode, AsrResponse, AsrRunRequest } from "./protocol";
 
 /** the slice of DedicatedWorkerGlobalScope we use (the project compiles against the DOM lib) */
@@ -47,6 +49,9 @@ async function loadPipeline(req: AsrRunRequest): Promise<Transcriber> {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
     env.useBrowserCache = true;
+    // pinned, and served from the cache once downloaded (transformers.js asks for a few files at `main`)
+    const cacheKey = env.cacheKey;
+    env.fetch = pinnedFetch(asrHubPins(), globalThis.fetch.bind(globalThis), () => (typeof caches === "undefined" ? Promise.resolve(null) : caches.open(cacheKey)));
     const onnx = env.backends.onnx as { wasm?: { wasmPaths?: unknown; proxy?: boolean } };
     if (onnx.wasm) {
       // self-hosted, not the CDN transformers.js would pick
