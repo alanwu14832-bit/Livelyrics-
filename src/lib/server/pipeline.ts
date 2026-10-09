@@ -784,7 +784,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
       message = `使用貼上的同步歌詞（${parsed.lines.length} 行）`;
     } else {
       lyrics = roughTiming(parsed);
-      message = `使用貼上的歌詞（${parsed.lines.length} 行）；沒有時間碼，已${how}（仍是估的），建議到歌詞編輯器對拍`;
+      message = `使用貼上的歌詞（${parsed.lines.length} 行）；沒有時間碼，已${how}（仍是估的），建議到歌詞編輯器用「AI 自動對時」或對拍`;
     }
   }
 
@@ -793,7 +793,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
       skipped: true,
       message:
         estimatedCount(project.lyrics) > 0
-          ? `沿用現有歌詞（${project.lyrics.lines.length} 行）；還有 ${estimatedCount(project.lyrics)} 句時間是估的，建議到歌詞編輯器對拍`
+          ? `沿用現有歌詞（${project.lyrics.lines.length} 行）；還有 ${estimatedCount(project.lyrics)} 句時間是估的，建議到歌詞編輯器用「AI 自動對時」或對拍`
           : `沿用現有的同步歌詞（${project.lyrics.lines.length} 行）`,
     };
   }
@@ -811,7 +811,7 @@ async function lyricsStep(run: RunInternal, project: Project, signal: AbortSigna
           message = `LRCLIB 同步歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行）`;
         } else if (best?.kind === "plain") {
           lyrics = roughTiming(best.lyrics);
-          message = `LRCLIB 歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已${how}，建議到歌詞編輯器對拍）`;
+          message = `LRCLIB 歌詞：${best.result.trackName}，${best.result.artistName}（${best.lyrics.lines.length} 行，沒有可用的時間碼，已${how}，建議到歌詞編輯器用「AI 自動對時」或對拍）`;
         } else if (best?.kind === "instrumental") {
           lyrics = emptyLyrics("none");
           message = `LRCLIB 標示「${best.trackName}」為純音樂，這首歌以純視覺設計`;

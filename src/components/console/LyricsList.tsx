@@ -291,11 +291,11 @@ function LyricsListImpl({
         <div className="shrink-0 px-3 pb-2" data-testid="timing-estimated">
           <Banner
             tone="warning"
-            title={`還有 ${estimated} 句時間是估的，先到歌詞編輯器對拍`}
-            description={live ? "在那之前用手動切換：由你逐句送出。對拍後就能跟著音檔自動換句。" : "跟音檔模式會照估的時間換句，可能對不上歌手。建議先對拍，或改用手動切換。"}
+            title={`還有 ${estimated} 句時間是估的，到歌詞編輯器用「AI 自動對時」或對拍`}
+            description={live ? "在那之前用手動切換：由你逐句送出。時間對好、確認後就能跟著音檔自動換句。" : "跟音檔模式會照估的時間換句，可能對不上歌手。建議先對時，或改用手動切換。"}
             actions={
               <Button size="sm" variant="tinted" href={editHref} transitionTypes={["push"]} onClick={leave}>
-                去對拍
+                去對時
               </Button>
             }
           />

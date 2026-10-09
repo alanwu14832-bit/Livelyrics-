@@ -9,7 +9,14 @@
 //
 //    It runs the repo's real analysis (analyzeSamples) on every song and the timing estimators,
 //    prints the summary and writes the full report (default scratch/round14/timing-eval.md).
-//    Local measurement only: never commit dataset audio, lyrics or annotations.
+//    Local measurement only: never commit dataset audio, lyrics, annotations or transcripts.
+//
+//    Round 15 (「AI 自動對時」): LIVELYRICS_TIMING_EVAL_ASR="small=<dir>,base=<dir>" adds a `whisper`
+//    estimator per transcript folder (written by scripts/timing-eval/transcribe.mjs): the recognised
+//    words → alignTranscript → applyAnchors, untimed and with the paragraph taps, scored on the songs
+//    that have a transcript next to round 14 on the same songs. LIVELYRICS_TIMING_EVAL_ASR_VARIANTS
+//    (JSON { name: Partial<AsrAlignParams> }) scores parameter variants on the dev half only (tuning);
+//    LIVELYRICS_TIMING_EVAL_SUBSET (comma-separated stems) reports one named subset as well.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -19,6 +26,7 @@ import { ANALYSIS_RATE, analyzeSamples } from "../audio/analysis";
 import { downsample, removeDc } from "../audio/resample";
 import { analyzeVocal, sideRateFor, sideSignal } from "../audio/vocal";
 import type { AudioAnalysis, LyricLine, Lyrics } from "../types";
+import { alignTranscript, applyAnchors, asrLanguage, hasHan, loadHanTables, type AsrAlignParams, type AsrWord, type HanTables } from "./asr-align";
 import { distributeLines, normalizeLyrics } from "./lrc";
 import {
   SUMMARY_HEADER,
@@ -108,6 +116,51 @@ const CACHE = process.env.LIVELYRICS_TIMING_EVAL_CACHE ?? path.join(REPO, "scrat
 const OUT = process.env.LIVELYRICS_TIMING_EVAL_OUT ?? path.join(REPO, "scratch/round14/timing-eval.md");
 const ONLY = process.env.LIVELYRICS_TIMING_EVAL_ONLY ?? "";
 const ENABLED = !!DIR && fs.existsSync(path.join(DIR, "annotations", "lines")) && fs.existsSync(CACHE);
+/** label → folder of transcripts (transcribe.mjs output) */
+const ASR_DIRS: Array<[string, string]> = (process.env.LIVELYRICS_TIMING_EVAL_ASR ?? "")
+  .split(",")
+  .map((x) => x.trim())
+  .filter(Boolean)
+  .map((x) => {
+    const at = x.indexOf("=");
+    return at > 0 ? ([x.slice(0, at), path.resolve(REPO, x.slice(at + 1))] as [string, string]) : (["whisper", path.resolve(REPO, x)] as [string, string]);
+  });
+const ASR_VARIANTS: Record<string, Partial<AsrAlignParams>> = JSON.parse(process.env.LIVELYRICS_TIMING_EVAL_ASR_VARIANTS || "{}");
+const SUBSET = new Set(
+  (process.env.LIVELYRICS_TIMING_EVAL_SUBSET ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean),
+);
+
+interface Transcript {
+  words: AsrWord[];
+  seconds: number;
+  audioSeconds: number;
+  language?: string | null;
+}
+
+function readTranscript(dir: string, stem: string): Transcript | null {
+  const file = path.join(dir, `${stem}.json`);
+  return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Transcript) : null;
+}
+
+/** The 「AI 自動對時」 result for one song: anchors from the transcript, the rest laid out by the round-14 aligner. */
+function whisperTiming(
+  texts: readonly string[],
+  input: Lyrics,
+  tr: Transcript,
+  analysis: AudioAnalysis,
+  duration: number,
+  han: HanTables | null,
+  params: Partial<AsrAlignParams> = {},
+): { lyrics: Lyrics; anchors: number } {
+  const fixed = input.lines.map((l) => (l.start != null && !l.estimated ? l.start : null));
+  const vocal = analysis.vocal?.length ? { curve: analysis.vocal, rate: analysis.envelopeRate } : null;
+  const r = alignTranscript({ lines: texts, words: tr.words, han, vocal, fixed, params });
+  const { lines } = applyAnchors(input.lines, r.anchors, analysis, duration);
+  return { lyrics: normalizeLyrics({ ...input, lines }), anchors: r.anchors.length };
+}
 
 interface Wav {
   rate: number;
@@ -238,7 +291,17 @@ interface SongResult {
   anchors: number;
   auc: number;
   scores: Partial<Record<EstimatorId, { plain: SongScore; anchored: SongScore }>>;
+  /** per transcript label: the 「AI 自動對時」 scores, the anchors kept (untimed), ASR seconds / audio seconds */
+  whisper: Record<string, { plain: SongScore; anchored: SongScore; anchors: number; speed: number }>;
+  /** dev songs only: per variant name, the first label's scores */
+  variants: Record<string, { plain: SongScore; anchored: SongScore }>;
+  /** asrLanguage(lyrics) agreed with the dataset's language */
+  languageOk: boolean;
+  asrLanguage: string | null;
 }
+
+/** JamendoLyrics' language column → ISO 639-1 (what asrLanguage answers) */
+const DATASET_LANGUAGE: Record<string, string> = { English: "en", German: "de", Spanish: "es", French: "fr" };
 
 const fmtS = (x: number) => (Number.isFinite(x) ? x.toFixed(2) : "–");
 const fmtP = (x: number) => (Number.isFinite(x) ? `${(100 * x).toFixed(0)} %` : "–");
@@ -303,6 +366,10 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
         anchors: anchors.size,
         auc: vocal ? vocalAuc(vocal, ann, analysis.envelopeRate) : NaN,
         scores: {},
+        whisper: {},
+        variants: {},
+        languageOk: asrLanguage(texts) === (DATASET_LANGUAGE[m.language] ?? "?"),
+        asrLanguage: asrLanguage(texts),
       };
       const t0 = performance.now();
       for (const [id, run] of Object.entries(estimators) as [EstimatorId, (l: Lyrics) => Lyrics][]) {
@@ -310,6 +377,29 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
         const anchored = run(inputLyrics(texts, ann, anchors));
         expect(plain.lines.length, `${stem} ${id}`).toBe(ann.length);
         result.scores[id] = { plain: scoreSong(plain, ann, duration), anchored: scoreSong(anchored, ann, duration, anchors) };
+      }
+      // 「AI 自動對時」: the cached transcripts of this song
+      const han = hasHan(texts) ? await loadHanTables() : null;
+      for (const [label, dir] of ASR_DIRS) {
+        const tr = readTranscript(dir, stem);
+        if (!tr) continue;
+        const plain = whisperTiming(texts, inputLyrics(texts, ann, new Set()), tr, analysis, duration, han);
+        const anchored = whisperTiming(texts, inputLyrics(texts, ann, anchors), tr, analysis, duration, han);
+        expect(plain.lyrics.lines.length, `${stem} whisper ${label}`).toBe(ann.length);
+        result.whisper[label] = {
+          plain: scoreSong(plain.lyrics, ann, duration),
+          anchored: scoreSong(anchored.lyrics, ann, duration, anchors),
+          anchors: plain.anchors,
+          speed: tr.seconds / Math.max(1, tr.audioSeconds),
+        };
+      }
+      const first = ASR_DIRS[0] ? readTranscript(ASR_DIRS[0][1], stem) : null;
+      if (first && result.split === "dev") {
+        for (const [name, params] of Object.entries(ASR_VARIANTS)) {
+          const plain = whisperTiming(texts, inputLyrics(texts, ann, new Set()), first, analysis, duration, han, params);
+          const anchored = whisperTiming(texts, inputLyrics(texts, ann, anchors), first, analysis, duration, han, params);
+          result.variants[name] = { plain: scoreSong(plain.lyrics, ann, duration), anchored: scoreSong(anchored.lyrics, ann, duration, anchors) };
+        }
       }
       estimateSeconds += (performance.now() - t0) / 1000;
       results.push(result);
@@ -358,6 +448,68 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
         )
       : [];
 
+    // 「AI 自動對時」 on the songs that have a transcript, next to round 14 on the same songs
+    const labels = ASR_DIRS.map(([label]) => label);
+    const whisperTable = (songs: SongResult[]) => {
+      const withAll = songs.filter((r) => labels.every((l) => r.whisper[l]));
+      if (!withAll.length) return "";
+      const pick = (f: (r: SongResult) => SongScore | undefined) => withAll.flatMap((r) => [f(r)].filter((x): x is SongScore => !!x));
+      const out = [SUMMARY_HEADER];
+      out.push(summaryRow("round 14 (人聲 + alignment), untimed", summarize(pick((r) => r.scores.new?.plain))));
+      out.push(summaryRow("round 14 + one tap per paragraph (taps not scored)", summarize(pick((r) => r.scores.new?.anchored))));
+      for (const l of labels) {
+        out.push(summaryRow(`whisper-${l} anchors + aligner, no taps`, summarize(pick((r) => r.whisper[l]?.plain))));
+        out.push(summaryRow(`whisper-${l} + one tap per paragraph (taps not scored)`, summarize(pick((r) => r.whisper[l]?.anchored))));
+      }
+      return out.join("\n");
+    };
+    const whisperSection: string[] = [];
+    if (labels.length) {
+      const anchorShare = (l: string, songs: SongResult[]) => {
+        const s = songs.filter((r) => r.whisper[l]);
+        const a = s.reduce((n, r) => n + r.whisper[l].anchors, 0);
+        const total = s.reduce((n, r) => n + r.lines, 0);
+        const speed = s.length ? s.reduce((n, r) => n + r.whisper[l].speed, 0) / s.length : NaN;
+        return `whisper-${l}: ${s.length} songs, anchored ${a} of ${total} lines (${((100 * a) / Math.max(1, total)).toFixed(1)} %), ASR ${speed.toFixed(2)} s per audio second (Node CPU)`;
+      };
+      whisperSection.push("## 「AI 自動對時」 (Whisper anchors + the round-14 aligner), songs with every transcript", "");
+      whisperSection.push(...labels.map((l) => `- ${anchorShare(l, results)}`), "");
+      for (const [label, songs] of groups) {
+        const t = whisperTable(songs);
+        if (t) whisperSection.push(`### ${label}`, "", t, "");
+      }
+      if (SUBSET.size) {
+        const t = whisperTable(results.filter((r) => SUBSET.has(r.stem)));
+        if (t) whisperSection.push(`### subset (${SUBSET.size} songs: ${[...SUBSET].join(", ")})`, "", t, "");
+      }
+      const wrong = results.filter((r) => !r.languageOk).map((r) => `${r.stem} (${r.language} → ${r.asrLanguage ?? "auto"})`);
+      whisperSection.push(`asrLanguage(lyrics) vs the dataset's language: ${results.length - wrong.length} / ${results.length} agree${wrong.length ? ` — ${wrong.join("; ")}` : ""}.`, "");
+      const cell = (sc: SongScore | undefined) => (sc ? `${fmtS(songMedian(sc))} / ${fmtP(sc.rightSeconds / Math.max(1e-9, sc.sungSeconds))}` : "–");
+      whisperSection.push(
+        "### per song (median |Δstart| s / right line on screen; no taps)",
+        "",
+        `| song | split | lines | ${labels.map((l) => `${l} anchors`).join(" | ")} | round 14 | ${labels.map((l) => `whisper-${l}`).join(" | ")} | ${labels.map((l) => `${l} s / audio s`).join(" | ")} |`,
+        `|---|---|---:|${labels.map(() => "---:").join("|")}|---:|${labels.map(() => "---:").join("|")}|${labels.map(() => "---:").join("|")}|`,
+        ...results
+          .filter((r) => labels.some((l) => r.whisper[l]))
+          .map(
+            (r) =>
+              `| ${r.stem} | ${r.split} | ${r.lines} | ${labels.map((l) => (r.whisper[l] ? String(r.whisper[l].anchors) : "–")).join(" | ")} | ${cell(r.scores.new?.plain)} | ${labels.map((l) => cell(r.whisper[l]?.plain)).join(" | ")} | ${labels.map((l) => (r.whisper[l] ? r.whisper[l].speed.toFixed(2) : "–")).join(" | ")} |`,
+          ),
+        "",
+      );
+      const variantNames = Object.keys(ASR_VARIANTS);
+      if (variantNames.length) {
+        const dev = results.filter((r) => r.split === "dev" && r.whisper[labels[0]]);
+        whisperSection.push(`### parameter variants (dev half only, whisper-${labels[0]}, ${dev.length} songs)`, "", SUMMARY_HEADER);
+        whisperSection.push(summaryRow("default, no taps", summarize(dev.map((r) => r.whisper[labels[0]].plain))));
+        for (const name of variantNames) whisperSection.push(summaryRow(`${name}, no taps`, summarize(dev.flatMap((r) => (r.variants[name] ? [r.variants[name].plain] : [])))));
+        whisperSection.push(summaryRow("default + paragraph taps", summarize(dev.map((r) => r.whisper[labels[0]].anchored))));
+        for (const name of variantNames) whisperSection.push(summaryRow(`${name} + paragraph taps`, summarize(dev.flatMap((r) => (r.variants[name] ? [r.variants[name].anchored] : [])))));
+        whisperSection.push("");
+      }
+    }
+
     const aucs = results.map((r) => r.auc).filter(Number.isFinite);
     const md: string[] = [
       "# Lyric timing evaluation (JamendoLyrics MultiLang)",
@@ -374,6 +526,7 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
             "",
           ]
         : []),
+      ...whisperSection,
       "## Untimed lyrics (no anchors)",
       "",
       table(groups, "plain"),
@@ -408,7 +561,7 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
     ];
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, md.join("\n"));
-    console.log(`\n${table(groups, "plain")}\n\nanchors:\n${table(groups, "anchored")}\n\ncatastrophically worse:\n${catLines.join("\n")}\n\nreport: ${OUT}`);
+    console.log(`\n${whisperSection.length ? `${whisperSection.join("\n")}\n` : ""}${table(groups, "plain")}\n\nanchors:\n${table(groups, "anchored")}\n\ncatastrophically worse:\n${catLines.join("\n")}\n\nreport: ${OUT}`);
   }, 3_600_000);
 });
 

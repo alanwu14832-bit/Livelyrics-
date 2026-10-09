@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
     ".claude/**",
     // Local, git-ignored visual-check scratch files.
     "scratch/**",
+    // ONNX Runtime's WebAssembly loader, copied from node_modules by next.config.ts (not in the repo).
+    "public/ort/**",
   ]),
   // Node scripts (e2e, fixtures) are CommonJS and load Playwright with require().
   {

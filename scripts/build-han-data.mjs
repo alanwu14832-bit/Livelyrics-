@@ -1,0 +1,118 @@
+// Generates src/lib/lyrics/han-data.json (round 15, 「AI 自動對時」): the Traditional → Simplified
+// variant table and the toneless Mandarin readings that let the lyric aligner match Whisper's
+// (often Simplified, sometimes homophone) Chinese against Traditional lyrics. No package: the data
+// comes from Unicode's Unihan database, restricted to the characters that matter for lyrics — the
+// 8 105 characters of the 通用规范汉字表 (kTGH), Big5 level 1 (kBigFive A440–C67E, Taiwan's common
+// characters) and the Traditional / Simplified variants of both.
+//
+//   curl -O https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip   (NODE_USE_ENV_PROXY=1 behind the proxy)
+//   unzip Unihan.zip -d <dir>
+//   node scripts/build-han-data.mjs <dir> [out file, default src/lib/lyrics/han-data.json]
+//
+// Fields used: Unihan_Variants.txt kSimplifiedVariant / kTraditionalVariant; Unihan_Readings.txt
+// kMandarin and kHanyuPinlu (readings with at least 5 % of the character's most frequent reading);
+// Unihan_OtherMappings.txt kTGH / kBigFive (the character set). The Unihan data is © Unicode, Inc.,
+// under the Unicode License v3 (https://www.unicode.org/license.txt); the generated file says so.
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const [dir, outArg] = process.argv.slice(2);
+if (!dir) {
+  console.error("usage: node scripts/build-han-data.mjs <extracted Unihan dir> [out file]");
+  process.exit(2);
+}
+const out = path.resolve(outArg ?? path.join(HERE, "../src/lib/lyrics/han-data.json"));
+
+/** field → Map(char → value) for the wanted fields of one Unihan file */
+function readFields(file, fields) {
+  const maps = Object.fromEntries(fields.map((f) => [f, new Map()]));
+  let version = "";
+  for (const line of fs.readFileSync(path.join(dir, file), "utf8").split("\n")) {
+    if (line.startsWith("#")) {
+      const m = /Unicode Version (\S+)/.exec(line);
+      if (m) version = m[1];
+      continue;
+    }
+    const [cp, field, value] = line.split("\t");
+    if (!value || !maps[field]) continue;
+    maps[field].set(String.fromCodePoint(parseInt(cp.slice(2), 16)), value.trim());
+  }
+  return { maps, version };
+}
+
+const chars = (value) => value.split(/\s+/).map((v) => String.fromCodePoint(parseInt(v.replace(/<.*$/, "").slice(2), 16)));
+
+const variants = readFields("Unihan_Variants.txt", ["kSimplifiedVariant", "kTraditionalVariant"]);
+const readings = readFields("Unihan_Readings.txt", ["kMandarin", "kHanyuPinlu"]);
+const mappings = readFields("Unihan_OtherMappings.txt", ["kTGH", "kBigFive"]);
+const version = variants.version || readings.version;
+
+// the character set: 通用规范汉字表 + Big5 level 1, then their variants
+const set = new Set();
+for (const c of mappings.maps.kTGH.keys()) set.add(c);
+for (const [c, code] of mappings.maps.kBigFive) {
+  const n = parseInt(code, 16);
+  if (n >= 0xa440 && n <= 0xc67e) set.add(c);
+}
+for (const c of [...set]) {
+  for (const f of ["kSimplifiedVariant", "kTraditionalVariant"]) {
+    const v = variants.maps[f].get(c);
+    if (v) for (const x of chars(v)) set.add(x);
+  }
+}
+
+// Traditional → Simplified (first simplified variant; the reverse field fills gaps)
+const t2s = new Map();
+for (const c of set) {
+  const v = variants.maps.kSimplifiedVariant.get(c);
+  if (!v) continue;
+  const s = chars(v).find((x) => x !== c);
+  if (s) t2s.set(c, s);
+}
+for (const c of set) {
+  const v = variants.maps.kTraditionalVariant.get(c);
+  if (!v) continue;
+  for (const t of chars(v)) if (t !== c && !t2s.has(t) && !variants.maps.kSimplifiedVariant.has(t)) t2s.set(t, c);
+}
+
+/** "zhǎng" → "zhang", "lǜ" → "lv" */
+function toneless(syllable) {
+  return syllable
+    .normalize("NFD")
+    .replace(/ü/g, "v")
+    .replace(/ü/g, "v")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+}
+
+const pinyin = new Map(); // syllable → chars
+let withReading = 0;
+for (const c of [...set].sort()) {
+  const found = new Set();
+  const mandarin = readings.maps.kMandarin.get(c);
+  if (mandarin) for (const r of mandarin.split(/\s+/)) found.add(toneless(r));
+  const pinlu = readings.maps.kHanyuPinlu.get(c);
+  if (pinlu) {
+    const items = [...pinlu.matchAll(/([^\s(]+)\((\d+)\)/g)].map((m) => ({ r: toneless(m[1]), n: Number(m[2]) }));
+    const top = Math.max(0, ...items.map((x) => x.n));
+    for (const { r, n } of items) if (n >= 0.05 * top) found.add(r);
+  }
+  found.delete("");
+  if (found.size) withReading++;
+  for (const r of found) pinyin.set(r, (pinyin.get(r) ?? "") + c);
+}
+
+const pairs = [...t2s].sort((a, b) => a[0].codePointAt(0) - b[0].codePointAt(0));
+const data = {
+  source: `Unicode Unihan database ${version}: kSimplifiedVariant / kTraditionalVariant (Unihan_Variants.txt), kMandarin and kHanyuPinlu readings ≥ 5 % (Unihan_Readings.txt), for the 通用规范汉字表 (kTGH) and Big5 level 1 (kBigFive A440–C67E) characters and their variants. Generated by scripts/build-han-data.mjs.`,
+  license: "Unihan data © Unicode, Inc., distributed under the Unicode License v3: https://www.unicode.org/license.txt",
+  trad: pairs.map((p) => p[0]).join(""),
+  simp: pairs.map((p) => p[1]).join(""),
+  pinyin: Object.fromEntries([...pinyin].sort((a, b) => (a[0] < b[0] ? -1 : 1))),
+};
+fs.writeFileSync(out, `${JSON.stringify(data)}\n`);
+console.log(`${set.size} characters (${withReading} with a reading), ${pairs.length} Traditional → Simplified pairs, ${pinyin.size} syllables → ${out} (${(fs.statSync(out).size / 1024).toFixed(1)} KB)`);
