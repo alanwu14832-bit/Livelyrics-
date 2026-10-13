@@ -60,6 +60,11 @@ export interface ResolvedHint {
    * (巨字, 出血, 鏤空窗 at full scale); every other line is small-to-medium on the grid
    */
   key?: boolean;
+  /**
+   * round 17: the crowd's line — a hook sung four times or more, or a chant in a shouting voice: set
+   * at key-line scale every time it comes back, never smaller than the display floor
+   */
+  chant?: boolean;
   /** the section's motion override (0..1), null = the system's */
   motion: number | null;
   /** the orientation was set in the editor (line or section): the canvas may not adapt it */
@@ -180,6 +185,8 @@ export interface Composition {
    * for a display word the knockout treatment opens (the scene stays half seen around it)
    */
   windowFill: number;
+  /** round 17: the line carries a dark word — no ink bleed, no drip, no echo on it */
+  dark?: boolean;
   /** the composition carries a seal (the spot plate is vermilion) */
   seal: boolean;
   /** smallest readable glyph size (px) */

@@ -5,7 +5,8 @@
 // Pure, shared by the server (normalizePlan, the designers) and the browser (renderer, type engine).
 
 import { SCENE_PROGRAM_ENGINES, TYPE_RELATIONS } from "../../schema";
-import type { DesignPlan, SceneProgram, SceneProgramSection, SectionDesign, SectionKind, TypeRelation, Zone } from "../../types";
+import type { DesignPlan, LyricLine, SceneProgram, SceneProgramSection, SectionDesign, SectionKind, TypeRelation, Zone } from "../../types";
+import { hasDarkWord } from "../../type/sensitive";
 import { programKey, validateProgram } from "./validate";
 
 const clamp = (x: unknown, lo: number, hi: number, fb: number) => (typeof x === "number" && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : fb);
@@ -189,13 +190,44 @@ export function sectionComposition(plan: DesignPlan | null | undefined, index: n
   return { zone: canvasZone(s.zone, aspect), relation: s.relation };
 }
 
-/** The key still's song time: the program's own moment, else 60 % into the first chorus (or the loudest section). */
-export function keyMomentOf(plan: DesignPlan, duration: number): number {
+/**
+ * The song time of the key still (主視覺): the program's own keyMoment, else 60 % into the first
+ * chorus (the loudest section without one). Round 17: never a moment whose sung line carries a dark
+ * word (blood, a weapon, death…) — the still and the library card show the song's picture, not its
+ * threat: other points of that section, then the other choruses, then any section, then a moment
+ * between lines.
+ */
+export function keyMomentOf(plan: DesignPlan, duration: number, lines: readonly Pick<LyricLine, "text" | "start" | "end">[] = []): number {
+  const timed = lines.filter((l) => typeof l?.start === "number" && Number.isFinite(l.start) && typeof l.text === "string" && l.text.trim()).sort((a, b) => (a.start as number) - (b.start as number));
+  const lineAt = (t: number) => {
+    let hit: (typeof timed)[number] | null = null;
+    for (let i = 0; i < timed.length; i++) {
+      const l = timed[i];
+      const end = typeof l.end === "number" && l.end > (l.start as number) ? l.end : (timed[i + 1]?.start ?? Infinity);
+      if ((l.start as number) <= t && t < end) hit = l;
+    }
+    return hit;
+  };
+  const clean = (t: number) => {
+    const l = lineAt(t);
+    return !l || !hasDarkWord(l.text);
+  };
   const own = plan.sceneProgram?.keyMoment;
-  if (typeof own === "number" && Number.isFinite(own) && own >= 0 && (!duration || own <= duration)) return own;
+  if (typeof own === "number" && Number.isFinite(own) && own >= 0 && (!duration || own <= duration) && clean(own)) return own;
   const sections = plan.sections ?? [];
   let s = sections.find((x) => x.kind === "chorus");
   if (!s) s = [...sections].sort((a, b) => b.energy - a.energy)[0];
   if (!s) return Math.max(0, duration * 0.4);
-  return s.start + (s.end - s.start) * 0.6;
+  const first = s.start + (s.end - s.start) * 0.6;
+  if (!timed.length || clean(first)) return first;
+  const order = [s, ...sections.filter((x) => x !== s && x.kind === "chorus"), ...[...sections].filter((x) => x !== s && x.kind !== "chorus").sort((a, b) => b.energy - a.energy)];
+  for (const sec of order) {
+    for (const f of [0.6, 0.4, 0.8, 0.25, 0.9, 0.1]) {
+      const t = sec.start + (sec.end - sec.start) * f;
+      if (clean(t)) return t;
+    }
+  }
+  // every point is sung with a dark word: the breath before the first line
+  const lead = (timed[0].start as number) - 0.4;
+  return lead > 0.5 ? lead : first;
 }

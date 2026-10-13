@@ -7,7 +7,8 @@ import { SONG_FIXTURES, fixtureInput } from "../server/designer/testing/songs";
 import { tokenizeLyric } from "../stage/lyrics/tokenize";
 import type { CanvasSpec, Composition } from "./model";
 import { composeProjectLine } from "./prepare";
-import { approxMeasure, breakRows, keySpan, leavesFragment, lineText, splitsWord } from "./text";
+import { TYPE_RECIPE_IDS } from "../schema";
+import { approxMeasure, breakRows, keySpan, leavesFragment, lineText, splitLongLine, splitsWord } from "./text";
 
 const SAFE = { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 };
 const CANVASES: CanvasSpec[] = [
@@ -118,5 +119,78 @@ describe("the five song fixtures: no row or featured word tears a word", () => {
       });
     }
     expect(checked).toBeGreaterThan(60);
+  });
+});
+
+// Round 17 (M4): the round-16 audit's torn lines — words the lexicon did not list (睡著了, 其實, 血滴),
+// a motion word cut from its word (醒｜來), a phrase left as a fragment (我不要 我｜不要), and English
+// rows ending on a function word (light hums a / song it). Intl.Segmenter (ICU) finds the words.
+describe("round 17: Intl.Segmenter word boundaries", () => {
+  const torn: Array<[string, RegExp]> = [
+    ["就算整個世界都睡著了，我們還醒著", /睡／著/],
+    ["後來才知道所有的遠方其實都只是另一個人的家門口", /其／實/],
+    ["刀片劃過手腕 我數著血滴", /血／滴/],
+    ["我不想再醒來", /醒／來/],
+    ["把藥全部吞下去", /全／部/],
+  ];
+
+  it("rows never break inside those words, at any width", () => {
+    for (const [text, bad] of torn) {
+      for (const max of [3, 4, 5, 6, 7, 8, 9, 10, 12]) {
+        const rows = rowsOf(text, max, 3);
+        expect(rows.join("／"), `${text} @${max}`).not.toMatch(bad);
+      }
+    }
+  });
+
+  it("the featured word is a whole word: 「醒來」 not 「醒」, 「我不要」 not 「我不要 我」+「不要」", () => {
+    const wake = lt("我不想再醒來");
+    const k = keySpan(wake, "醒", 3)!;
+    expect(wake.units.slice(k[0], k[1]).map((u) => u.text).join("")).toBe("醒來");
+    const emph = lt("我不想再醒來", "醒");
+    const ke = keySpan(emph, "", 3)!;
+    expect(emph.units.slice(ke[0], ke[1]).map((u) => u.text).join("")).toBe("醒來");
+    const no = lt("我不要 我不要");
+    const kn = keySpan(no, "", 3)!;
+    expect(no.units.slice(kn[0], kn[1]).map((u) => u.text).join("")).toBe("我不要");
+  });
+
+  it("every recipe sets those lines without tearing a word (rows and pieces)", () => {
+    for (const text of [...torn.map(([t]) => t), "我不要 我不要"]) {
+      const lines = [{ id: "l0", text, start: 10, end: 14 }];
+      const units = tokenizeLyric(text);
+      // (散字 throws single characters around on purpose: its glyphs are not rows)
+      for (const recipe of TYPE_RECIPE_IDS.filter((id) => id !== "scatter")) {
+        for (const voice of ["mv-card", "glitch"] as const) {
+          const plan = { ...offlineDesign(fixtureInput(SONG_FIXTURES[0])), sections: [], typeSystem: { voice, params: {}, color: "auto", fonts: {}, weight: 800, ornaments: [], seal: "", rationale: "", lines: [{ lineId: "l0", recipe, emphasis: [], orientation: "h", energy: 0.8, motionWord: "", seed: 11 }] } } as unknown as Parameters<typeof composeProjectLine>[0];
+          const r = composeProjectLine(plan, lines, 0, CANVASES[0], approxMeasure, { duration: 60 });
+          if (!r) continue;
+          for (const pair of boundaries(r.comp, text)) {
+            const at = units.findIndex((u, k) => u.text === pair[0] && units[k + 1]?.text === pair[1]);
+            if (at < 0) continue;
+            expect(splitsWord(units, at), `${recipe}/${voice}: 「${text}」 breaks ${pair}`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("English rows and phrases never end on a / the / and / of / to / it / in / my", () => {
+    const text = "The porch light hums a song it half remembers";
+    const units = tokenizeLyric(text);
+    const END = /\b(a|the|and|of|to|it|in|my)$/i;
+    for (const max of [6, 8, 10, 12, 14, 16, 18, 20]) {
+      const rows = breakRows(units, 0, units.length, { max, maxRows: 3, width: (idx) => idx.reduce((w, i) => w + Math.max(0.3, units[i].text.length * 0.55), 0) }).map((r) => r.map((i) => units[i].text).join(""));
+      for (const row of rows.slice(0, -1)) expect(row.trim(), `${max}: ${rows.join(" / ")}`).not.toMatch(END);
+    }
+    const cut = splitLongLine(units);
+    if (cut) expect(units.slice(cut[0][0], cut[0][1]).map((u) => u.text).join("").trim()).not.toMatch(END);
+    for (const t of ["Oh, lay me down where the water's slow", "Where the stones forget the weight they used to know", "I carried river stones in both my coat pockets"]) {
+      const u = tokenizeLyric(t);
+      for (const max of [8, 10, 12, 14]) {
+        const rows = breakRows(u, 0, u.length, { max, maxRows: 3, width: (idx) => idx.reduce((w, i) => w + Math.max(0.3, u[i].text.length * 0.55), 0) }).map((r) => r.map((i) => u[i].text).join(""));
+        for (const row of rows.slice(0, -1)) expect(row.trim(), `${t} @${max}: ${rows.join(" / ")}`).not.toMatch(END);
+      }
+    }
   });
 });

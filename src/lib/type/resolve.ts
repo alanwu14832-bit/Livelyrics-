@@ -12,7 +12,8 @@ import type { LineContext, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { findMotionWord } from "./motion-words";
 import { autoHint, textKey } from "./sequence";
 import { VOICES } from "./vocab";
-import { keyLineKeys } from "./key-lines";
+import { chantLineKeys, keyLineKeys } from "./key-lines";
+import { hasDarkWord, touchesDark } from "./sensitive";
 import { sectionComposition } from "../stage/program/model";
 import type { StageOverrides } from "../stage/protocol";
 
@@ -73,6 +74,8 @@ interface LineTable {
   chorusKeys: Set<string>;
   /** the song's key lines (text keys): the only ones set large */
   keys: Set<string>;
+  /** the crowd's lines (a hook sung ≥ 4 times, a shouted chant): large every time */
+  chants: Set<string>;
 }
 
 const tables = new WeakMap<object, { lines: readonly LyricLine[]; title: string; table: LineTable }>();
@@ -101,7 +104,7 @@ function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonl
     const si = sectionIndexForLine(plan, lines as LyricLine[], i, duration);
     if (si != null && plan.sections[si]?.kind === "chorus" && si !== lastChorus) chorusKeys.add(textKey(l.text));
   });
-  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title) };
+  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title), chants: chantLineKeys(plan, lines) };
   tables.set(plan.typeSystem, { lines, title, table });
   return table;
 }
@@ -131,6 +134,9 @@ export interface ResolveOptions {
   /** ignore the editor's edits (the A/B comparison and 「重設為生成的」) */
   generated?: boolean;
 }
+
+/** The recipes a line with a dark word keeps (quiet ones: no display word, no echo, no bleed). */
+const QUIET_RECIPES: ReadonlySet<TypeRecipeId> = new Set<TypeRecipeId>(["whisper", "title-card"]);
 
 /** Recipes that feature one span only (the giant / bled / window word): their first emphasized run is what shows. */
 const SINGLE_SPAN_RECIPES: ReadonlySet<TypeRecipeId> = new Set<TypeRecipeId>(["giant-word", "bleed", "window"]);
@@ -170,14 +176,19 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
   const edit = opts.generated ? null : (ownEdited ? own!.edit : base?.edit) ?? null;
   const override = (ts.sections ?? []).find((s) => s && s.sectionId === section?.id) ?? null;
   const latin = !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(line.text);
-  const recipe = oneOf(edit?.recipe, TYPE_RECIPE_IDS, oneOf(override?.recipe ?? undefined, TYPE_RECIPE_IDS, oneOf(src.recipe, TYPE_RECIPE_IDS, fallback.recipe)));
+  // round 17: a line with a dark word (blood, a weapon, death…) is set quietly wherever its hint came
+  // from (an older plan, Claude, a section override): no display word, no echo, no bleed, no motion
+  // word, never a key line — only the editor's own recipe for the line is kept
+  const dark = hasDarkWord(line.text);
+  const designed = oneOf(override?.recipe ?? undefined, TYPE_RECIPE_IDS, oneOf(src.recipe, TYPE_RECIPE_IDS, fallback.recipe));
+  const recipe = oneOf(edit?.recipe, TYPE_RECIPE_IDS, dark && !QUIET_RECIPES.has(designed) ? "whisper" : designed);
   let orientation = oneOf(edit?.orientation, TYPE_ORIENTATIONS, oneOf(override?.orientation ?? undefined, TYPE_ORIENTATIONS, oneOf(src.orientation, TYPE_ORIENTATIONS, "h")));
   if (latin) orientation = "h";
-  const emphasis = validSubstrings(edit?.emphasis ?? src.emphasis, line.text);
+  const emphasis = validSubstrings(edit?.emphasis ?? src.emphasis, line.text).filter((w) => !touchesDark(w, line.text));
   const mw = typeof (edit?.motionWord ?? src.motionWord) === "string" ? String(edit?.motionWord ?? src.motionWord).trim() : "";
-  const motionWord = mw && line.text.includes(mw) ? mw : edit?.motionWord === "" ? "" : findMotionWord(line.text);
-  const escalate = table.lastChorus != null && sectionIndex === table.lastChorus && table.chorusKeys.has(key);
-  const energy = clamp(src.energy, 0, 1, fallback.energy);
+  const motionWord = dark ? "" : mw && line.text.includes(mw) ? mw : edit?.motionWord === "" ? "" : findMotionWord(line.text);
+  const escalate = !dark && table.lastChorus != null && sectionIndex === table.lastChorus && table.chorusKeys.has(key);
+  const energy = Math.min(clamp(src.energy, 0, 1, fallback.energy), dark ? 0.4 : 1);
   const hint: ResolvedHint = {
     recipe,
     emphasis,
@@ -196,7 +207,8 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     motion: override?.motion != null ? clamp(override.motion, 0, 1, 0.5) : null,
     orientationFixed: edit?.orientation != null || override?.orientation != null,
     recipeFixed: edit?.recipe != null || override?.recipe != null,
-    key: typeof edit?.key === "boolean" ? edit.key : table.keys.has(key),
+    key: typeof edit?.key === "boolean" ? edit.key : !dark && (table.keys.has(key) || table.chants.has(key)),
+    chant: !dark && edit?.key !== false && table.chants.has(key),
   };
   // the first lyric line of its section carries the section's label and number
   let first0 = true;

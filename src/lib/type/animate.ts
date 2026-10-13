@@ -354,6 +354,11 @@ export function compositionUniforms(comp: Composition, c: TypeClock, texture: nu
       u.bleed = tex * 0.2 * present;
       break;
   }
+  // round 17: a line with a dark word never bleeds or runs dry like dripping ink
+  if (comp.dark) {
+    u.bleed = 0;
+    u.dry = 0;
+  }
   if (overprint) {
     u.overprint = present;
     u.rgb = Math.max(u.rgb, 0.12 * present);

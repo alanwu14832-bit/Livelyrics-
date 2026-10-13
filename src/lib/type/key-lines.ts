@@ -5,6 +5,7 @@
 
 import { sectionIndexForLine } from "../timeline";
 import type { DesignPlan, LyricLine } from "../types";
+import { hasDarkWord } from "./sensitive";
 import { textKey } from "./sequence";
 
 /** At most this many distinct lyric texts are key lines, and about one in ten. */
@@ -12,6 +13,45 @@ export const MAX_KEY_LINES = 3;
 
 export function keyLineBudget(distinct: number): number {
   return Math.max(1, Math.min(MAX_KEY_LINES, Math.round(distinct * 0.1)));
+}
+
+/** A hook sung at least this many times is the crowd's line (set large every time). */
+export const CHANT_REPEATS = 4;
+const CHANT_WORD = /^(?:hey|oh+|yeah|woah|whoa|la+|na+|go|嘿|喔|哦|啦)+$/i;
+/** Voices whose genres shout (punk, hardcore, metal, noise: the glitch voice). */
+const SHOUT_VOICES = new Set(["glitch"]);
+
+/**
+ * Round 17: the text keys of the crowd's lines — the hook sung ≥ CHANT_REPEATS times (a short line
+ * that is, or is contained in, that many sung lines: 「拆掉這面牆」, 「Lay me down」 in 「Lay me down,
+ * lay me down」) and the lines that carry it without much else, plus, in a shouting voice, a chant
+ * (「Hey Hey Hey」). Never a line with a dark word. Outside the key-line budget: they are set large
+ * every time they come back.
+ */
+export function chantLineKeys(plan: Pick<DesignPlan, "typeSystem">, lines: readonly LyricLine[]): Set<string> {
+  const out = new Set<string>();
+  const keys = lines.map((l) => ({ k: textKey(l?.text ?? ""), text: l?.text ?? "" })).filter((x) => x.k);
+  const distinct = [...new Set(keys.map((x) => x.k))];
+  const dark = new Set(keys.filter((x) => hasDarkWord(x.text)).map((x) => x.k));
+  const hooks: string[] = [];
+  for (const k of distinct) {
+    if (dark.has(k) || Array.from(k).length > 14 || Array.from(k).length < 2) continue;
+    const sung = keys.filter((x) => x.k.includes(k)).length;
+    if (sung >= CHANT_REPEATS) hooks.push(k);
+  }
+  for (const k of distinct) {
+    if (dark.has(k)) continue;
+    // the hook itself, or a line that is mostly the hook (its repeats, a chant word around it)
+    if (hooks.some((h) => k === h || (k.includes(h) && Array.from(k).length <= Array.from(h).length * 2.2))) out.add(k);
+  }
+  if (SHOUT_VOICES.has(plan.typeSystem?.voice ?? "")) {
+    for (const x of keys) {
+      if (dark.has(x.k)) continue;
+      const words = x.text.split(/[\s,，、!！?？.。~～]+/).filter(Boolean);
+      if (words.length && words.every((w) => CHANT_WORD.test(w))) out.add(x.k);
+    }
+  }
+  return out;
 }
 
 /** The text keys (sequence.textKey) of the song's key lines. */

@@ -6,6 +6,7 @@
 import { DROP_AT_ROW_END, NO_LINE_END, NO_LINE_START, isCjkChar, tokenizeLyric, type TextUnit } from "../stage/lyrics/tokenize";
 import type { TimedUnit } from "../stage/lyrics/timing";
 import type { FontRole, Measure } from "./model";
+import { darkRanges } from "./sensitive";
 
 export interface LineText {
   text: string;
@@ -21,6 +22,19 @@ export interface LineText {
   /** units that begin a word of the line's word timing (empty without word timing): rows break there */
   wordStarts: ReadonlySet<number>;
   translation: string | null;
+  /** per unit: part of a dark word (blood, a weapon, death…): never the featured word (round 17) */
+  dark: boolean[];
+}
+
+/** Per unit: inside one of the text's dark words (sensitive.ts). */
+export function darkUnits(text: string, units: readonly TextUnit[]): boolean[] {
+  const ranges = darkRanges(text);
+  if (!ranges.length) return units.map(() => false);
+  // code points → UTF-16 offsets (the units' from / to)
+  const offs: number[] = [0];
+  for (const ch of text) offs.push(offs[offs.length - 1] + ch.length);
+  const spans = ranges.map(([a, b]) => [offs[a] ?? 0, offs[b] ?? text.length] as const);
+  return units.map((u) => spans.some(([a, b]) => u.from < b && u.to > a));
 }
 
 const isWordUnit = (u: TextUnit) => u.kind === "cjk" || u.kind === "latin";
@@ -60,7 +74,7 @@ export function lineText(text: string, units: TimedUnit[], emph: boolean[], tran
     } else if (start < 0) start = i;
   }
   if (start >= 0) phrases.push([start, units.length]);
-  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), wordStarts, translation };
+  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), wordStarts, translation, dark: darkUnits(text, units) };
 }
 
 function isClosingQuote(ch: string): boolean {
@@ -99,13 +113,86 @@ function cjkRun(units: readonly TextUnit[], i: number, dir: 1 | -1): number {
   return n;
 }
 
-/** Breaking between units i and i + 1 would split a word (a known compound, a bound character). */
+// Round 17: the browser's own word segmenter (Intl.Segmenter, ICU's dictionary — built into Node and
+// Chromium, not a dependency) finds the words LEXICON does not list (睡著了, 其實, 血滴, 數著): a row,
+// a phrase cut or a featured word never falls inside one. Without Intl.Segmenter nothing changes.
+type WordSegmenter = { segment(text: string): Iterable<{ index: number; segment: string; isWordLike?: boolean }> };
+let segmenter: WordSegmenter | null | undefined;
+function wordSegmenter(): WordSegmenter | null {
+  if (segmenter !== undefined) return segmenter;
+  try {
+    const Seg = (Intl as unknown as { Segmenter?: new (locale: string, o: { granularity: "word" }) => WordSegmenter }).Segmenter;
+    segmenter = Seg ? new Seg("zh-Hant", { granularity: "word" }) : null;
+  } catch {
+    segmenter = null;
+  }
+  return segmenter;
+}
+
+/** Adverbs and negators that lean on the next word (不, 再, 都…): an ICU word ending on one is not trusted. */
+const LEAN_RIGHT = new Set([..."不再都也就還很最太又才"]);
+
+const icuCache = new WeakMap<readonly TextUnit[], { inside: Uint8Array; words: Array<[number, number]> }>();
+
+/**
+ * The ICU words of a unit list: `inside[i]` = 1 when the boundary between units i and i + 1 lies
+ * inside a word (both CJK); `words` = unit ranges [from, to) of the multi-character CJK words.
+ */
+export function icuWords(units: readonly TextUnit[]): { inside: Uint8Array; words: Array<[number, number]> } {
+  const hit = icuCache.get(units);
+  if (hit) return hit;
+  const inside = new Uint8Array(Math.max(0, units.length));
+  const words: Array<[number, number]> = [];
+  const seg = wordSegmenter();
+  if (seg && units.length > 1) {
+    // the source text as the units saw it (offsets kept)
+    const end = units.reduce((m, u) => Math.max(m, u.to), 0);
+    const chars = new Array<string>(end).fill(" ");
+    for (const u of units) for (let k = 0; k < u.text.length && u.from + k < end; k++) chars[u.from + k] = u.text[k];
+    const text = chars.join("");
+    const unitAt = new Int32Array(end + 1).fill(-1);
+    units.forEach((u, i) => {
+      unitAt[u.from] = i;
+    });
+    for (const sg of seg.segment(text)) {
+      const a = sg.index;
+      const b = a + sg.segment.length;
+      const ua = unitAt[a];
+      if (ua < 0) continue;
+      let ub = ua;
+      while (ub + 1 < units.length && units[ub + 1].from < b) ub++;
+      // ICU joins a leaning adverb or a trailing particle into odd pairs (「我不｜想再｜醒來」): those
+      // edges stay breakable (the particles have their own rule, ATTACH_LEFT)
+      if (ub > ua && units.slice(ua, ub + 1).every((u) => u.kind === "cjk") && !LEAN_RIGHT.has(units[ub].text) && !ATTACH_LEFT.has(units[ua].text)) {
+        for (let k = ua; k < ub; k++) inside[k] = 1;
+        words.push([ua, ub + 1]);
+      }
+    }
+  }
+  const out = { inside, words };
+  icuCache.set(units, out);
+  return out;
+}
+
+/** Breaking between units i and i + 1 would split a word (a known compound, a bound character, an ICU word). */
 export function splitsWord(units: readonly TextUnit[], i: number): boolean {
   const a = units[i];
   const b = units[i + 1];
   if (!a || !b || a.kind !== "cjk" || b.kind !== "cjk") return false;
   if (BOUND.has(a.text) || BOUND.has(b.text)) return true;
-  return LEXICON.has(a.text + b.text);
+  if (LEXICON.has(a.text + b.text)) return true;
+  return icuWords(units).inside[i] === 1;
+}
+
+/** Latin words a row (or a phrase of a long line) never ends on: 「light hums a / song it」. */
+const LATIN_NO_END = new Set(["a", "an", "the", "and", "or", "of", "to", "it", "in", "on", "at", "for", "with", "my", "your", "our"]);
+
+/** The row would end on a Latin function word (the last word unit at or before `i`, spaces skipped). */
+export function endsOnFunctionWord(units: readonly TextUnit[], i: number): boolean {
+  let j = i;
+  while (j >= 0 && units[j].kind === "space") j--;
+  const u = units[j];
+  return !!u && u.kind === "latin" && LATIN_NO_END.has(u.text.toLowerCase());
 }
 
 /** Breaking between units i and i + 1 would leave a one-character fragment of a run (夜行巴士 開｜往海). */
@@ -140,6 +227,16 @@ function unitRangeOf(lt: LineText, needle: string): [number, number] | null {
     }
   });
   return from >= 0 ? [from, to] : null;
+}
+
+/** A range grown to the ICU / lexicon word it cuts into at either edge (when the whole stays within `max` CJK). */
+function wholeWord(lt: LineText, [a, b]: [number, number], max: number): [number, number] {
+  const units = lt.units;
+  let x = a;
+  let y = b;
+  while (x > 0 && splitsWord(units, x - 1)) x--;
+  while (y < units.length && splitsWord(units, y - 1)) y++;
+  return cjkCount(lt, x, y) <= max + 1 ? [x, y] : [a, b];
 }
 
 function cjkCount(lt: LineText, a: number, b: number): number {
@@ -178,34 +275,50 @@ function clipRange(lt: LineText, [a, b]: [number, number], max: number): [number
  */
 export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, number] | null {
   const units = lt.units;
+  // round 17: a dark word (blood, a weapon, death…) is never the featured word
+  const dark = lt.dark ?? [];
+  const darkIn = (a: number, b: number) => dark.slice(a, b).some(Boolean);
   // 1. an emphasized run
   for (let i = 0; i < units.length; i++) {
     if (!lt.emph[i] || !isWordUnit(units[i])) continue;
     let j = i;
     while (j < units.length && lt.emph[j] && units[j].kind !== "space") j++;
-    return clipRange(lt, [i, j], maxCjk);
+    // (grown to the whole word it cuts into: an emphasized 「醒」 of 醒來 features 醒來)
+    const g = wholeWord(lt, [i, j], maxCjk);
+    if (darkIn(g[0], g[1])) {
+      i = j;
+      continue;
+    }
+    return clipRange(lt, g, maxCjk);
   }
-  // 2. the motion word
-  const mw = unitRangeOf(lt, motionWord);
-  if (mw && cjkCount(lt, mw[0], mw[1]) <= maxCjk) return mw;
+  // 2. the motion word (grown to the whole word it is part of: 「醒」 of 醒來 is 醒來)
+  const mw0 = unitRangeOf(lt, motionWord);
+  const mw = mw0 ? wholeWord(lt, mw0, maxCjk) : null;
+  if (mw && cjkCount(lt, mw[0], mw[1]) <= maxCjk && !darkIn(mw[0], mw[1])) return mw;
   if (!lt.phrases.length) return null;
   // 3. Latin: the longest content word
   if (lt.latinOnly) {
     let best = -1;
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
-      if (u.kind !== "latin" || LATIN_STOP.has(u.text.toLowerCase())) continue;
+      if (u.kind !== "latin" || LATIN_STOP.has(u.text.toLowerCase()) || dark[i]) continue;
       if (best < 0 || u.text.length > units[best].text.length) best = i;
     }
-    if (best < 0) best = units.findIndex((u) => u.kind === "latin");
+    if (best < 0) best = units.findIndex((u, i) => u.kind === "latin" && !dark[i]);
     return best >= 0 ? [best, best + 1] : null;
   }
-  // 4. CJK: a short line is its own key; else the best 2-character window
+  // 4. CJK: a short line is its own key; a line that repeats one phrase (「我不要 我不要」, 「殺了我
+  // 殺了我」) features that phrase whole; else the best 2-character window
   const total = cjkCount(lt, 0, units.length);
+  if (lt.phrases.length >= 2) {
+    const texts = lt.phrases.map(([a, b]) => units.slice(a, b).map((u) => u.text).join(""));
+    const [la, lb] = lt.phrases[lt.phrases.length - 1];
+    if (texts.every((t) => t === texts[0]) && cjkCount(lt, la, lb) <= maxCjk && cjkCount(lt, la, lb) === lb - la && !darkIn(la, lb)) return [la, lb];
+  }
   if (total <= 2) {
     const [a] = lt.phrases[0];
     const [, b] = lt.phrases[lt.phrases.length - 1];
-    return clipRange(lt, [a, b], maxCjk);
+    return darkIn(a, b) ? null : clipRange(lt, [a, b], maxCjk);
   }
   let best: { a: number; b: number; score: number } | null = null;
   let clean = false;
@@ -218,7 +331,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
     for (let i = pa; i < pb - 1; i++) {
       const u0 = units[i];
       const u1 = units[i + 1];
-      if (u0.kind !== "cjk" || u1.kind !== "cjk") continue;
+      if (u0.kind !== "cjk" || u1.kind !== "cjk" || dark[i] || dark[i + 1]) continue;
       let score = place;
       const pair = u0.text + u1.text;
       const known = LEXICON.has(pair) && !NOT_KEY.has(pair);
@@ -233,15 +346,25 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
       // never half of a compound (開「往海」, 潮汐「之間」 cut from its 潮汐)
       if (i > pa && splitsWord(units, i - 1)) score -= 2.5;
       if (i + 2 < pb && splitsWord(units, i + 1)) score -= 2.5;
+      // round 17: never a one-character fragment of the phrase left behind (「我不要 我」+「不要」)
+      if (i - pa === 1 || pb - (i + 2) === 1) score -= 1.6;
       if (BOUND.has(u0.text) || BOUND.has(u1.text)) score -= 2.5;
       // with word timing: a whole word beats two halves of two words
       if (words.size) score += wordEdge(i, pa, pb) && wordEdge(i + 2, pa, pb) ? 0.9 : words.has(i + 1) ? -0.9 : 0;
       if (!best || score > best.score) best = { a: i, b: i + 2, score };
     }
+    // a short phrase whole (「我不要」), when every pair of it would leave a fragment behind
+    const plen = pb - pa;
+    if (len === plen && len >= 3 && len <= maxCjk && !darkIn(pa, pb) && !(FUNCTION_CHARS.has(units[pa].text) && FUNCTION_CHARS.has(units[pb - 1].text))) {
+      const icu = icuWords(units).words.some(([a, b]) => a >= pa && b <= pb);
+      const score = place + 0.6 + (icu ? 0.3 : 0);
+      if (!best || score > best.score) best = { a: pa, b: pb, score };
+      clean = true;
+    }
     // one strong character (跟著我「唱」), for a line whose every pair leans on a function word
     for (let i = pa; i < pb; i++) {
       const u = units[i];
-      if (u.kind !== "cjk" || FUNCTION_CHARS.has(u.text)) continue;
+      if (u.kind !== "cjk" || FUNCTION_CHARS.has(u.text) || dark[i]) continue;
       let score = place + (i + 1 === pb ? 0.8 : 0);
       if (words.size && wordEdge(i, pa, pb) && wordEdge(i + 1, pa, pb)) score += 0.6;
       if (!single || score > single.score) single = { a: i, b: i + 1, score };
@@ -249,7 +372,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
   });
   if (!clean && single) best = single;
   if (best) return [(best as { a: number }).a, (best as { b: number }).b];
-  const first = units.findIndex((u) => u.kind === "cjk");
+  const first = units.findIndex((u, i) => u.kind === "cjk" && !dark[i]);
   return first >= 0 ? [first, first + 1] : null;
 }
 
@@ -404,15 +527,17 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     // between atom k-1 and k
     const before = units[atoms[k - 1][atoms[k - 1].length - 1]];
     const after = units[atoms[k][0]];
+    // round 17: a row never ends on 「a」「the」「and」「of」「to」「it」「in」「my」…
+    if (endsOnFunctionWord(units, atoms[k - 1][atoms[k - 1].length - 1])) return 300;
     if (before.kind === "space" || after.kind === "space") return -2.4;
     if (before.kind === "punct") return -2;
     if ((before.kind === "latin") !== (after.kind === "latin")) return -0.8;
-    // a particle stays with the word it follows; a known word or a bound character stays whole
-    // (潮汐之間, 開往) whatever the word timing says (it may be per character)
-    if (after.kind === "cjk" && ATTACH_LEFT.has(after.text)) return 4.5;
-    const at = atoms[k - 1][atoms[k - 1].length - 1];
+    // a known word or a bound character stays whole (潮汐之間, 開往, 睡著了) whatever the word timing
+    // says (it may be per character), a particle stays with the word it follows
     // (both cost more than an overflowing row: the caller then sets the type a little smaller)
+    const at = atoms[k - 1][atoms[k - 1].length - 1];
     if (splitsWord(units, at)) return 2000;
+    if (after.kind === "cjk" && ATTACH_LEFT.has(after.text)) return 4.5;
     // a one-character fragment of a phrase is left behind (夜行巴士 開｜往海的方向)
     const frag = leavesFragment(units, at) ? 60 : 0;
     const ws = o.wordStarts;
@@ -539,6 +664,8 @@ export function splitLongLine(units: readonly TextUnit[], wordStarts: ReadonlySe
       else if (BREAK_BEFORE.has(after.text)) cost = 1.1;
       else cost = 1.8;
     } else cost = 1.2;
+    // round 17: the first phrase never ends on a Latin function word (「light hums a」)
+    if (endsOnFunctionWord(units, k - 1)) cost += 6;
     const a = load(0, k);
     const b = total - a;
     // both halves readable on their own; the cut as near the middle as the words allow

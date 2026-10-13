@@ -146,6 +146,8 @@ export interface TypeDesignInput {
   title?: string;
   /** 重新生成: another draw of the same rules */
   salt?: number;
+  /** the plan gets a 專屬畫面 (the offline designers always make one): no automatic 鏤空窗 */
+  program?: boolean;
 }
 
 const unit = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
@@ -186,6 +188,7 @@ export function designTypeSystem(input: TypeDesignInput): { system: TypeSystem; 
     motionFor: (line) => lineMotion(line, f),
     policy: typePolicy(input.bible, f),
     hookKey: hookKeyOf(input.lines),
+    program: input.program,
   });
   if (input.salt) return { system: { ...system, generation: input.salt }, choice };
   return { system, choice };

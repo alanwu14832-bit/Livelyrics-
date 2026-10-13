@@ -1686,6 +1686,38 @@ right line (round 14: 4.90 s / 14.8 % / 44.1 %), the same as the Node transcript
 cached and https routed to a dead proxy: 275 s, no request off the app's origin, the same result. Cross-origin
 isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next speed-up.
 
+### Round 17: nothing embarrassing on the wall
+
+- **鏤空窗 never blacks out the stage.** The type pass (`stage/scenes/type.ts`) fills only a feathered plate
+  around the window word (`uDisplayBox`, padded), in the composite and the export's lyric layer; the letters
+  are windows onto the picture, lifted toward the full ink colour so they still meet the display target.
+  `TypeLayer` scales the window fill by the words' visibility (a hidden line used to leave an invisible
+  full-frame fill: the demo's chorus entry was near-black even with `lyrics=0`). Over a 專屬畫面 zone
+  `compose.restrain` turns an automatic 鏤空窗 into 巨字＋小字 (an editor's recipe is kept), and the sequencer
+  never picks it when `program` is set (the offline designer and the directions always make a program).
+  `scripts/legibility.cjs` also grabs every line with `lyrics=0` and fails when the mean luma outside the
+  type's box (`data-bounds` on the type layer's text element) falls below half of that frame's.
+- **Dark lyrics are never emphasis** (`src/lib/type/sensitive.ts`: the shared word list and matcher,
+  client-safe, everyday compounds such as 熱血 / 血拼 left alone; the lexicon re-exports the list). At render
+  time (`resolve.ts`, any plan, old or Claude's): a line with a dark word takes a quiet recipe (whisper /
+  title-card, unless the editor chose one), energy ≤ 0.4, no motion word, no emphasis touching a dark word,
+  never a key line or escalated; `keySpan` never features a dark unit (`LineText.dark`); `Composition.dark`
+  zeroes ink bleed and dry brush. The sequencer does the same up front. `singalongPhrases` drops phrases with
+  a dark word (so the findings, the notes and the claude.ai prompt never call one the 大合唱重點); imagery
+  words quoted to Claude skip dark ones (`quotableWords`); a dark chorus's cue never says 「帶全場一起喊」;
+  `keyMomentOf(plan, duration, lines)` skips moments sung with a dark word (key still, library card).
+  殺 / 刀 / 槍 / kill / knife / gun read as broken glass (`glass`), no longer the storm.
+- **Breaks never split words.** `text.ts icuWords()` uses `Intl.Segmenter("zh-Hant", { granularity:
+  "word" })` (built into Node and Chromium; a no-op without it) inside `splitsWord`, so rows, long-line cuts,
+  scatter's split and the featured word respect 睡著了 / 其實 / 血滴 / 醒來 (ICU pairs ending on a leaning
+  adverb — 我不｜想再 — are not trusted). An emphasis or motion word grows to the word it cuts into (醒 →
+  醒來); a line repeating one phrase features it whole (我不要 我不要 → 我不要). Latin rows and phrases never
+  end on a / an / the / and / or / of / to / it / in / on / at / for / with / my / your / our.
+- **Chants are display type** (`key-lines.ts chantLineKeys`): a short hook sung ≥ 4 times (and lines that
+  are mostly it), or a chant line in a shouting voice (glitch), is a key line outside the budget with
+  `hint.chant`: never whispered, a Latin chant set whole as a poster, its largest glyph at least
+  `CHANT_DISPLAY` (14 %) of the frame's short side every time it comes back.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
