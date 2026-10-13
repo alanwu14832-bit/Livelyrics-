@@ -696,7 +696,9 @@ function poster(r: RecipeCtx): Piece[] | null {
   const all = allIdx(lt);
   const totalEm = width(all);
   const perRow = f.aspect < 1 ? 4 : lerp(7, 4.5, r.c);
-  const maxRows = clamp(Math.round(totalEm / perRow + 0.4), 1, 4);
+  // round 17: a chant sung in two or three breaths (「Lay me down, lay me down」) gets a row per breath
+  const breaths = r.hint.chant ? lt.units.filter((u) => u.kind === "punct" && /[,，、;；!！?？]/.test(u.text)).length + 1 : 0;
+  const maxRows = breaths >= 2 && breaths <= 3 ? breaths : clamp(Math.round(totalEm / perRow + 0.4), 1, 4);
   const rows = breakRows(lt.units, 0, lt.units.length, { max: Math.max(2, totalEm / Math.max(1, maxRows) + 0.8), maxRows, width, wordStarts: lt.wordStarts }).filter((row) => row.length);
   if (!rows.length) return null;
   let blockW = rd.w * (f.aspect < 1 ? 0.9 : lerp(0.46, 0.7, r.d)) * (0.9 + 0.2 * r.e);
