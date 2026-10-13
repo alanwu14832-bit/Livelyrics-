@@ -13,6 +13,7 @@
 // Simplified lyrics are matched through a char-by-char traditional mapping (the same code point
 // positions), so every phrase and word reported is an exact substring of the original line.
 
+import { hasDarkWord } from "@/lib/type/sensitive";
 import { toTraditional } from "@/lib/zh-variants";
 import { IMAGERY_FAMILIES, SENSITIVE_WORDS, STOP_WORDS, type ImageryFamily } from "./lexicon/imagery";
 import { CHANTS, INTENSIFIERS, NEGATORS, SENTIMENT } from "./lexicon/sentiment";
@@ -115,6 +116,15 @@ export function sensitiveWords(text: string): string[] {
   return tokenize(text)
     .filter((t) => SENSITIVE_SET.has(t.key))
     .map((t) => t.surface);
+}
+
+/**
+ * Round 17: the words of a finding that may be quoted to Claude or shown as a finding (never a dark
+ * one: 「凋零（鮮血）」 reads as the word to feature); the family's own name when none is left.
+ */
+export function quotableWords(words: readonly string[], fallback: string): string[] {
+  const ok = words.filter((w) => !hasDarkWord(w));
+  return ok.length ? ok : [fallback];
 }
 
 export function findImageryFamilies(lines: readonly string[], title = ""): ImageryMatch[] {
@@ -489,7 +499,7 @@ function containsGram(line: string, gram: Gram): boolean {
 
 /**
  * The phrases a crowd sings back: short, repeated, from the chorus / hook (chants always count).
- * Each is strictly shorter than every line it comes from.
+ * Each is strictly shorter than every line it comes from. Never one with a dark word in it.
  */
 export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string; start?: number | null }>, st: SongStructure | null, max = 3): SingalongPhrase[] {
   const texts = lines.map((l) => l.text ?? "");
@@ -513,6 +523,8 @@ export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string
     for (const g of gramsOf(l.text ?? "", wholeLines)) {
       const key = g.cjk ? g.text : g.text.toLowerCase();
       if (seen.has(key)) continue;
+      // round 17: a phrase with a dark word (「殺了我」, 「let me bleed」) is never the crowd's chant
+      if (hasDarkWord(g.text)) continue;
       if (breaths.has(key)) g.complete = true;
       const containing = texts.map((t, i) => (containsGram(t, g) ? i : -1)).filter((i) => i >= 0);
       if (containing.length < 2 && !g.chant) continue;

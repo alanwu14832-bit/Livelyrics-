@@ -6,6 +6,7 @@
 import { DROP_AT_ROW_END, NO_LINE_END, NO_LINE_START, isCjkChar, tokenizeLyric, type TextUnit } from "../stage/lyrics/tokenize";
 import type { TimedUnit } from "../stage/lyrics/timing";
 import type { FontRole, Measure } from "./model";
+import { darkRanges } from "./sensitive";
 
 export interface LineText {
   text: string;
@@ -21,6 +22,19 @@ export interface LineText {
   /** units that begin a word of the line's word timing (empty without word timing): rows break there */
   wordStarts: ReadonlySet<number>;
   translation: string | null;
+  /** per unit: part of a dark word (blood, a weapon, death…): never the featured word (round 17) */
+  dark: boolean[];
+}
+
+/** Per unit: inside one of the text's dark words (sensitive.ts). */
+export function darkUnits(text: string, units: readonly TextUnit[]): boolean[] {
+  const ranges = darkRanges(text);
+  if (!ranges.length) return units.map(() => false);
+  // code points → UTF-16 offsets (the units' from / to)
+  const offs: number[] = [0];
+  for (const ch of text) offs.push(offs[offs.length - 1] + ch.length);
+  const spans = ranges.map(([a, b]) => [offs[a] ?? 0, offs[b] ?? text.length] as const);
+  return units.map((u) => spans.some(([a, b]) => u.from < b && u.to > a));
 }
 
 const isWordUnit = (u: TextUnit) => u.kind === "cjk" || u.kind === "latin";
@@ -60,7 +74,7 @@ export function lineText(text: string, units: TimedUnit[], emph: boolean[], tran
     } else if (start < 0) start = i;
   }
   if (start >= 0) phrases.push([start, units.length]);
-  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), wordStarts, translation };
+  return { text, units, emph, cjk: cjk > 0 && cjk >= latin, latinOnly: cjk === 0, phrases: phrases.filter(([a, b]) => units.slice(a, b).some(isWordUnit)), wordStarts, translation, dark: darkUnits(text, units) };
 }
 
 function isClosingQuote(ch: string): boolean {
@@ -178,26 +192,33 @@ function clipRange(lt: LineText, [a, b]: [number, number], max: number): [number
  */
 export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, number] | null {
   const units = lt.units;
+  // round 17: a dark word (blood, a weapon, death…) is never the featured word
+  const dark = lt.dark ?? [];
+  const darkIn = (a: number, b: number) => dark.slice(a, b).some(Boolean);
   // 1. an emphasized run
   for (let i = 0; i < units.length; i++) {
     if (!lt.emph[i] || !isWordUnit(units[i])) continue;
     let j = i;
     while (j < units.length && lt.emph[j] && units[j].kind !== "space") j++;
+    if (darkIn(i, j)) {
+      i = j;
+      continue;
+    }
     return clipRange(lt, [i, j], maxCjk);
   }
   // 2. the motion word
   const mw = unitRangeOf(lt, motionWord);
-  if (mw && cjkCount(lt, mw[0], mw[1]) <= maxCjk) return mw;
+  if (mw && cjkCount(lt, mw[0], mw[1]) <= maxCjk && !darkIn(mw[0], mw[1])) return mw;
   if (!lt.phrases.length) return null;
   // 3. Latin: the longest content word
   if (lt.latinOnly) {
     let best = -1;
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
-      if (u.kind !== "latin" || LATIN_STOP.has(u.text.toLowerCase())) continue;
+      if (u.kind !== "latin" || LATIN_STOP.has(u.text.toLowerCase()) || dark[i]) continue;
       if (best < 0 || u.text.length > units[best].text.length) best = i;
     }
-    if (best < 0) best = units.findIndex((u) => u.kind === "latin");
+    if (best < 0) best = units.findIndex((u, i) => u.kind === "latin" && !dark[i]);
     return best >= 0 ? [best, best + 1] : null;
   }
   // 4. CJK: a short line is its own key; else the best 2-character window
@@ -205,7 +226,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
   if (total <= 2) {
     const [a] = lt.phrases[0];
     const [, b] = lt.phrases[lt.phrases.length - 1];
-    return clipRange(lt, [a, b], maxCjk);
+    return darkIn(a, b) ? null : clipRange(lt, [a, b], maxCjk);
   }
   let best: { a: number; b: number; score: number } | null = null;
   let clean = false;
@@ -218,7 +239,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
     for (let i = pa; i < pb - 1; i++) {
       const u0 = units[i];
       const u1 = units[i + 1];
-      if (u0.kind !== "cjk" || u1.kind !== "cjk") continue;
+      if (u0.kind !== "cjk" || u1.kind !== "cjk" || dark[i] || dark[i + 1]) continue;
       let score = place;
       const pair = u0.text + u1.text;
       const known = LEXICON.has(pair) && !NOT_KEY.has(pair);
@@ -241,7 +262,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
     // one strong character (跟著我「唱」), for a line whose every pair leans on a function word
     for (let i = pa; i < pb; i++) {
       const u = units[i];
-      if (u.kind !== "cjk" || FUNCTION_CHARS.has(u.text)) continue;
+      if (u.kind !== "cjk" || FUNCTION_CHARS.has(u.text) || dark[i]) continue;
       let score = place + (i + 1 === pb ? 0.8 : 0);
       if (words.size && wordEdge(i, pa, pb) && wordEdge(i + 1, pa, pb)) score += 0.6;
       if (!single || score > single.score) single = { a: i, b: i + 1, score };
@@ -249,7 +270,7 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
   });
   if (!clean && single) best = single;
   if (best) return [(best as { a: number }).a, (best as { b: number }).b];
-  const first = units.findIndex((u) => u.kind === "cjk");
+  const first = units.findIndex((u, i) => u.kind === "cjk" && !dark[i]);
   return first >= 0 ? [first, first + 1] : null;
 }
 

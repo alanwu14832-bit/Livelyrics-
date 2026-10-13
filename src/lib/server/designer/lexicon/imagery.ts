@@ -69,16 +69,16 @@ export const IMAGERY_FAMILIES: readonly ImageryFamily[] = [
   // Round 14 (sensitive lyrics, after chrimage/ai-lyric-video-generator's broadcast-safe prompts): blood,
   // death and self-harm words read as withered petals, wounds as broken glass, weapons and violence as
   // a storm, cages as chains breaking, drugs as haze, sex as candlelight — never the literal thing.
-  { id: "wither", name: "凋零", motif: "凋零的花瓣", words: ["鮮血", "血液", "流血", "死亡", "死去", "死掉", "屍體", "墳墓", "墓碑", "骷髏", "葬禮", "自殺", "割腕", "自殘", "輕生", "血", "blood", "bleed", "bleeding", "dying", "dead", "death", "corpse", "corpses", "grave", "graves", "coffin", "skull", "skulls", "funeral", "suicide", "suicidal"], scenes: ["rain", "ink", "gradient"], hues: [340, 280], saturation: 0.5, light: "dark", temperature: "cool", motion: "fall", emblem: "bloom", colors: "褪色的玫瑰紅、灰紫、深黑" },
+  { id: "wither", name: "凋零", motif: "凋零的花瓣", words: ["鮮血", "血液", "流血", "血滴", "想死", "去死", "尋死", "死亡", "死去", "死掉", "屍體", "墳墓", "墓碑", "骷髏", "葬禮", "自殺", "割腕", "自殘", "輕生", "血", "blood", "bloody", "bleed", "bleeding", "dying", "dead", "death", "corpse", "corpses", "grave", "graves", "coffin", "skull", "skulls", "funeral", "suicide", "suicidal"], scenes: ["rain", "ink", "gradient"], hues: [340, 280], saturation: 0.5, light: "dark", temperature: "cool", motion: "fall", emblem: "bloom", colors: "褪色的玫瑰紅、灰紫、深黑" },
   { id: "metal", name: "鋼鐵", motif: "鏽蝕的鋼鐵", words: ["鋼鐵", "金屬", "機器", "齒輪", "鐵軌", "鐵", "鋼", "鏽", "metal", "steel", "iron", "machine", "rust"], scenes: ["grid", "shards", "ink"], hues: [210, 25], saturation: 0.3, light: "dark", temperature: "cool", motion: "spin", emblem: "crystal", colors: "鋼灰、鏽橘、冷銀" },
   { id: "chains", name: "枷鎖", motif: "斷裂的鎖鏈", words: ["鎖鏈", "鐵鏈", "枷鎖", "牢籠", "囚禁", "監獄", "束縛", "chain", "chains", "cage", "caged", "prison", "shackles"], scenes: ["shards", "grid", "ink"], hues: [215, 42], saturation: 0.4, light: "dark", temperature: "cool", motion: "burst", emblem: "shard", colors: "鐵灰、斷口的一道金光", visual: 0.9 },
-  { id: "glass", name: "碎片", motif: "破碎的玻璃", words: ["破碎", "碎片", "玻璃", "碎裂", "裂縫", "崩塌", "傷口", "傷痕", "疤痕", "碎", "裂", "疤", "broken", "glass", "shatter", "shattered", "crack", "pieces", "wound", "wounds", "scar", "scars"], scenes: ["shards", "ink", "particles"], hues: [300, 190], saturation: 0.7, light: "mid", temperature: "cool", motion: "burst", emblem: "shard", colors: "碎玻璃青、紫" },
+  { id: "glass", name: "碎片", motif: "破碎的玻璃", words: ["破碎", "碎片", "玻璃", "碎裂", "裂縫", "崩塌", "傷口", "傷痕", "疤痕", "刀子", "刀鋒", "刀片", "匕首", "殺死", "殺人", "謀殺", "暴力", "開槍", "槍口", "子彈", "槍", "刀", "殺", "碎", "裂", "疤", "broken", "glass", "shatter", "shattered", "crack", "pieces", "wound", "wounds", "scar", "scars", "kill", "kills", "killing", "killer", "murder", "knife", "knives", "blade", "blades", "gun", "guns", "bullet", "bullets", "shoot", "violence", "violent"], scenes: ["shards", "ink", "particles"], hues: [300, 190], saturation: 0.7, light: "mid", temperature: "cool", motion: "burst", emblem: "shard", colors: "碎玻璃青、紫" },
   { id: "dark", name: "黑暗", motif: "黑暗中的裂縫", words: ["黑暗", "深淵", "陰影", "影子", "暗處", "無底", "暗", "影", "dark", "darkness", "shadow", "shadows", "abyss", "void"], scenes: ["ink", "gradient", "nebula"], hues: [262, 240], saturation: 0.6, light: "dark", temperature: "cool", motion: "still", emblem: "shard", colors: "深黑、暗紫" },
   { id: "forest", name: "山林", motif: "山與森林的剪影", words: ["森林", "山谷", "山頂", "高山", "樹林", "樹", "山", "林", "forest", "mountain", "mountains", "tree", "trees", "woods", "valley"], scenes: ["ink", "nebula", "particles"], hues: [140, 110], saturation: 0.6, light: "mid", temperature: "neutral", motion: "still", emblem: "crystal", colors: "墨綠、苔綠、山嵐灰" },
   { id: "river", name: "河流", motif: "流動的河", words: ["河流", "溪流", "湖水", "湖泊", "流水", "河", "溪", "湖", "水", "river", "stream", "lake", "water"], scenes: ["waves", "ink", "nebula"], hues: [190, 175], saturation: 0.65, light: "mid", temperature: "cool", motion: "flow", emblem: "wave", colors: "湖水綠、河藍" },
   { id: "harbor", name: "港口", motif: "港口與燈塔", words: ["島嶼", "海港", "港口", "碼頭", "燈塔", "船", "島", "港", "island", "harbor", "harbour", "port", "pier", "lighthouse", "boat", "ship", "sail"], scenes: ["waves", "bokeh", "gradient"], hues: [200, 40], saturation: 0.65, light: "mid", temperature: "cool", motion: "drift", emblem: "wave", colors: "港藍、燈塔黃" },
   { id: "desert", name: "荒漠", motif: "無邊的沙丘", words: ["沙漠", "沙丘", "荒漠", "荒野", "沙", "desert", "dune", "sand", "wasteland"], scenes: ["gradient", "particles", "waves"], hues: [35, 25], saturation: 0.7, light: "bright", temperature: "warm", motion: "drift", emblem: "sun", colors: "沙金、赭" },
-  { id: "storm", name: "雷電", motif: "劈開夜空的閃電", words: ["雷電", "閃電", "雷聲", "打雷", "暴風雨", "暴雨", "風暴", "颱風", "雷", "刀子", "刀鋒", "匕首", "殺死", "殺人", "謀殺", "暴力", "開槍", "子彈", "槍", "刀", "殺", "thunder", "lightning", "storm", "stormy", "kill", "killing", "killer", "murder", "knife", "knives", "blade", "gun", "guns", "bullet", "bullets", "shoot", "violence", "violent"], scenes: ["shards", "rain", "ink"], hues: [250, 55], saturation: 0.8, light: "dark", temperature: "cool", motion: "burst", emblem: "shard", colors: "電光白、暴風紫" },
+  { id: "storm", name: "雷電", motif: "劈開夜空的閃電", words: ["雷電", "閃電", "雷聲", "打雷", "暴風雨", "暴雨", "風暴", "颱風", "雷", "thunder", "lightning", "storm", "stormy"], scenes: ["shards", "rain", "ink"], hues: [250, 55], saturation: 0.8, light: "dark", temperature: "cool", motion: "burst", emblem: "shard", colors: "電光白、暴風紫" },
   { id: "wings", name: "飛翔", motif: "張開的翅膀", words: ["翅膀", "飛翔", "飛鳥", "羽毛", "飛", "鳥", "翼", "wings", "wing", "fly", "flying", "bird", "birds", "feather"], scenes: ["particles", "nebula", "gradient"], hues: [195, 45], saturation: 0.65, light: "bright", temperature: "neutral", motion: "rise", emblem: "bloom", colors: "天青、羽白" },
   { id: "freedom", name: "自由", motif: "衝破邊界的光", words: ["自由", "解放", "逃離", "掙脫", "奔跑", "奔向", "free", "freedom", "escape", "run", "running"], scenes: ["tunnel", "particles", "gradient"], hues: [190, 50], saturation: 0.85, light: "bright", temperature: "warm", motion: "rush", emblem: "sun", colors: "晴藍、陽光黃", visual: 0.7 },
   { id: "memory", name: "時光", motif: "時光與回憶", words: ["時光", "回憶", "記憶", "從前", "過去", "時間", "昨天", "往事", "曾經", "懷念", "時鐘", "歲月", "光陰", "time", "memory", "memories", "remember", "yesterday", "past", "clock"], scenes: ["bokeh", "gradient", "ink"], hues: [30, 40], saturation: 0.55, light: "mid", temperature: "warm", motion: "drift", emblem: "orbit", colors: "懷舊棕、褪色金", visual: 0.7 },
@@ -103,17 +103,11 @@ export const IMAGERY_FAMILIES: readonly ImageryFamily[] = [
 
 /**
  * Round 14: the dark words (violence, weapons, blood, death, self-harm, drugs, sex). They still
- * colour the world through their symbolic families above, but the offline type design never
- * enlarges one as an emphasis and gives its line no motion word (no dripping, no splatter).
+ * colour the world through their symbolic families above, but they are never emphasis, never a
+ * motion word, never a chant or a key moment. Round 17: the list lives with the type engine
+ * (`@/lib/type/sensitive`), which applies the same rule when a line is rendered.
  */
-export const SENSITIVE_WORDS: readonly string[] = [
-  "鮮血", "血液", "流血", "血", "死亡", "死去", "死掉", "屍體", "墳墓", "墓碑", "骷髏", "葬禮", "自殺", "割腕", "自殘", "輕生",
-  "傷口", "傷痕", "刀子", "刀鋒", "匕首", "殺死", "殺人", "謀殺", "暴力", "開槍", "子彈", "槍", "刀", "殺", "炸彈",
-  "毒品", "嗑藥", "吸毒", "藥丸", "大麻", "做愛", "上床", "赤裸", "裸體", "情慾",
-  "blood", "bleed", "bleeding", "dying", "dead", "death", "corpse", "corpses", "grave", "graves", "coffin", "skull", "skulls", "suicide", "suicidal",
-  "wound", "wounds", "kill", "killing", "killer", "murder", "knife", "knives", "blade", "gun", "guns", "bullet", "bullets", "shoot", "violence", "violent", "bomb",
-  "drug", "drugs", "pill", "pills", "cocaine", "heroin", "sex", "naked", "nude", "lust",
-];
+export { SENSITIVE_WORDS } from "@/lib/type/sensitive";
 
 /**
  * Common words that contain an image character but are not the image (they are consumed whole by

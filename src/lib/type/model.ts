@@ -180,6 +180,8 @@ export interface Composition {
    * for a display word the knockout treatment opens (the scene stays half seen around it)
    */
   windowFill: number;
+  /** round 17: the line carries a dark word — no ink bleed, no drip, no echo on it */
+  dark?: boolean;
   /** the composition carries a seal (the spot plate is vermilion) */
   seal: boolean;
   /** smallest readable glyph size (px) */

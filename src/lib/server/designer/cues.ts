@@ -7,6 +7,7 @@
 
 import type { CueNote, LyricLine, SectionDesign } from "@/lib/types";
 import type { MotionEnergy } from "./lexicon/genres";
+import { hasDarkWord } from "@/lib/type/sensitive";
 import { LYRIC_STYLES, SCENES, TRANSITIONS } from "./catalog";
 
 export const MAX_CUES = 12;
@@ -81,8 +82,11 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
       });
     }
     if (hasLyrics && s.kind === "chorus" && s.lyricStyle !== "hidden" && chorusCount >= SINGALONG_CHORUSES) {
-      const how =
-        s.lyricStyle === "impact" && !calm
+      // round 17: a chorus that sings a dark word (blood, a weapon, death…) is never shouted from the wall
+      const dark = lines.some((l) => typeof l.start === "number" && l.start >= s.start - 0.05 && l.start < s.end && hasDarkWord(l.text ?? ""));
+      const how = dark
+        ? "這段副歌有暗黑的字句：歌詞以小字安靜呈現，不放大、不帶喊，讓畫面的象徵說話"
+        : s.lyricStyle === "impact" && !calm
           ? "口號以巨字呈現，帶全場一起喊"
           : s.lyricStyle === "karaoke" || s.lyricStyle === "subtitle"
             ? `歌詞以「${LYRIC_STYLES[s.lyricStyle].label}」呈現`

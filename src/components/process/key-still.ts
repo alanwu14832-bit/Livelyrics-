@@ -46,7 +46,7 @@ async function render(project: Project): Promise<KeyStill> {
   const { width, height } = frameSize(project);
   const out = project.output;
   const staged: Project = { ...project, output: { ...out, width, height } };
-  const t = keyMomentOf(plan, project.meta.duration || project.analysis?.duration || 0);
+  const t = keyMomentOf(plan, project.meta.duration || project.analysis?.duration || 0, project.lyrics?.lines ?? []);
   const stage = new OfflineStage(staged);
   try {
     await stage.prepare();

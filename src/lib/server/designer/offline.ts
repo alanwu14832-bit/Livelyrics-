@@ -574,7 +574,7 @@ function buildLines(ctx: SectionPlanCtx, sections: SectionDesign[]): LineDesign[
     const short = readingUnits(l.text) <= 6;
     let styleOverride: LyricStyleId | null = null;
     let note = "";
-    if (hook && short && (chant || l.cluster === ctx.st.hookCluster) && sec.lyricStyle !== "impact") {
+    if (hook && short && (chant || l.cluster === ctx.st.hookCluster) && sec.lyricStyle !== "impact" && !dark.length) {
       styleOverride = "impact";
       note = "口號句：巨字帶動全場";
     } else if (l === lastLine && sec.kind !== "chorus") {

@@ -24,6 +24,7 @@ import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
+import { quotableWords } from "./lyric-analysis";
 import { moodboardBlock } from "./moodboard";
 import { collectedBlock } from "./collected";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
@@ -235,7 +236,7 @@ export function lyricExcerpt(input: DesignerInput, st: SongStructure): string {
   const hook = st.hookCluster != null ? st.lines.find((l) => l.cluster === st.hookCluster) : undefined;
   if (hook && hook.text !== first?.text) rows.push(`- 最常重複的句子（可能是 hook）：「${clip(hook.text, 10)}」，出現 ${hook.repeats} 次`);
   const imagery = findImagery(lines.map((l) => l.text)).slice(0, 6);
-  if (imagery.length) rows.push(`- 歌詞中的意象詞：${imagery.map((h) => h.words[0]).join("、")}`);
+  if (imagery.length) rows.push(`- 歌詞中的意象詞：${imagery.map((h) => quotableWords(h.words, h.imagery.family.name)[0]).join("、")}`);
   const units = lines.reduce((a, l) => a + readingUnits(l.text), 0);
   rows.push(`- 平均每行約 ${Math.round(units / lines.length)} 個字`);
   return rows.join("\n");

@@ -740,6 +740,7 @@ export function composeLine(given: ComposeInput): Composition {
     bounds,
     window,
     windowFill,
+    ...(given.lt.dark?.some(Boolean) ? { dark: true } : {}),
     seal: pieces.some((p) => p.role === "seal"),
     minReadable: minReadable(pieces),
     key: String(hash32(composeKey(given))),

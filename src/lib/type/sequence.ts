@@ -11,6 +11,7 @@ import type { LyricLine, SectionDesign, SectionKind, TypeLine, TypeOrientation, 
 import { findMotionWord } from "./motion-words";
 import { zoneFor } from "./recipes";
 import { createRng, hash32 } from "./rng";
+import { hasDarkWord, touchesDark } from "./sensitive";
 import { RECIPES, VOICES } from "./vocab";
 
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -135,6 +136,9 @@ export interface SequenceInput {
   program?: boolean;
 }
 
+/** Recipes a line with a dark word may take: quiet ones (no display word, no echo, no bleed). */
+const QUIET_RECIPES: readonly TypeRecipeId[] = ["whisper", "title-card"];
+
 interface LineSlot {
   index: number;
   line: LyricLine;
@@ -226,7 +230,11 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
     // the band's lyric policy as typographic intensity
     if (input.policy === "chorus-only" && kind !== "chorus") energy = Math.min(energy, 0.34);
     if (input.policy === "minimal" && s.key !== input.hookKey) energy = Math.min(energy, 0.26);
-    const quiet = energy < 0.28 || (kind === "outro" && posInSection > 0) || kind === "breakdown";
+    // round 17: a line with a dark word (blood, a weapon, death…) is set quietly — never enlarged,
+    // dripped or echoed, whatever its section
+    const dark = hasDarkWord(s.line.text);
+    if (dark) energy = Math.min(energy, 0.4);
+    const quiet = dark || energy < 0.28 || (kind === "outro" && posInSection > 0) || kind === "breakdown";
     const bridge = kind === "bridge";
 
     // recipe: the voice's palette, weighted by the section's role and the line, never the previous one
@@ -235,6 +243,7 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
       const info = RECIPES[id];
       if (info.cjkOnly && !s.cjk) continue;
       if (input.program && id === "window") continue;
+      if (dark && !QUIET_RECIPES.includes(id)) continue;
       let k = w;
       const [lo, hi] = info.energy;
       if (energy < lo - 0.08 || energy > hi + 0.1) k *= 0.2;
@@ -255,7 +264,7 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
     const entries = [...weights.entries()];
     const total = entries.reduce((a, [, w]) => a + w, 0);
     let pick = rng.next() * total;
-    let recipe: TypeRecipeId = entries[0]?.[0] ?? "title-card";
+    let recipe: TypeRecipeId = entries[0]?.[0] ?? (dark ? "whisper" : "title-card");
     for (const [id, w] of entries) {
       pick -= w;
       if (pick <= 0) {
@@ -272,9 +281,9 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
     // the seed: another side of the frame than the previous line
     let seed = rng.int(1000);
     for (let tries = 0; tries < 16 && prevSide != null && zoneFor(seed).side === prevSide; tries++) seed = rng.int(1000);
-    const motionWord = (input.motionFor?.(s.line, s.index) ?? findMotionWord(s.line.text)).trim();
+    const motionWord = dark ? "" : (input.motionFor?.(s.line, s.index) ?? findMotionWord(s.line.text)).trim();
     const mw = motionWord && s.line.text.includes(motionWord) ? motionWord : "";
-    let emphasis = exactSubstrings(input.emphasisFor?.(s.line, s.index) ?? [], s.line.text);
+    let emphasis = exactSubstrings(input.emphasisFor?.(s.line, s.index) ?? [], s.line.text).filter((w) => !touchesDark(w, s.line.text));
     if (!emphasis.length && mw && (kind === "chorus" || LOUD.includes(recipe))) emphasis = [mw];
     const hint: TypeLine = { lineId: s.line.id, recipe, emphasis, orientation, energy: r2(energy), motionWord: mw, seed };
     out.push(hint);
