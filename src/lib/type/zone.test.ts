@@ -105,6 +105,23 @@ describe("restraint", () => {
     expect(compose(TEXTS[3], "bleed", C169, null, { key: false, recipeFixed: true }).recipe).toBe("bleed");
   });
 
+  it("round 17: no automatic 鏤空窗 over a 專屬畫面 (its plate would cover the picture); the editor may still ask", () => {
+    expect(compose(TEXTS[3], "window", C169, RIGHT, { key: true, energy: 0.9 }).recipe).toBe("giant-word");
+    expect(compose(TEXTS[3], "window", C169, RIGHT, { key: true, energy: 0.9 }).windowFill).toBe(0);
+    expect(compose(TEXTS[3], "window", C169, RIGHT, { key: true, energy: 0.9, recipeFixed: true }).recipe).toBe("window");
+    expect(compose(TEXTS[3], "window", C169, null, { key: true, energy: 0.9 }).recipe).toBe("window");
+    // the sequencer never picks it for a plan that gets a program (the offline designers always make one)
+    const p = createDemoProject();
+    const sections = p.plan!.sections;
+    for (const voice of TYPE_VOICE_IDS) {
+      for (const salt of [0, 1, 2, 3]) {
+        const { system } = normalizeTypeSystem({ voice }, { lines: p.lyrics.lines, sections, duration: 73, voice, program: true });
+        const again = normalizeTypeSystem({ ...system, generation: salt }, { lines: p.lyrics.lines, sections, duration: 73, voice, program: true }).system;
+        expect(again.lines.filter((l) => l.recipe === "window").map((l) => l.lineId), `${voice} ${salt}`).toEqual([]);
+      }
+    }
+  });
+
   it("the key-line budget is small and chosen for meaning (the title line, the chorus hook)", () => {
     const p = createDemoProject();
     const lines = p.lyrics.lines;

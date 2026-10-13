@@ -53,6 +53,8 @@ export interface TypeNormalizeContext {
   motionFor?: SequenceInput["motionFor"];
   policy?: SequenceInput["policy"];
   hookKey?: string | null;
+  /** the plan has a 專屬畫面 (no automatic 鏤空窗) */
+  program?: boolean;
   /** keep editor-only fields (locked, edit, section overrides): storage paths do, design outputs do not */
   keepEdits?: boolean;
 }
@@ -211,6 +213,7 @@ export function normalizeTypeSystem(raw: unknown, c: TypeNormalizeContext): Type
     motionFor: c.motionFor,
     policy: c.policy,
     hookKey: c.hookKey,
+    program: c.program,
   });
   if (missing && given && keep.size) repairs.push(`補上 ${missing} 行歌詞的構圖（重複句沿用同一個構圖）`);
 

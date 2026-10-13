@@ -115,6 +115,11 @@ describe("display words (B3): full ink at ≥ 7:1", () => {
 
   it("the type pass carries a display box and a display target", () => {
     expect(TYPE_FRAGMENT).toContain("uniform vec4 uDisplayBox;");
+    // round 17: the 鏤空窗 fill is a plate confined to the display box (never the whole frame), in the
+    // composite and in the export's lyric layer alike
+    expect(TYPE_FRAGMENT).toContain("col = mix(col, fill, win * plateK * (1.0 - windowMask));");
+    expect(TYPE_FRAGMENT).toContain("float fillA = win * plateK * (1.0 - windowMask);");
+    expect(TYPE_FRAGMENT).not.toContain("col = mix(col, fill, win * (1.0 - windowMask));");
     expect(TYPE_FRAGMENT).toContain("inDisplay ? uDisplayTarget : uTarget");
     expect(TYPE_FRAGMENT).toContain("displayInk(uInk, fill)");
     expect(TYPE_TARGETS.display).toBe(DISPLAY_TARGET);

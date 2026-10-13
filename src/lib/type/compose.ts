@@ -548,11 +548,16 @@ const EXIT_SECONDS: Record<Exclude<TypeExitId, "auto">, number> = { cut: 0.05, f
 
 /**
  * Restraint: a line that is not one of the song's key lines never gets a display recipe that only
- * works large (出血 runs off the frame, 鏤空窗 fills it): it becomes 巨字＋小字 at a modest scale.
+ * works large (出血 runs off the frame, 鏤空窗 plates it): it becomes 巨字＋小字 at a modest scale;
+ * neither does any line over a 專屬畫面 get an automatic 鏤空窗.
  * A recipe the editor set is kept. Hints without the flag (older callers) are left as they are.
  */
-function restrain(hint: ResolvedHint): ResolvedHint {
-  if (hint.key !== false || hint.recipeFixed) return hint;
+function restrain(hint: ResolvedHint, programZone: boolean): ResolvedHint {
+  if (hint.recipeFixed) return hint;
+  // round 17: under a 專屬畫面 (the section gives the words a zone) the picture is the protagonist —
+  // an automatic 鏤空窗 never plates the stage over it (the editor may still ask for one)
+  if (hint.recipe === "window" && programZone) return { ...hint, recipe: "giant-word" };
+  if (hint.key !== false) return hint;
   if (hint.recipe === "bleed" || hint.recipe === "window") return { ...hint, recipe: "giant-word" };
   return hint;
 }
@@ -648,7 +653,7 @@ export function composeLine(given: ComposeInput): Composition {
   const full = makeFrame(given.canvas, given.system.params);
   // 專屬畫面: the section's text zone (the image's negative space) narrows the readable area
   const zone = given.ctx.zone ? canvasZone(given.ctx.zone, full.aspect) : null;
-  const hint0: ResolvedHint = restrain(given.hint);
+  const hint0: ResolvedHint = restrain(given.hint, !!zone);
   const hint: ResolvedHint = { ...hint0, orientation: effectiveOrientation(hint0, given.lt.cjk, full.aspect) };
   const view = zone ? null : compositionView(given.canvas, hint);
   const input: ComposeInput = { ...given, hint, canvas: view ? view.canvas : given.canvas };

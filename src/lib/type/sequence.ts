@@ -128,6 +128,11 @@ export interface SequenceInput {
   policy?: "chorus-only" | "full" | "minimal" | null;
   /** the song's hook (most repeated line), for the minimal policy */
   hookKey?: string | null;
+  /**
+   * The plan has (or will get) a 專屬畫面: no line is given 鏤空窗 automatically (its plate would
+   * cover the picture that is the chorus's protagonist; the 排版 editor may still choose it).
+   */
+  program?: boolean;
 }
 
 interface LineSlot {
@@ -229,6 +234,7 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
     for (const [id, w] of Object.entries(voice.recipes) as Array<[TypeRecipeId, number]>) {
       const info = RECIPES[id];
       if (info.cjkOnly && !s.cjk) continue;
+      if (input.program && id === "window") continue;
       let k = w;
       const [lo, hi] = info.energy;
       if (energy < lo - 0.08 || energy > hi + 0.1) k *= 0.2;

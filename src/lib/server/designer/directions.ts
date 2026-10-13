@@ -717,6 +717,7 @@ export function expandDirection(spec: DirectionSpec, req: DesignRequest, letter 
     lineDesigns,
     bandName: req.bandName,
     title: req.meta?.title,
+    program: true,
   });
   const plan: DesignPlan = {
     version: 1,

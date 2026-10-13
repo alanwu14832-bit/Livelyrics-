@@ -830,6 +830,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     lineDesigns: lines,
     bandName: input.bandName,
     title: input.meta?.title,
+    program: true,
   });
   const plan: DesignPlan = {
     version: 1,

@@ -15,7 +15,9 @@
 //
 // As a script (round 10, B3): checks every sung line of the given projects (every project of the
 // server without ids) on the song's own program — ≥ 4.5 : 1 for every line, ≥ 7 : 1 for the display
-// word (the giant / bled / window word, from the type layer's `data-display` box):
+// word (the giant / bled / window word, from the type layer's `data-display` box), and (round 17)
+// the mean luma outside the type's box (`data-bounds`) at least half of the same frame's with
+// `lyrics=0` (the words never black out the stage):
 //
 //   BASE=http://localhost:3100 [SHOTS=/tmp/shots] node scripts/legibility.cjs [projectId ...]
 //
@@ -147,7 +149,48 @@ async function measureContrast(page, frame, probe, region = null) {
   );
 }
 
-module.exports = { measureContrast, PROBE_PROGRAM, LINE_MIN, DISPLAY_MIN };
+/**
+ * Round 17: the mean luma (0–255, Rec. 709) of a PNG outside a box ({ x0, y0, x1, y1 } fractions,
+ * y down; null = the whole frame). Runs in the page like measureContrast.
+ */
+async function outsideLuma(page, png, box = null) {
+  return page.evaluate(
+    async ({ a, box }) => {
+      const im = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = a;
+      });
+      const W = Math.min(480, im.naturalWidth);
+      const H = Math.round((W * im.naturalHeight) / im.naturalWidth);
+      const c = document.createElement("canvas");
+      c.width = W;
+      c.height = H;
+      const g = c.getContext("2d");
+      g.drawImage(im, 0, 0, W, H);
+      const d = g.getImageData(0, 0, W, H).data;
+      let s = 0;
+      let n = 0;
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          if (box && x >= box.x0 * W && x < box.x1 * W && y >= box.y0 * H && y < box.y1 * H) continue;
+          const i = (y * W + x) * 4;
+          s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+          n++;
+        }
+      return n ? s / n : null;
+    },
+    { a: `data:image/png;base64,${png.toString("base64")}`, box },
+  );
+}
+
+/** The picture away from the words may lose at most half its light to them (a 鏤空窗 plate over the stage fails). */
+const OUTSIDE_KEEP = 0.5;
+/** …measured only where the picture has some light to lose (mean luma, 0–255). */
+const OUTSIDE_FLOOR = 8;
+
+module.exports = { measureContrast, outsideLuma, PROBE_PROGRAM, LINE_MIN, DISPLAY_MIN, OUTSIDE_KEEP, OUTSIDE_FLOOR };
 
 // ---------------------------------------------------------------------------
 // the check (run as a script)
@@ -187,17 +230,17 @@ if (require.main === module) {
     const context = await browser.newContext({ viewport: { width: W, height: H } });
     context.setDefaultNavigationTimeout(90000);
     const measurePage = await context.newPage();
-    const grab = async (id, t) => {
+    const grab = async (id, t, extra = "") => {
       const p = await context.newPage();
       await p.setViewportSize({ width: W, height: H });
-      await p.goto(`${BASE}/stage-lab?project=${id}&program=plan&chrome=0&play=0&aq=0&t=${t}`, { waitUntil: "load" });
+      await p.goto(`${BASE}/stage-lab?project=${id}&program=plan&chrome=0&play=0&aq=0&t=${t}${extra}`, { waitUntil: "load" });
       await p
         .waitForFunction(() => document.querySelector("[data-stage-backend]")?.getAttribute("data-scene-program") === "ready", null, { timeout: 60000 })
         .catch(() => {});
       await p.waitForTimeout(2500);
       const info = await p.evaluate(() => {
         const el = document.querySelector("[data-type-layer]");
-        return { display: el?.getAttribute("data-display") ?? null, recipe: el?.getAttribute("data-recipe") ?? null, text: el?.textContent ?? "" };
+        return { display: el?.getAttribute("data-display") ?? null, bounds: el?.getAttribute("data-bounds") ?? null, recipe: el?.getAttribute("data-recipe") ?? null, text: el?.textContent ?? "" };
       });
       const png = await p.screenshot();
       await p.close();
@@ -243,10 +286,19 @@ if (require.main === module) {
         }
         const lineOk = all.ratio == null ? false : all.ratio >= LINE_MIN;
         const displayOk = display == null || display.ratio == null || display.ratio >= DISPLAY_MIN;
-        const ok = lineOk && displayOk;
+        // round 17: the same moment with the lyrics off — the picture outside the type's box keeps at
+        // least half its light (a frame-filling 鏤空窗 put the demo's chorus on a near-black wall)
+        const bare = await grab(id, t, "&lyrics=0");
+        const tb = (probe.bounds ?? frame.bounds ?? "").split(",").map(Number);
+        const tbox = tb.length === 4 && tb.every(Number.isFinite) ? { x0: Math.max(0, tb[0] - 0.02), y0: Math.max(0, tb[1] - 0.02), x1: Math.min(1, tb[2] + 0.02), y1: Math.min(1, tb[3] + 0.02) } : null;
+        const outWith = await outsideLuma(measurePage, frame.png, tbox);
+        const outBare = await outsideLuma(measurePage, bare.png, tbox);
+        const keep = outWith != null && outBare != null && outBare >= OUTSIDE_FLOOR ? outWith / outBare : null;
+        const pictureOk = keep == null || keep >= OUTSIDE_KEEP;
+        const ok = lineOk && displayOk && pictureOk;
         if (!ok) failures++;
-        rows.push({ project: title, id, line: l.index, t, text: l.text, recipe: frame.recipe, ratio: all.ratio, display: display?.ratio ?? null, glyphs: all.glyphs, ok });
-        console.log(`${ok ? "PASS" : "FAIL"} ${title} #${l.index} @${t}s ${frame.recipe ?? "?"} ${all.ratio == null ? "—" : all.ratio.toFixed(2)}:1${display ? ` display ${display.ratio == null ? "—" : display.ratio.toFixed(2)}:1` : ""} 「${l.text}」`);
+        rows.push({ project: title, id, line: l.index, t, text: l.text, recipe: frame.recipe, ratio: all.ratio, display: display?.ratio ?? null, glyphs: all.glyphs, outside: outWith, outsideBare: outBare, keep, ok });
+        console.log(`${ok ? "PASS" : "FAIL"} ${title} #${l.index} @${t}s ${frame.recipe ?? "?"} ${all.ratio == null ? "—" : all.ratio.toFixed(2)}:1${display ? ` display ${display.ratio == null ? "—" : display.ratio.toFixed(2)}:1` : ""} picture ${keep == null ? "—" : `${Math.round(keep * 100)}%`} 「${l.text}」`);
         if (SHOTS) fs.writeFileSync(path.join(SHOTS, `legibility-${title.replace(/[^\w一-鿿-]+/g, "_")}-${l.index}.png`), frame.png);
       }
     }
@@ -256,7 +308,9 @@ if (require.main === module) {
     const displays = rows.filter((r) => r.display != null);
     const worst = measured.length ? Math.min(...measured.map((r) => r.ratio)) : null;
     const worstDisplay = displays.length ? Math.min(...displays.map((r) => r.display)) : null;
-    console.log(`\n${rows.length - failures}/${rows.length} lines pass (≥ ${LINE_MIN}:1 every line, ≥ ${DISPLAY_MIN}:1 display words); worst line ${worst == null ? "—" : worst.toFixed(2)}:1, worst display word ${worstDisplay == null ? "—" : worstDisplay.toFixed(2)}:1 over ${displays.length} display words`);
+    const keeps = rows.filter((r) => r.keep != null);
+    const worstKeep = keeps.length ? Math.min(...keeps.map((r) => r.keep)) : null;
+    console.log(`\n${rows.length - failures}/${rows.length} lines pass (≥ ${LINE_MIN}:1 every line, ≥ ${DISPLAY_MIN}:1 display words, the picture outside the words ≥ ${OUTSIDE_KEEP * 100}% of its light with the lyrics off); picture kept at worst ${worstKeep == null ? "—" : `${Math.round(worstKeep * 100)}%`}; worst line ${worst == null ? "—" : worst.toFixed(2)}:1, worst display word ${worstDisplay == null ? "—" : worstDisplay.toFixed(2)}:1 over ${displays.length} display words`);
     process.exit(failures ? 1 : 0);
   })().catch((e) => {
     console.error(e);

@@ -203,11 +203,16 @@ export class TypeLayer {
       const H = this.canvasSize.height || 1080;
       if (db) el.dataset.display = [db.x / W, db.y / H, (db.x + db.w) / W, (db.y + db.h) / H].map((v) => Math.min(1.2, Math.max(-0.2, v)).toFixed(4)).join(",");
       else delete el.dataset.display;
+      // …and everything the line draws (the legibility check's picture is measured outside it)
+      const b = cur.comp.bounds;
+      if (b.w > 0 && b.h > 0) el.dataset.bounds = [b.x / W, b.y / H, (b.x + b.w) / W, (b.y + b.h) / H].map((v) => Math.min(1.2, Math.max(-0.2, v)).toFixed(4)).join(",");
+      else delete el.dataset.bounds;
     } else {
       delete el.dataset.recipe;
       delete el.dataset.voice;
       delete el.dataset.line;
       delete el.dataset.display;
+      delete el.dataset.bounds;
     }
   }
 
@@ -490,6 +495,10 @@ export class TypeLayer {
       fill: rgb(look.colorway[0]),
       alpha: 1,
       ...u,
+      // round 17: the window fill follows the words' visibility (the glyph plates already do): a hidden
+      // or fading line never leaves its fill over the picture (the demo's chorus went near-black with
+      // the lyrics switched off)
+      windowFill: u.windowFill * ease(this.visibleAmt),
       halo: 0.62,
       px: scale,
       time: f.t,
