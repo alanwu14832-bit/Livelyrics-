@@ -635,7 +635,7 @@ function scatter(r: RecipeCtx): Piece[] | null {
       const prev = units[k - 1];
       const boundary = lt.units.slice(prev + 1, units[k]).some((u) => u.kind === "space" || u.kind === "punct");
       // round 17: never inside a word (全｜部), nor leaving one character of a phrase behind
-      const torn = !boundary && (splitsWord(lt.units, prev) ? 100 : leavesFragment(lt.units, prev) ? 4 : 0);
+      const torn = boundary ? 0 : splitsWord(lt.units, prev) ? 100 : leavesFragment(lt.units, prev) ? 4 : 0;
       const d = Math.abs(k - units.length / 2) - (boundary ? 2 : 0) + torn;
       if (d < bestD) {
         bestD = d;

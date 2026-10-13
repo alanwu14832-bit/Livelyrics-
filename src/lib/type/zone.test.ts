@@ -122,6 +122,28 @@ describe("restraint", () => {
     }
   });
 
+  it("round 17 (M5): the crowd's line is set large every time — a hook sung ≥ 4 times, a shouted chant", () => {
+    const at = (t: number, text: string, i: number): LyricLine => ({ id: `l${i}`, text, start: t, end: t + 2 });
+    const songs: Array<{ voice: (typeof TYPE_VOICE_IDS)[number]; rows: string[]; crowd: RegExp }> = [
+      { voice: "glitch", rows: ["他們說安靜 他們說聽話", "我不要 我不要", "拆掉這面牆", "拆掉這面牆", "拆掉這面牆 讓光進來", "撕掉那張表 燒掉那本帳", "Hey Hey Hey", "Hey Hey Hey", "拆掉這面牆", "拆掉這面牆", "拆掉這面牆 讓光進來", "讓光進來"], crowd: /^(拆掉這面牆|Hey Hey Hey)$/ },
+      { voice: "mv-card", rows: ["I carried river stones in both my coat pockets", "Oh, lay me down where the water's slow", "Lay me down, lay me down", "The kettle sings, the kitchen holds its breath", "Oh, lay me down where the water's slow", "Lay me down"], crowd: /^Lay me down(, lay me down)?$/ },
+    ];
+    for (const song of songs) {
+      const lines = song.rows.map((t, i) => at(4 + i * 5, t, i));
+      const p = createDemoProject();
+      const { system } = normalizeTypeSystem({ voice: song.voice }, { lines, sections: p.plan!.sections, duration: 73, voice: song.voice });
+      const plan = { ...p.plan!, typeSystem: system } as DesignPlan & { typeSystem: TypeSystem };
+      lines.forEach((l, i) => {
+        if (!song.crowd.test(l.text)) return;
+        const r = composeProjectLine(plan, lines, i, C169, approxMeasure, { duration: 73 })!;
+        expect(r.res.hint.chant, `${l.text} #${i}`).toBe(true);
+        expect(r.comp.recipe, `${l.text} #${i}`).not.toBe("whisper");
+        const big = Math.max(...r.comp.pieces.filter((x) => x.readable).flatMap((x) => x.glyphs.map((g) => g.size)));
+        expect(big, `${l.text} #${i} (${r.comp.recipe})`).toBeGreaterThanOrEqual(1080 * 0.12);
+      });
+    }
+  });
+
   it("the key-line budget is small and chosen for meaning (the title line, the chorus hook)", () => {
     const p = createDemoProject();
     const lines = p.lyrics.lines;

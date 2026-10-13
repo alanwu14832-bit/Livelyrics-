@@ -48,6 +48,9 @@ export const ORNAMENT_CHARS = [
   ...new Set(`${Object.values(SECTION_LATIN).join("")}「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
 ].join("");
 
+/** A chant's largest readable glyph, as a fraction of the frame's short side (round 17, M5). */
+export const CHANT_DISPLAY = 0.14;
+
 /** The knockout treatment opens the display word of lines at least this strong (choruses, peaks). */
 const KNOCK_ENERGY = 0.6;
 
@@ -72,7 +75,10 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   const displayPlate: PlateId = displayWindow ? "spot" : role === "accent" ? "accent" : "ink";
   // restraint: most lines are small-to-medium; the few key lines keep the full display scale
   const restrained = hint.key === false;
-  const body = Math.max(frame.minRead, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc);
+  // round 17: the crowd's line (a hook sung four times, a shouted chant) is never the smallest type
+  // on the wall: at least a tenth of the frame's short side, every time it comes back
+  const chantFloor = hint.chant ? ref * 0.1 : 0;
+  const body = Math.max(frame.minRead, chantFloor, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc);
   const giantFull = ref * lerp(0.34, 0.66, c) * lerp(0.86, 1.06, e) * esc;
   return {
     lt: input.lt,
@@ -87,7 +93,7 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
     c,
     d,
     body,
-    small: Math.max(frame.minRead, ref * (restrained ? lerp(0.046, 0.056, e) : lerp(0.05, 0.064, e)) * esc),
+    small: Math.max(frame.minRead, chantFloor * 0.6, ref * (restrained ? lerp(0.046, 0.056, e) : lerp(0.05, 0.064, e)) * esc),
     // a key line may be set huge; every other line's display word stays a step or two above the body
     giant: restrained ? Math.min(giantFull, body * lerp(1.6, 2.3, c) * lerp(0.95, 1.08, e)) : giantFull,
     cap: restrained ? body * 1.7 : Infinity,
@@ -552,8 +558,11 @@ const EXIT_SECONDS: Record<Exclude<TypeExitId, "auto">, number> = { cut: 0.05, f
  * neither does any line over a 專屬畫面 get an automatic 鏤空窗.
  * A recipe the editor set is kept. Hints without the flag (older callers) are left as they are.
  */
-function restrain(hint: ResolvedHint, programZone: boolean): ResolvedHint {
+function restrain(hint: ResolvedHint, programZone: boolean, latinOnly = false): ResolvedHint {
   if (hint.recipeFixed) return hint;
+  // round 17: the crowd's line is never whispered, and a Latin chant is set whole (a poster), not as
+  // one giant word torn from the rest (「lay」 + 「me down」)
+  if (hint.chant && (hint.recipe === "whisper" || (latinOnly && (hint.recipe === "giant-word" || hint.recipe === "window" || hint.recipe === "bleed")))) return { ...hint, recipe: "poster" };
   // round 17: under a 專屬畫面 (the section gives the words a zone) the picture is the protagonist —
   // an automatic 鏤空窗 never plates the stage over it (the editor may still ask for one)
   if (hint.recipe === "window" && programZone) return { ...hint, recipe: "giant-word" };
@@ -586,6 +595,7 @@ export function composeKey(input: Omit<ComposeInput, "measure">): string {
     h.color,
     h.escalate ? 1 : 0,
     h.key == null ? "" : h.key ? "k" : "n",
+    h.chant ? "c" : "",
     h.recipeFixed ? 1 : 0,
     h.motion ?? "",
     s.voice,
@@ -653,7 +663,7 @@ export function composeLine(given: ComposeInput): Composition {
   const full = makeFrame(given.canvas, given.system.params);
   // 專屬畫面: the section's text zone (the image's negative space) narrows the readable area
   const zone = given.ctx.zone ? canvasZone(given.ctx.zone, full.aspect) : null;
-  const hint0: ResolvedHint = restrain(given.hint, !!zone);
+  const hint0: ResolvedHint = restrain(given.hint, !!zone, given.lt.latinOnly);
   const hint: ResolvedHint = { ...hint0, orientation: effectiveOrientation(hint0, given.lt.cjk, full.aspect) };
   const view = zone ? null : compositionView(given.canvas, hint);
   const input: ComposeInput = { ...given, hint, canvas: view ? view.canvas : given.canvas };
@@ -687,6 +697,17 @@ export function composeLine(given: ComposeInput): Composition {
   }
   const r = recipeCtx(input, frame, recipe);
   pieces = pieces ?? [];
+  // round 17: the crowd's line is set at display scale every time it comes back — its largest
+  // readable glyph at least CHANT_DISPLAY of the frame's short side (the fit below keeps it inside)
+  if (hint.chant) {
+    let big = 0;
+    for (const p of pieces) if (p.readable) for (const g of p.glyphs) big = Math.max(big, g.size);
+    const want = frame.ref * CHANT_DISPLAY;
+    if (big > 0 && big < want) {
+      const b = readableBox(pieces);
+      scaleAll(pieces, Math.min(2.2, want / big), b.x + b.w / 2, b.y + b.h / 2);
+    }
+  }
   if (hint.color === "invert") pieces = invertDisplay(pieces);
   // legibility: the readable text stays in the readable area before anything else is added
   fitInto(pieces, frame.read, frame.minRead);

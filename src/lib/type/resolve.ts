@@ -12,7 +12,7 @@ import type { LineContext, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { findMotionWord } from "./motion-words";
 import { autoHint, textKey } from "./sequence";
 import { VOICES } from "./vocab";
-import { keyLineKeys } from "./key-lines";
+import { chantLineKeys, keyLineKeys } from "./key-lines";
 import { hasDarkWord, touchesDark } from "./sensitive";
 import { sectionComposition } from "../stage/program/model";
 import type { StageOverrides } from "../stage/protocol";
@@ -74,6 +74,8 @@ interface LineTable {
   chorusKeys: Set<string>;
   /** the song's key lines (text keys): the only ones set large */
   keys: Set<string>;
+  /** the crowd's lines (a hook sung ≥ 4 times, a shouted chant): large every time */
+  chants: Set<string>;
 }
 
 const tables = new WeakMap<object, { lines: readonly LyricLine[]; title: string; table: LineTable }>();
@@ -102,7 +104,7 @@ function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonl
     const si = sectionIndexForLine(plan, lines as LyricLine[], i, duration);
     if (si != null && plan.sections[si]?.kind === "chorus" && si !== lastChorus) chorusKeys.add(textKey(l.text));
   });
-  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title) };
+  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title), chants: chantLineKeys(plan, lines) };
   tables.set(plan.typeSystem, { lines, title, table });
   return table;
 }
@@ -205,7 +207,8 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     motion: override?.motion != null ? clamp(override.motion, 0, 1, 0.5) : null,
     orientationFixed: edit?.orientation != null || override?.orientation != null,
     recipeFixed: edit?.recipe != null || override?.recipe != null,
-    key: typeof edit?.key === "boolean" ? edit.key : !dark && table.keys.has(key),
+    key: typeof edit?.key === "boolean" ? edit.key : !dark && (table.keys.has(key) || table.chants.has(key)),
+    chant: !dark && edit?.key !== false && table.chants.has(key),
   };
   // the first lyric line of its section carries the section's label and number
   let first0 = true;

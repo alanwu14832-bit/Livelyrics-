@@ -60,6 +60,11 @@ export interface ResolvedHint {
    * (巨字, 出血, 鏤空窗 at full scale); every other line is small-to-medium on the grid
    */
   key?: boolean;
+  /**
+   * round 17: the crowd's line — a hook sung four times or more, or a chant in a shouting voice: set
+   * at key-line scale every time it comes back, never smaller than the display floor
+   */
+  chant?: boolean;
   /** the section's motion override (0..1), null = the system's */
   motion: number | null;
   /** the orientation was set in the editor (line or section): the canvas may not adapt it */
