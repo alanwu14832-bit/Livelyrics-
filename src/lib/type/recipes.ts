@@ -12,7 +12,7 @@ import { colRight, colX, type Frame } from "./frame";
 import type { Box, GlyphBox, LineContext, Measure, Piece, PieceRole, PlateId, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { createRng, hashUnit, type Rng } from "./rng";
 import { columnEm, rowEm, setColumn, setRow, type RunStyle } from "./set";
-import { breakRows, keySpan, splitLongLine, trimIndices, type LineText } from "./text";
+import { breakRows, keySpan, leavesFragment, splitLongLine, splitsWord, trimIndices, type LineText } from "./text";
 
 export interface Zone {
   /** where the composition leans: the sequencer alternates these between consecutive lines */
@@ -634,7 +634,9 @@ function scatter(r: RecipeCtx): Piece[] | null {
     for (let k = 1; k < units.length; k++) {
       const prev = units[k - 1];
       const boundary = lt.units.slice(prev + 1, units[k]).some((u) => u.kind === "space" || u.kind === "punct");
-      const d = Math.abs(k - units.length / 2) - (boundary ? 2 : 0);
+      // round 17: never inside a word (全｜部), nor leaving one character of a phrase behind
+      const torn = !boundary && (splitsWord(lt.units, prev) ? 100 : leavesFragment(lt.units, prev) ? 4 : 0);
+      const d = Math.abs(k - units.length / 2) - (boundary ? 2 : 0) + torn;
       if (d < bestD) {
         bestD = d;
         best = k;
