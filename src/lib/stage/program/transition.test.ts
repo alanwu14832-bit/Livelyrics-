@@ -174,3 +174,41 @@ describe("same-program section transitions (round 18)", () => {
     });
   }
 });
+
+// Round 18 (m6): an instrumental reserves no text zone — the form owns the frame and crosses it
+describe("an instrumental uses the full frame and travels (round 18)", () => {
+  const instrumental = (form: FormId) => {
+    const p = composeSceneProgram({ seed: 4242, forms: [form], weights: { [form]: 1 }, lyrics: false, sections: [{ id: "a", kind: "verse", energy: 0.4 }, { id: "b", kind: "chorus", energy: 0.8 }], title: "t" });
+    const v = validateProgram(p.source);
+    if (!v.ok) throw new Error(v.errors.join("; "));
+    return { code: v.code, program: p };
+  };
+  const centroidX = (fr: Frame) => {
+    let s = 0;
+    let w = 0;
+    fr.forEach((v, k) => {
+      const x = (k % COLS) / COLS;
+      s += x * v * v;
+      w += v * v;
+    });
+    return s / w;
+  };
+
+  it("every form ignores the zone and every section names the same caption band", () => {
+    for (const form of ["horizon", "pillars", "orbits", "strata", "bars", "brush", "ribbons", "threads"] as FormId[]) {
+      const { code, program: p } = instrumental(form);
+      expect(new Set(p.sections.map((s) => JSON.stringify(s.zone))).size).toBe(1);
+      const left = render(code, draw({ zone: [0.08, 0.3, 0.46, 0.8] }));
+      const right = render(code, draw({ zone: [0.54, 0.3, 0.92, 0.8] }));
+      expect(Math.max(...left.map((v, i) => Math.abs(v - right[i]))), form).toBeLessThan(1e-9);
+    }
+  });
+
+  it("the focal form crosses the frame over the song", () => {
+    for (const form of ["horizon", "orbits", "pillars"] as FormId[]) {
+      const { code } = instrumental(form);
+      const xs = [0.05, 0.35, 0.7].map((songProgress) => centroidX(render(code, draw({ songProgress }))));
+      expect(Math.max(...xs) - Math.min(...xs), `${form}: ${xs.map((x) => x.toFixed(3)).join(",")}`).toBeGreaterThan(0.04);
+    }
+  });
+});
