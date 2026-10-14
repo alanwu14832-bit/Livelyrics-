@@ -81,3 +81,44 @@ export function programFrame(f: ProgramFrameInput): ProgramDraw | null {
 export function programLookKey(base: string, pd: ProgramDraw | null): string {
   return pd ? `${base}|p:${pd.key}:${pd.mode}:${pd.params.map((v) => v.toFixed(2)).join(",")}` : base;
 }
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const lerpRgb = (a: RGB, b: RGB, t: number): RGB => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const lerp4 = (a: readonly number[], b: readonly number[], t: number): [number, number, number, number] => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t), lerp(a[3], b[3], t)];
+
+/** Where in a transition a mode that cannot be tweened switches: behind the flash's peak, else mid-sweep. */
+export const MODE_CUT: Record<number, number> = { 1: 0.5, 2: 0.12, 3: 0.5, 4: 0.5 };
+
+/**
+ * Round 18 (M1): a section change between two states of the *same* program is one render, not a
+ * cross-fade of two (which showed the planet / sun / slab twice where the composition has one).
+ * The zone, the parameters, the section energy and the colours tween (eased) from the outgoing state
+ * to the incoming one; the mode tweens between the open-ended modes 0–2 and otherwise switches at
+ * `cut` (behind the transition's flash / sweep); the clocks and the words are the incoming state's.
+ */
+export function blendProgramDraw(prev: ProgramDraw, cur: ProgramDraw, progress: number, cut = 0.5): ProgramDraw {
+  const p = clamp01(progress);
+  const e = p * p * (3 - 2 * p);
+  const tweenMode = prev.mode <= 2 && cur.mode <= 2;
+  return {
+    ...cur,
+    sectionEnergy: lerp(prev.sectionEnergy, cur.sectionEnergy, e),
+    mode: tweenMode ? lerp(prev.mode, cur.mode, e) : p < cut ? prev.mode : cur.mode,
+    params: lerp4(prev.params, cur.params, e),
+    ink: lerpRgb(prev.ink, cur.ink, e),
+    palette: cur.palette.map((c, i) => lerpRgb(prev.palette[i] ?? c, c, e)) as ProgramDraw["palette"],
+    zone: lerp4(prev.zone, cur.zone, e),
+  };
+}
+
+/** Both slots of a transition draw the same program (the case `blendProgramDraw` merges). */
+export function sameProgram(prev: { program?: ProgramDraw | null } | null | undefined, cur: { program?: ProgramDraw | null }): boolean {
+  return !!prev?.program && !!cur.program && prev.program.key === cur.program.key;
+}
+
+/** The colours of a merged slot: the scene uniforms tween like the program's. */
+export function blendSlotColors<T extends { bg: RGB; primary: RGB; accent: RGB }>(prev: T, cur: T, progress: number): T {
+  const p = clamp01(progress);
+  const e = p * p * (3 - 2 * p);
+  return { ...cur, bg: lerpRgb(prev.bg, cur.bg, e), primary: lerpRgb(prev.primary, cur.primary, e), accent: lerpRgb(prev.accent, cur.accent, e) };
+}
