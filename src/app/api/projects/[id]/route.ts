@@ -1,5 +1,6 @@
 import { handle, HttpError, json, readJson, requireProjectId } from "@/lib/server/http";
 import { remapPlanLines } from "@/lib/lyrics/remap";
+import { nextTimingChange } from "@/lib/lyrics/timing-change";
 import { cancelRun, withLiveStatus } from "@/lib/server/pipeline";
 import { isValidBandId } from "@/lib/band";
 import { getBand, withBandAssets } from "@/lib/server/band-storage";
@@ -69,6 +70,10 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
     if (lyrics) {
       // ids are re-numbered on every lyrics save: keep per-line designs on the same text
       if (!plan && p.plan) p.plan = remapPlanLines(p.plan, p.lyrics, lyrics);
+      // round 19 (M6): timing moved since the design → the editor and the console suggest a re-design
+      // (a plan sent with the lyrics is a new plan: it follows them)
+      if (p.plan && !plan) p.timingChange = nextTimingChange(p.timingChange, p.lyrics, lyrics, new Date().toISOString());
+      else delete p.timingChange;
       p.lyrics = lyrics;
     }
     if (plan) p.plan = plan;

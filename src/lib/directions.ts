@@ -160,6 +160,7 @@ export function applySelection(draft: Project, directionId: string, plan: Design
     draft.previousPlan = { plan: draft.plan, at: now, reason: `採用方向 ${chosen.letter}「${chosen.name}」`, ...(draft.planSource ? { source: draft.planSource } : {}) };
   } else delete draft.previousPlan;
   draft.plan = plan;
+  delete draft.timingChange;
   draft.planSource = { engine: chosen.engine, ...(chosen.model ? { model: chosen.model } : {}), at: now };
   for (const d of set.directions) {
     if (d.id === directionId) {

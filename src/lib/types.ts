@@ -572,6 +572,30 @@ export interface Project {
   collectedDismissed?: string[];
   /** a band-less song's material authorization (a song of a band uses the band's) */
   materialAuthorization?: MaterialAuthorization;
+  /**
+   * Round 19 (M6): the lyric timing the plan was designed with and how far it moved since
+   * (`src/lib/lyrics/timing-change.ts`): `lines` > 0 = some line moved by more than 2 s. Set by the
+   * lyrics PATCH, cleared by any new design; absent = the plan follows the current timing.
+   */
+  timingChange?: TimingChange;
+}
+
+/** One line of the lyric timing a plan was designed with: normalized text and start. */
+export interface TimingPoint {
+  key: string;
+  start: number | null;
+}
+
+/** Round 19 (M6): how far the lyric timing moved since the design (see Project.timingChange). */
+export interface TimingChange {
+  /** the timing the current plan was designed with */
+  baseline: TimingPoint[];
+  /** lines whose start moved by more than 2 s (or that got their first time); 0 = the plan still follows */
+  lines: number;
+  /** the largest move, seconds (0 when only first times were added) */
+  shift: number;
+  /** ISO time of the save that measured it */
+  at: string;
 }
 
 /** A small key still (data:image/jpeg, ≤ THUMB_MAX_CHARS) and the plan it shows (planHash). */
