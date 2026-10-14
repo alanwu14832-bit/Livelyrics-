@@ -120,7 +120,8 @@ function paletteSentence(c: ConceptContext, skeleton: SkeletonId, variant: numbe
 /** 約 120 BPM、能量起伏好幾次、最高點在 0:48 — only when the tempo is confident and the song long enough. */
 function arcSentence(c: ConceptContext): string {
   const f = c.findings;
-  if (!(c.bpm > 0) || !(c.bpmConfidence >= CONFIDENT_BPM) || c.structure.duration < ARC_MIN_DURATION) return "";
+  // (round 19: a near-silent file's "tempo" is the noise floor's)
+  if (c.structure.silent || !(c.bpm > 0) || !(c.bpmConfidence >= CONFIDENT_BPM) || c.structure.duration < ARC_MIN_DURATION) return "";
   const peak = f.audio.peakAt != null && f.audio.contrast >= 0.2 ? `，最高點在 ${formatTimeShort(f.audio.peakAt)}` : "";
   return `約 ${c.bpm} BPM，能量${f.audio.shapeLabel}${peak}。`;
 }
