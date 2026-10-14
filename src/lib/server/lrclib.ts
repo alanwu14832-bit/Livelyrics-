@@ -5,7 +5,16 @@ import { parseLrc, parsePlainLyrics } from "@/lib/lyrics/lrc";
 import type { Lyrics, SongMeta } from "@/lib/types";
 import { networkErrorText } from "./net-error";
 
-const API_BASE = "https://lrclib.net/api";
+const DEFAULT_API_BASE = "https://lrclib.net/api";
+
+/**
+ * Round 20: LIVELYRICS_LRCLIB_URL points the client elsewhere (the e2e stub, a mirror), read per
+ * request so a test can set it; the home page's automatic search then never reaches the internet.
+ */
+export function lrclibBase(env: Record<string, string | undefined> = process.env): string {
+  const v = env.LIVELYRICS_LRCLIB_URL?.trim();
+  return (v && /^https?:\/\//i.test(v) ? v : DEFAULT_API_BASE).replace(/\/+$/, "");
+}
 const USER_AGENT = "Livelyrics/0.1 (+https://github.com/alanwu14832-bit/Livelyrics-)";
 const TIMEOUT_MS = 8000;
 /** synced timings are only trusted when the recording length matches within this many seconds */
@@ -106,7 +115,7 @@ async function requestOnce(pathAndQuery: string, opts: RequestOptions = {}): Pro
   const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${pathAndQuery}`, {
+    res = await fetch(`${lrclibBase()}${pathAndQuery}`, {
       headers: { "User-Agent": USER_AGENT, "Lrclib-Client": USER_AGENT, Accept: "application/json" },
       signal,
       cache: "no-store",

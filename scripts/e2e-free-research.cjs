@@ -5,7 +5,10 @@
 //   LIVELYRICS_DATA_DIR=/tmp/livelyrics-e2e \
 //   LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
 //   LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' \
-//   LIVELYRICS_COVERART_URL=http://127.0.0.1:3199/coverart npx next start -p 3100
+//   LIVELYRICS_COVERART_URL=http://127.0.0.1:3199/coverart \
+//   LIVELYRICS_LRCLIB_URL=http://127.0.0.1:3199/lrclib/api npx next start -p 3100
+//   (the LRCLIB stub answers 「no lyrics」; the other e2e scripts then get a refused connection at once —
+//   either way the home page's automatic lyric search never reaches the internet)
 //   BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 //
 //   1. The sources unreachable (the stub is not listening yet): the pipeline still finishes with a
@@ -119,6 +122,16 @@ function stubHandler(req, res) {
   if (p.startsWith("/wikipedia/en/w/rest.php/v1/search/page")) {
     res.writeHead(200, { "content-type": "application/json" });
     return res.end('{"pages":[]}');
+  }
+  // round 20: LRCLIB (LIVELYRICS_LRCLIB_URL=http://127.0.0.1:<STUB_PORT>/lrclib/api): the home page's
+  // automatic lyric search finds nothing, at once, and never reaches the internet
+  if (p === "/lrclib/api/search") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end("[]");
+  }
+  if (p === "/lrclib/api/get") {
+    res.writeHead(404, { "content-type": "application/json" });
+    return res.end('{"code":404,"name":"TrackNotFound","message":"Failed to find specified track"}');
   }
   res.writeHead(404, { "content-type": "application/json" });
   res.end('{"title":"Not found."}');
@@ -264,7 +277,9 @@ async function clipboard(page) {
     check("brief quotes Wikipedia", brief.includes("維基百科"));
     check("sources cite MusicBrainz and Wikipedia", (song.research?.sources ?? []).some((s) => s.url.startsWith("https://musicbrainz.org/")) && (song.research?.sources ?? []).some((s) => /wikipedia\.org/.test(s.url)), (song.research?.sources ?? []).map((s) => s.title).join("、"));
     check("public facts cached on the project", song.research?.publicInfo?.status?.musicbrainz === "ok", JSON.stringify(song.research?.publicInfo?.status));
-    check("the stub was asked, with the Livelyrics User-Agent", stubRequests.length >= 3 && stubRequests.every((r) => r.ua === USER_AGENT), `${stubRequests.length} requests`);
+    // (LRCLIB has its own client and User-Agent)
+    const research = stubRequests.filter((r) => !r.path.startsWith("/lrclib/"));
+    check("the stub was asked, with the Livelyrics User-Agent", research.length >= 3 && research.every((r) => r.ua === USER_AGENT), `${research.length} requests`);
     check("zh Wikipedia asked for Taiwan variants", stubRequests.filter((r) => r.path.startsWith("/wikipedia/zh")).every((r) => /zh-TW/.test(r.lang)));
     check("the design used the genre", /獨立搖滾/.test(song.plan?.designerNotes ?? ""), song.plan?.keyVisual?.title);
     const panel = await openResearchPanel(page);
