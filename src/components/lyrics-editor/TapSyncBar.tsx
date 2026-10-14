@@ -171,7 +171,7 @@ export function TapSyncCard({ session: live, lines, onMark, onUndo, onSkip, onEx
             <CheckCircleIcon size={28} weight="fill" className="shrink-0 text-green" />
             <div>
               <p className="text-title-2 text-label">全部標記完成</p>
-              <p className="text-[15px] leading-[22px] text-label-2">已標記 {marked} 句。按結束離開，或用退回修正最後一句。</p>
+              <p className="text-[15px] leading-[22px] text-label-2">已標記 {marked} 句。按「完成」離開，或按「退回」修正最後一句。</p>
             </div>
           </div>
         ) : (

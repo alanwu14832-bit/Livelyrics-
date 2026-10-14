@@ -268,19 +268,31 @@ export async function renderPreview(
     // cannot move to a worker; with a signal it yields between pre-roll frames and can be cancelled
     await stage.renderFrame(t, fps, { scene: true, background: true, lyrics: true, matte: true }, { signal });
     if (signal?.aborted) throw new RenderCanceled();
-    const out = document.createElement("canvas");
-    out.width = stage.width;
-    out.height = stage.height;
-    const ctx = out.getContext("2d")!;
-    ctx.drawImage(stage.sceneCanvas, 0, 0);
-    const background = out.toDataURL("image/png");
-    ctx.clearRect(0, 0, out.width, out.height);
-    stage.drawFull(ctx);
-    const full = out.toDataURL("image/png");
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, out.width, out.height);
-    ctx.drawImage(stage.matteCanvas, 0, 0);
-    const matte = out.toDataURL("image/png");
+    // round 20 (M7): the PNGs are encoded off the main thread (toBlob), one canvas each, checking
+    // the signal between them; still data URLs, so the same frame gives the same string
+    const png = async (draw: (ctx: CanvasRenderingContext2D) => void): Promise<string> => {
+      if (signal?.aborted) throw new RenderCanceled();
+      const out = document.createElement("canvas");
+      out.width = stage.width;
+      out.height = stage.height;
+      draw(out.getContext("2d")!);
+      const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
+      if (!blob) return out.toDataURL("image/png");
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error ?? new Error("無法輸出畫面"));
+        reader.readAsDataURL(blob);
+      });
+    };
+    const background = await png((ctx) => ctx.drawImage(stage.sceneCanvas, 0, 0));
+    const full = await png((ctx) => stage.drawFull(ctx));
+    const matte = await png((ctx) => {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, stage.width, stage.height);
+      ctx.drawImage(stage.matteCanvas, 0, 0);
+    });
+    if (signal?.aborted) throw new RenderCanceled();
     return { full, background, matte, warnings, width: stage.width, height: stage.height };
   } finally {
     stage.destroy();

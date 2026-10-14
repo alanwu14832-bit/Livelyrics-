@@ -9,7 +9,7 @@ import { useId, useState } from "react";
 import { Button, Switch, TextArea } from "@/components/ui";
 import { SparkleIcon } from "@/components/ui/Icon";
 
-const SUGGESTIONS = ["副歌更熱血一點", "整體更安靜、留白多一點", "主歌用直排歌詞", "更貼近專輯封面的色調", "減少歌詞，讓畫面當主角", "最後一次副歌要最炸"];
+const SUGGESTIONS = ["副歌更熱血一點", "整體更安靜、留白多一點", "主歌用直排歌詞", "更貼近專輯封面的色調", "減少歌詞，讓畫面當主角", "最後一次副歌要最炸", "換一個新方向"];
 
 /** Free-text art direction for a re-design. */
 export function RedesignBox({
@@ -84,7 +84,7 @@ export function RedesignBox({
         </div>
       </div>
       <p id={hintId} className="mt-1.5 px-4 text-[12px] leading-4 text-label-2">
-        像跟設計師開會一樣給指示；沒寫也可以直接重新設計。
+        像跟設計師開會一樣給指示；沒寫也可以直接重新設計。沒寫指示時，「重新研究並設計」會保留目前的主視覺、配色與字體，只依新的研究更新段落與提示；想換方向，請寫「換一個新方向」。
         {noApi && "基本模式的內建設計師只聽得懂簡單的指示，例如「更熱血」「更安靜」「直排」。"}
       </p>
     </section>

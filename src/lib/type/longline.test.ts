@@ -27,7 +27,8 @@ const LONG = [
   "就算整個世界都睡著了我們還醒著在這條路上一直開一直開",
   "I carried river stones in both my coat pockets so the wind would not take me",
 ];
-const SHORT = ["夜色慢慢落在城市的邊緣", "直到天亮", "Hey 跟著我唱", "Tonight we sing until the morning light"];
+// round 20 (m4): an ordinary English line (43 letters) is not long
+const SHORT = ["夜色慢慢落在城市的邊緣", "直到天亮", "Hey 跟著我唱", "Tonight we sing until the morning light", "And I will wait for you until the morning comes again"];
 
 function hint(recipe: TypeRecipeId, over: Partial<ResolvedHint> = {}): ResolvedHint {
   return { recipe, emphasis: [], orientation: "h", energy: 0.8, motionWord: "", seed: 11, dx: 0, dy: 0, scale: 1, rotate: 0, enter: "auto", exit: "auto", color: "auto", escalate: false, motion: null, key: true, ...over };

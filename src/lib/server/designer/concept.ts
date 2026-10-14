@@ -14,6 +14,7 @@ import { MOOD_VOCABULARY } from "./lexicon/moods";
 import type { SongStructure } from "./structure";
 import type { ImageryHit } from "./imagery";
 import { artistWhere } from "./free-research";
+import { isBallad } from "./scene-program";
 
 export type SkeletonId = "fragment" | "instrumental" | "chant" | "ballad" | "story" | "groove" | "two-peaks" | "slow-build" | "steady";
 
@@ -67,11 +68,14 @@ export function chooseSkeleton(c: ConceptContext): SkeletonId {
   if (st.duration < SHORT_SONG_SECONDS || st.silent) return "fragment";
   if (!c.hasLyrics) return "instrumental";
   const hook = hookInfo(st);
-  const emotion = f.lyrics.emotion.label;
+  // round 20: the one reconciled mood (a calm lyric on a track that explodes reads as the explosion)
+  const emotion = f.mood.label;
   const chorusCount = st.sections.filter((s) => s.kind === "chorus").length;
   if ((g && CHANT_GENRES.has(g.id) && (hook?.repeats ?? 0) >= 3) || (hook && hook.repeats >= 4 && hook.units <= 6)) return "chant";
   const quiet = f.audio.quadrant === "dark-slow" || f.audio.quadrant === "gentle-float";
   if (quiet || (CALM_EMOTIONS.has(emotion) && (!g || g.motion === "soft" || g.id === "pop" || g.id === "rnb"))) return "ballad";
+  // a power ballad: the genre and the words say ballad, the track builds to a loud chorus
+  if (isBallad(f) && CALM_EMOTIONS.has(f.lyrics.emotion.label)) return "ballad";
   if ((g && STORY_GENRES.has(g.id)) || f.lyrics.pov.voice === "they" || (f.lyrics.pov.voice === "i-you" && f.lyrics.lineCount >= 10)) return "story";
   if ((g && GROOVE_GENRES.has(g.id)) || f.audio.quadrant === "warm-groove" || c.imagery[0]?.imagery.family.id === "dance") return "groove";
   // round 19: two climaxes or a build need a level that actually rises
@@ -111,10 +115,14 @@ function factSentence(c: ConceptContext, variant: number): string {
 function paletteSentence(c: ConceptContext, skeleton: SkeletonId, variant: number): string {
   const [bg, p1, p2] = [c.palette[0]?.name, c.palette[1]?.name, c.palette[2]?.name];
   if (!bg || !p1 || !p2) return "";
-  if (skeleton === "ballad") return `大片的${bg}，${p1}很省地用，${p2}只留給最亮的那一句。`;
-  if (skeleton === "slow-build" || skeleton === "instrumental") return `${bg}打底，${p1}是慢慢累積的光，${p2}只在爆開的那一刻出現。`;
-  if (skeleton === "chant") return `配色只有三個角色：${bg}、${p1}、${p2}，像一張影印的傳單。`;
-  return variant % 2 === 0 ? `以${p1}與${p2}為主色，在${bg}的背景上發光。` : `${bg}的底、${p1}的光、${p2}的點綴，整首歌只有這三種顏色在說話。`;
+  // round 20: the background is usually the primary's darkest shade (深夜洋紅 under 洋紅): call it the
+  // near-black ground then, never 「大片的深夜洋紅，洋紅很省地用」
+  const shade = bg.includes(p1) || p1.includes(bg);
+  const ground = shade ? `近乎全黑的底` : bg;
+  if (skeleton === "ballad") return `大片${shade ? ground : `的${bg}`}，${p1}很省地用，${p2}只留給最亮的那一句。`;
+  if (skeleton === "slow-build" || skeleton === "instrumental") return `${shade ? "從近乎全黑起手" : `${bg}打底`}，${p1}是慢慢累積的光，${p2}只在爆開的那一刻出現。`;
+  if (skeleton === "chant") return shade ? `配色只有三個角色：黑、${p1}、${p2}，像一張影印的傳單。` : `配色只有三個角色：${bg}、${p1}、${p2}，像一張影印的傳單。`;
+  return variant % 2 === 0 ? `以${p1}與${p2}為主色，在${shade ? ground : `${bg}的背景`}上發光。` : `${shade ? ground : `${bg}的底`}、${p1}的光、${p2}的點綴，整首歌只有這三種顏色在說話。`;
 }
 
 /** 約 120 BPM、能量起伏好幾次、最高點在 0:48 — only when the tempo is confident and the song long enough. */
@@ -161,7 +169,8 @@ function opening(c: ConceptContext, skeleton: SkeletonId): string {
   const [a, b] = images(c);
   const T = quote(c.title);
   const song = `〈${c.songTitle || "這首歌"}〉`;
-  const adj = EMOTION_ADJ[f.lyrics.emotion.label];
+  // round 20: the one reconciled mood (never 「一首安靜的歌…整首歌明亮而激昂」)
+  const adj = f.mood.source === "lyrics" ? EMOTION_ADJ[f.mood.label] : f.mood.adj;
   const peak = f.audio.peakAt != null ? formatTimeShort(f.audio.peakAt) : null;
   const vocab = MOOD_VOCABULARY[f.audio.quadrant];
   switch (skeleton) {
@@ -175,8 +184,12 @@ function opening(c: ConceptContext, skeleton: SkeletonId): string {
       const phrase = singalong(c);
       return `這是一首要全場一起喊的歌。${T}不講故事，只有${phrase ? `一句話：${quote(phrase)}` : "口號"}——${a ? `${quote(a)}是它的質地，` : ""}字比畫面重要，每一次口號都用同一個構圖讓全場認得。`;
     }
-    case "ballad":
-      return `${T}是一首安靜的歌該有的畫面：${a && b ? `${quote(a)}與${quote(b)}` : a ? quote(a) : "很少的光"}留在很暗的底色裡，${povClause(c)}${adj ? `，整首歌${adj}` : ""}。`;
+    case "ballad": {
+      const held = `${a && b ? `${quote(a)}與${quote(b)}` : a ? quote(a) : "很少的光"}留在很暗的底色裡`;
+      // a power ballad (the track builds to a loud chorus) is not 「一首安靜的歌」
+      if (!f.mood.calm) return `${T}是一首抒情歌的畫面：${held}，${povClause(c)}；副歌${peak ? `（${peak}）` : ""}才讓光漲上來。`;
+      return `${T}是一首安靜的歌該有的畫面：${held}，${povClause(c)}${adj ? `，整首歌${adj}` : ""}。`;
+    }
     case "story":
       return `${song}像在說一個故事：${povClause(c)}。${T}讓畫面當場景而不是特效——${a && b ? `${quote(a)}與${quote(b)}是道具` : a ? `${quote(a)}是道具` : "光是道具"}，歌詞是旁白。`;
     case "groove":
@@ -295,10 +308,13 @@ export function conceptMotifs(f: Findings, max = 4): string[] {
   return out.slice(0, max);
 }
 
-/** Mood keywords: the findings' (emotion, audio, images, genre), the mood lexicon's, the images. */
-export function conceptKeywords(f: Findings, imagery: readonly ImageryHit[], max = 6): string[] {
+/**
+ * Mood keywords (the 「情緒」 row): the one reconciled mood, then the sound's own mood words — never the
+ * images or the genre (round 20: 「平靜內斂、爆發釋放、雨、夜色、流行」 was five things, two of them at odds).
+ */
+export function conceptKeywords(f: Findings, max = 4): string[] {
   const out: string[] = [];
-  for (const k of [...f.hints.keywords, ...MOOD_VOCABULARY[f.audio.quadrant].keywords, ...imagery.map((h) => h.imagery.name)]) {
+  for (const k of [...f.hints.keywords, ...MOOD_VOCABULARY[f.audio.quadrant].keywords]) {
     // 「爆發」 after 「爆發釋放」 says nothing new
     if (k && !out.some((o) => o.includes(k) || k.includes(o))) out.push(k);
   }

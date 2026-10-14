@@ -25,6 +25,8 @@ import { claudeStructured } from "./structured";
 import { LYRIC_STYLES, SCENES } from "./catalog";
 import { claudeDesign, claudeResearch, clientOptions, sdkTransport, type ClaudeTransport } from "./claude";
 import { applyInstruction } from "./instruction";
+import { asksNewDirection, keepWorld } from "./keep-world";
+import { lookOfPlan } from "./recent";
 import { describeError } from "./messages";
 import { backupModelName, withRetries, type RetryOptions } from "./retry";
 import { hasApiKey, storedApiKey } from "@/lib/server/api-key";
@@ -211,6 +213,15 @@ function offlinePlan(req: DesignRequest, cb: SafeCallbacks, claudeFailed: boolea
   const instruction = req.instruction?.trim();
   const previous = req.previous ? normalizePlan(req.previous, req, { typeSystem: "keep" }) : null;
 
+  // round 20 (m9): 「換一個新方向」 is a new world: designed as if the current look were the library's
+  // latest song (the variety rules move off its form, hue, voice and fonts) and under a new title
+  if (previous && !claudeFailed && asksNewDirection(instruction)) {
+    const fresh = offlineDesign({ ...req, recentLooks: [lookOfPlan(previous), lookOfPlan(previous), ...(req.recentLooks ?? [])], takenTitles: [...(req.takenTitles ?? []), previous.keyVisual.title] });
+    cb.onLog(`換一個新方向：主視覺「${fresh.keyVisual.title}」（原本是「${previous.keyVisual.title}」）。`);
+    cb.onDelta(planSummary(fresh));
+    return fresh;
+  }
+
   if (previous && (instruction || (claudeFailed && !req.arc))) {
     if (instruction) {
       const { plan, changes } = applyInstruction(previous, instruction, req);
@@ -253,6 +264,17 @@ export async function designSong(
   throwIfAborted(cb.signal);
   const d = resolveDeps(deps);
   const req: DesignRequest = input;
+  const previous = req.previous;
+  if (req.keepWorld && previous) {
+    // round 20 (m9): the world stays; the operator asks for another one in words
+    const plan = await designFresh({ ...req, keepWorld: false }, cb, d, cbs);
+    cbs.onLog("保留目前的世界觀（主視覺、配色、字體與專屬畫面），只依新的研究更新段落、歌詞呈現與提示。想換一個方向，請在指示寫「換一個新方向」。");
+    return ensureSceneProgram(req, normalizePlan(keepWorld(plan, previous), req, { typeSystem: "keep" }));
+  }
+  return designFresh(req, cb, d, cbs);
+}
+
+async function designFresh(req: DesignRequest, cb: DesignerCallbacks, d: ReturnType<typeof resolveDeps>, cbs: SafeCallbacks): Promise<DesignPlan> {
 
   if (isNearlySilent(req.analysis)) {
     // round 19: nothing to hear, nothing for Claude to design to — one quiet picture, no invented sections

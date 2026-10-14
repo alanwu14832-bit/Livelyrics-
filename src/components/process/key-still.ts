@@ -56,7 +56,8 @@ async function render(project: Project): Promise<KeyStill> {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d")!;
-    await stage.renderFrame(t, 12, { scene: true, background: false, lyrics: true, matte: false });
+    // paced (round 20): the page stays responsive while the still renders
+    await stage.renderFrame(t, 12, { scene: true, background: false, lyrics: true, matte: false }, { signal: new AbortController().signal });
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, width, height);
     stage.drawFull(ctx);
@@ -160,7 +161,7 @@ async function renderBackdrop(project: Project, t: number, width: number, height
     canvas.height = height;
     const ctx = canvas.getContext("2d")!;
     // the background-only picture: no lyric, and no trace of it in the scene
-    await stage.renderFrame(t, 12, { scene: false, background: true, lyrics: false, matte: false });
+    await stage.renderFrame(t, 12, { scene: false, background: true, lyrics: false, matte: false }, { signal: new AbortController().signal });
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(stage.sceneCanvas, 0, 0, width, height);

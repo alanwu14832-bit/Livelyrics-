@@ -337,7 +337,7 @@ export function ConnectClaudeSheet({ open, onClose, state, onRecheck }: { open: 
               到 Anthropic Console 建立金鑰
               <ArrowSquareOutIcon size={14} />
             </a>
-            ：登入後按「Create Key」，複製那串 sk-ant- 開頭的文字。
+            ：登入後按「建立金鑰」的按鈕，複製那串 sk-ant- 開頭的文字。
           </p>
         </li>
         <li className="flex gap-3 px-4 py-3">

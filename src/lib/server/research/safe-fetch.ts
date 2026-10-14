@@ -20,6 +20,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { RESEARCH_USER_AGENT } from "./http";
+import { networkErrorText } from "../net-error";
 
 export const MAX_REDIRECTS = 3;
 export const DOWNLOAD_TIMEOUT_MS = 8000;
@@ -258,12 +259,9 @@ function typeOk(accept: Accept, contentType: string): boolean {
   return t === "application/json" || t.endsWith("+json");
 }
 
+/** round 20 (m3): the reason in plain Chinese (never the raw 「connect ECONNREFUSED …」). */
 function causeOf(err: unknown): string {
-  if (err instanceof Error) {
-    const c = err.cause instanceof Error ? err.cause.message : "";
-    return (c || err.message || err.name).slice(0, 120);
-  }
-  return String(err).slice(0, 120);
+  return networkErrorText(err);
 }
 
 export interface SafeGetOptions {

@@ -121,7 +121,9 @@ describe("sing-along phrases", () => {
 
   it("finds the repeated chant and phrases, shorter than every line they come from", () => {
     const phrases = singalongPhrases(lines, null);
-    expect(phrases.map((p) => p.text)).toEqual(expect.arrayContaining(["Oh oh oh", "燃燒吧", "我們的青春"]));
+    expect(phrases.map((p) => p.text)).toEqual(expect.arrayContaining(["燃燒吧", "我們的青春"]));
+    // round 20: a bare chant (Oh oh oh) is filler, not a phrase to quote
+    expect(phrases.some((p) => p.chant)).toBe(false);
     for (const p of phrases) {
       for (const id of p.lineIds) {
         const line = lines.find((l) => l.id === id)!.text;
@@ -132,14 +134,14 @@ describe("sing-along phrases", () => {
     expect(phrases.find((p) => p.text === "燃燒吧")).toMatchObject({ count: 4, start: 20 });
   });
 
-  it("the demo song's chorus: Hey, 跟著我唱, 我們的歌", () => {
+  it("the demo song's chorus: 跟著我唱, 我們的歌 (the bare Hey is filler)", () => {
     const input = demoInput();
     const st = analyzeStructure(input);
     const phrases = singalongPhrases(
       input.lyrics.lines.map((l) => ({ id: l.id, text: l.text, start: l.start })),
       st,
     );
-    expect(phrases.map((p) => p.text)).toEqual(["Hey", "跟著我唱", "我們的歌"]);
+    expect(phrases.map((p) => p.text).slice(0, 2)).toEqual(["跟著我唱", "我們的歌"]);
   });
 
   it("no repeats, no phrases", () => {

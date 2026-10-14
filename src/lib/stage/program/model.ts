@@ -190,12 +190,15 @@ export function sectionComposition(plan: DesignPlan | null | undefined, index: n
   return { zone: canvasZone(s.zone, aspect), relation: s.relation };
 }
 
+/** Round 20 (m7): the key still waits this long after a line starts (its entrance and the previous line's exit are done). */
+export const KEY_SETTLE_SECONDS = 0.8;
+
 /**
  * The song time of the key still (主視覺): the program's own keyMoment, else 60 % into the first
  * chorus (the loudest section without one). Round 17: never a moment whose sung line carries a dark
  * word (blood, a weapon, death…) — the still and the library card show the song's picture, not its
  * threat: other points of that section, then the other choruses, then any section, then a moment
- * between lines.
+ * between lines. Round 20: never in the first KEY_SETTLE_SECONDS of a line.
  */
 export function keyMomentOf(plan: DesignPlan, duration: number, lines: readonly Pick<LyricLine, "text" | "start" | "end">[] = []): number {
   const timed = lines.filter((l) => typeof l?.start === "number" && Number.isFinite(l.start) && typeof l.text === "string" && l.text.trim()).sort((a, b) => (a.start as number) - (b.start as number));
@@ -214,17 +217,26 @@ export function keyMomentOf(plan: DesignPlan, duration: number, lines: readonly 
   };
   const own = plan.sceneProgram?.keyMoment;
   if (typeof own === "number" && Number.isFinite(own) && own >= 0 && (!duration || own <= duration) && clean(own)) return own;
+  // round 20 (m7): a moment just after a line starts catches the previous line mid-exit and this one
+  // mid-entrance (a 3 s clip's still showed both, cut by their wipes): wait until the line has settled
+  const settled = (t: number, limit: number) => {
+    const l = lineAt(t);
+    if (!l || t - (l.start as number) >= KEY_SETTLE_SECONDS) return t;
+    const later = Math.min((l.start as number) + KEY_SETTLE_SECONDS, limit - 0.05, duration > 0 ? duration - 0.05 : Infinity);
+    return later > t && clean(later) ? later : t;
+  };
   const sections = plan.sections ?? [];
   let s = sections.find((x) => x.kind === "chorus");
   if (!s) s = [...sections].sort((a, b) => b.energy - a.energy)[0];
   if (!s) return Math.max(0, duration * 0.4);
   const first = s.start + (s.end - s.start) * 0.6;
-  if (!timed.length || clean(first)) return first;
+  if (!timed.length) return first;
+  if (clean(first)) return settled(first, s.end);
   const order = [s, ...sections.filter((x) => x !== s && x.kind === "chorus"), ...[...sections].filter((x) => x !== s && x.kind !== "chorus").sort((a, b) => b.energy - a.energy)];
   for (const sec of order) {
     for (const f of [0.6, 0.4, 0.8, 0.25, 0.9, 0.1]) {
       const t = sec.start + (sec.end - sec.start) * f;
-      if (clean(t)) return t;
+      if (clean(t)) return settled(t, sec.end);
     }
   }
   // every point is sung with a dark word: the breath before the first line

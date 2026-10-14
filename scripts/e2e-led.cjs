@@ -455,6 +455,9 @@ async function measure(popup, seconds) {
     check("the pre-show check lists every changed section", rows >= 240, `${rows} rows`);
 
     // --- export page: safe by default, off only after a confirm
+    // round 20: the console and the projection window are done; parked, they no longer share the one
+    // software GPU with the export (the paced preview leaves them running, so they would slow it down)
+    for (const p of context.pages()) await p.goto("about:blank").catch(() => {});
     const exp = await context.newPage();
     watch(exp, "export");
     await exp.goto(`${BASE}/p/${song.id}/export`, { waitUntil: "networkidle" });
@@ -475,7 +478,9 @@ async function measure(popup, seconds) {
       await exp.locator("#preview-time").fill(time);
       await exp.getByRole("button", { name: "單格預覽" }).click();
       await exp.waitForSelector('button[aria-busy="true"]', { timeout: 5000 }).catch(() => {});
-      await exp.waitForFunction(() => document.querySelector("img[data-export-preview]") && !document.querySelector('button[aria-busy="true"]'), null, { timeout: 120000 });
+      // round 20: the paced preview no longer freezes the page, so the live console open in this browser
+      // keeps rendering and shares SwiftShader with it: a frame takes longer here than alone (~25 s)
+      await exp.waitForFunction(() => document.querySelector("img[data-export-preview]") && !document.querySelector('button[aria-busy="true"]'), null, { timeout: 400000 });
       await exp.waitForTimeout(500);
       return exp.evaluate(async () => {
         const img = document.querySelector("img[data-export-preview]");

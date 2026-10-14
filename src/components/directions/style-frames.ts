@@ -84,7 +84,7 @@ async function render(project: Project, direction: DesignDirection): Promise<Sty
     const ctx = canvas.getContext("2d")!;
     const frames: StyleFrame[] = [];
     for (const m of moments) {
-      await stage.renderFrame(m.t, FPS, { scene: true, background: false, lyrics: true, matte: false });
+      await stage.renderFrame(m.t, FPS, { scene: true, background: false, lyrics: true, matte: false }, { signal: new AbortController().signal });
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);
       stage.drawFull(ctx);

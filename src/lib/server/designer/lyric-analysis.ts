@@ -488,6 +488,24 @@ function gramsOf(line: string, wholeLines: ReadonlySet<string>): Gram[] {
   return out;
 }
 
+/** 「一句」「一場」: a phrase ending on a count (「等一句」) is cut before its noun. */
+const COUNT_END = /一[句個场場片次字首條段道顆張天夜步]$/u;
+
+/**
+ * Round 20: a phrase worth quoting as the crowd's — at least 3 CJK characters or 2 Latin words that
+ * are not filler (oh / yeah / la / hey: a chant is a chant, not a phrase), never cut on a count.
+ */
+export function substantialPhrase(g: { text: string; cjk: boolean; chant: boolean }): boolean {
+  if (g.chant) return false;
+  if (g.cjk) {
+    const han = Array.from(g.text).filter((ch) => /\p{Script=Han}/u.test(ch) && !CHANT_SET.has(ch));
+    return han.length >= 3 && !COUNT_END.test(g.text);
+  }
+  const words = (g.text.match(LATIN_WORD) ?? []).filter((w) => !CHANT_SET.has(w.toLowerCase()));
+  LATIN_WORD.lastIndex = 0;
+  return words.length >= 2;
+}
+
 const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function containsGram(line: string, gram: Gram): boolean {
@@ -543,6 +561,7 @@ export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string
   const picked: typeof ranked = [];
   for (const c of ranked) {
     if (picked.length >= max) break;
+    if (!substantialPhrase(c.gram)) continue;
     const t = c.gram.text.toLowerCase();
     if (picked.some((p) => p.gram.text.toLowerCase().includes(t) || t.includes(p.gram.text.toLowerCase()))) continue;
     picked.push(c);

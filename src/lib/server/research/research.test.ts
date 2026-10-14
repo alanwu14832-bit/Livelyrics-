@@ -229,7 +229,9 @@ describe("lookups with a fake network", () => {
     };
     const failed = await lookupPublicInfo({ title: "大風吹", artist: "草東沒有派對" }, { fetch: down, musicbrainzGate: new RateGate(0), env: {} });
     expect(failed.status).toEqual({ musicbrainz: "failed", wikipedia: "failed" });
-    expect(failed.notes.join()).toContain("ECONNREFUSED");
+    // round 20 (m3): plain Chinese, never the raw socket error
+    expect(failed.notes.join()).not.toContain("ECONNREFUSED");
+    expect(failed.notes.join()).toContain("拒絕連線");
     expect(isFreshPublicInfo(failed, { title: "大風吹", artist: "草東沒有派對" })).toBe(false);
 
     const hang: FetchLike = (_input, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));

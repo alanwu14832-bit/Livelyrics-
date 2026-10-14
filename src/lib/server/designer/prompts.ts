@@ -29,6 +29,7 @@ import { moodboardBlock } from "./moodboard";
 import { collectedBlock } from "./collected";
 import { energyCurve, readingUnits, type SongStructure } from "./structure";
 import type { DesignerInput, DesignRequest } from "./types";
+import { asksNewDirection } from "./keep-world";
 
 export const RESEARCH_HEADINGS = ["樂團視覺識別", "歌曲意象與情緒", "現場表演觀察", "設計方向建議", "參考來源"] as const;
 
@@ -462,7 +463,15 @@ export function buildDesignPrompt(req: DesignRequest, st: SongStructure): string
   const arc = arcBlock(req.arc);
   if (arc) parts.push("", "# 整場弧線中的位置", "這首歌是一整場演出的一部分，依它在弧線中的位置調整強度與配色重心：", arc);
   const instruction = req.instruction?.trim();
-  if (req.previous && instruction) {
+  if (req.previous && instruction && asksNewDirection(instruction)) {
+    // round 20 (m9): the operator asked for another world in words
+    parts.push(
+      "",
+      "# 換一個新方向",
+      `操作員的指示：「${clip(instruction, 600)}」`,
+      `操作員要一個新的世界觀：不要沿用目前的主視覺「${clip(req.previous.keyVisual.title, 40)}」、它的配色與母題；換一個標題、配色、主要場景與字體語言，仍然根據研究與歌詞。在 designerNotes 開頭用一句話說明新方向和原本的差別。`,
+    );
+  } else if (req.previous && instruction) {
     parts.push(
       "",
       "# 重新設計",

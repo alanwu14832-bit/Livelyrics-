@@ -76,6 +76,11 @@ export interface DesignRequest extends DesignerInput {
   previous?: DesignPlan | null;
   /** the song's place in a show's arc (energy, palette emphasis, role) */
   arc?: SongArcDirective | null;
+  /**
+   * round 20 (m9): 「重新研究並設計」 without an instruction — the new plan keeps `previous`'s world
+   * (key visual, 字體語言, 專屬畫面); only the sections, lines, cues and notes follow the new research
+   */
+  keepWorld?: boolean;
 }
 
 /** Callbacks that never throw into the designer. */
