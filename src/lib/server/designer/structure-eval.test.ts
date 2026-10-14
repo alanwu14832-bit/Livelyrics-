@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { alignTranscript, applyAnchors, type AsrWord } from "@/lib/lyrics/asr-align";
 import { REPO, analyse, analysisCodeKey } from "@/lib/lyrics/eval-io";
 import { distributeLines, normalizeLyrics } from "@/lib/lyrics/lrc";
 import { evalSplit, lyricParagraphs, parseLineAnnotations, type AnnotatedLine } from "@/lib/lyrics/timing-eval";
@@ -27,6 +28,8 @@ const DIR = process.env.LIVELYRICS_TIMING_EVAL_DIR ?? "";
 const CACHE = process.env.LIVELYRICS_TIMING_EVAL_CACHE ?? path.join(REPO, "scratch/round14/wav");
 const OUT = process.env.LIVELYRICS_STRUCTURE_EVAL_OUT ?? path.join(REPO, "scratch/round19/structure-eval.md");
 const LABEL = process.env.LIVELYRICS_STRUCTURE_EVAL_LABEL ?? "run";
+/** optional: a folder of round-15 Whisper transcripts (scripts/timing-eval/transcribe.mjs) adds the 「AI 自動對時」 case */
+const ASR = process.env.LIVELYRICS_STRUCTURE_EVAL_ASR ?? "";
 const ENABLED = !!DIR && fs.existsSync(path.join(DIR, "annotations", "lines")) && fs.existsSync(CACHE);
 
 interface Paragraph {
@@ -133,7 +136,8 @@ describe.skipIf(!ENABLED)("song structure evaluation (JamendoLyrics, local only)
       .sort();
     expect(stems.length).toBeGreaterThan(0);
     const key = analysisCodeKey();
-    const rows: Array<{ stem: string; split: string; estimated: StructScore; timed: StructScore }> = [];
+    type Mode = "estimated" | "ai" | "timed";
+    const rows: Array<{ stem: string; split: string } & Partial<Record<Mode, StructScore>>> = [];
     const maps: string[] = [];
     for (const stem of stems) {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -150,20 +154,36 @@ describe.skipIf(!ENABLED)("song structure evaluation (JamendoLyrics, local only)
       const run = (lyrics: Lyrics, a: AudioAnalysis) => analyzeStructure({ meta, lyrics, analysis: a });
       const stE = run(estimated, analysis);
       const stT = run(timed, analysis);
-      rows.push({ stem, split: evalSplit(stem), estimated: score(stE, ref), timed: score(stT, ref) });
+      const row: (typeof rows)[number] = { stem, split: evalSplit(stem), estimated: score(stE, ref), timed: score(stT, ref) };
+      const trFile = ASR ? path.join(ASR, `${stem}.json`) : "";
+      if (trFile && fs.existsSync(trFile)) {
+        // 「AI 自動對時」: the recognised words → anchors (aligned lines), the rest over the 人聲 curve
+        const tr = JSON.parse(fs.readFileSync(trFile, "utf8")) as { words: AsrWord[] };
+        const vocal = analysis.vocal?.length ? { curve: analysis.vocal, rate: analysis.envelopeRate } : null;
+        const r = alignTranscript({ lines: texts, words: tr.words, han: null, vocal, fixed: texts.map(() => null) });
+        const ai = normalizeLyrics({ ...untimed, lines: applyAnchors(untimed.lines, r.anchors, analysis, duration).lines });
+        row.ai = score(run(ai, analysis), ref);
+      }
+      rows.push(row);
       if (stem.includes("Keep_On")) {
         maps.push(`### ${stem} (${LABEL})\n\nreference: intro ends ${fmtTime(ref.introEnd)}; paragraphs ${ref.paragraphs.map((p) => `${p.chorus ? "C" : "v"} ${fmtTime(p.start)}–${fmtTime(p.end)}`).join(", ")}\n\nestimated timing:\n\n\`\`\`\n${sectionMap(stE)}\n\`\`\`\n\ntimed:\n\n\`\`\`\n${sectionMap(stT)}\n\`\`\`\n`);
       }
     }
     const lines: string[] = [`## ${LABEL}`, ""];
-    for (const mode of ["estimated", "timed"] as const) {
-      lines.push(`### lyrics ${mode === "estimated" ? "estimated (as uploaded, 人聲 curve)" : "timed (annotated starts, as after AI 自動對時 / 確認全部時間)"}`, "", HEADER);
+    const MODE_LABEL: Record<Mode, string> = {
+      estimated: "estimated (as uploaded, 人聲 curve)",
+      ai: "「AI 自動對時」 (Whisper small anchors + 人聲 curve)",
+      timed: "timed (annotated starts, as after 確認全部時間)",
+    };
+    for (const mode of ["estimated", "ai", "timed"] as const) {
+      if (!rows.some((r) => r[mode])) continue;
+      lines.push(`### lyrics ${MODE_LABEL[mode]}`, "", HEADER);
       for (const [name, set] of [
         ["dev", rows.filter((r) => r.split === "dev")],
         ["held-out", rows.filter((r) => r.split === "held-out")],
         ["all", rows],
       ] as const)
-        lines.push(summaryRow(name, set.map((r) => r[mode])));
+        lines.push(summaryRow(name, set.flatMap((r) => (r[mode] ? [r[mode]] : []))));
       lines.push("");
     }
     lines.push(...maps);
