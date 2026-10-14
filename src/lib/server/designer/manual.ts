@@ -24,6 +24,7 @@ import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS, TRANSITIONS } 
 import { collectedLabel } from "./collected";
 import { DirectionDraftSchema, DIRECTIONS_SYSTEM } from "./directions";
 import { analyzeFindings, type Findings } from "./findings";
+import { quotableWords } from "./lyric-analysis";
 import { freeBrief } from "./free-research";
 import { designPlanJsonSchema, jsonOutputFormat } from "./output-schema";
 import {
@@ -213,7 +214,7 @@ export function findingsBlock(req: DesignRequest, f: Findings, st: SongStructure
   if (f.info?.wikipedia?.artist) rows.push(`- 維基百科：「${clip(f.info.wikipedia.artist.extract, 60)}」 ${f.info.wikipedia.artist.url}`);
   if (f.genre) rows.push(`- 曲風的視覺語法：${f.genre.label}——${f.genre.palette.note}`);
   rows.push(`- 音訊：${f.audio.label}（${f.audio.bpm ? `約 ${f.audio.bpm} BPM，` : ""}能量${f.audio.shapeLabel}）`);
-  if (f.imagery.length) rows.push(`- 歌詞意象：${f.imagery.slice(0, 4).map((h) => `${h.family.name}（${h.words.slice(0, 2).join("、")}）`).join("、")}`);
+  if (f.imagery.length) rows.push(`- 歌詞意象：${f.imagery.slice(0, 4).map((h) => `${h.family.name}（${quotableWords(h.words, "象徵化").slice(0, 2).join("、")}）`).join("、")}`);
   if (f.lyrics.lineCount) rows.push(`- 情緒：${f.lyrics.emotion.label}；人稱：${f.lyrics.pov.label}`);
   if (f.hints.singalong.length) rows.push(`- 大合唱重點：${f.hints.singalong.map((p) => `「${p.text}」`).join("、")}`);
   rows.push(`- 世界觀草稿：${f.hints.world}`);

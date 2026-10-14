@@ -8,8 +8,9 @@
 //
 // Effects: noise wobble (ink), glitch slices, RGB split, ink bleed (blur + noisy threshold), dry
 // brush 飛白 streaks, erosion by the scene, grain, the legibility halo (darkens the scene under the
-// text), glow (the halo turned to light), knockout (the frame filled, the scene seen only through
-// the window glyphs, lifted so the letters read), overprint (a misregistered accent plate, screen).
+// text), glow (the halo turned to light), knockout (a plate around the word, the scene seen through
+// the window glyphs, lifted so the letters read; round 17: the fill is a plate around the window
+// word, never the whole frame), overprint (a misregistered accent plate, screen).
 // uLayer = 1 renders the type alone over transparent (premultiplied) for the export's lyric layer.
 // 可讀性保證 (phase 7): for every relation the picture under a dilated mask of the readable glyphs
 // is attenuated until the lyric colour meets the contrast target (legibility.ts).
@@ -233,6 +234,18 @@ void main() {
   halo *= a;
   float win = uSeal > 0.5 ? 0.0 : clamp(uWindow, 0.0, 1.0) * a;
   float windowMask = uSeal > 0.5 ? 0.0 : spot;
+  // round 17: the fill is a plate around the window word only (its padded display box, feathered),
+  // never the whole frame — the picture keeps the rest of the stage (a 鏤空窗 chorus entry used to
+  // put the demo on a near-black wall)
+  float plateK = 0.0;
+  if (win > 0.001 && uDisplayBox.z > uDisplayBox.x) {
+    vec2 fe = vec2(0.03, 0.03 * uRes.x / max(uRes.y, 1.0));
+    vec2 lo = uDisplayBox.xy - fe;
+    vec2 hi = uDisplayBox.zw + fe;
+    vec2 inLo = smoothstep(lo - fe, lo, uv);
+    vec2 inHi = 1.0 - smoothstep(hi, hi + fe, uv);
+    plateK = inLo.x * inLo.y * inHi.x * inHi.y;
+  }
   float seal = uSeal > 0.5 ? spot : 0.0;
   float grain = (hash12(fc + fract(uTime * 7.3) * 91.0) - 0.5) * uGrain * 0.22;
 
@@ -240,7 +253,7 @@ void main() {
     // the type alone, premultiplied, for the export's lyric layer
     vec3 c = vec3(0.0);
     float al = 0.0;
-    float fillA = win * (1.0 - windowMask);
+    float fillA = win * plateK * (1.0 - windowMask);
     c = uFill * fillA;
     al = fillA;
     al = max(al, halo * uHalo * 0.6);
@@ -289,15 +302,19 @@ void main() {
   if (cover > 0.001) col = mix(col, legibleBgT(col, inkC, uSoften, uGain, target), cover);
   // glow: the halo turned into light (bloom entrances, 光, the transition's flare; a lit relation glows a little)
   col += inkC * halo * (uGlow * 0.55 + tGlow * 0.5 + (uRelation > 2.5 ? 0.16 : 0.0));
-  // knockout: the frame fills with the background; the window letters are the display word, so
-  // they are set in the full ink colour (pushed until it meets the display target against the
-  // fill) — the picture only lights their texture a little, never dims them (B3)
+  // 鏤空窗: a plate of the background tone around the window word (its box only); the letters are
+  // windows onto the picture — its hue and texture show through them, lifted toward the full ink
+  // colour (pushed until it meets the display target against the plate) so they always read (B3)
   if (win > 0.001) {
     vec3 fill = mix(scene * 0.16, uFill, 0.9);
     vec3 inkW = displayInk(uInk, fill);
-    vec3 inside = clamp(inkW + (scene - vec3(luma(scene))) * 0.18 + vec3(0.08 * luma(scene)) * step(0.5, luma(inkW)), 0.0, 1.0);
-    inside = mix(inkW, inside, 0.5);
-    col = mix(col, fill, win * (1.0 - windowMask));
+    float lightW = step(0.5, luma(inkW));
+    vec3 lifted = clamp(scene * 1.35 + vec3(0.05), 0.0, 1.0);
+    vec3 through = mix(inkW, lifted, 0.5);
+    // never much darker (light ink) / lighter (dark ink) than the ink itself
+    vec3 inside = mix(min(through, inkW + (1.0 - inkW) * 0.22), max(through, inkW * 0.78), lightW);
+    inside = clamp(inside, 0.0, 1.0);
+    col = mix(col, fill, win * plateK * (1.0 - windowMask));
     col = mix(col, inside, windowMask);
   }
   // overprint: a misregistered second plate screened over the picture — the accent plate, and a

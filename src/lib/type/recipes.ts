@@ -12,7 +12,7 @@ import { colRight, colX, type Frame } from "./frame";
 import type { Box, GlyphBox, LineContext, Measure, Piece, PieceRole, PlateId, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { createRng, hashUnit, type Rng } from "./rng";
 import { columnEm, rowEm, setColumn, setRow, type RunStyle } from "./set";
-import { breakRows, keySpan, splitLongLine, trimIndices, type LineText } from "./text";
+import { breakRows, keySpan, leavesFragment, splitLongLine, splitsWord, trimIndices, type LineText } from "./text";
 
 export interface Zone {
   /** where the composition leans: the sequencer alternates these between consecutive lines */
@@ -634,7 +634,9 @@ function scatter(r: RecipeCtx): Piece[] | null {
     for (let k = 1; k < units.length; k++) {
       const prev = units[k - 1];
       const boundary = lt.units.slice(prev + 1, units[k]).some((u) => u.kind === "space" || u.kind === "punct");
-      const d = Math.abs(k - units.length / 2) - (boundary ? 2 : 0);
+      // round 17: never inside a word (全｜部), nor leaving one character of a phrase behind
+      const torn = boundary ? 0 : splitsWord(lt.units, prev) ? 100 : leavesFragment(lt.units, prev) ? 4 : 0;
+      const d = Math.abs(k - units.length / 2) - (boundary ? 2 : 0) + torn;
       if (d < bestD) {
         bestD = d;
         best = k;
@@ -694,7 +696,9 @@ function poster(r: RecipeCtx): Piece[] | null {
   const all = allIdx(lt);
   const totalEm = width(all);
   const perRow = f.aspect < 1 ? 4 : lerp(7, 4.5, r.c);
-  const maxRows = clamp(Math.round(totalEm / perRow + 0.4), 1, 4);
+  // round 17: a chant sung in two or three breaths (「Lay me down, lay me down」) gets a row per breath
+  const breaths = r.hint.chant ? lt.units.filter((u) => u.kind === "punct" && /[,，、;；!！?？]/.test(u.text)).length + 1 : 0;
+  const maxRows = breaths >= 2 && breaths <= 3 ? breaths : clamp(Math.round(totalEm / perRow + 0.4), 1, 4);
   const rows = breakRows(lt.units, 0, lt.units.length, { max: Math.max(2, totalEm / Math.max(1, maxRows) + 0.8), maxRows, width, wordStarts: lt.wordStarts }).filter((row) => row.length);
   if (!rows.length) return null;
   let blockW = rd.w * (f.aspect < 1 ? 0.9 : lerp(0.46, 0.7, r.d)) * (0.9 + 0.2 * r.e);

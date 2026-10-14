@@ -61,6 +61,8 @@ function watch(page, label) {
   page.on("console", (m) => {
     // the broken paste's 422 is also logged by the browser as a failed resource
     if (/status of 422/.test(m.text())) return;
+    // SwiftShader's own performance note (GPU stall due to ReadPixels) is the test GPU's, not the app's (as in e2e.cjs)
+    if (/GL Driver Message/.test(m.text())) return;
     if (m.type() === "error" || m.type() === "warning") problems.push(`[${label}] console.${m.type()}: ${m.text()}`);
   });
   page.on("pageerror", (e) => problems.push(`[${label}] pageerror: ${e.message}`));

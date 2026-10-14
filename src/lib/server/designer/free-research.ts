@@ -15,6 +15,8 @@ import { activeBible } from "./bible-style";
 import { LYRIC_POLICY_INFO } from "@/lib/band";
 import { SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { analyzeFindings, type Findings } from "./findings";
+import { quotableWords } from "./lyric-analysis";
+import { hasDarkWord } from "@/lib/type/sensitive";
 import { RESEARCH_HEADINGS } from "./prompts";
 import { chooseVoice } from "./type-design";
 import { VOICES } from "@/lib/type/vocab";
@@ -190,12 +192,12 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
       song.push(
         `- 歌詞意象：${f.imagery
           .slice(0, 4)
-          .map((h) => `**${h.family.name}**（${h.words.slice(0, 2).join("、")}，${h.count} 次）→ ${h.family.colors}；${h.family.scenes.slice(0, 2).map((x) => SCENES[x].label).join("、")}`)
+          .map((h) => `**${h.family.name}**（${quotableWords(h.words, "象徵化").slice(0, 2).join("、")}，${h.count} 次）→ ${h.family.colors}；${h.family.scenes.slice(0, 2).map((x) => SCENES[x].label).join("、")}`)
           .join("；")}。`,
       );
     } else song.push("- 歌詞中沒有抓到明顯的具象意象：畫面以音樂能量與色彩為主。");
     const e = f.lyrics.emotion;
-    const words = [...e.positive.slice(0, 3), ...e.negative.slice(0, 3)];
+    const words = [...e.positive.slice(0, 3), ...e.negative.slice(0, 3)].filter((w) => !hasDarkWord(w));
     song.push(`- 情緒：**${e.label}**（正向程度 ${e.valence.toFixed(2)}、激昂程度 ${e.arousal.toFixed(2)}${words.length ? `；情緒詞：${words.join("、")}` : ""}${e.confidence === "low" ? "；情緒詞很少，僅供參考" : ""}）${e.hook ? `，副歌的 hook ${e.hook.arousal >= 0.6 ? "特別激昂" : e.hook.valence > e.valence + 0.2 ? "比主歌更明亮" : "延續整首的情緒"}` : ""}。`);
     song.push(`- 人稱：${f.lyrics.pov.label}——${f.lyrics.pov.note}`);
   } else {
