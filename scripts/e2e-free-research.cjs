@@ -6,8 +6,8 @@
 //   LIVELYRICS_MUSICBRAINZ_URL=http://127.0.0.1:3199/musicbrainz/ws/2 \
 //   LIVELYRICS_WIKIPEDIA_URL='http://127.0.0.1:3199/wikipedia/{lang}' \
 //   LIVELYRICS_COVERART_URL=http://127.0.0.1:3199/coverart \
-//   LIVELYRICS_LRCLIB_URL=http://127.0.0.1:3199/lrclib/api npx next start -p 3100
-//   (the LRCLIB stub answers 「no lyrics」; the other e2e scripts then get a refused connection at once —
+//   LIVELYRICS_LRCLIB_URL=http://127.0.0.1:3429/lrclib/api npx next start -p 3100   (scripts/lrclib-stub.cjs)
+//   (scripts/lrclib-stub.cjs, or this stub at /lrclib/api, answers 「no lyrics」 at once —
 //   either way the home page's automatic lyric search never reaches the internet)
 //   BASE=http://localhost:3100 SHOTS=/tmp/shots node scripts/e2e-free-research.cjs
 //

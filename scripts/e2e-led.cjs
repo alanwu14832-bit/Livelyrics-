@@ -475,7 +475,9 @@ async function measure(popup, seconds) {
       await exp.locator("#preview-time").fill(time);
       await exp.getByRole("button", { name: "單格預覽" }).click();
       await exp.waitForSelector('button[aria-busy="true"]', { timeout: 5000 }).catch(() => {});
-      await exp.waitForFunction(() => document.querySelector("img[data-export-preview]") && !document.querySelector('button[aria-busy="true"]'), null, { timeout: 120000 });
+      // round 20: the paced preview no longer freezes the page, so the live console open in this browser
+      // keeps rendering and shares SwiftShader with it: a frame takes longer here than alone (~25 s)
+      await exp.waitForFunction(() => document.querySelector("img[data-export-preview]") && !document.querySelector('button[aria-busy="true"]'), null, { timeout: 400000 });
       await exp.waitForTimeout(500);
       return exp.evaluate(async () => {
         const img = document.querySelector("img[data-export-preview]");
