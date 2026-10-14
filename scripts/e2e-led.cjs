@@ -455,6 +455,9 @@ async function measure(popup, seconds) {
     check("the pre-show check lists every changed section", rows >= 240, `${rows} rows`);
 
     // --- export page: safe by default, off only after a confirm
+    // round 20: the console and the projection window are done; parked, they no longer share the one
+    // software GPU with the export (the paced preview leaves them running, so they would slow it down)
+    for (const p of context.pages()) await p.goto("about:blank").catch(() => {});
     const exp = await context.newPage();
     watch(exp, "export");
     await exp.goto(`${BASE}/p/${song.id}/export`, { waitUntil: "networkidle" });
