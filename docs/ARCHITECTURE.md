@@ -1792,6 +1792,42 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   「AI 自動對時」: 7.4 → 0.6 s, 65 → 76 %, 89 → 94 %; estimated (upload) lyrics: first section a wrong chorus
   20 → 0 %, precision 58 → 66 %. Eval I/O shared with the timing eval lives in `src/lib/lyrics/eval-io.ts`.
 
+### Round 20: sound like a designer, feel like a product
+
+- **Prose from the song** (offline designer): `offline.ts sectionRationale` writes each section's reason from
+  what it does (its lines, the first one quoted — never a chant-only or dark line —, the energy move from the
+  previous section, the phrase the crowd sings in it, whether a chorus repeats or climbs past the previous
+  one, a last chorus that is really the top or sung softer, how the outro ends); `arcStory` writes the 敘事弧線
+  from the plan (the chorus scenes and whether they really get brighter / faster, the true ending: the symbol,
+  the opening scene, fading after the last line, or cut on a chorus). `findings.ts songMood` reconciles the
+  lyric emotion with the audio mood (agreement → the words; disagreement → the audio: the energy decides);
+  `Findings.mood` feeds `conceptKeywords` (the 「情緒」 row: the mood and the sound's mood words, never images
+  or the genre), the concept's adjective, `chooseSkeleton` (a ballad on a loud track is a 抒情歌 whose chorus
+  lifts, never 「一首安靜的歌」) and the findings notes (「情緒：爆發釋放（歌詞讀起來平靜內斂，但音訊爆發釋放，
+  以能量為準）」). The palette sentence calls a background that is the primary's darkest shade 「近乎全黑的底」.
+  The genre's live cue lands one bar before the first chorus (`「副歌一前：…的現場」`). `singalongPhrases` keeps
+  only `substantialPhrase`s (≥ 3 CJK characters or ≥ 2 Latin words that are not filler, no chant, never cut on a
+  count such as 「等一句」). `designer/prose.test.ts` fails on any sentence two of the audit songs share.
+- **Paced offline renders** (M7): `OfflineStage.renderFrame(…, { signal })` (the 單格預覽, the key still, the
+  style frames) runs under a `Pacer`: the signal is checked before every pre-roll frame, the limiter's grid
+  comes back through the fenced PBO read and `StageRenderer.settle()` waits for the GPU off the main thread
+  (a fence polled every 4 ms), the type layer is read after a fence (`renderTypeLayerAsync`) and converted in
+  row bands, and the page gets the main thread back at least every `PACE_MS` (40 ms). `renderPreview` encodes
+  its PNGs with `toBlob` (still data URLs: deterministic). `ensureReady` yields between programs. SwiftShader,
+  1080p: long tasks 50 → 13, the longest 3.2 s → 0.4 s, blocked 73 s → 1.4 s, 「取消」 lands in 0.1 s (was 12.7 s).
+- **Minors**: network failures in plain Chinese (`src/lib/server/net-error.ts`: research, safe fetch, LRCLIB,
+  the process log); `LONG_LINE_LATIN` 56 (the mixed rule scales with it); the AI's estimate is its own
+  「AI 估」 tag; `keyMomentOf` waits `KEY_SETTLE_SECONDS` (0.8 s) after a line starts; the projection window
+  shows a quiet boot screen (`data-boot-screen`) while it has nothing to draw, within the waiting-hint
+  window; `detectAsrDevice` asks for a WebGPU adapter once per page and never again once there was none.
+- **Keep the world** (`designer/keep-world.ts`): 「重新研究並設計」 without an instruction (`DesignRequest.keepWorld`,
+  set by the pipeline when the run re-researches a song that has a plan) keeps the key visual, the 字體語言 and
+  the 專屬畫面 (the scene step skips a written program) and maps the fresh sections' colours onto the kept
+  palette; 「換一個新方向」 (`asksNewDirection`) asks for a new world (offline: the current look counts as the
+  library's latest twice, its title is taken; Claude: told not to reuse it). The 重新設計 box says so.
+- **LRCLIB in tests**: `LIVELYRICS_LRCLIB_URL` (`lrclibBase()`, read per request) points the client at the e2e
+  stub (`/lrclib/api/search` → `[]`, `/get` → 404), so the home page's automatic search never reaches the internet.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
