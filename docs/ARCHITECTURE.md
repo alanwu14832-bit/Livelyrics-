@@ -1826,7 +1826,8 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   palette; 「換一個新方向」 (`asksNewDirection`) asks for a new world (offline: the current look counts as the
   library's latest twice, its title is taken; Claude: told not to reuse it). The 重新設計 box says so.
 - **LRCLIB in tests**: `LIVELYRICS_LRCLIB_URL` (`lrclibBase()`, read per request) points the client at the e2e
-  stub (`/lrclib/api/search` → `[]`, `/get` → 404), so the home page's automatic search never reaches the internet.
+  stub (`/lrclib/api/search` → `[]`, `/get` → 404; `scripts/lrclib-stub.cjs` standalone for every e2e script,
+  the same paths in `e2e-free-research.cjs`'s stub), so the home page's automatic search never reaches the internet.
 
 ### Cloud mode (Vercel)
 
