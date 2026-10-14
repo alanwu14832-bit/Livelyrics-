@@ -1754,6 +1754,11 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   road to the horizon, a meander, a lamp, a flame); `orbit` is one planet and one ring (no atom). The
   built-in 「主視覺符號」 scene is a candidate only when `symbolOnWall` (the bible's motifs, or an image
   sung ≥ 4 times) and never when the band has a logo asset.
+- **Glitch type keeps the legibility guarantee** (`stage/scenes/type.ts`; variety now gives the glitch
+  voice to songs that never wore it): `uEat` never eats the readable letters (only ornaments outside the
+  readable area and the accent layers), glitch slices hold still in the readable area over a bright picture
+  (a sliced band broke its neighbours' plate), and the contrast target rises by up to 35 % under an RGB
+  split / glitch.
 
 ### Cloud mode (Vercel)
 
