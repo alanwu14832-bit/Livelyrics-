@@ -74,8 +74,9 @@ export function chooseSkeleton(c: ConceptContext): SkeletonId {
   if (quiet || (CALM_EMOTIONS.has(emotion) && (!g || g.motion === "soft" || g.id === "pop" || g.id === "rnb"))) return "ballad";
   if ((g && STORY_GENRES.has(g.id)) || f.lyrics.pov.voice === "they" || (f.lyrics.pov.voice === "i-you" && f.lyrics.lineCount >= 10)) return "story";
   if ((g && GROOVE_GENRES.has(g.id)) || f.audio.quadrant === "warm-groove" || c.imagery[0]?.imagery.family.id === "dance") return "groove";
-  if (chorusCount >= 2 && BRIGHT_EMOTIONS.has(emotion) && f.audio.contrast >= 0.4) return "two-peaks";
-  if (f.audio.quadrant === "release" || f.audio.shape === "rising") return "slow-build";
+  // round 19: two climaxes or a build need a level that actually rises
+  if (chorusCount >= 2 && BRIGHT_EMOTIONS.has(emotion) && f.audio.contrast >= 0.4 && !st.flat) return "two-peaks";
+  if ((f.audio.quadrant === "release" || f.audio.shape === "rising") && !st.flat) return "slow-build";
   return "steady";
 }
 
@@ -166,7 +167,7 @@ function opening(c: ConceptContext, skeleton: SkeletonId): string {
     case "fragment":
       return `這段音檔只有 ${Math.round(c.structure.duration)} 秒，分析不可靠：${T}只是一個安靜、單一的畫面（${a ? `${quote(a)}的` : ""}${vocab.motifs[0]}），等完整的音檔上傳後再重新設計。`;
     case "instrumental":
-      return `沒有歌詞的歌，畫面就是主唱。${T}把${f.genre ? `${f.genre.label}的${f.genre.motifs[0]}` : vocab.motifs[0]}做成一道會呼吸的光：安靜的段落只剩一條線${peak ? `，${peak} 的最高點才撐滿整面牆` : "，最高點才撐滿整面牆"}。`;
+      return `沒有歌詞的歌，畫面就是主唱。${T}把${f.genre ? `${f.genre.label}的${f.genre.motifs[0]}` : vocab.motifs[0]}做成一道會呼吸的光：安靜的段落只剩一條線${c.structure.flat ? "，整首歌的音量都差不多，光就一直維持同樣的呼吸，不硬造高潮" : peak ? `，${peak} 的最高點才撐滿整面牆` : "，最高點才撐滿整面牆"}。`;
     case "chant": {
       const phrase = singalong(c);
       return `這是一首要全場一起喊的歌。${T}不講故事，只有${phrase ? `一句話：${quote(phrase)}` : "口號"}——${a ? `${quote(a)}是它的質地，` : ""}字比畫面重要，每一次口號都用同一個構圖讓全場認得。`;

@@ -650,11 +650,12 @@ function arcDescription(st: SongStructure): string {
     const prev = st.sections[i - 1];
     const t = formatTimeShort(s.start);
     if (i === 0) parts.push(`${t} ${SECTION_KIND_LABELS[s.kind]}（能量 ${s.energy.toFixed(2)}）`);
-    else if (s === peak) parts.push(`${t} 最高點（${s.energy.toFixed(2)}）`);
+    else if (s === peak && !st.flat) parts.push(`${t} 最高點（${s.energy.toFixed(2)}）`);
     else if (prev && s.energy - prev.energy >= 0.25) parts.push(`${t} 衝上${SECTION_KIND_LABELS[s.kind]}（${s.energy.toFixed(2)}）`);
     else if (prev && prev.energy - s.energy >= 0.25) parts.push(`${t} 回落（${s.energy.toFixed(2)}）`);
   });
   const end = st.sections[st.sections.length - 1];
+  if (st.flat) parts.push("音量一路差不多，沒有真正的高潮");
   parts.push(`${formatTimeShort(end.end)} 結束`);
   return parts.join(" → ");
 }

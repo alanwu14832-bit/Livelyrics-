@@ -3,6 +3,7 @@
 // section boundaries (audio novelty sections, refined by lyric structure; lyric gaps
 // or an even split without analysis) and a section-kind guess per section.
 
+import { estimatedFlags } from "@/lib/lyrics/lrc";
 import { lineAnchorTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, Lyrics, SectionKind, SongMeta } from "@/lib/types";
 
@@ -52,6 +53,12 @@ export interface SongStructure {
   meanEnergy: number;
   /** where the boundaries came from */
   source: "audio" | "lyrics" | "even";
+  /**
+   * Round 19: the level never rises — the loudest section is barely above the song's typical
+   * section, or never loud in absolute terms. No section is a chorus or a climax by energy alone,
+   * and the designer writes no 最高點 / 爆點 wording.
+   */
+  flat: boolean;
 }
 
 const DEFAULT_DURATION = 180;
@@ -59,6 +66,21 @@ const MIN_SECTION = 4;
 const MIN_SPLIT_PART = 6;
 const LYRIC_GAP = 5;
 const MAX_SIMILARITY_LINES = 600;
+/** Round 19: a chorus longer than this is two sections (split at a lyric boundary) or not a chorus. */
+export const MAX_CHORUS_SECONDS = 45;
+/** an instrumental opening at least this long before the first sung line is its own intro */
+const INTRO_MIN = 3;
+/** mean 人聲 curve under which a span is not sung (an intro needs it) */
+const VOCAL_QUIET = 0.4;
+/** …or under this share of the curve over the 20 s after the first line */
+const INTRO_VOCAL_RATIO = 0.8;
+/** a song whose loudest section is less than this above its median section never rises */
+export const RISE_MIN = 0.12;
+/**
+ * The absolute energy floor: a section whose waveform peaks (90th percentile, absolute 0..1)
+ * stay under this (≈ −30 dBFS) is never loud, whatever the per-song normalized energy says.
+ */
+export const LOUD_PEAK_FLOOR = 0.03;
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -140,7 +162,7 @@ export function cjkShare(texts: readonly string[]): number {
 }
 
 /** Mean of an analysis envelope over [start, end). */
-export function meanEnvelope(analysis: AudioAnalysis | null, key: "energy" | "brightness" | "bass" | "onset", start: number, end: number): number | null {
+export function meanEnvelope(analysis: AudioAnalysis | null, key: "energy" | "brightness" | "bass" | "onset" | "vocal", start: number, end: number): number | null {
   const arr = analysis?.[key];
   const rate = analysis?.envelopeRate;
   if (!arr || !arr.length || !isFiniteNumber(rate) || rate <= 0) return null;
@@ -356,6 +378,132 @@ function evenSpans(duration: number): Span[] {
   return Array.from({ length: n }, (_, i) => ({ start: i * step, end: (i + 1) * step, energy: null }));
 }
 
+// ---------------------------------------------------------------------------
+// round 19: structure that follows the singing
+// ---------------------------------------------------------------------------
+
+function sortedTimed(lines: LineInfo[]): LineInfo[] {
+  return lines.filter((l) => l.start != null).sort((a, b) => (a.start as number) - (b.start as number));
+}
+
+/**
+ * Timed lyrics: cut a span where the lines switch between repeated runs and unique runs (a
+ * one-line flip inside a run does not count), so a chorus and the verse after it are two sections
+ * even when the audio heard one.
+ */
+function splitByRuns(spans: Span[], lines: LineInfo[]): Span[] {
+  const out: Span[] = [];
+  for (const span of spans) {
+    const inside = sortedTimed(lines).filter((l) => inSpan(l, span));
+    if (inside.length < 4) {
+      out.push(span);
+      continue;
+    }
+    const status = inside.map(isChorusLine);
+    for (let i = 1; i < status.length - 1; i++) if (status[i - 1] === status[i + 1] && status[i] !== status[i - 1]) status[i] = status[i - 1];
+    let from = span.start;
+    for (let i = 1; i < inside.length; i++) {
+      if (status[i] === status[i - 1]) continue;
+      const t = inside[i].start as number;
+      // both sides long enough, and the new run is a run (two lines at least) or the span's last line
+      if (t - from < MIN_SPLIT_PART || span.end - t < MIN_SPLIT_PART) continue;
+      if (i + 1 < inside.length && status[i + 1] !== status[i]) continue;
+      out.push({ start: from, end: t, energy: span.energy });
+      from = t;
+    }
+    out.push({ start: from, end: span.end, energy: span.energy });
+  }
+  return out;
+}
+
+/**
+ * The instrumental opening: when the first sung line starts INTRO_MIN or more into the song and the
+ * 人聲 curve is low before it, the time before the line is its own span (an intro), however the
+ * audio boundaries fell — a song never opens on a chorus before the voice is in.
+ */
+function splitIntro(spans: Span[], lines: LineInfo[], analysis: AudioAnalysis | null): Span[] {
+  const first = sortedTimed(lines)[0];
+  if (!first || spans.length === 0) return spans;
+  let cut = first.start as number;
+  const beats = analysis?.beats ?? [];
+  let best: number | null = null;
+  for (const b of beats) if (b <= cut + 0.1 && b >= cut - 0.6 && (best == null || Math.abs(b - cut) < Math.abs(best - cut))) best = b;
+  if (best != null) cut = best;
+  if (cut < INTRO_MIN) return spans;
+  // the curve reads guitars and pads as a little voice: "low" is quiet in absolute terms or
+  // clearly under the singing that follows
+  const vocal = meanEnvelope(analysis, "vocal", 0, cut);
+  const sung = meanEnvelope(analysis, "vocal", cut, cut + 20);
+  if (vocal != null && vocal >= VOCAL_QUIET && !(sung != null && vocal < INTRO_VOCAL_RATIO * sung)) return spans;
+  const out = spans.map((s) => ({ ...s }));
+  const k = out.findIndex((s) => cut >= s.start && cut < s.end);
+  if (k < 0) return spans;
+  const s = out[k];
+  if (Math.abs(cut - s.start) < 1e-6) return out;
+  if (cut - s.start < MIN_SECTION && k > 0) {
+    // the boundary is just early: move it onto the voice
+    out[k - 1].end = cut;
+    s.start = cut;
+    return out;
+  }
+  if (s.end - cut < MIN_SECTION && k + 1 < out.length) {
+    s.end = cut;
+    out[k + 1].start = cut;
+    return out;
+  }
+  out.splice(k, 1, { start: s.start, end: cut, energy: null }, { start: cut, end: s.end, energy: null });
+  return out;
+}
+
+/**
+ * A sung span longer than MAX_CHORUS_SECONDS is cut at a lyric boundary — the line after the
+ * longest pause, preferring the middle — until every part fits or no line boundary is left.
+ */
+function capLong(spans: Span[], lines: LineInfo[], depth = 0): Span[] {
+  const out: Span[] = [];
+  for (const span of spans) {
+    const len = span.end - span.start;
+    if (len <= MAX_CHORUS_SECONDS || depth > 4) {
+      out.push(span);
+      continue;
+    }
+    const inside = sortedTimed(lines).filter((l) => inSpan(l, span));
+    let cut: number | null = null;
+    let best = -Infinity;
+    for (let i = 1; i < inside.length; i++) {
+      const t = inside[i].start as number;
+      if (t - span.start < MIN_SPLIT_PART || span.end - t < MIN_SPLIT_PART) continue;
+      const gap = t - (inside[i - 1].end ?? t);
+      const middle = 1 - Math.abs((t - span.start) / len - 0.5) * 2;
+      const score = Math.min(4, Math.max(0, gap)) + 2 * middle;
+      if (score > best) {
+        best = score;
+        cut = t;
+      }
+    }
+    if (cut == null) out.push(span);
+    else out.push(...capLong([{ start: span.start, end: cut, energy: span.energy }, { start: cut, end: span.end, energy: span.energy }], lines, depth + 1));
+  }
+  return out;
+}
+
+function quantile(xs: number[], q: number): number {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.floor(q * (s.length - 1))))];
+}
+
+/** 90th percentile of the waveform peaks (absolute 0..1) over [start, end); null without peaks. */
+export function peakLevel(analysis: AudioAnalysis | null, start: number, end: number): number | null {
+  const peaks = analysis?.peaks;
+  const d = analysis?.duration;
+  if (!peaks?.length || !isFiniteNumber(d) || d <= 0) return null;
+  const i0 = clamp(Math.floor((start / d) * peaks.length), 0, peaks.length - 1);
+  const i1 = clamp(Math.ceil((end / d) * peaks.length), i0 + 1, peaks.length);
+  const vals = peaks.slice(i0, i1).filter(isFiniteNumber);
+  return vals.length ? quantile(vals, 0.9) : null;
+}
+
 /** Typical pop form resampled to n sections (used when nothing is timed). */
 function formTemplate(n: number): SectionKind[] {
   if (n <= 3) return (["intro", "chorus", "outro"] as SectionKind[]).slice(0, n);
@@ -411,9 +559,12 @@ export function analyzeStructure(input: StructureInput): SongStructure {
   let source: SongStructure["source"];
   let spans: Span[];
   const audio = input.analysis && input.analysis.sections?.length ? audioSpans(input.analysis, duration) : [];
+  // round 19: which lines have a real (operator / LRC) or 「AI 自動對時」 start, not the 人聲-curve estimate
+  const flags = estimatedFlags(input.lyrics);
   if (audio.length >= 2) {
     source = "audio";
-    spans = mergeShort(splitByRepetition(audio, lines), MIN_SECTION);
+    // round 19: repetition decides verse vs chorus where the lines say so (better on estimated lines too)
+    spans = mergeShort(splitByRuns(mergeShort(splitByRepetition(audio, lines), MIN_SECTION), lines), MIN_SECTION);
   } else if (hasTiming) {
     source = "lyrics";
     spans = lyricSpans(lines, duration);
@@ -422,6 +573,7 @@ export function analyzeStructure(input: StructureInput): SongStructure {
     spans = evenSpans(duration);
   }
   if (!spans.length) spans = [{ start: 0, end: duration, energy: null }];
+  if (hasTiming) spans = splitIntro(capLong(spans, lines), lines, input.analysis);
 
   // energy per span: analysis envelope > section guess > filled later from kind
   for (const s of spans) {
@@ -464,8 +616,20 @@ export function analyzeStructure(input: StructureInput): SongStructure {
     };
   });
 
-  assignKinds(sections, source, meanEnergy);
+  // round 19: the absolute energy floor and the 人聲 curve of each section
+  const loud = sections.map((s) => {
+    const p = peakLevel(input.analysis, s.start, s.end);
+    return p == null || p >= LOUD_PEAK_FLOOR;
+  });
+  const energies = sections.map((s) => s.energy).filter(isFiniteNumber);
+  const rise = energies.length >= 2 ? Math.max(...energies) - quantile(energies, 0.5) : 0;
+  const flat = !!input.analysis?.energy?.length && (rise < RISE_MIN || !loud.some(Boolean));
+  const vocal = sections.map((s) => meanEnvelope(input.analysis, "vocal", s.start, s.end));
+  const firstSung = sortedTimed(lines)[0];
+  const openTimed = !!firstSung && (!flags[firstSung.index] || rawLines[firstSung.index].aligned === true);
+  assignKinds(sections, source, meanEnergy, { flat, loud, vocal, openTimed });
   for (const s of sections) {
+    if (s.kind === "chorus" && s.end - s.start > MAX_CHORUS_SECONDS + 0.5) s.kind = "verse";
     if (!isFiniteNumber(s.energy)) s.energy = KIND_ENERGY[s.kind];
     s.energy = Math.round(clamp(s.energy, 0, 1) * 100) / 100;
     s.start = round3(s.start);
@@ -489,12 +653,31 @@ export function analyzeStructure(input: StructureInput): SongStructure {
     cjk: cjkShare(rawLines.map((l) => l.text)) >= 0.3,
     meanEnergy: sections.reduce((a, s) => a + s.energy, 0) / sections.length,
     source,
+    flat,
   };
 }
 
-function assignKinds(sections: StructSection[], source: SongStructure["source"], meanEnergy: number) {
+interface KindContext {
+  flat: boolean;
+  /** per section: above the absolute energy floor */
+  loud: boolean[];
+  /** per section: mean 人聲 curve, null without one */
+  vocal: (number | null)[];
+  /** the first sung line has a real or 「AI 自動對時」 start (not the 人聲-curve estimate) */
+  openTimed: boolean;
+}
+
+function assignKinds(sections: StructSection[], source: SongStructure["source"], meanEnergy: number, ctx: KindContext) {
   const n = sections.length;
   const anyLyrics = sections.some((s) => s.lineIds.length > 0);
+  /** an intro has no sung line and a low 人聲 curve */
+  const quietVoice = (i: number) => {
+    const v = ctx.vocal[i];
+    const next = ctx.vocal[i + 1];
+    return v == null || v < VOCAL_QUIET || (next != null && v < INTRO_VOCAL_RATIO * next);
+  };
+  /** energy alone may only call a section a chorus / solo when the song rises and this section is loud */
+  const energyPeak = (i: number) => !ctx.flat && ctx.loud[i];
 
   if (source === "even" || !anyLyrics) {
     if (source === "even") {
@@ -507,9 +690,10 @@ function assignKinds(sections: StructSection[], source: SongStructure["source"],
     const hot = sorted[Math.max(0, Math.floor(sorted.length * 0.35) - 1)] ?? 1;
     sections.forEach((s, i) => {
       const e = isFiniteNumber(s.energy) ? s.energy : meanEnergy;
-      if (i === 0 && n > 2 && e <= meanEnergy) s.kind = "intro";
+      if (i === 0 && n > 2 && e <= meanEnergy && quietVoice(i)) s.kind = "intro";
       else if (i === n - 1 && n > 2 && e <= meanEnergy + 0.05) s.kind = "outro";
-      else if (e >= hot && e >= meanEnergy) s.kind = "chorus";
+      // never open on a chorus: nothing timed says the voice is in
+      else if (i > 0 && e >= hot && e >= meanEnergy && energyPeak(i)) s.kind = "chorus";
       else if (e < meanEnergy - 0.15) s.kind = "breakdown";
       else s.kind = "verse";
     });
@@ -523,19 +707,21 @@ function assignKinds(sections: StructSection[], source: SongStructure["source"],
       chorusFound = true;
     }
   });
+  // never open on a chorus on a guess: an estimated first line does not say the voice is in at 0:00
+  if (n > 1 && sections[0].kind === "chorus" && !ctx.openTimed) sections[0].kind = "verse";
   if (!chorusFound) {
     // through-composed song: the most energetic sung sections carry the hook
     const sung = sections.filter((s) => s.lineIds.length && isFiniteNumber(s.energy));
     const top = Math.max(...sung.map((s) => s.energy), -1);
-    for (const s of sung) if (s.energy >= Math.max(meanEnergy + 0.1, top - 0.08)) s.kind = "chorus";
+    for (const s of sung) if (s.energy >= Math.max(meanEnergy + 0.1, top - 0.08) && energyPeak(sections.indexOf(s))) s.kind = "chorus";
   }
 
   sections.forEach((s, i) => {
     if (s.lineIds.length) return;
     const e = isFiniteNumber(s.energy) ? s.energy : meanEnergy;
-    if (i === 0) s.kind = "intro";
+    if (i === 0) s.kind = quietVoice(i) ? "intro" : "verse";
     else if (i === n - 1) s.kind = "outro";
-    else if (e >= Math.max(0.6, meanEnergy + 0.15)) s.kind = "solo";
+    else if (e >= Math.max(0.6, meanEnergy + 0.15) && energyPeak(i)) s.kind = "solo";
     else if (e <= meanEnergy - 0.12) s.kind = "breakdown";
     else s.kind = "interlude";
   });
