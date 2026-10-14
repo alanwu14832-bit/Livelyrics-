@@ -22,7 +22,7 @@ import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hashString } from "./svg";
 import { analyzeFindings, type Findings } from "./findings";
-import { recentFactor, RECENT_USE_FACTORS, RECENT_WINDOW, type RecentLook } from "./recent";
+import { recentFactor, recentUses, RECENT_USE_FACTORS, RECENT_WINDOW, type RecentLook } from "./recent";
 import { bibleBlock, energyCurveBlock, SENSITIVE_LYRICS_RULE, songBlock, trimBrief } from "./prompts";
 import { collectedBlock, leadPalette, leadTemperature } from "./collected";
 import { analyzeStructure } from "./structure";
@@ -281,7 +281,13 @@ export function surfaceWeights(findings: Findings, looks?: readonly RecentLook[]
     const share = Math.min(1, h.weight / max);
     for (const [t, k] of Object.entries(sw) as Array<[TextureId, number]>) w[t] = (w[t] ?? 1) * (1 + (k - 1) * share);
   }
-  if (looks?.length) for (const t of TEXTURE_IDS) w[t] = (w[t] ?? 1) * recentFactor(looks, "texture", t);
+  // (the composer draws the texture at random by weight, so a surface worn twice is left out
+  // altogether while another one is still fresh)
+  if (looks?.length) {
+    const worn = (t: TextureId) => recentUses(looks, "texture", t) >= 2;
+    const fresh = TEXTURE_IDS.some((t) => !worn(t));
+    for (const t of TEXTURE_IDS) w[t] = fresh && worn(t) ? 0 : (w[t] ?? 1) * recentFactor(looks, "texture", t);
+  }
   return w;
 }
 
