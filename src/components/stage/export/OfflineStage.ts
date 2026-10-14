@@ -69,6 +69,31 @@ function yieldToMain(signal: AbortSignal): Promise<void> {
     setTimeout(() => (signal.aborted ? reject(new RenderCanceled()) : resolve()), 0);
   });
 }
+
+/** Round 20 (M7): a cancellable render gives the page the main thread back at least this often. */
+export const PACE_MS = 40;
+
+/**
+ * Paces a cancellable render (the single-frame preview, the key still): `tick()` checks the signal
+ * and yields once PACE_MS of work went by since the last yield; the GPU work itself is waited for
+ * off the main thread (renderer.settle).
+ */
+class Pacer {
+  private last = performance.now();
+  constructor(readonly signal: AbortSignal) {}
+  async tick(): Promise<void> {
+    throwIfAborted(this.signal);
+    if (performance.now() - this.last < PACE_MS) return;
+    await yieldToMain(this.signal);
+    this.last = performance.now();
+  }
+  async settle(r: StageRenderer | null): Promise<void> {
+    throwIfAborted(this.signal);
+    if (r) await r.settle(this.signal).catch(() => throwIfAborted(this.signal));
+    throwIfAborted(this.signal);
+    this.last = performance.now();
+  }
+}
 /**
  * LED 安全模式: the last part of the pre-roll also renders the scene through the flash limiter, so
  * its one-second history and the low-pass are settled (covers the detection window and the hold).
@@ -160,6 +185,8 @@ export class OfflineStage {
   private lyricAmt = 0;
   private destroyed = false;
   private rendererError: string | null = null;
+  /** the running cancellable render's pacer (renderFrame with a signal), null for the export */
+  private pacer: Pacer | null = null;
   private cjkFamily: string | null = null;
   /** LED 安全模式 of this export (the project's output settings; the export page may turn it off) */
   readonly safety: ActiveSafety;
@@ -408,17 +435,20 @@ export class OfflineStage {
     const n = Math.floor((t - start) / dt + 1e-6);
     const limiterFrames = this.limiter ? Math.round(LIMITER_PREROLL_SECONDS * fps) : 0;
     // same grid as the export (t − k·dt), so the first real frame steps exactly one frame on
+    // a cancellable caller (the single-frame preview, the key still) is paced: the signal is checked
+    // before every frame, the GPU is waited for off the main thread, and the page gets the main
+    // thread back at least every PACE_MS (round 20: it used to freeze in 3 s chunks)
+    const pacer = this.pacer ?? (signal ? new Pacer(signal) : null);
     for (let k = n; k >= 1; k--) {
+      if (pacer) await pacer.tick();
       const tk = t - k * dt;
       const d = this.lastT == null ? 0 : tk - this.lastT;
       const stepped = this.step(tk, d);
       if (k <= limiterFrames && this.renderer && !this.renderer.lost) {
         await this.renderScene(stepped.frame, stepped.audio, tk, d);
+        if (pacer) await pacer.tick();
         if (this.typeMode && this.wantBackground) await this.renderScene(stepped.frame, stepped.audio, tk, d, 1);
-        // a cancellable caller (the single-frame preview) gets the main thread back between the
-        // rendered pre-roll frames: the page stays responsive and 「取消」 can land
-        if (signal) await yieldToMain(signal);
-      } else if (signal && k % 30 === 0) await yieldToMain(signal);
+      }
     }
   }
 
@@ -444,18 +474,26 @@ export class OfflineStage {
     const typeDraw = this.typeMode && chain === 0 && this.typeDraw ? { ...this.typeDraw, relation: pd ? pd.relation : 0 } : null;
     // the background variant (chain 1) has no lyric: the program sees no type mask either
     const noType = (d: ProgramDraw | null) => (d && chain === 1 ? { ...d, typeAmt: 0 } : d);
+    const pacer = this.pacer;
     const ok = r.render({
       current: { ...this.slotDraw(frame.current, audio, t, beatIndex), program: noType(pd) },
       previous: frame.previous ? { ...this.slotDraw(frame.previous, audio, t, beatIndex), program: noType(prevPd) } : null,
       transition: frame.transition,
       clock: t % 3600,
       media,
-      safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: true } : null, chain } : null,
+      // paced (the preview): the grid comes back through the fenced read, waited for off the main thread
+      safety: s.on ? { soften: s.soften, gain: s.gain, alpha: limiter ? null : 1, measure: limiter ? { ...this.grid, sync: !pacer } : null, chain } : null,
       type: typeDraw,
     });
     if (!ok) throw new Error(this.rendererError ?? "WebGL 繪製失敗");
+    let measured = limiter ? r.lastGrid : null;
+    if (limiter && pacer) {
+      await pacer.settle(r);
+      const grids = r.takeGrids();
+      measured = grids.find((x) => x.serial === r.frameSerial) ?? grids[grids.length - 1] ?? null;
+    }
     if (limiter) {
-      const g = r.lastGrid;
+      const g = measured;
       let alpha = 1;
       if (g && g.cols === this.grid.cols && g.rows === this.grid.rows) {
         const buf = this.gridBuf;
@@ -474,6 +512,8 @@ export class OfflineStage {
       }
       r.composeSafety(alpha);
     }
+    // paced: the frame is finished on the GPU before anything reads the canvas (no stall then)
+    if (pacer) await pacer.settle(r);
   }
 
   private lyricEstimate(frame: OfflineSceneFrame): LyricEstimate | null {
@@ -539,11 +579,22 @@ export class OfflineStage {
    */
   async renderFrame(t: number, fps: number, req: OfflineFrameRequest, opts: { signal?: AbortSignal } = {}): Promise<void> {
     if (this.destroyed) throw new Error("renderer destroyed");
+    if (!opts.signal) return this.renderFrameNow(t, fps, req);
+    // round 20 (M7): a cancellable render is paced for its whole length (pre-roll, GPU, read-backs)
+    this.pacer = new Pacer(opts.signal);
+    try {
+      await this.renderFrameNow(t, fps, req, opts.signal);
+    } finally {
+      this.pacer = null;
+    }
+  }
+
+  private async renderFrameNow(t: number, fps: number, req: OfflineFrameRequest, signal?: AbortSignal): Promise<void> {
     const dt = 1 / fps;
     const last = this.lastT;
     this.wantBackground = req.background ?? req.scene;
-    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps, opts.signal);
-    throwIfAborted(opts.signal);
+    if (last == null || t < last - 1e-9 || t - last > dt * 1.5) await this.preroll(t, fps, signal);
+    throwIfAborted(signal);
     const d = this.lastT == null ? 0 : t - this.lastT;
     const { frame, audio } = this.step(t, d);
 
@@ -574,12 +625,13 @@ export class OfflineStage {
         ctx.drawImage(this.sceneCanvas, 0, 0);
       }
     }
-    if (req.lyrics || req.matte) this.paintTypeLayer(req.lyrics, req.matte);
+    if (req.lyrics || req.matte) await this.paintTypeLayer(req.lyrics, req.matte);
     if (wantBg) await this.renderScene(frame, audio, t, d, 1);
   }
 
   /** The type pass alone over transparent into the lyric canvas (coloured) and the matte (white at its alpha). */
-  private paintTypeLayer(color: boolean, matte: boolean) {
+  private async paintTypeLayer(color: boolean, matte: boolean) {
+    const pacer = this.pacer;
     const r = this.renderer;
     const W = this.width;
     const H = this.height;
@@ -590,12 +642,14 @@ export class OfflineStage {
     const draw = this.typeDraw;
     if (!r || !draw) return;
     const s = this.safety;
-    const data = r.renderTypeLayer(draw, s.on ? s.soften : 0, s.on ? s.gain : 1);
+    const data = pacer ? await r.renderTypeLayerAsync(draw, s.on ? s.soften : 0, s.on ? s.gain : 1, pacer.signal).catch(() => null) : r.renderTypeLayer(draw, s.on ? s.soften : 0, s.on ? s.gain : 1);
+    if (pacer) throwIfAborted(pacer.signal);
     if (!data) return;
     const col = color && lctx ? lctx.createImageData(W, H) : null;
     const mat = matte && mctx ? mctx.createImageData(W, H) : null;
     // GL rows are bottom-up and premultiplied; canvas image data is top-down and straight
     for (let y = 0; y < H; y++) {
+      if (pacer && y % 64 === 0) await pacer.tick();
       const src = (H - 1 - y) * W * 4;
       const dst = y * W * 4;
       for (let x = 0; x < W * 4; x += 4) {

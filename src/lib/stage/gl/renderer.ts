@@ -565,6 +565,35 @@ export class StageRenderer {
     this.feedbackValid = [false, false];
   }
 
+  /**
+   * Round 20 (M7): resolves once the GPU has finished every command issued so far, without blocking
+   * the main thread (WebGL2: a fence polled every few ms; WebGL1 resolves at once and the next read
+   * waits as before). A synchronous read after it does not stall. Rejects with `signal.reason` when
+   * aborted while waiting.
+   */
+  settle(signal?: AbortSignal): Promise<void> {
+    if (!this.gl2 || this.lost || this.disposed) return Promise.resolve();
+    const gl2 = this.gl as WebGL2RenderingContext;
+    const fence = gl2.fenceSync(gl2.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!fence) return Promise.resolve();
+    gl2.flush();
+    return new Promise<void>((resolve, reject) => {
+      const poll = () => {
+        if (this.lost || this.disposed) return resolve();
+        if (signal?.aborted) {
+          gl2.deleteSync(fence);
+          return reject(signal.reason ?? new Error("aborted"));
+        }
+        if (gl2.getSyncParameter(fence, gl2.SYNC_STATUS) === gl2.SIGNALED) {
+          gl2.deleteSync(fence);
+          return resolve();
+        }
+        setTimeout(poll, 4);
+      };
+      poll();
+    });
+  }
+
   /** Grid readbacks that completed since the last call (WebGL2 async path), oldest first. */
   takeGrids(): GridReadback[] {
     this.pollReads();
@@ -657,7 +686,9 @@ export class StageRenderer {
       const pending = [...this.programs.values()].some((e) => e.state === "pending");
       if (!this.queue.length && !pending) break;
       if (Date.now() > deadline) break;
-      if (this.parallel && !this.queue.length) await new Promise((r) => setTimeout(r, 8));
+      // round 20: give the page the main thread back between programs (one compile at a time
+      // without the parallel extension; polling with it)
+      await new Promise((r) => setTimeout(r, this.parallel && !this.queue.length ? 8 : 0));
     }
     return [...this.programs.entries()].filter(([, e]) => e.state !== "ready").map(([k]) => k);
   }
@@ -1158,6 +1189,19 @@ export class StageRenderer {
    * first), with the safety soften and cap applied to its colours. Null when the pass is not ready.
    */
   renderTypeLayer(t: TypeDraw, soften: number, gain: number): Uint8Array | null {
+    const out = this.drawTypeLayer(t, soften, gain);
+    return out ? this.readTypeLayer(out) : null;
+  }
+
+  /** renderTypeLayer, waiting for the GPU off the main thread before the read (round 20, the preview). */
+  async renderTypeLayerAsync(t: TypeDraw, soften: number, gain: number, signal?: AbortSignal): Promise<Uint8Array | null> {
+    const out = this.drawTypeLayer(t, soften, gain);
+    if (!out) return null;
+    await this.settle(signal);
+    return this.lost || this.disposed ? null : this.readTypeLayer(out);
+  }
+
+  private drawTypeLayer(t: TypeDraw, soften: number, gain: number): Target | null {
     if (this.lost || this.disposed) return null;
     const entry = this.typeProgram();
     if (!entry?.program) return null;
@@ -1168,6 +1212,16 @@ export class StageRenderer {
       const scene = this.target(6);
       if (!out || !scene) return null;
       this.drawType(entry, scene, t, out, true, soften, gain);
+      return out;
+    } catch (e) {
+      this.report("type-layer", `歌詞層算圖失敗：${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  private readTypeLayer(out: Target): Uint8Array | null {
+    const gl = this.gl;
+    try {
       const data = new Uint8Array(this.width * this.height * 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
       gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
