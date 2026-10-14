@@ -1,6 +1,6 @@
 // Designer module input/callback types (re-exported from ./index).
 
-import type { Asset, AudioAnalysis, BandBible, CollectedVisual, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SceneId, SongArcDirective, SongMeta } from "@/lib/types";
+import type { Asset, AudioAnalysis, RecentLook, BandBible, CollectedVisual, DesignPlan, Lyrics, MoodImage, PublicInfo, Research, SceneId, SongArcDirective, SongMeta } from "@/lib/types";
 import type { VisionImage } from "./moodboard";
 
 export interface DesignerInput {
@@ -45,6 +45,12 @@ export interface DesignerInput {
    * not come out as the same picture three times in a row.
    */
   recentForms?: string[];
+  /**
+   * Round 18: the looks the library's most recently designed other songs wear (most recent first):
+   * form, texture, type voice, font pair and palette family, each weighed down by how often the last
+   * songs used it.
+   */
+  recentLooks?: RecentLook[];
 }
 
 export interface BandSongSummary {

@@ -138,7 +138,11 @@ void main() {
   if (uGlitch > 0.001) {
     float band = floor(fc.y / (26.0 * s) + hash12(vec2(uSeed, 1.7)) * 9.0);
     float on = step(1.0 - 0.32 * uGlitch, hash12(vec2(band, uSeed + 0.37)));
-    tuv.x += (hash12(vec2(band * 1.7, uSeed + 3.1)) - 0.5) * 0.05 * uGlitch * on;
+    // round 18: over a bright picture the readable letters hold still (a sliced band leaves the
+    // legibility plate of its neighbours broken, and the picture shows through the gaps)
+    bool readableS = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
+    float calm = readableS ? 1.0 - smoothstep(0.25, 0.55, luma(TEX(uScene, uv).rgb)) : 1.0;
+    tuv.x += (hash12(vec2(band * 1.7, uSeed + 3.1)) - 0.5) * 0.05 * uGlitch * on * calm;
   }
   vec4 T = plates(tuv);
   float ink = T.r;
@@ -189,13 +193,17 @@ void main() {
     spot *= keepF;
     halo *= keepF;
   }
-  // characters eaten by the scene: blocks of the glyphs give way where the picture is bright
+  // characters eaten by the scene: blocks of the glyphs give way where the picture is bright —
+  // round 18: only outside the readable area (ornaments, display type beyond it) and the accent
+  // layers; the readable letters keep the legibility guarantee over any picture
   if (uEat > 0.001) {
     float blk = hash12(floor(fc / (16.0 * s)) + vec2(uSeed * 3.1, uSeed));
     float e = step(1.0 - uEat * 0.5, blk) * (0.55 + 0.45 * smoothstep(0.2, 0.7, luma(scene)));
-    ink *= 1.0 - e;
-    inkR *= 1.0 - e;
-    inkB *= 1.0 - e;
+    bool readable = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
+    float eI = readable ? 0.0 : e;
+    ink *= 1.0 - eI;
+    inkR *= 1.0 - eI;
+    inkB *= 1.0 - eI;
     acc *= 1.0 - e * 0.8;
   }
   // the section transition reaches the words that enter with it: a wipe reveals them along the
@@ -285,7 +293,9 @@ void main() {
   bool inArea = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
   // the display word (B3): the full ink colour, no hue from the picture, and a higher contrast target around it
   bool inDisplay = uDisplayBox.z > uDisplayBox.x && uv.x >= uDisplayBox.x && uv.y >= uDisplayBox.y && uv.x <= uDisplayBox.z && uv.y <= uDisplayBox.w;
-  float target = inDisplay ? uDisplayTarget : uTarget;
+  // round 18: an RGB split and glitch slices eat into the glyphs' edges (the fringe channels go dark),
+  // so the plate under glitchy type aims higher to keep the measured contrast at the target
+  float target = (inDisplay ? uDisplayTarget : uTarget) * (1.0 + 0.35 * clamp(uRgb + uGlitch, 0.0, 1.0));
   if (inDisplay) inkC = uInk;
   if (inArea) inkC = legibleInkT(inkC, uSoften, uGain, target);
   // the legibility halo: the stage darkens softly under readable text (no box, no scrim), more
