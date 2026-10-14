@@ -320,8 +320,30 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-export type EmblemStyle = "sun" | "crystal" | "orbit" | "wave" | "bloom" | "shard";
-export const EMBLEM_STYLES: readonly EmblemStyle[] = ["sun", "crystal", "orbit", "wave", "bloom", "shard"];
+export type EmblemStyle = "sun" | "crystal" | "orbit" | "wave" | "bloom" | "shard" | "moon" | "rain" | "wall" | "road" | "river" | "lamp" | "flame";
+export const EMBLEM_STYLES: readonly EmblemStyle[] = ["sun", "crystal", "orbit", "wave", "bloom", "shard", "moon", "rain", "wall", "road", "river", "lamp", "flame"];
+
+/**
+ * Round 18 (m1): the symbol an image family draws when the song's own words name it (a crescent for
+ * the night, slanted rain, a cracked brick course, a road to the horizon…) instead of the lexicon's
+ * archetype — the archetypes read as stock clip-art (the night's 「軌道」 drew an atom).
+ */
+export const EMBLEM_FOR_IMAGERY: Record<string, EmblemStyle> = {
+  night: "moon",
+  moon: "moon",
+  rain: "rain",
+  tears: "rain",
+  storm: "rain",
+  wall: "wall",
+  road: "road",
+  harbor: "road",
+  river: "river",
+  sea: "river",
+  light: "lamp",
+  candle: "lamp",
+  fire: "flame",
+  ash: "flame",
+};
 
 const f = (n: number) => String(Math.round(n * 10) / 10);
 
@@ -387,17 +409,86 @@ export function generateMotifSvg(seed: string, style?: EmblemStyle): string {
       break;
     }
     case "orbit": {
-      const tilt = Math.floor(rnd() * 60);
-      parts.push(`<circle cx="50" cy="50" r="12" fill="currentColor"/>`);
+      // round 18: one planet and one tilted ring (three crossed ellipses read as an atom)
+      const tilt = -12 - Math.floor(rnd() * 16);
+      parts.push(`<circle cx="50" cy="50" r="${f(15 + rnd() * 4)}" fill="currentColor"/>`);
+      parts.push(`<ellipse cx="50" cy="50" rx="40" ry="${f(9 + rnd() * 4)}" fill="none" stroke="currentColor" stroke-width="2" transform="rotate(${tilt} 50 50)"/>`);
+      const [mx, my] = polar(50, 50, 40, 70 + rnd() * 40);
+      parts.push(`<circle cx="${f(mx)}" cy="${f(my)}" r="2.6" fill="currentColor"/>`);
+      break;
+    }
+    case "moon": {
+      const r = 26 + rnd() * 6;
+      const off = 9 + rnd() * 5;
+      parts.push(`<path d="M${f(50 - r * 0.2)} ${f(50 - r)} A${f(r)} ${f(r)} 0 1 0 ${f(50 - r * 0.2)} ${f(50 + r)} A${f(r - off * 0.4)} ${f(r - off * 0.4)} 0 1 1 ${f(50 - r * 0.2)} ${f(50 - r)} Z" fill="currentColor"/>`);
       for (let i = 0; i < 3; i++) {
-        parts.push(
-          `<ellipse cx="50" cy="50" rx="40" ry="${f(12 + i * 4)}" fill="none" stroke="currentColor" stroke-width="1.6" transform="rotate(${tilt + i * 60} 50 50)"/>`,
-        );
+        const [x, y] = polar(50, 50, 38 + rnd() * 6, 20 + i * 38 + rnd() * 10);
+        parts.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(1.2 + rnd() * 1.4)}" fill="currentColor"/>`);
       }
+      break;
+    }
+    case "rain": {
+      const n = 9 + Math.floor(rnd() * 4);
+      for (let i = 0; i < n; i++) {
+        const x = 14 + (i * 72) / (n - 1) + (rnd() - 0.5) * 4;
+        const y = 16 + rnd() * 34;
+        const l = 14 + rnd() * 16;
+        parts.push(`<line x1="${f(x)}" y1="${f(y)}" x2="${f(x - l * 0.28)}" y2="${f(y + l)}" stroke="currentColor" stroke-width="${f(1.4 + rnd() * 1.2)}" stroke-linecap="round"/>`);
+      }
+      parts.push(`<path d="M18 84 L82 84" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>`);
+      break;
+    }
+    case "wall": {
+      for (let row = 0; row < 5; row++) {
+        const y = 22 + row * 12;
+        const shift = row % 2 ? 9 : 0;
+        for (let x = 12 + shift - (row % 2 ? 18 : 0); x < 88; x += 18) {
+          const x0 = Math.max(12, x);
+          const x1 = Math.min(88, x + 16);
+          if (x1 - x0 > 3) parts.push(`<rect x="${f(x0)}" y="${f(y)}" width="${f(x1 - x0)}" height="10" fill="currentColor" fill-opacity="${f(0.55 + rnd() * 0.4)}"/>`);
+        }
+      }
+      // the crack
+      let x = 44 + rnd() * 12;
+      const pts = [`${f(x)},18`];
+      for (let y = 26; y <= 84; y += 8) {
+        x += (rnd() - 0.5) * 12;
+        pts.push(`${f(x)},${y}`);
+      }
+      parts.push(`<polyline points="${pts.join(" ")}" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-opacity="0.2"/>`);
+      break;
+    }
+    case "road": {
+      const hz = 38 + rnd() * 8;
+      parts.push(`<line x1="10" y1="${f(hz)}" x2="90" y2="${f(hz)}" stroke="currentColor" stroke-width="1.6"/>`);
+      parts.push(`<polygon points="47,${f(hz)} 53,${f(hz)} 84,88 16,88" fill="currentColor" fill-opacity="0.5"/>`);
       for (let i = 0; i < 4; i++) {
-        const [x, y] = polar(50, 50, 30 + rnd() * 12, rnd() * 360);
-        parts.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(1.4 + rnd() * 1.6)}" fill="currentColor"/>`);
+        const t0 = 0.12 + i * 0.22;
+        const t1 = t0 + 0.1;
+        const y0 = hz + (88 - hz) * t0;
+        const y1 = hz + (88 - hz) * t1;
+        parts.push(`<polygon points="${f(49.6 - t0 * 2)},${f(y0)} ${f(50.4 + t0 * 2)},${f(y0)} ${f(50.6 + t1 * 3)},${f(y1)} ${f(49.4 - t1 * 3)},${f(y1)}" fill="currentColor"/>`);
       }
+      parts.push(`<circle cx="${f(30 + rnd() * 40)}" cy="${f(hz - 12)}" r="4" fill="currentColor"/>`);
+      break;
+    }
+    case "river": {
+      const a = 10 + rnd() * 8;
+      parts.push(`<path d="M50 10 C${f(50 + a * 2)} 24 ${f(50 - a * 2)} 40 50 52 S${f(50 + a * 2.4)} 78 ${f(50 - a)} 92" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>`);
+      parts.push(`<path d="M30 30 C38 34 44 30 48 26 M62 66 C68 70 74 68 80 64" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`);
+      break;
+    }
+    case "lamp": {
+      parts.push(`<circle cx="50" cy="44" r="${f(18 + rnd() * 3)}" fill="none" stroke="currentColor" stroke-width="2.4"/>`);
+      parts.push(`<path d="M44 46 L47 38 L50 46 L53 38 L56 46" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`);
+      parts.push(`<rect x="42" y="64" width="16" height="10" rx="2" fill="currentColor"/>`);
+      ring(44, 1, "1 4");
+      break;
+    }
+    case "flame": {
+      const lean = (rnd() - 0.5) * 10;
+      parts.push(`<path d="M50 12 C${f(62 + lean)} 30 74 44 70 62 C66 80 34 80 30 62 C27 48 ${f(40 + lean)} 40 50 12 Z" fill="currentColor" fill-opacity="0.6"/>`);
+      parts.push(`<path d="M50 40 C56 50 60 58 57 66 C54 74 46 74 43 66 C41 58 46 52 50 40 Z" fill="currentColor"/>`);
       break;
     }
     case "wave": {

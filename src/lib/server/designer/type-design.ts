@@ -11,6 +11,7 @@ import { textKey } from "@/lib/type/sequence";
 import { RECIPES, VOICES, voiceFonts } from "@/lib/type/vocab";
 import type { BandBible, FontId, LineDesign, LyricLine, SectionDesign, TypeParams, TypeRecipeId, TypeSystem, TypeVoiceId } from "@/lib/types";
 import type { Findings } from "./findings";
+import { recentFactor, recentUses, type RecentLook } from "./recent";
 import { sensitiveWords } from "./lyric-analysis";
 
 export interface VoiceChoice {
@@ -29,7 +30,63 @@ const LYRICAL = new Set(["憂傷低迴", "平靜內斂", "溫柔明亮"]);
  * a quiet song that explodes gets the MV card's extreme contrast, a dark slow ballad the brush, a
  * warm groove the film title, a hard cold drive the glitch.
  */
-export function chooseVoice(f: Findings, cjk: boolean): VoiceChoice {
+export function chooseVoice(f: Findings, cjk: boolean, looks?: readonly RecentLook[]): VoiceChoice {
+  const own = songVoice(f, cjk);
+  if (!looks?.length) return own;
+  // round 18: the library's last songs wore this voice twice already — the song's next-best voice
+  // (the genre's second grammar, else the audio mood's), unless it fits far worse than the repeat
+  const options: Array<[VoiceChoice, number]> = [[own, 3], ...alternateVoices(f, cjk, own.voice)];
+  let best = options[0];
+  let bestScore = -1;
+  for (const o of options) {
+    const s = o[1] * recentFactor(looks, "voice", o[0].voice) * (looks[0]?.voice === o[0].voice ? 0.8 : 1);
+    if (s > bestScore) [best, bestScore] = [o, s];
+  }
+  return best[0];
+}
+
+/** Round 18: a genre's second typographic grammar (what its records also wear), fit 0–3. */
+const ALTERNATE_VOICE: Record<string, Array<[TypeVoiceId, number, string]>> = {
+  "post-rock": [["title-sequence", 1.6, "像電影片頭的細線與編號，字在漸強裡一格一格出現"], ["ink", 1.2, "大片留白的水墨，字慢慢暈開"]],
+  shoegaze: [["ink", 1.4, "字像在音牆裡暈開的墨"], ["title-sequence", 1, "霧面的片頭字卡"]],
+  "dream-pop": [["ink", 1.4, "柔軟的書寫，字慢慢暈開"], ["title-sequence", 1, "柔和的片頭字卡"]],
+  "city-pop": [["mv-card", 1.4, "霓虹夜色裡的日系字卡"], ["glitch", 1, "掃描線與錯位的復古電視"]],
+  "indie-rock": [["title-sequence", 1.8, "像獨立電影的片頭：細線、編號與網格"], ["glitch", 1.3, "粗糙的影印與錯版"]],
+  "indie-pop": [["mv-card", 1.4, "明亮的字卡"], ["ink", 1, "手寫的溫度"]],
+  folk: [["mv-card", 1.6, "大留白的字卡，像手寫的筆記"], ["title-sequence", 1.1, "老唱片封套的細線與編號"]],
+  metal: [["title-sequence", 1.2, "粗重的海報堆疊"], ["mv-card", 0.8, "巨字的壓迫感"]],
+  punk: [["title-sequence", 1.4, "影印海報的堆疊與標籤"], ["mv-card", 1, "巨字硬切"]],
+  "post-punk": [["glitch", 1.5, "冷調的錯位與掃描線"], ["mv-card", 1, "寬字距的冷字卡"]],
+  electronic: [["title-sequence", 1.5, "精準的網格與編號"], ["mv-card", 1, "巨字在 drop 上硬切"]],
+  "hip-hop": [["glitch", 1.4, "拍點上的切片與錯位"], ["mv-card", 1, "巨字的 hook"]],
+  rnb: [["title-sequence", 1.3, "優雅的片頭細線"], ["ink", 1, "柔軟的書寫"]],
+  jazz: [["ink", 1.3, "老唱片的手寫"], ["mv-card", 1, "優雅的字卡"]],
+  "math-rock": [["title-sequence", 1.5, "精準的瑞士網格"], ["mv-card", 1, "極端的字級對比"]],
+  emo: [["ink", 1.7, "撕心的書寫：楷書依筆順寫出來，飛白與暈染"], ["glitch", 1.5, "情緒崩開的切片與殘影"]],
+  psychedelic: [["ink", 1.3, "流動的暈染"], ["title-sequence", 1, "迷幻海報的細線"]],
+  "alt-rock": [["glitch", 1.4, "粗糙的錯版與殘影"], ["title-sequence", 1.2, "海報堆疊"]],
+  ambient: [["mv-card", 1.4, "大留白的字卡"], ["title-sequence", 1, "細線與編號"]],
+  pop: [["ink", 1.6, "抒情的書寫：楷書依筆順寫出來，字慢慢暈開"], ["title-sequence", 1.2, "明亮的片頭字卡"]],
+};
+
+function alternateVoices(f: Findings, cjk: boolean, own: TypeVoiceId): Array<[VoiceChoice, number]> {
+  const list = f.genre ? (ALTERNATE_VOICE[f.genre.id] ?? []) : [];
+  const out: Array<[VoiceChoice, number]> = [];
+  for (const [voice, fit, note] of list) {
+    if (voice === own || (voice === "ink" && !cjk)) continue;
+    out.push([{ voice, params: {}, why: `${f.genre!.label}的另一種字體語法：${note}（樂團片庫最近幾首已經用過${VOICES[own].label}）。` }, fit]);
+  }
+  // the audio mood's own voice (what the song would wear without a genre)
+  const mood = songVoice({ ...f, genre: null }, cjk);
+  if (mood.voice !== own && !out.some(([o]) => o.voice === mood.voice)) out.push([mood, 1.2]);
+  for (const voice of ["mv-card", "title-sequence", "glitch", "ink"] as TypeVoiceId[]) {
+    if (voice === own || (voice === "ink" && !cjk) || out.some(([o]) => o.voice === voice)) continue;
+    out.push([{ voice, params: {}, why: VOICES[voice].description }, 0.5]);
+  }
+  return out;
+}
+
+function songVoice(f: Findings, cjk: boolean): VoiceChoice {
   const g = f.genre;
   if (g) {
     const voice = !cjk && g.type.voice === "ink" ? "mv-card" : g.type.voice;
@@ -148,6 +205,8 @@ export interface TypeDesignInput {
   salt?: number;
   /** the plan gets a 專屬畫面 (the offline designers always make one): no automatic 鏤空窗 */
   program?: boolean;
+  /** round 18: the library's last looks (voice and font pair recency) */
+  recentLooks?: readonly RecentLook[];
 }
 
 const unit = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
@@ -155,14 +214,14 @@ const unit = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
 /** The rule-based type system for a song: its voice, parameters, fonts and a hint for every line. */
 export function designTypeSystem(input: TypeDesignInput): { system: TypeSystem; choice: VoiceChoice } {
   const f = input.findings;
-  const own = chooseVoice(f, input.cjk);
+  const own = chooseVoice(f, input.cjk, input.recentLooks);
   const choice: VoiceChoice = input.voice ? { voice: input.voice, params: input.voice === own.voice ? own.params : {}, why: input.voice === own.voice ? own.why : VOICES[input.voice].description } : own;
   const d = VOICES[choice.voice];
   const merged: TypeParams = { ...d.params };
   for (const [k, v] of Object.entries({ ...choice.params, ...(input.params ?? {}) }) as Array<[keyof TypeParams, number]>) {
     if (typeof v === "number" && Number.isFinite(v)) merged[k] = k === "gridColumns" ? Math.round(Math.min(12, Math.max(2, v))) : unit(v);
   }
-  const fonts = input.bible ? voiceFonts(choice.voice, { cjk: input.bible.fonts.cjkFont, latin: input.bible.fonts.latinFont }, true) : voiceFonts(choice.voice, input.planFonts ?? null);
+  const fonts = input.bible ? voiceFonts(choice.voice, { cjk: input.bible.fonts.cjkFont, latin: input.bible.fonts.latinFont }, true) : freshFonts(choice.voice, voiceFonts(choice.voice, input.planFonts ?? null), input.recentLooks);
   const weight = input.bible ? Math.max(600, Math.round(input.bible.fonts.weight / 100) * 100) : d.weight;
   const emphasisOf = new Map((input.lineDesigns ?? []).filter((l) => l.emphasis.length).map((l) => [l.lineId, l.emphasis] as const));
   const seal = choice.voice === "ink" ? sealText(input.bandName, input.title) : "";
@@ -192,6 +251,29 @@ export function designTypeSystem(input: TypeDesignInput): { system: TypeSystem; 
   });
   if (input.salt) return { system: { ...system, generation: input.salt }, choice };
   return { system, choice };
+}
+
+/**
+ * Round 18: a font pair the library's last songs set twice already gives way to another pair the
+ * voice speaks (the Latin face first, then the CJK one), the least used of them.
+ */
+export function freshFonts(voice: TypeVoiceId, fonts: { cjk: FontId; latin: FontId }, looks?: readonly RecentLook[]): { cjk: FontId; latin: FontId } {
+  const uses = (p: { cjk: FontId; latin: FontId }) => recentUses(looks, "fonts", `${p.cjk}+${p.latin}`);
+  if (!looks?.length || uses(fonts) < 2) return fonts;
+  const ok = VOICES[voice].fontsOk;
+  const options = [
+    ...ok.latin.filter((l) => l !== fonts.latin).map((latin) => ({ cjk: fonts.cjk, latin })),
+    ...ok.cjk.filter((c) => c !== fonts.cjk).map((cjk) => ({ cjk, latin: fonts.latin })),
+    ...ok.cjk.filter((c) => c !== fonts.cjk).flatMap((cjk) => ok.latin.filter((l) => l !== fonts.latin).map((latin) => ({ cjk, latin }))),
+  ];
+  let best = fonts;
+  let n = uses(fonts);
+  for (const o of options) {
+    const u = uses(o);
+    if (u < n) [best, n] = [o, u];
+    if (n === 0) break;
+  }
+  return best;
 }
 
 /** The recipes a system uses most (for notes and cards), most frequent first. */

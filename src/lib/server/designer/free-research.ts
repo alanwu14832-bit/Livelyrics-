@@ -227,7 +227,7 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
   // ## 設計方向建議
   const h = f.hints;
   // 字體藝術: every line is a composition in the song's typographic voice
-  const voice = chooseVoice(f, st.cjk);
+  const voice = chooseVoice(f, st.cjk, input.recentLooks);
   // without imagery and genre the mood lexicon fills the motif and scene rows: a row is never empty
   const vocab = MOOD_VOCABULARY[f.audio.quadrant];
   const motifs = [...h.motifs, ...vocab.motifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4);

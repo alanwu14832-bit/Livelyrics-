@@ -1718,6 +1718,48 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   `hint.chant`: never whispered, a Latin chant set whole as a poster, its largest glyph at least
   `CHANT_DISPLAY` (14 %) of the frame's short side every time it comes back.
 
+### Round 18: motion and variety that look designed
+
+- **One render for one program** (`gl/renderer.ts drawSceneLayer`, `program/runtime.ts blendProgramDraw`):
+  a section transition between two states of the same 專屬畫面 (same code key) draws the program once, its
+  zone, parameters, section energy, ink, palette and scene colours tweened (smoothstep) from the outgoing
+  state to the incoming one; the mode tweens within 0–2 and otherwise switches at `MODE_CUT` (behind the
+  flash's peak, else mid-sweep). The compositor still runs with both inputs bound to that one render, so the
+  wipe's accent line and the bloom's breath stay. Different programs (or a built-in scene) still cross-fade.
+  `program/transition.test.ts` renders the composer's disc and planet on the CPU: the old cross-fade shows
+  two bright subjects, the merged render never more than its end states.
+- **Library recency** (`designer/recent.ts`): every project summary carries `look` (`lookOfPlan`: form,
+  texture, type voice, font pair, palette hue family of the primary, last-chorus scene;
+  `SUMMARY_VERSION` 5); `listRecentLooks` → `DesignerInput.recentLooks`. Each choice the last
+  `RECENT_WINDOW` (7) songs used weighs `RECENT_USE_FACTORS` [1, 0.45, 0.04] by its count — forms (the
+  latest once more × 0.6), textures (`surfaceWeights`), the climax scene (`chooseClimax`), the voice
+  (`chooseVoice`: the genre's voice scores 3, its `ALTERNATE_VOICE` grammars and the audio mood's voice
+  less), the font pair (`freshFonts`: another pair the voice speaks once a pair was worn twice; the key
+  visual's typography follows) and the hue (`freshHue`: a family worn twice moves to the nearest family
+  worn fewer times).
+- **Forms that fit the genre**: punk prints bars and a brush stroke, hardcore / screamo (`isShout`) adds
+  `SHOUT_BRUSH` to the brush, a ballad (`isBallad`: 抒情 / ballad evidence) lays a horizon or strata; an
+  image adds to a form scaled by `sqrt` of the genre's own weight for it (floored at 0.4), so a wall in a
+  punk song is not a monument.
+- **Choruses climb**: the built-in ladder never makes the smallest scene the climax of two choruses
+  (unless the library already ended twice on every bigger one), keeps the climax for the last chorus and
+  never repeats the previous chorus's scene; the composer's chorus states grow denser and livelier
+  (`CHORUS_CLIMB`, uParams.y / .w) chorus to chorus.
+- **Instrumentals use the whole frame** (`composer.ts INSTRUMENTAL_COMMON`): no text zone is avoided (the
+  forms read `zc()` / `zn()`, a centred anchor and an off-frame zone), every section names the same caption
+  band (`INSTRUMENTAL_ZONE`), and the focal form crosses the frame with `uSongProgress` (continuous, so a
+  section change never jumps it).
+- **The 主視覺符號 comes from the song** (`svg.ts EMBLEM_FOR_IMAGERY`, `offline.ts imageryEmblem`): the
+  strongest image draws its own symbol (a crescent for the night, slanted rain, a cracked brick course, a
+  road to the horizon, a meander, a lamp, a flame); `orbit` is one planet and one ring (no atom). The
+  built-in 「主視覺符號」 scene is a candidate only when `symbolOnWall` (the bible's motifs, or an image
+  sung ≥ 4 times) and never when the band has a logo asset.
+- **Glitch type keeps the legibility guarantee** (`stage/scenes/type.ts`; variety now gives the glitch
+  voice to songs that never wore it): `uEat` never eats the readable letters (only ornaments outside the
+  readable area and the accent layers), glitch slices hold still in the readable area over a bright picture
+  (a sliced band broke its neighbours' plate), and the contrast target rises by up to 35 % under an RGB
+  split / glitch.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

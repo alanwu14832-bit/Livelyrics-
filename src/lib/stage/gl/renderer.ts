@@ -4,7 +4,8 @@
 //   compiles them one per frame (or in parallel with KHR_parallel_shader_compile)
 //   so section changes never stall the show.
 // - Section transitions render the outgoing and incoming scenes into two
-//   framebuffers and composite them.
+//   framebuffers and composite them (two states of the same scene program are
+//   one render with tweened uniforms, under the same compositor sweep).
 // - Context loss is survivable: `lost` goes true, everything is recreated on
 //   restore (the motif source is kept so the texture can be re-uploaded).
 // - Nothing here throws to the caller after construction; failures degrade to a
@@ -30,6 +31,7 @@ import { TYPE_FRAGMENT, TYPE_TARGETS, TYPE_UNIFORMS } from "../scenes/type";
 import { UNIFORM_NAMES, buildFragmentWithHeader, buildSceneFragment, buildVertex } from "../scenes/common";
 import { SCENE_SHADERS } from "../scenes";
 import { PROGRAM_UNIFORMS, buildProgramFragment, tidyCompileLog } from "../program/contract";
+import { MODE_CUT, blendProgramDraw, blendSlotColors, sameProgram } from "../program/runtime";
 
 type GL = WebGL2RenderingContext | WebGLRenderingContext;
 
@@ -1383,8 +1385,18 @@ export class StageRenderer {
       this.drawScene(req.current, out);
       return;
     }
-    this.drawScene(req.current, a);
-    const sameLook = prev.lookKey === req.current.lookKey && prev.scene === req.current.scene;
+    // round 18: two states of one program are one render with its uniforms tweened (a cross-fade
+    // of two renders showed the subject twice); the compositor still draws its sweep over it
+    const merged = sameProgram(prev, req.current) && this.programEntry(req.current.program!.key)?.program;
+    const cur: SceneDraw = merged
+      ? {
+          ...req.current,
+          uniforms: blendSlotColors(prev.uniforms, req.current.uniforms, tr.progress),
+          program: blendProgramDraw(prev.program!, req.current.program!, tr.progress, MODE_CUT[TRANSITION_CODE[tr.kind]]),
+        }
+      : req.current;
+    this.drawScene(cur, a);
+    const sameLook = !!merged || (prev.lookKey === req.current.lookKey && prev.scene === req.current.scene);
     if (!sameLook) this.drawScene(prev, b);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.fbo : null);

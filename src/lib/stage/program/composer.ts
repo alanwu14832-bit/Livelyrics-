@@ -235,6 +235,37 @@ float horizonY() {
 float T() { return uTime * K_SPEED; }
 `;
 
+/**
+ * Round 18 (m6): an instrumental reserves no text zone. The form owns the whole frame and travels
+ * across it with the song (uSongProgress: continuous, so a section change never jumps it), and the
+ * zone helpers the forms read answer "no words anywhere" (a zone off the frame, a centred anchor).
+ */
+const INSTRUMENTAL_COMMON = (c: ComposerChoice) => `
+const float K_FX = ${f(c.focalX)};
+const float K_FY = ${f(c.focalY)};
+const float K_SCALE = ${f(c.scale)};
+const float K_SPEED = ${f(c.speed)};
+const float K_PH = ${f(c.focalX * 9.0)};
+
+vec2 toP(vec2 q) { return (q * uRes - 0.5 * uRes) / min(uRes.x, uRes.y); }
+vec2 zc() { return vec2(0.5, 0.5); }
+vec4 zn() { return vec4(2.0, 2.0, 2.4, 2.4); }
+// no words: the form crosses the frame over the song, from one side through the centre to the other
+vec2 focalUv() {
+  float s = sin(uSongProgress * 4.4 + K_PH);
+  if (aspect() < 0.8) return vec2(0.5, 0.44 + 0.12 * s);
+  return vec2(0.5 + 0.2 * s, K_FY + 0.18 + 0.04 * cos(uSongProgress * 3.1 + K_PH));
+}
+float horizonY() {
+  if (aspect() < 0.8) return 0.42;
+  return K_FY + 0.05 * sin(uSongProgress * 2.7 + K_PH);
+}
+float T() { return uTime * K_SPEED; }
+`;
+
+/** An instrumental's form reads the zone helpers instead of the (unreserved) text zone. */
+const fullFrame = (code: string) => code.replace(/zoneCenter\(\)/g, "zc()").replace(/\buZone\b/g, "zn()");
+
 function motionGlsl(m: MotionId): string {
   // mo(): a small offset of the form in p units; br(): a breathing scale
   switch (m) {
@@ -736,15 +767,34 @@ function zoneFor(side: "left" | "right" | "wide", kind: SectionKind, r: () => nu
   return { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, w: Math.round(w * 1000) / 1000, h: Math.round(h * 1000) / 1000 };
 }
 
+/** Round 18 (m6): an instrumental's nominal zone, a caption band the program does not avoid. */
+export const INSTRUMENTAL_ZONE: Zone = { x: 0.19, y: 0.66, w: 0.62, h: 0.26 };
+
+function instrumentalNote(kind: SectionKind, form: FormId): string {
+  const name = FORM_LABELS[form];
+  if (kind === "chorus" || kind === "solo") return `沒有字：${name}完全展開，佔滿整個畫面`;
+  if (kind === "bridge" || kind === "breakdown") return `${name}換一個規則，在畫面中間停下來`;
+  if (kind === "outro") return `${name}慢慢收回，只留一點光`;
+  return `沒有字：${name}用整個畫面，慢慢移到另一側`;
+}
+
+/** Round 18: how much denser and livelier the last of several choruses is than the first (uParams.y and .w). */
+export const CHORUS_CLIMB = 0.25;
+
 function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => number): SceneProgramSection[] {
   const first: "left" | "right" = r() < 0.5 ? "left" : "right";
   const other = first === "left" ? "right" : "left";
   let verseSide = first;
   const out: SceneProgramSection[] = [];
   let prevKind: SectionKind | null = null;
+  // round 18: the choruses climb — 一次比一次更亮: each one after the first fills in denser and moves
+  // more (up to CHORUS_CLIMB), so the second chorus is never the first one's picture again
+  const choruses = input.sections.filter((s) => s.kind === "chorus").length;
+  let chorusN = 0;
   for (const s of input.sections) {
     const d = KIND_DEFAULTS[s.kind] ?? KIND_DEFAULTS.verse;
     const e = Math.min(1, Math.max(0, s.energy ?? 0.5));
+    const climb = s.kind === "chorus" && choruses > 1 ? 1 + CHORUS_CLIMB * (chorusN++ / (choruses - 1)) : 1;
     // the words change sides when the song turns a page: a verse after a chorus, the pre-chorus, the bridge
     let side: "left" | "right" | "wide";
     if (s.kind === "chorus") side = first;
@@ -753,7 +803,7 @@ function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => nu
       if (s.kind === "verse" && prevKind === "chorus") verseSide = verseSide === first ? other : first;
       side = s.kind === "verse" ? verseSide : first;
     }
-    const params = d.params.map((v, i) => Math.round(Math.min(1, Math.max(0, v * (i === 0 || i === 2 ? 0.75 + 0.5 * e : 1))) * 1000) / 1000);
+    const params = d.params.map((v, i) => Math.round(Math.min(1, Math.max(0, v * (i === 0 || i === 2 ? 0.75 + 0.5 * e : climb))) * 1000) / 1000);
     const relation: TypeRelation = s.kind === "chorus" || s.kind === "solo" ? RELATION_FOR_FORM[choice.form] : choice.form === "horizon" || choice.form === "orbits" ? "plain" : "plain";
     const note =
       s.kind === "chorus"
@@ -765,7 +815,10 @@ function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => nu
             : s.kind === "pre-chorus"
               ? "光慢慢打開，字換到另一側"
               : "只留一點點光";
-    out.push({ sectionId: s.id, mode: d.mode, params, zone: zoneFor(side, s.kind, r), relation, note });
+    // an instrumental reserves no text zone: a caption band low in the frame (where an operator's
+    // title would go) that the program ignores
+    const zone = input.lyrics === false ? { ...INSTRUMENTAL_ZONE } : zoneFor(side, s.kind, r);
+    out.push({ sectionId: s.id, mode: d.mode, params, zone, relation: input.lyrics === false ? "plain" : relation, note: input.lyrics === false ? instrumentalNote(s.kind, choice.form) : note });
     prevKind = s.kind;
   }
   return out;
@@ -779,9 +832,9 @@ export function composeSceneProgram(input: ComposerInput): SceneProgram {
   const textureAmount = 0.3 + r() * 0.5;
   const instrumental = input.lyrics === false;
   const source = `// ${input.title ?? ""} — 離線作曲器：${FORM_LABELS[choice.form]} × ${TEXTURE_LABELS[choice.texture]} × ${MOTION_LABELS[choice.motion]}${instrumental ? "（器樂曲）" : ""}
-${COMMON(choice)}
+${instrumental ? INSTRUMENTAL_COMMON(choice) : COMMON(choice)}
 ${motionGlsl(choice.motion)}
-${form.code}
+${instrumental ? fullFrame(form.code) : form.code}
 ${textureGlsl(choice.texture, textureAmount)}
 ${instrumental ? QUIET_LAYER : ""}
 vec3 scene(vec2 fc) {
@@ -800,7 +853,7 @@ ${instrumental ? "  col = quiet(fc, uv, col);\n" : ""}  vec2 vq = (uv - 0.5) * v
     version: 1,
     engine: "offline",
     title,
-    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；${instrumental ? "沒有歌詞，畫面自己呼吸：安靜的段落有緩緩上升的微塵，每八秒一道光慢慢掃過，隨能量變亮；" : "形狀永遠站在字的另一側，"}主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
+    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；${instrumental ? "沒有歌詞，不留文字區：形狀用整個畫面，隨著歌曲從一側慢慢走到另一側；安靜的段落有緩緩上升的微塵，每八秒一道光慢慢掃過，隨能量變亮；" : "形狀永遠站在字的另一側，"}主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
     source,
     sections: sectionStates(input, choice, r),
     keyMoment: null,

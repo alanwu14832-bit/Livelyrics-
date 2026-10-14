@@ -22,6 +22,7 @@ import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hashString } from "./svg";
 import { analyzeFindings, type Findings } from "./findings";
+import { recentFactor, recentUses, RECENT_USE_FACTORS, RECENT_WINDOW, type RecentLook } from "./recent";
 import { bibleBlock, energyCurveBlock, SENSITIVE_LYRICS_RULE, songBlock, trimBrief } from "./prompts";
 import { collectedBlock, leadPalette, leadTemperature } from "./collected";
 import { analyzeStructure } from "./structure";
@@ -63,8 +64,9 @@ const FORM_WEIGHTS_BY_GENRE: Record<string, Partial<Record<FormId, number>>> = {
   "indie-pop": { ribbons: 2.5, horizon: 2, orbits: 1.5, threads: 1, bars: 0.8, strata: 0.6, brush: 0.6, pillars: 0.3 },
   folk: { strata: 3.2, brush: 2.2, horizon: 1.5, threads: 0.9, ribbons: 0.8, orbits: 0.6, pillars: 0.5, bars: 0.25 },
   metal: { pillars: 3, bars: 2.2, threads: 1, strata: 0.8, orbits: 0.5, horizon: 0.4, brush: 0.15, ribbons: 0.15 },
-  punk: { bars: 3.2, threads: 1.6, pillars: 1.4, orbits: 0.7, strata: 0.5, horizon: 0.4, brush: 0.35, ribbons: 0.2 },
-  "post-punk": { bars: 2.5, pillars: 2, threads: 1.2, orbits: 1, strata: 0.6, horizon: 0.5, ribbons: 0.3, brush: 0.3 },
+  // round 18: a shout song is printed and torn — slashed bars, one hard brush stroke — not a monument
+  punk: { bars: 3.2, brush: 2.8, threads: 1.2, pillars: 0.35, orbits: 0.5, strata: 0.4, horizon: 0.35, ribbons: 0.2 },
+  "post-punk": { bars: 2.5, brush: 1.8, pillars: 1.6, threads: 1.2, orbits: 1, strata: 0.6, horizon: 0.5, ribbons: 0.3 },
   electronic: { orbits: 2.5, bars: 2, threads: 1.2, ribbons: 1, horizon: 0.9, pillars: 0.8, strata: 0.4, brush: 0.2 },
   "hip-hop": { bars: 2.5, pillars: 2, orbits: 1, threads: 0.8, horizon: 0.6, ribbons: 0.5, brush: 0.5, strata: 0.4 },
   rnb: { ribbons: 2.5, orbits: 2, horizon: 1.5, threads: 0.8, brush: 0.6, pillars: 0.5, strata: 0.4, bars: 0.4 },
@@ -76,6 +78,24 @@ const FORM_WEIGHTS_BY_GENRE: Record<string, Partial<Record<FormId, number>>> = {
   ambient: { strata: 2.5, orbits: 2, horizon: 1.5, ribbons: 1.2, threads: 0.8, brush: 0.6, pillars: 0.6, bars: 0.1 },
   pop: { horizon: 2.5, ribbons: 2, orbits: 1.4, threads: 0.9, bars: 0.8, strata: 0.7, brush: 0.5, pillars: 0.5 },
 };
+
+/** Round 18: a ballad (抒情／情歌) is a wide, slow picture — a sun over the horizon, layered ridges. */
+const BALLAD_FORMS: Partial<Record<FormId, number>> = { horizon: 3.2, strata: 2.8, ribbons: 1.2, threads: 0.4, orbits: 0.6, brush: 0.6, pillars: 0.3, bars: 0.15 };
+const BALLAD_RE = /ballad|抒情|情歌|慢歌/i;
+
+const SHOUT_RE = /hardcore|screamo|grindcore|shout|吶喊|嘶吼/i;
+/** What a hardcore / shouted song adds to the brush (a punk song prints bars; a shout song tears one stroke). */
+export const SHOUT_BRUSH = 2.5;
+
+/** The genre evidence calls the song hardcore / screamed (post-hardcore, screamo, 嘶吼…). */
+export function isShout(findings: Findings): boolean {
+  return findings.genres.some((g) => g.evidence.some((e) => SHOUT_RE.test(e)));
+}
+
+/** The song's genre evidence calls it a ballad (a pop or R&B song tagged ballad / 抒情). */
+export function isBallad(findings: Findings): boolean {
+  return findings.genres.some((g) => g.evidence.some((e) => BALLAD_RE.test(e)));
+}
 
 /** Forms an imagery family calls for (most typical first) when the lexicon entry names none. */
 const FORMS_BY_IMAGERY: Record<string, FormId[]> = {
@@ -145,29 +165,37 @@ export const IMAGERY_SECOND = 1.5;
 export interface FormWeightOptions {
   /** the song has lyrics (false: an instrumental) */
   lyrics?: boolean;
-  /** the library's most recent forms (most recent first): the latest weigh RECENT_FORM_FACTORS, a repeat RECENT_REPEAT_FACTOR more */
+  /**
+   * the library's most recent forms (most recent first): a form the last RECENT_WINDOW songs wore
+   * weighs RECENT_USE_FACTORS by its count, the very latest RECENT_LATEST_FACTOR more
+   */
   recentForms?: readonly string[];
 }
 
-/** How much the forms the library's last songs wear are weighed down, by recency (a nudge, never a ban). */
-export const RECENT_FORM_FACTORS = [0.55, 0.55, 0.8, 0.8] as const;
-/** …and once more when a form was worn twice among the last five songs. */
-export const RECENT_REPEAT_FACTOR = 0.5;
+/** The latest song's form weighs this much more on top of its count (never the same picture twice in a row). */
+export const RECENT_LATEST_FACTOR = 0.6;
+/** Round 18: how much an image adds to a form the genre itself barely wears (the genre's weight below 1, square-rooted, floored here). */
+export const IMAGERY_GENRE_FLOOR = 0.4;
 
 /** Weights over the forms for a song (exported for the tests and the stage lab). */
 export function formWeights(findings: Findings, opts: FormWeightOptions = {}): Record<FormId, number> {
   const w = Object.fromEntries(FORM_IDS.map((f) => [f, 1])) as Record<FormId, number>;
-  const genre = findings.genre ? FORM_WEIGHTS_BY_GENRE[findings.genre.id] : null;
+  const genre = findings.genre ? (isBallad(findings) ? BALLAD_FORMS : FORM_WEIGHTS_BY_GENRE[findings.genre.id]) : null;
   if (genre) for (const f of FORM_IDS) w[f] = genre[f] ?? 0.3;
+  // an image pulls less towards a form the genre itself rarely wears (a wall in a punk song is torn
+  // print, not a monument; rain in a ballad is a sky, not threads)
+  const fit = (f: FormId) => (genre ? Math.max(IMAGERY_GENRE_FLOOR, Math.min(1, Math.sqrt(genre[f] ?? 0.3))) : 1);
   // the imagery families, by their share of the strongest
   const top = findings.imagery.slice(0, 4);
   const max = top[0]?.weight || 1;
   for (const h of top) {
     const share = Math.min(1, h.weight / max);
     const forms = (h.family.forms?.filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f)) ?? []).concat(FORMS_BY_IMAGERY[h.family.id] ?? []);
-    if (forms[0]) w[forms[0]] += IMAGERY_LEAD * share;
-    if (forms[1]) w[forms[1]] += IMAGERY_SECOND * share;
+    if (forms[0]) w[forms[0]] += IMAGERY_LEAD * share * fit(forms[0]);
+    if (forms[1]) w[forms[1]] += IMAGERY_SECOND * share * fit(forms[1]);
   }
+  // round 18: a hardcore / shouted song is one hard brush stroke across the wall
+  if (isShout(findings)) w.brush += SHOUT_BRUSH;
   // the energy shape
   const a = findings.audio;
   if (a.arousal > 0.62) {
@@ -196,12 +224,11 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.orbits += 0.3;
     w.bars *= 0.6;
   }
-  const recent = (opts.recentForms ?? []).slice(0, 5).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
-  recent.forEach((f, i) => {
-    if (i < RECENT_FORM_FACTORS.length) w[f] *= RECENT_FORM_FACTORS[i];
-  });
-  for (const f of new Set(recent)) if (recent.filter((x) => x === f).length >= 2) w[f] *= RECENT_REPEAT_FACTOR;
-  for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.05, w[f]) * 1000) / 1000;
+  // round 18: what the library's last songs wore, by count (one use a nudge, two nearly a ban)
+  const recent = (opts.recentForms ?? []).slice(0, RECENT_WINDOW).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
+  for (const f of new Set(recent)) w[f] *= RECENT_USE_FACTORS[Math.min(2, recent.filter((x) => x === f).length)];
+  if (recent[0]) w[recent[0]] *= RECENT_LATEST_FACTOR;
+  for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.02, w[f]) * 1000) / 1000;
   return w;
 }
 
@@ -238,8 +265,11 @@ const SURFACE_BY_IMAGERY: Record<string, Partial<Record<TextureId, number>>> = {
   dark: { film: 1.3 },
 };
 
-/** Texture weights the song suggests (the composer multiplies the voice's surfaces by these). */
-export function surfaceWeights(findings: Findings): Partial<Record<TextureId, number>> {
+/**
+ * Texture weights the song suggests (the composer multiplies the voice's surfaces by these); round 18:
+ * a surface the library's last songs were printed on weighs RECENT_USE_FACTORS by its count.
+ */
+export function surfaceWeights(findings: Findings, looks?: readonly RecentLook[]): Partial<Record<TextureId, number>> {
   const w: Partial<Record<TextureId, number>> = Object.fromEntries(TEXTURE_IDS.map((t) => [t, 1]));
   const g = findings.genre ? SURFACE_BY_GENRE[findings.genre.id] : null;
   if (g) for (const [t, k] of Object.entries(g) as Array<[TextureId, number]>) w[t] = (w[t] ?? 1) * k;
@@ -250,6 +280,13 @@ export function surfaceWeights(findings: Findings): Partial<Record<TextureId, nu
     if (!sw) continue;
     const share = Math.min(1, h.weight / max);
     for (const [t, k] of Object.entries(sw) as Array<[TextureId, number]>) w[t] = (w[t] ?? 1) * (1 + (k - 1) * share);
+  }
+  // (the composer draws the texture at random by weight, so a surface worn twice is left out
+  // altogether while another one is still fresh)
+  if (looks?.length) {
+    const worn = (t: TextureId) => recentUses(looks, "texture", t) >= 2;
+    const fresh = TEXTURE_IDS.some((t) => !worn(t));
+    for (const t of TEXTURE_IDS) w[t] = fresh && worn(t) ? 0 : (w[t] ?? 1) * recentFactor(looks, "texture", t);
   }
   return w;
 }
@@ -299,7 +336,7 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
     forms: sceneForms(f, wopts),
     weights: formWeights(f, wopts),
     avoid: bandPairs(req),
-    surface: surfaceWeights(f),
+    surface: surfaceWeights(f, req.recentLooks),
     motionBias: motionBias(f),
     lyrics,
     sections: plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy })),
