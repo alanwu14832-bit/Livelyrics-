@@ -9,7 +9,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Banner, Button, EmptyState, Kbd, Tag, Tooltip, cx } from "@/components/ui";
 import { estimatedCount } from "@/lib/lyrics/lrc";
-import { CrosshairIcon, MusicNotesIcon, PencilSimpleIcon } from "@/components/ui/Icon";
+import { TIMING_CHANGE_TITLE, timingChangeDetail, timingChanged } from "@/lib/lyrics/timing-change";
+import { CrosshairIcon, MusicNotesIcon, PencilSimpleIcon, SparkleIcon } from "@/components/ui/Icon";
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import type { ConsoleController } from "@/lib/console/controller";
 import { selectLineIndex, useStageValue } from "@/lib/console/hooks";
@@ -128,6 +129,7 @@ function LyricsListImpl({
 }) {
   const lines = useMemo(() => project.lyrics?.lines ?? [], [project.lyrics]);
   const plan = project.plan;
+  const [redesigning, setRedesigning] = useState(false);
   const groups = useMemo(() => buildGroups(project), [project]);
   const lineDesigns = useMemo(() => {
     const map = new Map<string, LineDesign>();
@@ -296,6 +298,31 @@ function LyricsListImpl({
             actions={
               <Button size="sm" variant="tinted" href={editHref} transitionTypes={["push"]} onClick={leave}>
                 去對時
+              </Button>
+            }
+          />
+        </div>
+      )}
+
+      {plan && timingChanged(project.timingChange) && (
+        <div className="shrink-0 px-3 pb-2" data-testid="timing-changed">
+          <Banner
+            tone="warning"
+            title={TIMING_CHANGE_TITLE}
+            description={timingChangeDetail(project.timingChange)}
+            actions={
+              <Button
+                size="sm"
+                variant="tinted"
+                icon={SparkleIcon}
+                disabled={redesigning}
+                onClick={() => {
+                  // round 19 (M6): the console's own re-design (no instruction): new sections from the new timing
+                  setRedesigning(true);
+                  void controller.redesign("").finally(() => setRedesigning(false));
+                }}
+              >
+                {redesigning ? "重新設計中…" : "重新設計"}
               </Button>
             }
           />

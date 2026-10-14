@@ -653,6 +653,8 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
       return {
         apply: (p) => {
           p.plan = checked.data;
+          // round 19 (M6): the new plan follows the current lyric timing
+          delete p.timingChange;
           // who made it: Claude, or the offline designer (following 免費研究's findings when there are some)
           const at = new Date().toISOString();
           p.planSource = madeBy ? { engine: "claude", model: madeBy, at } : { engine: p.research?.engine === "free" ? "free" : "offline", at };

@@ -1760,6 +1760,38 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   (a sliced band broke its neighbours' plate), and the contrast target rises by up to 35 % under an RGB
   split / glitch.
 
+### Round 19: real songs, real structure
+
+- **Section labels follow the singing** (`designer/structure.ts analyzeStructure`, which every designer path
+  labels sections with): the audio spans are split where the lines switch between repeated and unique runs
+  (`splitByRuns`, a one-line flip does not count), a sung span over `MAX_CHORUS_SECONDS` (45 s) is cut at a
+  lyric boundary (`capLong`; a chorus still longer is relabelled verse), and the time before the first sung
+  line (≥ 3 s, snapped to a beat) is its own intro (`splitIntro`) unless the 人聲 curve says the voice is
+  already in (mean ≥ 0.4 and ≥ 0.8 × the 20 s after it). An intro needs no line and a low curve
+  (`quietVoice`); the first section is never a chorus when its first line is only estimated (`openTimed`:
+  a real or 「AI 自動對時」 start). **Absolute energy floor**: `SongStructure.flat` when the loudest section
+  is less than `RISE_MIN` (0.12) above the median section or no section's waveform peaks (90th percentile)
+  reach `LOUD_PEAK_FLOOR` (≈ −30 dBFS); then energy alone makes no chorus / solo, `audio-mood` reports no
+  `peakAt` and no 爆發釋放, the concept has no two-peaks / slow-build skeleton and no 「最高點」.
+- **Near silence** (`src/lib/silence.ts isNearlySilent`: ≥ 85 % of the analysis's absolute waveform peaks under
+  0.004 ≈ RMS −60 dBFS; works on analyses from any round): `SongStructure.silent` — one quiet section with
+  every line; `designSong` does not call Claude (offline, one picture); the concept, designer notes and the
+  research briefs say 「這個音檔幾乎沒有聲音」; the process page shows the same banner as soon as the analysis says so.
+- **M6 — timing moved since the design** (`src/lib/lyrics/timing-change.ts`, `Project.timingChange`): every
+  lyrics PATCH on a project with a plan measures the line starts against the timing the plan was designed
+  with (`baseline`; for a plan from before round 19 the lyrics before that save), matched by text in order,
+  so inserted / removed lines are not moves. `lines` > 0 (a start moved by more than 2 s, or got its first
+  time) makes the lyric editor and the console's 歌詞 pane show 「歌詞時間改了，建議重新設計段落與提示」 with
+  重新設計 (editor: the process page's design run; console: `controller.redesign("")`). Any new plan (the
+  design step, claude.ai import, 採用這個方向) clears it; `storage.ts` keeps it.
+- **Evaluation** (local only, `designer/structure-eval.test.ts`, same data and env as the timing eval, plus
+  `LIVELYRICS_STRUCTURE_EVAL_ASR=<whisper transcripts>`; report `scratch/round19/structure-eval.md`): the
+  reference intro ends at the first sung line, paragraphs are the lyrics file's blank-line blocks, a chorus
+  is a paragraph whose normalised text repeats (Dice ≥ 0.8). Held-out, timed lyrics: intro-end error
+  5.0 → 0.3 s, chorus precision 63 → 73 %, recall 91 → 96 %, songs with a chorus over 45 s 55 → 0 %;
+  「AI 自動對時」: 7.4 → 0.6 s, 65 → 76 %, 89 → 94 %; estimated (upload) lyrics: first section a wrong chorus
+  20 → 0 %, precision 58 → 66 %. Eval I/O shared with the timing eval lives in `src/lib/lyrics/eval-io.ts`.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

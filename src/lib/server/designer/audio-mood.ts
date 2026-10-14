@@ -91,13 +91,15 @@ export function analyzeAudioMood(analysis: AudioAnalysis | null, st: SongStructu
   // in between, or without a tempo, the combined arousal
   const driving = bpm >= 105 ? energy >= 0.35 : bpm > 0 && bpm < 90 ? energy >= 0.7 : arousal >= 0.5;
   let quadrant: MoodQuadrant;
-  if (contrast >= 0.4 && peak >= 0.75) quadrant = "release";
+  // round 19: a song whose level never rises (st.flat) has no explosion to release
+  if (contrast >= 0.4 && peak >= 0.75 && !st.flat) quadrant = "release";
   else if (driving) quadrant = light < 0.5 ? "cold-drive" : "warm-groove";
   else quadrant = light < 0.5 ? "dark-slow" : "gentle-float";
   const shape = shapeOf(energies);
   let peakAt: number | null = null;
   let best = -1;
   for (const s of st.sections) {
+    if (st.flat) break; // no section is the 最高點 of a song that never rises
     if (s.energy > best) {
       best = s.energy;
       peakAt = s.start;

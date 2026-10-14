@@ -25,6 +25,7 @@ import type {
 import { formatTimeShort } from "@/lib/timeline";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { ensureContrast } from "./color";
+import { SILENT_DETAIL, SILENT_TITLE } from "@/lib/silence";
 import { buildConcept, chooseSkeleton, conceptKeywords, conceptMotifs, makeTitle, SHORT_SONG_SECONDS, type ConceptContext } from "./concept";
 import { capCues, suggestCues } from "./cues";
 import { analyzeFindings, type DesignHints, type Findings } from "./findings";
@@ -650,11 +651,12 @@ function arcDescription(st: SongStructure): string {
     const prev = st.sections[i - 1];
     const t = formatTimeShort(s.start);
     if (i === 0) parts.push(`${t} ${SECTION_KIND_LABELS[s.kind]}（能量 ${s.energy.toFixed(2)}）`);
-    else if (s === peak) parts.push(`${t} 最高點（${s.energy.toFixed(2)}）`);
+    else if (s === peak && !st.flat) parts.push(`${t} 最高點（${s.energy.toFixed(2)}）`);
     else if (prev && s.energy - prev.energy >= 0.25) parts.push(`${t} 衝上${SECTION_KIND_LABELS[s.kind]}（${s.energy.toFixed(2)}）`);
     else if (prev && prev.energy - s.energy >= 0.25) parts.push(`${t} 回落（${s.energy.toFixed(2)}）`);
   });
   const end = st.sections[st.sections.length - 1];
+  if (st.flat) parts.push("音量一路差不多，沒有真正的高潮");
   parts.push(`${formatTimeShort(end.end)} 結束`);
   return parts.join(" → ");
 }
@@ -663,9 +665,11 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
   const choruses = sections.filter((s) => s.kind === "chorus");
   const hidden = sections.filter((s) => s.lyricStyle === "hidden").map((s) => s.label);
   const verse = sections.find((s) => s.kind === "verse");
-  const short = ctx.st.duration < SHORT_SONG_SECONDS;
+  const silent = ctx.st.silent;
+  const short = ctx.st.duration < SHORT_SONG_SECONDS || silent;
   const lines = [
-    ...(short ? ["## 音檔太短，分析不可靠", `這段音檔只有 ${Math.round(ctx.st.duration)} 秒：速度、段落與能量都讀不準，所以只設計一個安靜的單一畫面，不閃、不切。上傳完整的音檔後再重新設計。`, ""] : []),
+    ...(silent ? [`## ${SILENT_TITLE}`, SILENT_DETAIL, ""] : []),
+    ...(short && !silent ? ["## 音檔太短，分析不可靠", `這段音檔只有 ${Math.round(ctx.st.duration)} 秒：速度、段落與能量都讀不準，所以只設計一個安靜的單一畫面，不閃、不切。上傳完整的音檔後再重新設計。`, ""] : []),
     "## 敘事弧線",
     short
       ? `整段用主視覺「${title}」一個畫面撐住，沒有段落變化。`
@@ -688,7 +692,9 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
               ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}」`).join("、")}，歌詞放大成畫面的主角，重複的句子沿用同一個構圖讓觀眾跟唱。`
               : `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
             : short
-              ? "- 音檔太短，沒有段落可言：歌詞小而安靜地出現。"
+              ? silent
+                ? "- 音檔幾乎沒有聲音，沒有段落可言：歌詞小而安靜地出現。"
+                : "- 音檔太短，沒有段落可言：歌詞小而安靜地出現。"
               : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
           hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
         ]),
@@ -767,7 +773,7 @@ export interface OfflineContext {
 
 /** A clip too short to analyse becomes one section (its lines, its mean energy): nothing to cue, nothing to escalate. */
 function collapseShort(st: SongStructure): SongStructure {
-  if (!(st.duration < SHORT_SONG_SECONDS) || st.sections.length <= 1) return st;
+  if (!(st.duration < SHORT_SONG_SECONDS || st.silent) || st.sections.length <= 1) return st;
   const lineIds = st.sections.flatMap((s) => s.lineIds);
   const energy = st.sections.reduce((a, s) => a + s.energy, 0) / st.sections.length;
   const density = st.sections.reduce((a, s) => a + s.density, 0) / st.sections.length;
@@ -933,7 +939,11 @@ export function offlineResearch(input: DesignerInput, reason?: string): Research
 
   const brief = [
     `> **離線模式**：${reason ?? "沒有 Anthropic API 金鑰"}，以下是依音訊分析與歌詞自動推論的啟發式簡報，**沒有經過網路研究**，請把它當成起點而不是結論。`,
-    ...(st.duration < SHORT_SONG_SECONDS ? [`> **音檔太短，分析不可靠**：只有 ${Math.round(st.duration)} 秒，請上傳完整的音檔再重新設計。`] : []),
+    ...(st.silent
+      ? [`> **${SILENT_TITLE}**：${SILENT_DETAIL}`]
+      : st.duration < SHORT_SONG_SECONDS
+        ? [`> **音檔太短，分析不可靠**：只有 ${Math.round(st.duration)} 秒，請上傳完整的音檔再重新設計。`]
+        : []),
     "",
     "## 樂團視覺識別",
     `- 無法在離線模式查證 **${artist}** 的專輯封面、MV、logo 與過往舞台設計。`,

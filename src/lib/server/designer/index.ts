@@ -29,6 +29,7 @@ import { describeError } from "./messages";
 import { backupModelName, withRetries, type RetryOptions } from "./retry";
 import { hasApiKey, storedApiKey } from "@/lib/server/api-key";
 import { normalizePlan } from "./normalize";
+import { isNearlySilent, SILENT_TITLE } from "@/lib/silence";
 import { offlineDesign } from "./offline";
 import { freeResearch, type FreeResearchOptions } from "./free-research";
 import type { FetchLike } from "@/lib/server/research/http";
@@ -253,6 +254,11 @@ export async function designSong(
   const d = resolveDeps(deps);
   const req: DesignRequest = input;
 
+  if (isNearlySilent(req.analysis)) {
+    // round 19: nothing to hear, nothing for Claude to design to — one quiet picture, no invented sections
+    cbs.onLog(`${SILENT_TITLE}：不分段、不設高潮，只設計一個安靜的單一畫面。`);
+    return ensureSceneProgram(req, offlinePath(req, cbs, false));
+  }
   if (!d.configured) {
     cbs.onLog(
       `${d.optedOut ? "這次不呼叫 Claude API" : "沒有 Anthropic API 金鑰"}，使用離線設計師：依免費研究的發現（曲風的視覺語法、歌詞意象與情緒、音訊情緒）、段落結構與能量產生方案。`,

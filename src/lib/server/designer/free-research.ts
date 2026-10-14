@@ -22,6 +22,7 @@ import { chooseVoice } from "./type-design";
 import { VOICES } from "@/lib/type/vocab";
 import { analyzeStructure, type SongStructure } from "./structure";
 import { MOOD_VOCABULARY } from "./lexicon/moods";
+import { SILENT_DETAIL, SILENT_TITLE } from "@/lib/silence";
 import { SHORT_SONG_SECONDS } from "./concept";
 import type { DesignerCallbacks, DesignerInput } from "./types";
 
@@ -157,7 +158,8 @@ export function freeBrief(input: DesignerInput, f: Findings, st: SongStructure, 
   const short = st.duration > 0 && st.duration < SHORT_SONG_SECONDS;
   const head = [
     `> **${FREE_RESEARCH_LABEL}**：${opts.reason ? `${opts.reason}，改用免費研究。` : ""}這份簡報沒有使用 Claude：公開資料來自 MusicBrainz 與維基百科${info ? `（${sourcesStatus(info)}）` : ""}，其餘是 Livelyrics 在本機分析歌詞與音訊的結果。請把它當成起點，演出前和樂團確認。`,
-    ...(short ? ["", `> **音檔太短，分析不可靠**：這段音檔只有 ${Math.round(st.duration)} 秒，速度、段落與能量的讀法都不能信；設計只給一個安靜的單一畫面，請上傳完整的音檔再重新設計。`] : []),
+    ...(st.silent ? ["", `> **${SILENT_TITLE}**：${SILENT_DETAIL}`] : []),
+    ...(short && !st.silent ? ["", `> **音檔太短，分析不可靠**：這段音檔只有 ${Math.round(st.duration)} 秒，速度、段落與能量的讀法都不能信；設計只給一個安靜的單一畫面，請上傳完整的音檔再重新設計。`] : []),
   ];
 
   // ## 樂團視覺識別

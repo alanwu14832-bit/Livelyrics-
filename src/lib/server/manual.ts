@@ -58,6 +58,7 @@ export async function manualApplyForProject(id: string, input: { target: ManualT
       else delete p.previousPlan;
       // 專屬畫面: the song keeps its program (a Claude one adapts to the pasted sections), else the composer's
       p.plan = ensureSceneProgram({ ...req, previous: p.plan }, plan);
+      delete p.timingChange;
       p.planSource = { engine: "manual-claude", at: now };
       // the pasted plan replaces an adopted direction
       for (const d of p.directions?.directions ?? []) if (d.status === "selected") d.status = "proposed";

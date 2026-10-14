@@ -64,7 +64,7 @@ export function chooseSkeleton(c: ConceptContext): SkeletonId {
   const f = c.findings;
   const g = f.genre;
   const st = c.structure;
-  if (st.duration < SHORT_SONG_SECONDS) return "fragment";
+  if (st.duration < SHORT_SONG_SECONDS || st.silent) return "fragment";
   if (!c.hasLyrics) return "instrumental";
   const hook = hookInfo(st);
   const emotion = f.lyrics.emotion.label;
@@ -74,8 +74,9 @@ export function chooseSkeleton(c: ConceptContext): SkeletonId {
   if (quiet || (CALM_EMOTIONS.has(emotion) && (!g || g.motion === "soft" || g.id === "pop" || g.id === "rnb"))) return "ballad";
   if ((g && STORY_GENRES.has(g.id)) || f.lyrics.pov.voice === "they" || (f.lyrics.pov.voice === "i-you" && f.lyrics.lineCount >= 10)) return "story";
   if ((g && GROOVE_GENRES.has(g.id)) || f.audio.quadrant === "warm-groove" || c.imagery[0]?.imagery.family.id === "dance") return "groove";
-  if (chorusCount >= 2 && BRIGHT_EMOTIONS.has(emotion) && f.audio.contrast >= 0.4) return "two-peaks";
-  if (f.audio.quadrant === "release" || f.audio.shape === "rising") return "slow-build";
+  // round 19: two climaxes or a build need a level that actually rises
+  if (chorusCount >= 2 && BRIGHT_EMOTIONS.has(emotion) && f.audio.contrast >= 0.4 && !st.flat) return "two-peaks";
+  if ((f.audio.quadrant === "release" || f.audio.shape === "rising") && !st.flat) return "slow-build";
   return "steady";
 }
 
@@ -119,7 +120,8 @@ function paletteSentence(c: ConceptContext, skeleton: SkeletonId, variant: numbe
 /** 約 120 BPM、能量起伏好幾次、最高點在 0:48 — only when the tempo is confident and the song long enough. */
 function arcSentence(c: ConceptContext): string {
   const f = c.findings;
-  if (!(c.bpm > 0) || !(c.bpmConfidence >= CONFIDENT_BPM) || c.structure.duration < ARC_MIN_DURATION) return "";
+  // (round 19: a near-silent file's "tempo" is the noise floor's)
+  if (c.structure.silent || !(c.bpm > 0) || !(c.bpmConfidence >= CONFIDENT_BPM) || c.structure.duration < ARC_MIN_DURATION) return "";
   const peak = f.audio.peakAt != null && f.audio.contrast >= 0.2 ? `，最高點在 ${formatTimeShort(f.audio.peakAt)}` : "";
   return `約 ${c.bpm} BPM，能量${f.audio.shapeLabel}${peak}。`;
 }
@@ -164,9 +166,11 @@ function opening(c: ConceptContext, skeleton: SkeletonId): string {
   const vocab = MOOD_VOCABULARY[f.audio.quadrant];
   switch (skeleton) {
     case "fragment":
+      if (c.structure.silent)
+        return `這個音檔幾乎沒有聲音：${T}只是一個安靜、單一的畫面（${a ? `${quote(a)}的` : ""}${vocab.motifs[0]}），沒有段落、也沒有高潮，等有聲音的音檔上傳後再重新設計。`;
       return `這段音檔只有 ${Math.round(c.structure.duration)} 秒，分析不可靠：${T}只是一個安靜、單一的畫面（${a ? `${quote(a)}的` : ""}${vocab.motifs[0]}），等完整的音檔上傳後再重新設計。`;
     case "instrumental":
-      return `沒有歌詞的歌，畫面就是主唱。${T}把${f.genre ? `${f.genre.label}的${f.genre.motifs[0]}` : vocab.motifs[0]}做成一道會呼吸的光：安靜的段落只剩一條線${peak ? `，${peak} 的最高點才撐滿整面牆` : "，最高點才撐滿整面牆"}。`;
+      return `沒有歌詞的歌，畫面就是主唱。${T}把${f.genre ? `${f.genre.label}的${f.genre.motifs[0]}` : vocab.motifs[0]}做成一道會呼吸的光：安靜的段落只剩一條線${c.structure.flat ? "，整首歌的音量都差不多，光就一直維持同樣的呼吸，不硬造高潮" : peak ? `，${peak} 的最高點才撐滿整面牆` : "，最高點才撐滿整面牆"}。`;
     case "chant": {
       const phrase = singalong(c);
       return `這是一首要全場一起喊的歌。${T}不講故事，只有${phrase ? `一句話：${quote(phrase)}` : "口號"}——${a ? `${quote(a)}是它的質地，` : ""}字比畫面重要，每一次口號都用同一個構圖讓全場認得。`;

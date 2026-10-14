@@ -39,6 +39,7 @@ import {
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { api } from "@/lib/api-client";
 import { normalizeLyrics, toLrc } from "@/lib/lyrics/lrc";
+import { TIMING_CHANGE_TITLE, timingChangeDetail, timingChanged } from "@/lib/lyrics/timing-change";
 import type { AudioAnalysis, Lyrics, Project } from "@/lib/types";
 import { formatRelativeTime } from "@/components/home/relative-time";
 import { LYRICS_SOURCE_LABEL } from "@/components/process/labels";
@@ -925,6 +926,22 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
             </Button>
             <Button variant="quiet" size="icon-sm" aria-label="關閉提示" icon={<XIcon size={16} />} onClick={() => setSavedInfo(null)} />
           </>
+        }
+      />,
+    );
+  }
+  if (project.plan && timingChanged(project.timingChange)) {
+    // round 19 (M6): the plan's sections, cues and type still follow the timing it was designed with
+    banners.push(
+      <Banner
+        key="timing-changed"
+        tone="warning"
+        title={TIMING_CHANGE_TITLE}
+        description={timingChangeDetail(project.timingChange)}
+        actions={
+          <Button variant="tinted" icon={SparkleIcon} href={redesignHref} transitionTypes={["push"]}>
+            重新設計
+          </Button>
         }
       />,
     );

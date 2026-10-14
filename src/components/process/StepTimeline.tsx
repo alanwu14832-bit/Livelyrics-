@@ -9,6 +9,7 @@
 import { useState, type ReactNode } from "react";
 import { Spinner, cx } from "@/components/ui";
 import { WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
+import { isNearlySilent } from "@/lib/silence";
 import { formatTimeShort } from "@/lib/timeline";
 import type { AudioAnalysis } from "@/lib/types";
 import type { StepState, StepStatus } from "./pipeline-state";
@@ -183,9 +184,11 @@ export function StepTimeline({
           draw={false}
           title={STEP_TITLE.analyze}
           detail={
-            analysis
-              ? `${formatTimeShort(analysis.duration)}${analysis.bpm > 0 ? `，${Math.round(analysis.bpm)} BPM` : ""}，${analysis.sections.length} 個段落邊界。上傳時已在瀏覽器完成。`
-              : "沒有音訊分析資料：畫面不會跟著音樂能量變化。"
+            analysis && isNearlySilent(analysis)
+              ? `${formatTimeShort(analysis.duration)}，幾乎沒有聲音：讀不到節拍與段落。上傳時已在瀏覽器完成。`
+              : analysis
+                ? `${formatTimeShort(analysis.duration)}${analysis.bpm > 0 ? `，${Math.round(analysis.bpm)} BPM` : ""}，${analysis.sections.length} 個段落邊界。上傳時已在瀏覽器完成。`
+                : "沒有音訊分析資料：畫面不會跟著音樂能量變化。"
           }
         />
         {ORDER.map((id) => {

@@ -18,15 +18,15 @@
 //    (JSON { name: Partial<AsrAlignParams> }) scores parameter variants on the dev half only (tuning);
 //    LIVELYRICS_TIMING_EVAL_SUBSET (comma-separated stems) reports one named subset as well.
 
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_RATE, analyzeSamples } from "../audio/analysis";
+import { ANALYSIS_RATE } from "../audio/analysis";
 import { downsample, removeDc } from "../audio/resample";
-import { analyzeVocal, sideRateFor, sideSignal } from "../audio/vocal";
+import { analyzeVocal } from "../audio/vocal";
 import type { AudioAnalysis, LyricLine, Lyrics } from "../types";
 import { alignTranscript, applyAnchors, asrLanguage, hasHan, loadHanTables, type AsrAlignParams, type AsrWord, type HanTables } from "./asr-align";
+import { REPO, analyse as analyseCached, analysisCodeKey, monoOf, readWav } from "./eval-io";
 import { distributeLines, normalizeLyrics } from "./lrc";
 import {
   SUMMARY_HEADER,
@@ -111,7 +111,6 @@ describe("timing-eval helpers", () => {
 // ---------------------------------------------------------------------------
 
 const DIR = process.env.LIVELYRICS_TIMING_EVAL_DIR ?? "";
-const REPO = path.resolve(__dirname, "../../..");
 const CACHE = process.env.LIVELYRICS_TIMING_EVAL_CACHE ?? path.join(REPO, "scratch/round14/wav");
 const OUT = process.env.LIVELYRICS_TIMING_EVAL_OUT ?? path.join(REPO, "scratch/round14/timing-eval.md");
 const ONLY = process.env.LIVELYRICS_TIMING_EVAL_ONLY ?? "";
@@ -160,77 +159,6 @@ function whisperTiming(
   const r = alignTranscript({ lines: texts, words: tr.words, han, vocal, fixed, params });
   const { lines } = applyAnchors(input.lines, r.anchors, analysis, duration);
   return { lyrics: normalizeLyrics({ ...input, lines }), anchors: r.anchors.length };
-}
-
-interface Wav {
-  rate: number;
-  left: Float32Array;
-  right: Float32Array | null;
-}
-
-function readWav(file: string): Wav {
-  const buf = fs.readFileSync(file);
-  if (buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") throw new Error(`${file}: not a WAV file`);
-  let pos = 12;
-  let channels = 0;
-  let rate = 0;
-  let bits = 0;
-  while (pos + 8 <= buf.length) {
-    const id = buf.toString("ascii", pos, pos + 4);
-    const size = buf.readUInt32LE(pos + 4);
-    const body = pos + 8;
-    if (id === "fmt ") {
-      channels = buf.readUInt16LE(body + 2);
-      rate = buf.readUInt32LE(body + 4);
-      bits = buf.readUInt16LE(body + 14);
-    } else if (id === "data") {
-      if (bits !== 16 || channels < 1 || channels > 2) throw new Error(`${file}: expected 16-bit mono / stereo PCM`);
-      const n = Math.floor(Math.min(size, buf.length - body) / (2 * channels));
-      const bytes = buf.subarray(body, body + n * 2 * channels);
-      // little-endian hosts only (every machine this runs on); copy when the view would be unaligned
-      const pcm = (bytes.byteOffset & 1) === 0 ? new Int16Array(bytes.buffer, bytes.byteOffset, n * channels) : new Int16Array(Uint8Array.from(bytes).buffer);
-      const left = new Float32Array(n);
-      const right = channels === 2 ? new Float32Array(n) : null;
-      for (let i = 0; i < n; i++) {
-        left[i] = pcm[i * channels] / 32768;
-        if (right) right[i] = pcm[i * 2 + 1] / 32768;
-      }
-      return { rate, left, right };
-    }
-    pos = body + size + (size & 1);
-  }
-  throw new Error(`${file}: no data chunk`);
-}
-
-/** The analysis cache key: the analysis code itself (any change re-analyses every song). */
-function analysisCodeKey(): string {
-  const dir = path.join(REPO, "src/lib/audio");
-  const h = createHash("sha1");
-  for (const f of fs.readdirSync(dir).sort()) {
-    if (f.endsWith(".ts") && !f.endsWith(".test.ts")) h.update(f).update(fs.readFileSync(path.join(dir, f)));
-  }
-  return h.digest("hex").slice(0, 10);
-}
-
-function analyse(stem: string, key: string): { analysis: AudioAnalysis; seconds: number; cached: boolean } {
-  const cacheFile = path.join(CACHE, `${stem}.analysis-${key}.json`);
-  if (fs.existsSync(cacheFile)) return { analysis: JSON.parse(fs.readFileSync(cacheFile, "utf8")) as AudioAnalysis, seconds: 0, cached: true };
-  const wav = readWav(path.join(CACHE, `${stem}.wav`));
-  const mono = monoOf(wav);
-  const t0 = performance.now();
-  // the upload's own path: the mono downmix, and the side signal of a stereo file (analyzeFile)
-  const side = wav.right ? sideSignal(wav.left, wav.right, wav.rate) : null;
-  const analysis = analyzeSamples(mono, wav.rate, { side, sideRate: sideRateFor(wav.rate) });
-  const seconds = (performance.now() - t0) / 1000;
-  fs.writeFileSync(cacheFile, JSON.stringify(analysis));
-  return { analysis, seconds, cached: false };
-}
-
-function monoOf(wav: Wav): Float32Array {
-  const mono = new Float32Array(wav.left.length);
-  if (wav.right) for (let i = 0; i < mono.length; i++) mono[i] = 0.5 * (wav.left[i] + wav.right[i]);
-  else mono.set(wav.left);
-  return mono;
 }
 
 /** The same song's curve without the side signal (what a mono upload gets), reusing its envelopes. */
@@ -335,7 +263,7 @@ describe.skipIf(!ENABLED)("lyric timing evaluation (JamendoLyrics, local only)",
       const ann = parseLineAnnotations(fs.readFileSync(path.join(DIR, "annotations", "lines", `${stem}.csv`), "utf8"));
       const { lines: texts, paragraphStarts } = lyricParagraphs(fs.readFileSync(path.join(DIR, "lyrics", `${stem}.txt`), "utf8"));
       expect(texts.length, stem).toBe(ann.length);
-      const { analysis, seconds } = analyse(stem, key);
+      const { analysis, seconds } = analyseCached(CACHE, stem, key);
       analysisSeconds += seconds;
       const duration = analysis.duration;
       const anchors = new Set(paragraphStarts);

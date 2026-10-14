@@ -33,7 +33,7 @@ import type {
 } from "@/lib/types";
 import type { BandSongSummary } from "@/lib/server/designer/types";
 import { lookOfPlan } from "@/lib/server/designer/recent";
-import type { RecentLook } from "@/lib/types";
+import type { RecentLook, TimingChange, TimingPoint } from "@/lib/types";
 import { THUMB_MAX_CHARS } from "@/lib/types";
 import { docs, files, type DocWrite, type StoredDoc, type StoredFile } from "./store";
 import { StorageError } from "./store/errors";
@@ -243,11 +243,25 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   // phase 5a: the start timecode (old files have none: 01:00:00:00)
   const tcStart = isRecord(raw.timecode) ? coerceTcString(raw.timecode.start) : null;
   if (tcStart) project.timecode = { start: tcStart };
+  // round 19 (M6): lyric timing moved since the design (only meaningful with a plan)
+  const timingChange = project.plan ? coerceTimingChange(raw.timingChange) : null;
+  if (timingChange) project.timingChange = timingChange;
   // the library card's picture (a small key still of some plan)
   if (isRecord(raw.thumb) && typeof raw.thumb.url === "string" && raw.thumb.url.startsWith("data:image/jpeg;base64,") && raw.thumb.url.length <= THUMB_MAX_CHARS && typeof raw.thumb.plan === "string") {
     project.thumb = { url: raw.thumb.url, plan: raw.thumb.plan };
   }
   return project;
+}
+
+function coerceTimingChange(raw: unknown): TimingChange | null {
+  if (!isRecord(raw) || !Array.isArray(raw.baseline)) return null;
+  const lines = typeof raw.lines === "number" && Number.isInteger(raw.lines) && raw.lines > 0 ? raw.lines : 0;
+  const baseline: TimingPoint[] = raw.baseline
+    .filter(isRecord)
+    .slice(0, 5000)
+    .map((p) => ({ key: typeof p.key === "string" ? p.key.slice(0, 2000) : "", start: typeof p.start === "number" && Number.isFinite(p.start) ? p.start : null }));
+  const shift = typeof raw.shift === "number" && Number.isFinite(raw.shift) && raw.shift >= 0 ? raw.shift : 0;
+  return { baseline, lines, shift, at: str(raw.at) };
 }
 
 function fromDoc(doc: StoredDoc): Project {

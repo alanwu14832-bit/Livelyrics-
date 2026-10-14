@@ -18,6 +18,7 @@ import { useServerStatus } from "@/components/home/ServerStatus";
 import { PUSH } from "@/components/home/transitions";
 import { clearLyricsHandoff, readLyricsHandoff } from "@/components/upload/handoff";
 import { estimatedCount } from "@/lib/lyrics/lrc";
+import { isNearlySilent, SILENT_DETAIL, SILENT_TITLE } from "@/lib/silence";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { DirectionsSection } from "@/components/directions/DirectionsPanel";
 import { ManualClaudeSheet } from "@/components/manual/ManualClaudeSheet";
@@ -361,6 +362,8 @@ export function ProcessClient({
   const briefCut = showSummary && project.research?.engine === "claude" ? (project.research.truncated ?? (/（簡報未完成：([^）]+)）/.exec(project.research.brief)?.[1] || null)) : null;
   const songSeconds = project.meta.duration || project.analysis?.duration || 0;
   const shortClip = showSummary && songSeconds > 0 && songSeconds < SHORT_CLIP_SECONDS;
+  // round 19: shown as soon as the analysis says so (while the design runs, too)
+  const silentFile = isNearlySilent(project.analysis);
   // 設計方向 (phase 4): the comparison spans the page once directions exist; before that a compact block in the main column
   const hasDirections = !!project.directions?.directions.length;
   const directions = !running ? (
@@ -468,7 +471,11 @@ export function ProcessClient({
             />
           )}
 
-          {shortClip && (
+          {silentFile && (
+            <Banner tone="warning" title={SILENT_TITLE} description={SILENT_DETAIL} className="max-w-full" />
+          )}
+
+          {shortClip && !silentFile && (
             <Banner
               tone="warning"
               title="音檔太短，分析不可靠"
