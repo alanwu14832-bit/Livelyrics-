@@ -603,8 +603,8 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
 
 /** A line with more CJK characters than this is long (industry practice: ~16 per row, two rows at most). */
 export const LONG_LINE_CJK = 14;
-/** …or more Latin letters than this (about seven words). */
-export const LONG_LINE_LATIN = 40;
+/** …or more Latin letters than this (about ten words; round 20: an ordinary English line is not long). */
+export const LONG_LINE_LATIN = 56;
 
 /** How much text a line carries: CJK characters and Latin letters (spaces and marks not counted). */
 export function lineLoad(units: readonly TextUnit[]): { cjk: number; latin: number } {
@@ -620,7 +620,8 @@ export function lineLoad(units: readonly TextUnit[]): { cjk: number; latin: numb
 /** The line-length policy: a line this long is split into two phrases (`splitLongLine`). */
 export function isLongUnits(units: readonly TextUnit[]): boolean {
   const { cjk, latin } = lineLoad(units);
-  return cjk > LONG_LINE_CJK || latin > LONG_LINE_LATIN || cjk + latin / 2.6 > LONG_LINE_CJK;
+  // a mixed line weighs its Latin letters at LONG_LINE_LATIN / LONG_LINE_CJK to one CJK character
+  return cjk > LONG_LINE_CJK || latin > LONG_LINE_LATIN || cjk + latin / (LONG_LINE_LATIN / LONG_LINE_CJK) > LONG_LINE_CJK;
 }
 
 /** `isLongUnits` on raw text (the lyrics editor's 「這句太長」 flag). */

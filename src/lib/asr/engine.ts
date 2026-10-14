@@ -65,6 +65,7 @@ function webgpuFailedBefore(): boolean {
 }
 
 function rememberWebgpuFailed(): void {
+  detected = Promise.resolve("wasm");
   try {
     window.localStorage.setItem(WEBGPU_FAILED_KEY, "1");
   } catch {
@@ -76,16 +77,45 @@ interface GpuLike {
   requestAdapter(): Promise<{ features: { has(name: string): boolean } } | null>;
 }
 
-/** WebGPU when the browser gives an adapter with shader-f16 (the fp16 encoder), else WebAssembly. */
-export async function detectAsrDevice(): Promise<AsrDevice> {
+/** round 20 (m10): this browser gave no usable adapter before — don't ask again (each ask logs a warning) */
+const WEBGPU_NONE_KEY = "livelyrics:asr:webgpu-none";
+let detected: Promise<AsrDevice> | null = null;
+
+function noAdapterBefore(): boolean {
   try {
-    const gpu = (navigator as Navigator & { gpu?: GpuLike }).gpu;
-    if (!gpu || webgpuFailedBefore()) return "wasm";
-    const adapter = await gpu.requestAdapter();
-    return adapter && adapter.features.has("shader-f16") ? "webgpu" : "wasm";
+    return window.localStorage.getItem(WEBGPU_NONE_KEY) === "1";
   } catch {
-    return "wasm";
+    return false;
   }
+}
+
+function rememberNoAdapter(): void {
+  try {
+    window.localStorage.setItem(WEBGPU_NONE_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * WebGPU when the browser gives an adapter with shader-f16 (the fp16 encoder), else WebAssembly.
+ * Asked once per page (round 20, m10: Chromium logs 「Failed to create WebGPU Context Provider」 on
+ * every requestAdapter() without a GPU) and never again in this browser once it gave none.
+ */
+export function detectAsrDevice(): Promise<AsrDevice> {
+  detected ??= (async (): Promise<AsrDevice> => {
+    try {
+      const gpu = (navigator as Navigator & { gpu?: GpuLike }).gpu;
+      if (!gpu || webgpuFailedBefore() || noAdapterBefore()) return "wasm";
+      const adapter = await gpu.requestAdapter();
+      if (adapter && adapter.features.has("shader-f16")) return "webgpu";
+      rememberNoAdapter();
+      return "wasm";
+    } catch {
+      return "wasm";
+    }
+  })();
+  return detected;
 }
 
 /** navigator.deviceMemory (GB, Chromium only; rounded down by the browser), null when unknown. */

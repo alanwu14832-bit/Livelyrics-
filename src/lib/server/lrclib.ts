@@ -3,6 +3,7 @@
 import type { LyricsSearchResult } from "@/lib/api-client";
 import { parseLrc, parsePlainLyrics } from "@/lib/lyrics/lrc";
 import type { Lyrics, SongMeta } from "@/lib/types";
+import { networkErrorText } from "./net-error";
 
 const API_BASE = "https://lrclib.net/api";
 const USER_AGENT = "Livelyrics/0.1 (+https://github.com/alanwu14832-bit/Livelyrics-)";
@@ -113,8 +114,8 @@ async function requestOnce(pathAndQuery: string, opts: RequestOptions = {}): Pro
   } catch (err) {
     if (opts.signal?.aborted) throw err;
     if (timeout.aborted) throw new LrclibError(`LRCLIB 沒有回應（逾時 ${TIMEOUT_MS / 1000} 秒）`);
-    const cause = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err);
-    throw new LrclibError(`無法連線到 LRCLIB（${cause}）`, true);
+    // round 20 (m3): plain Chinese, never the raw 「connect ECONNREFUSED …」
+    throw new LrclibError(`無法連線到 LRCLIB（${networkErrorText(err)}）`, true);
   }
   if (res.status === 404) {
     await res.body?.cancel().catch(() => {});

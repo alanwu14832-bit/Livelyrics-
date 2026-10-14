@@ -167,6 +167,8 @@ export function LedSimControls({ settings, geometry, onChange, className }: { se
           if (e.detail > 0) e.currentTarget.blur();
         }}
         data-led-sim-toggle=""
+        // round 20: say what it is (the label alone reads as jargon)
+        title="LED 模擬：用 LED 牆的點距與解析度看這個預覽，檢查小字和細線在牆上是否還清楚（只在控制台，不影響投影）"
         className={cx(
           "press-fade inline-flex h-6 items-center gap-1 rounded-pill px-2.5 text-c-footnote font-medium whitespace-nowrap",
           settings.on ? "bg-tint-fill text-on-tint" : "bg-black/60 text-label-2-on-material hover:bg-black/75",

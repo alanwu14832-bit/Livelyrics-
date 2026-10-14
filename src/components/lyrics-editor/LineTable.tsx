@@ -2,7 +2,7 @@
 
 import { memo, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Menu, MenuItem, MenuSeparator, Tag, Tooltip, cx } from "@/components/ui";
-import { ArrowsMergeIcon, CrosshairIcon, DotsThreeIcon, HandTapIcon, MinusIcon, PlayIcon, PlusIcon, ScissorsIcon, TrashIcon, WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
+import { ArrowsMergeIcon, CrosshairIcon, DotsThreeIcon, HandTapIcon, MinusIcon, PlayIcon, PlusIcon, ScissorsIcon, SparkleIcon, TrashIcon, WarningCircleIcon, WarningIcon } from "@/components/ui/Icon";
 import { SOFT_TEXT } from "@/components/ui/Tag";
 import { isLongLine } from "@/lib/type/text";
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
@@ -118,9 +118,10 @@ const LineRow = memo(function LineRow({ line, index, count, current, tapTarget, 
           </Tag>
         )}
         {estimated && line.aligned && (
-          // round 15: 「AI 自動對時」 heard this line here — still a guess, a fainter one
-          <Tag tone="orange" data-estimated data-aligned title="AI 對上的時間（還是估的）：播放檢查，對拍、拖曳標記或輸入時間後就是真的" className="cursor-default opacity-55">
-            估<span className="sr-only">：這行的時間是 AI 對上的，還是估的</span>
+          // round 15: 「AI 自動對時」 heard this line here — still a guess; round 20 (m5): its own 「AI 估」
+          // mark (tint, a sparkle), never mistaken for an ordinary 「估」
+          <Tag tone="tint" icon={SparkleIcon} data-estimated data-aligned title="AI 對上的時間（還是估的）：播放檢查，對拍、拖曳標記或輸入時間後就是真的" className="cursor-default">
+            AI 估<span className="sr-only">：這行的時間是 AI 對上的，還是估的</span>
           </Tag>
         )}
         {outOfOrder && (

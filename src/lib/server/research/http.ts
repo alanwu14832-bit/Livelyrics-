@@ -10,6 +10,8 @@
 // Endpoints can be pointed elsewhere (a mirror, the e2e stub) with LIVELYRICS_MUSICBRAINZ_URL and
 // LIVELYRICS_WIKIPEDIA_URL; LIVELYRICS_FREE_SOURCES=off skips the network lookups altogether.
 
+import { networkErrorText } from "../net-error";
+
 export const RESEARCH_USER_AGENT = "Livelyrics/0.1 (contact: https://github.com/alanwu14832-bit/Livelyrics-)";
 export const REQUEST_TIMEOUT_MS = 6000;
 /** MusicBrainz allows one request per second per client; a little margin. */
@@ -63,14 +65,6 @@ export type JsonResult =
       error: string;
     };
 
-function causeOf(err: unknown): string {
-  if (err instanceof Error) {
-    const cause = err.cause instanceof Error ? err.cause.message : typeof err.cause === "string" ? err.cause : "";
-    return cause || err.message || err.name;
-  }
-  return String(err);
-}
-
 function statusText(status: number): string {
   if (status === 429) return "HTTP 429（請求太頻繁）";
   if (status === 403) return "HTTP 403（被拒絕）";
@@ -95,7 +89,8 @@ export async function getJson(url: string, ctx: RequestContext, headers: Record<
   } catch (err) {
     if (ctx.signal?.aborted) return { ok: false, status: null, error: "已停止（查詢時間用完）" };
     if (timeout.aborted) return { ok: false, status: null, error: `逾時（${Math.round(timeoutMs / 1000)} 秒）` };
-    return { ok: false, status: null, error: `無法連線（${causeOf(err)}）` };
+    // round 20 (m3): plain Chinese, never 「connect ECONNREFUSED 127.0.0.1:…」
+    return { ok: false, status: null, error: `無法連線（${networkErrorText(err)}）` };
   }
   if (!res.ok) {
     // never awaited: under Next's fetch an awaited cancel() can stay pending
@@ -107,7 +102,7 @@ export async function getJson(url: string, ctx: RequestContext, headers: Record<
   } catch (err) {
     if (ctx.signal?.aborted) return { ok: false, status: null, error: "已停止（查詢時間用完）" };
     if (timeout.aborted) return { ok: false, status: null, error: `逾時（${Math.round(timeoutMs / 1000)} 秒）` };
-    return { ok: false, status: res.status, error: `回傳了無法解析的資料（${causeOf(err)}）` };
+    return { ok: false, status: res.status, error: err instanceof SyntaxError ? "回傳了無法解析的資料" : `回傳的資料沒有收完（${networkErrorText(err)}）` };
   }
 }
 

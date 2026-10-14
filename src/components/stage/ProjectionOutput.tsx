@@ -464,6 +464,21 @@ export function ProjectionOutput({ channel, projectId, title }: { channel: strin
         </div>
       )}
 
+      {/* round 20 (m8): a freshly opened / reloaded window with nothing to draw yet shows a quiet boot
+          screen instead of plain black (only while the 「等待控制台連線…」 window lasts: never text on the wall later) */}
+      {!project && status !== "missing" && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 transition-opacity duration-1000"
+          style={{ opacity: hintVisible ? 1 : 0 }}
+          data-boot-screen={hintVisible ? "on" : "off"}
+        >
+          <span className="size-2 animate-pulse rounded-full bg-white/30" />
+          <span className="text-[13px] font-semibold tracking-[0.2em] text-white/30">LIVELYRICS</span>
+          <span className="text-[11px] tracking-wide text-white/25">投影視窗{fixed && status === "loading" ? "載入中" : "已開啟"}</span>
+        </div>
+      )}
+
       <div
         aria-live="polite"
         className="pointer-events-none absolute inset-x-0 bottom-[3vh] flex justify-center transition-opacity duration-1000"

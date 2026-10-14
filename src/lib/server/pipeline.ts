@@ -38,6 +38,8 @@ import { collectForProject } from "./collect-visuals";
 import { findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
 import { collectedSummary } from "@/lib/visuals";
 import { isCloudStorage } from "./store";
+import { isRawNetworkError, networkErrorText } from "./net-error";
+import { keepsWorld } from "./designer/keep-world";
 
 export type PipelineStep = "lyrics" | "research" | "design" | "scene";
 export const ALL_STEPS: readonly PipelineStep[] = ["lyrics", "research", "design", "scene"];
@@ -409,6 +411,8 @@ function finish(run: RunInternal, status: "done" | "error", final: PipelineEvent
 }
 
 function describeError(err: unknown): string {
+  // round 20 (m3): a raw socket error never reaches the process log as 「connect ECONNREFUSED …」
+  if (isRawNetworkError(err)) return `網路連線失敗：${networkErrorText(err)}`;
   if (err instanceof Error) return err.message || err.name;
   return String(err);
 }
@@ -625,6 +629,13 @@ async function runStep(run: RunInternal, step: PipelineStep, project: Project, s
         // a cloud step of a recorded run keeps the run's instruction and arc
         instruction: run.cloud ? run.cloud.instruction : run.request.instruction,
         previous: project.plan,
+        // round 20 (m9): 「重新研究並設計」 without an instruction keeps the current world
+        keepWorld: keepsWorld({
+          research: (run.cloud ? run.cloud.steps : normalizeSteps(run.request.steps)).includes("research"),
+          design: true,
+          instruction: run.cloud ? run.cloud.instruction : run.request.instruction,
+          hasPlan: project.plan != null,
+        }),
         arc: (run.cloud ? run.cloud.arc : run.request.arc) ?? null,
         // the library's other key-visual titles: a new design gets a title of its own
         takenTitles: await listKeyVisualTitles(project.id).catch(() => []),
@@ -682,6 +693,11 @@ async function sceneStep(run: RunInternal, project: Project, signal: AbortSignal
   const designed = steps.includes("design");
   if (!claude && designed && plan.sceneProgram) {
     return { skipped: true, message: `沿用設計步驟的專屬畫面「${plan.sceneProgram.title}」（離線作曲器）` };
+  }
+  // round 20 (m9): a re-research without an instruction kept the world, its written program included
+  const written = plan.sceneProgram && (plan.sceneProgram.engine === "claude" || plan.sceneProgram.engine === "manual");
+  if (written && keepsWorld({ research: steps.includes("research"), design: designed, instruction, hasPlan: true })) {
+    return { skipped: true, message: `保留目前的專屬畫面「${plan.sceneProgram!.title}」（沒有指示，不換世界觀）` };
   }
   const band = await bandContext(project);
   const moodboard = mergedMoodboard({ moodboard: project.moodboard, bandMoodboard: band.bandMoodboard });
