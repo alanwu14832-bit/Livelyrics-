@@ -192,7 +192,8 @@ describe("M5 · lexicon", () => {
       const input = auditInput(auditSong(key));
       return singalongPhrases(input.lyrics.lines, analyzeStructure(input)).map((p) => p.text);
     };
-    expect(phrasesOf("punk")).toEqual(["拆掉這面牆", "讓光進來", "Hey Hey Hey"]);
+    expect(phrasesOf("punk").slice(0, 2)).toEqual(["拆掉這面牆", "讓光進來"]);
+    expect(phrasesOf("punk")).not.toContain("Hey Hey Hey");
     expect(phrasesOf("folk")[0]).toBe("lay me down");
     expect(phrasesOf("citypop")[0]).toBe("Midnight avenida");
     expect(phrasesOf("longlines")).toContain("我們還醒著");

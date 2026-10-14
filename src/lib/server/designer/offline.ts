@@ -23,7 +23,7 @@ import type {
   SectionKind,
 } from "@/lib/types";
 import { formatTimeShort } from "@/lib/timeline";
-import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
+import { FONT_CATALOG, LYRIC_STYLES, SCENES, SECTION_KIND_LABELS } from "./catalog";
 import { ensureContrast } from "./color";
 import { SILENT_DETAIL, SILENT_TITLE } from "@/lib/silence";
 import { buildConcept, chooseSkeleton, conceptKeywords, conceptMotifs, makeTitle, SHORT_SONG_SECONDS, type ConceptContext } from "./concept";
@@ -501,41 +501,111 @@ function transitionBase(s: StructSection, prev: StructSection | undefined): Sect
   return rise >= 0.15 ? "wipe" : "fade";
 }
 
-function rationaleFor(kind: SectionKind, scene: SceneId, style: LyricStyleId, placement: LyricPlacement, energy: number, songHasLyrics: boolean, voice?: VoiceChoice): string {
-  const sc = SCENES[scene].label;
-  // 字體藝術: the lyrics are compositions in the song's voice (the legacy style is only a fallback)
-  const ly = voice ? `${VOICES[voice.voice].short}構圖` : LYRIC_STYLES[style].label;
-  const where = LYRIC_PLACEMENTS_INFO[placement].split("：")[0];
-  const hidden = style === "hidden";
-  // how this section treats lyrics, for sections whose sentence depends on it
-  const lyricClause = !songHasLyrics ? "這首歌沒有歌詞，畫面本身就是主角" : hidden ? "這段不放歌詞" : voice ? `每一句歌詞都是「${ly}」` : `歌詞以「${ly}」放在${where}`;
-  switch (kind) {
+/** A lyric line short enough to quote in a sentence: the first breath of a long line. */
+function clipLine(text: string, max = 10): string {
+  const t = text.trim();
+  if (readingUnits(t) <= max) return t;
+  const first = t.split(/[,，、。！？!?;；]+|(?<=\p{Script=Han})\s+(?=\p{Script=Han})/u).find(Boolean) ?? t;
+  if (readingUnits(first) <= max && readingUnits(first) >= 2) return first;
+  // cut on a word boundary (Intl.Segmenter), never inside 城市
+  const Seg = (Intl as unknown as { Segmenter?: new (l: string, o: { granularity: "word" }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter;
+  let out = "";
+  if (Seg) {
+    for (const { segment } of new Seg("zh-Hant", { granularity: "word" }).segment(first)) {
+      if (readingUnits(out + segment) > max - 1) break;
+      out += segment;
+    }
+  }
+  return `${(out || Array.from(first).slice(0, max - 1).join("")).trim()}…`;
+}
+
+/** A line that is only a chant (Hey Hey Hey, Oh oh) is not the one to quote. */
+const CHANT_ONLY = /^(?:\s*(?:hey|oh+|yeah|woah|whoa|la+|na+|ooh+)[\s!,.]*)+$/i;
+
+const r2e = (x: number) => x.toFixed(2);
+
+/**
+ * Round 20 (M3): why this section looks the way it does, from what the section actually does — its
+ * lines (the first one quoted), the energy move from the previous section, the phrase the crowd sings
+ * in it, whether the chorus repeats or climbs past the previous one, how the song ends. No sentence
+ * shared by every section of every song (「每一句歌詞都是『MV 字卡構圖』」 was).
+ */
+function sectionRationale(ctx: SectionPlanCtx, list: readonly SectionDesign[], i: number): string {
+  const d = list[i];
+  const s = ctx.st.sections[i];
+  const prev = list[i - 1];
+  const next = list[i + 1];
+  const sc = SCENES[d.scene].label;
+  const hidden = d.lyricStyle === "hidden";
+  const sung = ctx.st.lines.length > 0;
+  const ids = new Set(s?.lineIds ?? []);
+  const lines = ctx.st.lines.filter((l) => ids.has(l.id));
+  const n = lines.length;
+  // never quote a chant-only line, nor a line with a dark word (round 17)
+  const quotes = (l: { text: string }) => !CHANT_ONLY.test(l.text) && sensitiveWords(l.text).length === 0;
+  const quotable = lines.find(quotes);
+  const first = quotable ? clipLine(quotable.text) : null;
+  const last = lines[n - 1] && quotes(lines[n - 1]) ? clipLine(lines[n - 1].text) : null;
+  const phrase = ctx.findings.hints.singalong.find((p) => p.lineIds.some((id) => ids.has(id)))?.text ?? null;
+  const dur = Math.max(1, Math.round(d.end - d.start));
+  const delta = prev ? d.energy - prev.energy : 0;
+  const move = !prev ? `能量 ${r2e(d.energy)}` : delta >= 0.15 ? `能量從 ${r2e(prev.energy)} 升到 ${r2e(d.energy)}` : delta <= -0.15 ? `能量從 ${r2e(prev.energy)} 掉到 ${r2e(d.energy)}` : `能量 ${r2e(d.energy)}，和前一段差不多`;
+  const earlier = [...list.slice(0, i)].reverse().find((x) => x.kind === d.kind) ?? null;
+  const image = ctx.imagery[0]?.imagery.name ?? null;
+  const opener = ctx.st.lines.find((l) => l.start != null) ?? ctx.st.lines[0];
+  const firstSung = opener && quotes(opener) ? opener : null;
+  if (!sung) {
+    const big = d.energy >= 0.6;
+    switch (d.kind) {
+      case "intro":
+        return `沒有歌詞的歌從「${sc}」開始，${dur} 秒裡只讓光慢慢出現。`;
+      case "outro":
+        return d.scene === list[0]?.scene ? `回到開場的「${sc}」，光一點一點收回去。` : `「${sc}」在最後 ${dur} 秒慢慢暗下去，畫面退回安靜。`;
+      default:
+        return `${d.label}（${move}）交給「${sc}」：${big ? "光跟著鼓點撐滿整面牆" : "畫面跟著樂手的動態慢慢呼吸"}，沒有歌詞要讓位。`;
+    }
+  }
+  switch (d.kind) {
     case "intro":
-      return `以「${sc}」開場，先讓觀眾認得這首歌的世界；歌詞留白。`;
-    case "chorus":
-      return hidden
-        ? `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，讓光與節拍帶動全場。`
-        : `副歌能量 ${energy.toFixed(2)}，「${sc}」隨大鼓脈動；${lyricClause}，邀請全場合唱。`;
+      if (n) return `一開場就有歌：「${first}」小小地放在「${sc}」上，先不放大。`;
+      return `前奏 ${dur} 秒還沒有人聲：「${sc}」先把${image ? `「${image}」的` : "這首歌的"}世界擺出來${firstSung && next?.kind !== "intro" ? `，等「${clipLine(firstSung.text, 8)}」進來` : ""}。`;
     case "verse":
-      if (hidden) return songHasLyrics ? `主歌以「${sc}」維持中低亮度；${lyricClause}，把焦點留給主唱。` : `主歌以「${sc}」維持中低亮度；${lyricClause}，跟著樂手的動態慢慢呼吸。`;
-      return style === "subtitle"
-        ? `主歌字很密，畫面「${sc}」為主、歌詞退到小字幕，不和主唱搶戲。`
-        : voice
-          ? `主歌以「${sc}」維持中低亮度，${lyricClause}，小而安靜、避開主唱 IMAG。`
-          : `主歌以「${sc}」維持中低亮度，${lyricClause}，避開主唱 IMAG。`;
+      if (hidden) return `${d.label}以「${sc}」壓低亮度（${move}）；這段不放歌詞，把焦點留給主唱。`;
+      if (d.lyricStyle === "subtitle") return `${d.label}字很密（${n} 句），畫面「${sc}」為主、歌詞退到小字幕，不和主唱搶戲。`;
+      if (earlier) {
+        const same = earlier.scene === d.scene;
+        return `${d.label}回到敘事${same ? `，仍是「${sc}」` : `，換成「${sc}」`}：${n} 句${first ? `從「${first}」接下去` : ""}，${d.energy > earlier.energy + 0.05 ? "比上一段主歌亮一點" : "和上一段主歌一樣收著"}。`;
+      }
+      return `${n} 句主歌${first ? `從「${first}」說起` : ""}，「${sc}」壓在${d.energy < 0.45 ? "低" : "中低"}亮度（${move}），字小、放在主唱旁邊，不擋 IMAG。`;
     case "pre-chorus":
-      return hidden ? `導歌用「${sc}」慢慢堆疊張力；${lyricClause}，為副歌蓄勢。` : `導歌用「${sc}」慢慢堆疊張力，歌詞「${ly}」為副歌蓄勢。`;
+      return `導歌 ${n ? `${n} 句` : `${dur} 秒`}把張力往上推（${move}），「${sc}」一層層堆起來${next?.kind === "chorus" ? `，先不放出副歌「${SCENES[next.scene].label}」的顏色` : ""}。`;
+    case "chorus": {
+      const words = hidden ? "這段不放歌詞，讓光與節拍帶動全場" : phrase ? `「${phrase}」放大成畫面的主角，邀請全場合唱` : `${n} 句歌詞${first ? `（從「${first}」起）` : ""}放大成畫面的主角`;
+      const total = list.filter((x) => x.kind === "chorus").length;
+      const ordinal = list.slice(0, i).filter((x) => x.kind === "chorus").length;
+      if (!earlier) return `第一次副歌（${move}）：「${sc}」打開整面牆，${words}。`;
+      const climb = earlier.scene === d.scene ? `仍是「${sc}」，強度從 ${r2e(earlier.sceneParams.intensity)} 推到 ${r2e(d.sceneParams.intensity)}` : `從${earlier.label}的「${SCENES[earlier.scene].label}」換到「${sc}」`;
+      if (ordinal === total - 1) {
+        // only a chorus that really is the loudest is called the top; a last chorus sung softer says so
+        if (d.energy < earlier.energy - 0.1) return `最後一次副歌反而收著（${move}）：「${sc}」放低亮度，${hidden ? "不放歌詞" : phrase ? `「${phrase}」輕輕再唱一次` : "歌詞不再放大"}。`;
+        const top = d.energy >= Math.max(...list.map((x) => x.energy)) - 0.05;
+        return `${top ? "最後一次副歌是全曲的頂點" : "最後一次副歌"}：${climb}，${hidden ? "不放歌詞" : phrase ? `「${phrase}」再放大一次` : "歌詞再放大一次"}。`;
+      }
+      return `${d.label}${climb}，${words}。`;
+    }
     case "bridge":
-      return hidden ? `橋段換一個畫面語彙：「${sc}」；${lyricClause}，製造轉折。` : `橋段換一個畫面語彙：「${sc}」配「${ly}」，製造文學感的轉折。`;
+      return `橋段轉個方向：「${sc}」換掉前面的語彙${hidden || !n ? "，不放歌詞" : `，${n} 句歌詞${first ? `（「${first}」）` : ""}換一種構圖`}，製造轉折。`;
     case "breakdown":
-      return `能量收掉，「${sc}」留白；${hidden ? "不放歌詞" : `歌詞「${ly}」`}，讓舞台燈光說話。`;
+      return `${move}：「${sc}」幾乎只剩留白，${hidden || !n ? "不放歌詞" : `只留 ${n} 句小字${first ? `「${first}」` : ""}`}，讓舞台燈光說話。`;
     case "solo":
     case "interlude":
-      return `器樂段落交給「${sc}」與燈光，歌詞隱藏，畫面隨節拍反應。`;
-    case "outro":
-      return scene === "motif"
-        ? `回到主視覺「${sc}」收尾，與開場呼應；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`
-        : `「${sc}」慢慢暗下去收尾，畫面退回安靜；${hidden ? "歌詞留白" : "最後一句放大淡出"}。`;
+      return `${dur} 秒的${SECTION_KIND_LABELS[d.kind]}交給「${sc}」與燈光，${d.energy >= 0.6 ? "畫面跟著鼓點爆開" : "畫面跟著節拍呼吸"}，歌詞隱藏。`;
+    case "outro": {
+      const words = hidden || !n ? "歌詞留白" : last ? `最後一句「${last}」放大淡出` : "最後一句淡出";
+      if (d.scene === "motif") return `回到主視覺「${sc}」收尾，和開場呼應；${words}。`;
+      if (d.scene === list[0]?.scene) return `回到開場的「${sc}」，首尾呼應；${words}。`;
+      return `「${sc}」在最後 ${dur} 秒慢慢暗下去，${words}${image && (hidden || !last) ? `，只剩「${image}」` : ""}。`;
+    }
   }
 }
 
@@ -553,7 +623,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
   const seen = new Map<SectionKind, number>();
   let prevScene: SceneId | null = null;
   const tempo = ctx.mood.bpm ? clamp(ctx.mood.bpm / 120, 0.7, 1.3) : 1;
-  return st.sections.map((s, i) => {
+  const list: SectionDesign[] = st.sections.map((s, i) => {
     const ordinal = seen.get(s.kind) ?? 0;
     seen.set(s.kind, ordinal + 1);
     const total = counts.get(s.kind) ?? 1;
@@ -591,9 +661,11 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       lyricColor: ensureContrast(palette.lyric, colorway[0], palette.entries.map((p) => p.hex)),
       transitionIn: transitionFor(s, st.sections[i - 1], ctx.findings.hints.motion, ctx.calm),
       media: null,
-      rationale: rationaleFor(s.kind, scene, style, placement, e, ctx.st.lines.length > 0, ctx.voice),
+      rationale: "",
     };
   });
+  // the rationale reads the neighbours (the energy move, the previous chorus, the opening scene)
+  return list.map((d, i) => ({ ...d, rationale: sectionRationale(ctx, list, i) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -661,9 +733,60 @@ function arcDescription(st: SongStructure): string {
   return parts.join(" → ");
 }
 
+/**
+ * Round 20 (M3): the arc in words from the plan itself — the scenes the choruses actually wear (and
+ * whether they really get brighter / faster), the brightest section without a chorus, and how the
+ * song really ends (back to the symbol, back to the opening scene, fading, or cut on a chorus).
+ */
+function arcStory(sections: readonly SectionDesign[], flat: boolean, phrase: string | null, image: string | null, lastLine: string | null): string {
+  const label = (s: SectionDesign) => `${s.label}「${SCENES[s.scene].label}」`;
+  const choruses = sections.filter((s) => s.kind === "chorus");
+  const parts: string[] = [];
+  if (choruses.length >= 2) {
+    const a = choruses[0];
+    const z = choruses[choruses.length - 1];
+    const brighter = z.sceneParams.intensity > a.sceneParams.intensity + 0.01;
+    const faster = z.sceneParams.speed > a.sceneParams.speed + 0.02;
+    const same = choruses.every((c) => c.scene === a.scene);
+    const softer = z.sceneParams.intensity < a.sceneParams.intensity - 0.01;
+    const climb = brighter && faster ? "一次比一次更亮、更快" : brighter ? "一次比一次更亮" : softer ? "最後一次反而收著唱" : "每一次都一樣滿";
+    const sung = phrase ? `，「${phrase}」${softer ? "最後輕輕唱" : "每次都更大"}` : "";
+    parts.push(same ? `${choruses.length} 次副歌都是「${SCENES[a.scene].label}」，${climb}${sung}` : `副歌從${choruses.map(label).join("到")}，${climb}${sung}`);
+  } else if (choruses.length === 1) {
+    const peak = sections.reduce((p, s) => (s.energy > p.energy ? s : p), sections[0]);
+    parts.push(peak === choruses[0] || flat ? `只有一次副歌，${label(choruses[0])}是全曲最亮的一段` : `只有一次副歌（${label(choruses[0])}），最亮的反而是${label(peak)}`);
+  } else if (!flat) {
+    const peak = sections.reduce((p, s) => (s.energy > p.energy ? s : p), sections[0]);
+    parts.push(`沒有重複的副歌，最亮的是${label(peak)}`);
+  } else parts.push("沒有一段特別亮，畫面維持同一種呼吸");
+  const end = sections[sections.length - 1];
+  const open = sections[0];
+  if (end.kind === "outro" || end.energy < 0.4) {
+    if (end.scene === "motif") parts.push(`${end.label}回到主視覺符號收尾`);
+    else if (end !== open && end.scene === open.scene) parts.push(`${end.label}回到開場的「${SCENES[end.scene].label}」，首尾呼應`);
+    else parts.push(`${end.label}讓「${SCENES[end.scene].label}」${lastLine ? `在「${lastLine}」之後` : image ? `帶著「${image}」` : ""}慢慢暗下去`);
+  } else parts.push(`歌停在${label(end)}最滿的時候，最後一拍直接全黑`);
+  return `${parts.join("；")}。`;
+}
+
+/** The song's last line fit to quote (no chant-only line, no dark word), clipped. */
+function lastQuotable(ctx: SectionPlanCtx): string | null {
+  const l = [...ctx.st.lines].reverse().find((x) => !CHANT_ONLY.test(x.text) && sensitiveWords(x.text).length === 0);
+  return l ? clipLine(l.text, 8) : null;
+}
+
+/** 「（從『窗外的雨還在下』開始）」 for the notes' verse row. */
+function verseLead(ctx: SectionPlanCtx, verse: SectionDesign): string {
+  const idx = ctx.st.sections.findIndex((s) => s.start === verse.start);
+  const id = ctx.st.sections[idx]?.lineIds[0];
+  const ids = new Set(ctx.st.sections[idx]?.lineIds ?? (id ? [id] : []));
+  const line = ctx.st.lines.find((l) => ids.has(l.id) && !CHANT_ONLY.test(l.text) && sensitiveWords(l.text).length === 0);
+  return line ? `（從「${clipLine(line.text)}」開始）` : "";
+}
+
 function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: string, typeSystem?: DesignPlan["typeSystem"]): string {
   const choruses = sections.filter((s) => s.kind === "chorus");
-  const hidden = sections.filter((s) => s.lyricStyle === "hidden").map((s) => s.label);
+  const hidden = sections.filter((s) => s.lyricStyle === "hidden");
   const verse = sections.find((s) => s.kind === "verse");
   const silent = ctx.st.silent;
   const short = ctx.st.duration < SHORT_SONG_SECONDS || silent;
@@ -673,7 +796,7 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
     "## 敘事弧線",
     short
       ? `整段用主視覺「${title}」一個畫面撐住，沒有段落變化。`
-      : `以主視覺「${title}」開場建立世界觀，${arcDescription(ctx.st)}。${choruses.length >= 2 ? "畫面隨能量起伏，副歌一次比一次更亮、更快，最後回到主視覺收尾。" : choruses.length === 1 ? "畫面隨能量起伏，副歌是全曲最亮的一段，最後回到主視覺收尾。" : "畫面跟著能量的起伏走，最後回到主視覺收尾。"}`,
+      : `「${title}」從${sections[0].label}的「${SCENES[sections[0].scene].label}」開始：${arcDescription(ctx.st)}。${arcStory(sections, ctx.st.flat, ctx.findings.hints.singalong[0]?.text ?? null, ctx.imagery[0]?.imagery.name ?? null, lastQuotable(ctx))}`,
     "",
     "## 歌詞與動畫",
     ...(ctx.st.lines.length === 0
@@ -684,19 +807,21 @@ function designerNotes(ctx: SectionPlanCtx, sections: SectionDesign[], title: st
       : [
           verse && verse.lyricStyle !== "hidden"
             ? typeSystem
-              ? `- 主歌：歌詞是小而安靜的構圖、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
+              ? `- 主歌${verseLead(ctx, verse)}：歌詞是小而安靜的構圖、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
               : `- 主歌：歌詞「${LYRIC_STYLES[verse.lyricStyle].label}」、畫面「${SCENES[verse.scene].label}」保持低調，把焦點留給主唱。`
             : "- 敘事段落：畫面保持低調，把焦點留給主唱。",
           choruses.length
             ? typeSystem
-              ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}」`).join("、")}，歌詞放大成畫面的主角，重複的句子沿用同一個構圖讓觀眾跟唱。`
+              ? `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${SCENES[c.scene].label}」`).join("、")}，歌詞放大成畫面的主角，${ctx.findings.hints.singalong[0] ? `「${ctx.findings.hints.singalong[0].text}」每次都用同一個構圖` : "重複的句子沿用同一個構圖"}讓觀眾跟唱。`
               : `- 副歌（${choruses.length} 次）：${choruses.map((c) => `${c.label}「${LYRIC_STYLES[c.lyricStyle].label}」`).join("、")}，重複的句子讓觀眾跟唱。`
             : short
               ? silent
                 ? "- 音檔幾乎沒有聲音，沒有段落可言：歌詞小而安靜地出現。"
                 : "- 音檔太短，沒有段落可言：歌詞小而安靜地出現。"
               : "- 沒有偵測到重複的副歌，能量最高的段落以大字呈現。",
-          hidden.length ? `- ${hidden.join("、")}不放歌詞，讓畫面與燈光當主角。` : "- 每段都有歌詞，注意畫面不要過度繁忙。",
+          hidden.length
+            ? `- ${hidden.map((h) => `${h.label}（「${SCENES[h.scene].label}」）`).join("、")}不放歌詞，讓「${title}」的畫面與燈光當主角。`
+            : "- 每段都有歌詞，注意畫面不要過度繁忙。",
         ]),
     "",
     ...(typeSystem ? typeNotes(typeSystem, sections) : []),
@@ -721,7 +846,8 @@ function findingsNotes(ctx: SectionPlanCtx): string[] {
   // an instrumental never hears about choruses and sing-alongs
   if (f.genre) rows.push(`- 曲風「${f.genre.label}」（${f.genres[0].evidence[0] ?? "公開資料"}）：${sung ? f.genre.why : `${f.genre.palette.note}，${f.genre.motifs[0]}。`}`);
   if (f.imagery.length) rows.push(`- 歌詞意象：${f.imagery.slice(0, 3).map((h) => `「${h.family.name}」→ ${h.family.colors}`).join("；")}。`);
-  if (ctx.st.lines.length && f.lyrics.emotion.hits > 0) rows.push(`- 情緒：${f.lyrics.emotion.label}；人稱 ${f.lyrics.pov.label}。`);
+  // round 20: one mood (the lyrics and the audio reconciled; the overruled reading is named, not listed as a second mood)
+  if (ctx.st.lines.length && f.lyrics.emotion.hits > 0) rows.push(`- 情緒：${f.mood.label}（${f.mood.why}）；人稱 ${f.lyrics.pov.label}。`);
   const phrases = f.hints.singalong.filter((p) => !p.chant).map((p) => `「${p.text}」`);
   if (ctx.st.lines.length && phrases.length) rows.push(`- 大合唱重點：${phrases.join("、")}，這幾個字在畫面上加強。`);
   rows.push(`- 音訊情緒：${f.audio.label}（${f.audio.why.split("；")[0]}）。`);
@@ -744,9 +870,14 @@ function findingsCues(cues: CueNote[], sections: readonly SectionDesign[], f: Fi
     return said ? { ...c, detail: `全場會一起唱${said}：${c.detail}`.slice(0, 240) } : c;
   });
   const mentionsSinger = /主唱|口號|跟唱|合唱|歌詞|喊/.test(f.genre?.live ?? "");
-  if (f.genre && f.audio.peakAt != null && st.duration >= SHORT_SONG_SECONDS && (st.lines.length > 0 || !mentionsSinger)) {
-    const time = Math.max(0, Math.round((f.audio.peakAt - 2) * 100) / 100);
-    out.push({ time, title: `${f.genre.label}的現場`, detail: f.genre.live.slice(0, 240), kind: "highlight" });
+  // round 20: the genre's live habit lands one bar before the first chorus (the loudest section without
+  // one), read from this song's structure — not 2 s before the audio's peak, which every song shared
+  const chorus = sections.find((s) => s.kind === "chorus");
+  const anchor = chorus ?? (f.audio.peakAt != null ? sections.find((s) => Math.abs(s.start - (f.audio.peakAt as number)) < 0.6) : undefined);
+  if (f.genre && anchor && st.duration >= SHORT_SONG_SECONDS && (st.lines.length > 0 || !mentionsSinger)) {
+    const bar = f.audio.bpm > 0 ? (4 * 60) / f.audio.bpm : 2;
+    const time = Math.max(0, Math.round((anchor.start - bar) * 100) / 100);
+    out.push({ time, title: `${anchor.label}前：${f.genre.label}的現場`, detail: f.genre.live.slice(0, 240), kind: "highlight" });
   }
   return capCues(out.sort((a, b) => a.time - b.time));
 }
@@ -859,7 +990,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const title = makeTitle(conceptCtx, skeleton, input.takenTitles ?? []);
   conceptCtx.title = title;
   const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...conceptMotifs(findings)].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
-  const moodKeywords = conceptKeywords(findings, imagery);
+  const moodKeywords = conceptKeywords(findings);
   // round 18 (m1): the symbol is drawn from the song's own strongest image when its words name one
   const emblem = imageryEmblem(findings) ?? hints.emblem ?? MOOD_EMBLEM[mood.mood];
   const concept = [

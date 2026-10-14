@@ -46,6 +46,22 @@ export interface DesignHints {
   world: string;
 }
 
+/**
+ * The song's one mood (round 20): the lyric emotion when the words and the sound agree, the audio mood
+ * when they pull apart — the energy decides, so a calm lyric on a track that explodes is never called
+ * 「平靜內斂」 next to 「爆發釋放」.
+ */
+export interface SongMood {
+  label: string;
+  /** 「平靜而內斂」, for 「整首歌…」 */
+  adj: string;
+  /** a quiet song (the energy's verdict) */
+  calm: boolean;
+  source: "lyrics" | "audio";
+  /** 繁中: why this mood (names the overruled reading when the two disagreed) */
+  why: string;
+}
+
 export interface Findings {
   info: PublicInfo | null;
   genres: GenreMatch[];
@@ -53,6 +69,8 @@ export interface Findings {
   genre: GenreRule | null;
   audio: AudioMood;
   lyrics: LyricAnalysis;
+  /** the one mood the words follow (lyrics and audio reconciled by the energy) */
+  mood: SongMood;
   /** image families ranked by weight (count × how visual) */
   imagery: ImageryMatch[];
   hints: DesignHints;
@@ -75,6 +93,28 @@ const EMOTION_ADJ: Record<string, string> = {
   平靜內斂: "平靜而內斂",
   情緒不明顯: "純粹由聲音構成",
 };
+
+const AUDIO_ADJ: Record<AudioMood["quadrant"], string> = {
+  release: "從收著到爆開",
+  "cold-drive": "冷冽地向前推",
+  "warm-groove": "溫暖而有律動",
+  "dark-slow": "陰鬱而緩慢",
+  "gentle-float": "溫柔地漂浮",
+};
+
+const LOUD_QUADRANTS = new Set<AudioMood["quadrant"]>(["release", "cold-drive", "warm-groove"]);
+
+/** One mood for the song: the words when they agree with the sound, else the sound (the energy decides). */
+export function songMood(lyrics: LyricAnalysis, audio: AudioMood): SongMood {
+  const loudSound = LOUD_QUADRANTS.has(audio.quadrant);
+  const named = lyrics.lineCount > 0 && lyrics.emotion.hits > 0 && lyrics.emotion.label !== "情緒不明顯";
+  const fromAudio = (why: string): SongMood => ({ label: audio.label, adj: AUDIO_ADJ[audio.quadrant], calm: !loudSound, source: "audio", why });
+  if (!named) return fromAudio(lyrics.lineCount > 0 ? "歌詞看不出情緒，由音訊決定" : "由音訊決定");
+  const loudWords = lyrics.emotion.arousal >= 0.5;
+  if (loudWords === loudSound)
+    return { label: lyrics.emotion.label, adj: EMOTION_ADJ[lyrics.emotion.label] ?? AUDIO_ADJ[audio.quadrant], calm: !loudSound, source: "lyrics", why: `歌詞和音訊的能量相符` };
+  return fromAudio(`歌詞讀起來${lyrics.emotion.label}，但音訊${audio.label}，以能量為準`);
+}
 
 function hueGap(a: number, b: number): number {
   const d = Math.abs((((a - b) % 360) + 360) % 360);
@@ -172,14 +212,9 @@ export function analyzeFindings(input: DesignerInput, structure?: SongStructure)
   const own = imagery.slice(0, 3).map((h) => h.family.motif);
   const fromGenre = genre?.motifs.slice(0, 2) ?? [];
   const motifs = [own[0], fromGenre[0], own[1], fromGenre[1], own[2]].filter((m): m is string => !!m).filter((m, i, a) => a.indexOf(m) === i).slice(0, 5);
-  const keywords = [
-    ...(lyrics.emotion.label !== "情緒不明顯" ? [lyrics.emotion.label] : []),
-    audio.label,
-    ...imagery.slice(0, 2).map((h) => h.family.name),
-    ...(genre ? [genre.label] : []),
-  ]
-    .filter((k, i, a) => a.indexOf(k) === i && Array.from(k).length <= 12)
-    .slice(0, 6);
+  // round 20: mood words only, one reconciled mood (the images and the genre have rows of their own)
+  const mood = songMood(lyrics, audio);
+  const keywords = [mood.label];
   const motion: MotionEnergy = genre?.motion ?? (audio.quadrant === "dark-slow" || audio.quadrant === "gentle-float" ? "soft" : "medium");
   return {
     info,
@@ -187,6 +222,7 @@ export function analyzeFindings(input: DesignerInput, structure?: SongStructure)
     genre,
     audio,
     lyrics,
+    mood,
     imagery,
     hints: {
       hue,

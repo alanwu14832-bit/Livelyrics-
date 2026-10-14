@@ -69,7 +69,7 @@ describe("free research brief", () => {
     expect(r.brief).toContain("獨立搖滾");
     // MusicBrainz's English area names read in Chinese
     expect(r.brief).toContain("**草東沒有派對**：臺灣臺北的樂團");
-    expect(r.brief).toMatch(/大合唱重點：「Hey」/);
+    expect(r.brief).toMatch(/大合唱重點：「跟著我唱」/);
     // the sources are the public pages it used
     const urls = r.sources.map((s) => s.url);
     expect(urls.some((u) => u.startsWith("https://musicbrainz.org/artist/1636f82a"))).toBe(true);

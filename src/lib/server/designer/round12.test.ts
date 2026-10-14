@@ -190,7 +190,7 @@ describe("M4 · chorus-scene rotation and the outro", () => {
         outro.scene === "motif" || outro.scene === sections[0].scene || outro.scene === lastChorus(s.key).scene || ["gradient", "bokeh", "ink", "nebula", "waves", "particles", "grid"].includes(outro.scene);
       expect(ok, `${s.key}: ${outro.scene}`).toBe(true);
       expect(outro.scene).not.toBe(sections[sections.length - 2].scene);
-      if (outro.scene !== "motif") expect(outro.rationale).toContain("慢慢暗下去");
+      if (outro.scene !== "motif") expect(outro.rationale).toMatch(/慢慢暗下去|回到開場/);
     }
   });
 });
