@@ -770,7 +770,7 @@ export const DirectionDraftSchema = z.object({
           rationale: z.string().describe("為什麼選這組字體（繁體中文，1 句）"),
         }),
         motifs: z.array(z.string()).describe("2–4 個視覺母題（繁體中文短語）"),
-        emblem: z.enum(EMBLEM_STYLES as unknown as [EmblemStyle, ...EmblemStyle[]]).describe("主視覺符號的造型：sun 放射、crystal 晶體、orbit 軌道、wave 波、bloom 花、shard 碎片"),
+        emblem: z.enum(EMBLEM_STYLES as unknown as [EmblemStyle, ...EmblemStyle[]]).describe("主視覺符號的造型：sun 放射、crystal 晶體、orbit 軌道、wave 波、bloom 花、shard 碎片、moon 月、rain 雨、wall 牆、road 路、river 河、lamp 燈、flame 火"),
         scenes: z
           .array(z.object({ kind: SectionKindSchema, scenes: z.array(SceneIdSchema).describe("1–3 個場景，最典型的在前；副歌依序往後推進") }))
           .describe("每種段落的場景家族（至少涵蓋 intro、verse、chorus、bridge、outro）"),

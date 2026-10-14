@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import type { DesignPlan } from "@/lib/types";
 import { FORM_IDS } from "@/lib/stage/program/composer";
 import { analyzeFindings } from "./findings";
-import { freshHue, offlineDesign } from "./offline";
+import { freshHue, imageryEmblem, offlineDesign, symbolOnWall } from "./offline";
+import { EMBLEM_FOR_IMAGERY, generateMotifSvg, sanitizeSvg } from "./svg";
 import { hueFamily, lookOfPlan, paletteFamily, recentFactor, type RecentLook } from "./recent";
 import { formWeights, isBallad, sceneForms } from "./scene-program";
 import { AUDIT_SONGS, auditInput, auditSong } from "./testing/audit-songs";
@@ -87,6 +88,30 @@ describe("round 18 · variety across the library", () => {
         expect(b.params[3]).toBeGreaterThan(a.params[3]);
       }
     }
+  });
+});
+
+describe("round 18 · the 主視覺符號 comes from the song (m1)", () => {
+  it("the symbol is drawn from the strongest image: the night is a crescent, never an atom", () => {
+    expect(generateMotifSvg("x", "orbit").match(/<ellipse/g)?.length).toBe(1);
+    for (const s of AUDIT_SONGS) {
+      const f = analyzeFindings(auditInput(s));
+      const e = imageryEmblem(f);
+      if (f.imagery[0] && EMBLEM_FOR_IMAGERY[f.imagery[0].family.id]) expect(e).toBe(EMBLEM_FOR_IMAGERY[f.imagery[0].family.id]);
+    }
+    const night = { imagery: [{ family: { id: "night", emblem: "orbit" }, weight: 6 }] } as never;
+    expect(imageryEmblem(night)).toBe("moon");
+    for (const style of ["moon", "rain", "wall", "road", "river", "lamp", "flame"] as const) expect(sanitizeSvg(generateMotifSvg("s", style))).toBeTruthy();
+  });
+
+  it("a symbol that says nothing about the song never fills the wall; a band logo replaces it", () => {
+    const plain = { ...auditInput(auditSong("instrumental")) };
+    const f = analyzeFindings(plain);
+    expect(symbolOnWall(f, null, [])).toBe(false);
+    expect(offlineDesign(plain).sections.some((s) => s.scene === "motif")).toBe(false);
+    const strong = auditInput(auditSong("punk"));
+    expect(symbolOnWall(analyzeFindings(strong), null, [])).toBe(true);
+    expect(symbolOnWall(analyzeFindings(strong), null, [{ kind: "logo" }])).toBe(false);
   });
 });
 

@@ -33,7 +33,7 @@ import { sensitiveWords } from "./lyric-analysis";
 import { normalizePlan } from "./normalize";
 import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
-import { generateMotifSvg, hashString, type EmblemStyle } from "./svg";
+import { EMBLEM_FOR_IMAGERY, generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { moodPalette, moodScenes } from "./moodboard";
 import { combinedMood, placeCollected } from "./collected";
 import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./type-design";
@@ -178,6 +178,24 @@ function makeTypography(mood: Mood, seed: number, imagery: ImageryHit[], finding
 
 const MOOD_EMBLEM: Record<MoodClass, EmblemStyle> = { calm: "orbit", warm: "bloom", driving: "wave", explosive: "sun" };
 
+/** Round 18 (m1): the emblem the song's strongest image draws (null when no image leads). */
+export function imageryEmblem(f: Findings): EmblemStyle | null {
+  const top = f.imagery[0];
+  if (!top) return null;
+  return EMBLEM_FOR_IMAGERY[top.family.id] ?? top.family.emblem ?? null;
+}
+
+/**
+ * Round 18 (m1): the 主視覺符號 belongs on the wall (the built-in 「主視覺符號」 scene) only when it
+ * says something about this song — the band's own motifs, or the song's strongest image sung often
+ * enough — and never when the band has a logo (the logo is its symbol, shown as band media). A
+ * generic glyph stays on the key-visual card.
+ */
+export function symbolOnWall(f: Findings, bible: { motifs: readonly string[] } | null, assets: readonly { kind: string }[] | undefined): boolean {
+  if ((assets ?? []).some((a) => a.kind === "logo")) return false;
+  return !!bible?.motifs.length || (f.imagery[0]?.weight ?? 0) >= 4;
+}
+
 const CALM_EMOTIONS = new Set(["平靜內斂", "憂傷低迴"]);
 
 /**
@@ -297,8 +315,10 @@ function chooseScene(s: StructSection, i: number, prev: SceneId | null, ordinal:
 /** A kind's candidates: the bible's order first, then this song's scene family (genre + imagery), without what the genre avoids. */
 function songCandidates(kind: SectionKind, ctx: SectionPlanCtx): SceneId[] {
   const hints = ctx.findings.hints;
-  const list = biasScenes(SCENE_CANDIDATES[kind], ctx.bible).filter((sc) => !hints.avoidScenes.includes(sc));
-  const base = list.length ? list : biasScenes(SCENE_CANDIDATES[kind], ctx.bible);
+  // round 18 (m1): a symbol that says nothing about the song never fills the wall
+  const own = SCENE_CANDIDATES[kind].filter((sc) => ctx.wantsMotif || sc !== "motif");
+  const list = biasScenes(own, ctx.bible).filter((sc) => !hints.avoidScenes.includes(sc) && (ctx.wantsMotif || sc !== "motif"));
+  const base = list.length ? list : biasScenes(own, ctx.bible).filter((sc) => ctx.wantsMotif || sc !== "motif");
   if (ctx.bible?.sceneAffinity.length || !ctx.findings.genre) return base;
   const family = hints.scenes.slice(0, 4);
   return [...base.filter((sc) => family.includes(sc)).sort((a, b) => family.indexOf(a) - family.indexOf(b)), ...base.filter((sc) => !family.includes(sc))];
@@ -798,7 +818,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     calm: isCalmSong(findings),
     climax: "tunnel",
     bandClimax: input.bandSongs?.[0]?.chorusScene ?? null,
-    wantsMotif: !!bible?.motifs.length || (findings.imagery[0]?.weight ?? 0) >= 4,
+    wantsMotif: symbolOnWall(findings, bible, input.assets),
     opening: null,
   };
   ctx.climax = chooseClimax(
@@ -834,7 +854,8 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   conceptCtx.title = title;
   const motifs = [...(bible?.motifs ?? []).slice(0, 3), ...conceptMotifs(findings)].filter((m, i, a) => a.indexOf(m) === i).slice(0, bible?.motifs.length ? 5 : 4);
   const moodKeywords = conceptKeywords(findings, imagery);
-  const emblem = hints.emblem ?? MOOD_EMBLEM[mood.mood];
+  // round 18 (m1): the symbol is drawn from the song's own strongest image when its words name one
+  const emblem = imageryEmblem(findings) ?? hints.emblem ?? MOOD_EMBLEM[mood.mood];
   const concept = [
     buildConcept(conceptCtx, skeleton),
     bible ? `整首歌延續${input.bandName ? `${input.bandName}的` : "樂團"}視覺聖經：同一套色盤、字體與母題，讓它和其他歌活在同一個世界。` : "",
