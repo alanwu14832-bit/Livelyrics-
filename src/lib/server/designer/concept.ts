@@ -64,7 +64,7 @@ export function chooseSkeleton(c: ConceptContext): SkeletonId {
   const f = c.findings;
   const g = f.genre;
   const st = c.structure;
-  if (st.duration < SHORT_SONG_SECONDS) return "fragment";
+  if (st.duration < SHORT_SONG_SECONDS || st.silent) return "fragment";
   if (!c.hasLyrics) return "instrumental";
   const hook = hookInfo(st);
   const emotion = f.lyrics.emotion.label;
@@ -165,6 +165,8 @@ function opening(c: ConceptContext, skeleton: SkeletonId): string {
   const vocab = MOOD_VOCABULARY[f.audio.quadrant];
   switch (skeleton) {
     case "fragment":
+      if (c.structure.silent)
+        return `這個音檔幾乎沒有聲音：${T}只是一個安靜、單一的畫面（${a ? `${quote(a)}的` : ""}${vocab.motifs[0]}），沒有段落、也沒有高潮，等有聲音的音檔上傳後再重新設計。`;
       return `這段音檔只有 ${Math.round(c.structure.duration)} 秒，分析不可靠：${T}只是一個安靜、單一的畫面（${a ? `${quote(a)}的` : ""}${vocab.motifs[0]}），等完整的音檔上傳後再重新設計。`;
     case "instrumental":
       return `沒有歌詞的歌，畫面就是主唱。${T}把${f.genre ? `${f.genre.label}的${f.genre.motifs[0]}` : vocab.motifs[0]}做成一道會呼吸的光：安靜的段落只剩一條線${c.structure.flat ? "，整首歌的音量都差不多，光就一直維持同樣的呼吸，不硬造高潮" : peak ? `，${peak} 的最高點才撐滿整面牆` : "，最高點才撐滿整面牆"}。`;

@@ -4,6 +4,7 @@
 // or an even split without analysis) and a section-kind guess per section.
 
 import { estimatedFlags } from "@/lib/lyrics/lrc";
+import { isNearlySilent } from "@/lib/silence";
 import { lineAnchorTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, Lyrics, SectionKind, SongMeta } from "@/lib/types";
 
@@ -59,6 +60,11 @@ export interface SongStructure {
    * and the designer writes no 最高點 / 爆點 wording.
    */
   flat: boolean;
+  /**
+   * Round 19: the file is (almost) silent (`isNearlySilent`, RMS under about −60 dBFS over most
+   * of it): one quiet section, no invented boundaries, choruses or climaxes.
+   */
+  silent: boolean;
 }
 
 const DEFAULT_DURATION = 180;
@@ -556,6 +562,20 @@ export function analyzeStructure(input: StructureInput): SongStructure {
   });
 
   const hasTiming = lines.some((l) => l.start != null);
+  if (isNearlySilent(input.analysis)) {
+    // round 19: nothing to segment — one quiet section holding every line
+    return {
+      duration,
+      lines: lines.map((l) => ({ ...l, sectionSpread: l.start != null ? 1 : 0 })),
+      sections: [{ start: 0, end: round3(duration), energy: 0.1, kind: lines.length ? "verse" : "intro", lineIds: lines.filter((l) => l.start != null).map((l) => l.id), repeatedRatio: 0, density: 0 }],
+      hookCluster: null,
+      cjk: cjkShare(rawLines.map((l) => l.text)) >= 0.3,
+      meanEnergy: 0.1,
+      source: "even",
+      flat: true,
+      silent: true,
+    };
+  }
   let source: SongStructure["source"];
   let spans: Span[];
   const audio = input.analysis && input.analysis.sections?.length ? audioSpans(input.analysis, duration) : [];
@@ -654,6 +674,7 @@ export function analyzeStructure(input: StructureInput): SongStructure {
     meanEnergy: sections.reduce((a, s) => a + s.energy, 0) / sections.length,
     source,
     flat,
+    silent: false,
   };
 }
 
