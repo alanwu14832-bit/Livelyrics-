@@ -14,14 +14,17 @@ import { analyzeFindings } from "./findings";
 import { chooseClimax, offlineContext, offlineDesign } from "./offline";
 import { bandPairs, ensureSceneProgram, formWeights, motionBias, offlineSceneProgram, programFromDraft, sceneForms, songSeed, surfaceWeights } from "./scene-program";
 import { AUDIT_SONGS, auditInput, auditSong } from "./testing/audit-songs";
+import { lookOfPlan, type RecentLook } from "./recent";
 
-// the seven songs are designed in the audit's order, each seeing the forms the library wore before it
-// (DesignerInput.recentForms, as the pipeline passes them)
+// the seven songs are designed in the audit's order, each seeing the forms and looks the library wore
+// before it (DesignerInput.recentForms / recentLooks, as the pipeline passes them)
 const recent: string[] = [];
+const looks: RecentLook[] = [];
 const plans = new Map(
   AUDIT_SONGS.map((s) => {
-    const plan = offlineDesign({ ...auditInput(s), recentForms: [...recent] });
+    const plan = offlineDesign({ ...auditInput(s), recentForms: [...recent], recentLooks: [...looks] });
     recent.unshift(plan.sceneProgram!.recipe!.split("/")[0]);
+    looks.unshift(lookOfPlan(plan));
     return [s.key, plan] as const;
   }),
 );
@@ -42,9 +45,10 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
 
   it("weights come from the genre family, the imagery families and the energy shape", () => {
     const punk = formWeights(analyzeFindings(auditInput(auditSong("punk"))));
-    // 牆 (14 hits) and the punk family: pillars and bars lead, ribbons stay low
-    expect(punk.pillars).toBeGreaterThan(punk.ribbons * 4);
-    expect(punk.bars).toBeGreaterThan(punk.brush * 4);
+    // round 18: a shout song is printed and torn — bars and the brush lead; 牆 (14 hits) still lifts
+    // the pillars, but less than in a genre that stands monuments; ribbons stay low
+    expect(punk.bars).toBeGreaterThan(punk.pillars);
+    expect(punk.brush).toBeGreaterThan(punk.ribbons * 2);
     const ballad = formWeights(analyzeFindings(auditInput(auditSong("ballad"))));
     // 雨 gives the threads a real chance in a pop ballad
     expect(ballad.threads).toBeGreaterThan(1.5);
@@ -60,18 +64,19 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     expect(formWeights(inst, { lyrics: false }).bars).toBeLessThan(formWeights(inst, { lyrics: true }).bars);
   });
 
-  it("the library's two most recent forms weigh less, a nudge rather than a ban", () => {
+  it("the forms the library's last songs wore weigh less by their count (round 18), the latest once more", () => {
     const f = analyzeFindings(auditInput(auditSong("demo")));
     const base = formWeights(f);
-    const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars", "strata", "ribbons", "pillars"] });
-    expect(nudged.horizon).toBeCloseTo(base.horizon * 0.55, 2);
-    expect(nudged.orbits).toBeCloseTo(base.orbits * 0.55, 2);
-    expect(nudged.bars).toBeCloseTo(base.bars * 0.8, 2);
-    expect(nudged.pillars).toBeCloseTo(base.pillars, 2);
+    const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars", "strata", "ribbons", "pillars", "threads", "brush"] });
+    expect(nudged.horizon).toBeCloseTo(base.horizon * 0.45 * 0.6, 2);
+    expect(nudged.orbits).toBeCloseTo(base.orbits * 0.45, 2);
+    expect(nudged.threads).toBeCloseTo(base.threads * 0.45, 2);
+    // the eighth song back is outside the window
+    expect(nudged.brush).toBeCloseTo(base.brush, 2);
     expect(nudged.horizon).toBeGreaterThan(0);
-    // a form worn twice among the last five takes both recency factors and weighs half again
-    const twice = formWeights(f, { recentForms: ["horizon", "bars", "horizon"] });
-    expect(twice.horizon).toBeCloseTo(base.horizon * 0.55 * 0.8 * 0.5, 2);
+    // a form worn twice among the last seven is nearly banned
+    const twice = formWeights(f, { recentForms: ["bars", "horizon", "strata", "horizon"] });
+    expect(twice.horizon).toBeCloseTo(Math.max(0.02, base.horizon * 0.04), 2);
   });
 
   it("the texture follows the genre's surface and the imagery, the motion the strongest image", () => {

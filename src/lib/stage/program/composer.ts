@@ -736,15 +736,23 @@ function zoneFor(side: "left" | "right" | "wide", kind: SectionKind, r: () => nu
   return { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, w: Math.round(w * 1000) / 1000, h: Math.round(h * 1000) / 1000 };
 }
 
+/** Round 18: how much denser and livelier the last of several choruses is than the first (uParams.y and .w). */
+export const CHORUS_CLIMB = 0.25;
+
 function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => number): SceneProgramSection[] {
   const first: "left" | "right" = r() < 0.5 ? "left" : "right";
   const other = first === "left" ? "right" : "left";
   let verseSide = first;
   const out: SceneProgramSection[] = [];
   let prevKind: SectionKind | null = null;
+  // round 18: the choruses climb — 一次比一次更亮: each one after the first fills in denser and moves
+  // more (up to CHORUS_CLIMB), so the second chorus is never the first one's picture again
+  const choruses = input.sections.filter((s) => s.kind === "chorus").length;
+  let chorusN = 0;
   for (const s of input.sections) {
     const d = KIND_DEFAULTS[s.kind] ?? KIND_DEFAULTS.verse;
     const e = Math.min(1, Math.max(0, s.energy ?? 0.5));
+    const climb = s.kind === "chorus" && choruses > 1 ? 1 + CHORUS_CLIMB * (chorusN++ / (choruses - 1)) : 1;
     // the words change sides when the song turns a page: a verse after a chorus, the pre-chorus, the bridge
     let side: "left" | "right" | "wide";
     if (s.kind === "chorus") side = first;
@@ -753,7 +761,7 @@ function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => nu
       if (s.kind === "verse" && prevKind === "chorus") verseSide = verseSide === first ? other : first;
       side = s.kind === "verse" ? verseSide : first;
     }
-    const params = d.params.map((v, i) => Math.round(Math.min(1, Math.max(0, v * (i === 0 || i === 2 ? 0.75 + 0.5 * e : 1))) * 1000) / 1000);
+    const params = d.params.map((v, i) => Math.round(Math.min(1, Math.max(0, v * (i === 0 || i === 2 ? 0.75 + 0.5 * e : climb))) * 1000) / 1000);
     const relation: TypeRelation = s.kind === "chorus" || s.kind === "solo" ? RELATION_FOR_FORM[choice.form] : choice.form === "horizon" || choice.form === "orbits" ? "plain" : "plain";
     const note =
       s.kind === "chorus"

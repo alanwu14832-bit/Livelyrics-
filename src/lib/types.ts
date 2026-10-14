@@ -652,6 +652,19 @@ export interface ProjectSummary {
   sceneRecipe?: string;
   /** the built-in scene of the plan's last chorus */
   chorusScene?: SceneId;
+  /** round 18: what the plan wears (the next songs weigh these down) */
+  look?: RecentLook;
+}
+
+/** Round 18: a plan's look — program form and texture, type voice, font pair (cjk+latin), palette hue family. */
+export interface RecentLook {
+  form?: string;
+  texture?: string;
+  voice?: string;
+  fonts?: string;
+  palette?: string;
+  /** the built-in scene of the last chorus */
+  climax?: string;
 }
 
 // ---------------------------------------------------------------------------

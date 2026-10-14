@@ -41,6 +41,7 @@ import { MOOD_VOCABULARY } from "./lexicon/moods";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
 import { offlineSceneProgram } from "./scene-program";
+import { hueFamily, recentFactor, recentUses, type RecentLook } from "./recent";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
 
@@ -94,15 +95,34 @@ const MOOD_SCHEMES: Record<MoodClass, [Scheme, Scheme]> = {
 };
 const MOOD_SATURATION: Record<MoodClass, number> = { calm: 0.55, warm: 0.7, driving: 0.85, explosive: 0.95 };
 
-function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverride?: number, mono = false, hints?: DesignHints): Palette {
+/**
+ * Round 18: the song's hue, moved off a family the library's last songs wore twice already — to the
+ * neighbouring family (either side, the less worn first) — so a catalogue of one genre is not three
+ * blue songs. An operator's hue is never moved.
+ */
+export function freshHue(hue: number, looks: readonly RecentLook[] | undefined): number {
+  if (!looks?.length) return hue;
+  const fam = hueFamily(hue);
+  if (recentUses(looks, "palette", fam) < 2) return hue;
+  // the nearest family worn fewer than twice (the less worn neighbour first), else the hue stays
+  const opts = [-60, 60, -120, 120, 180].map((d) => hue + d);
+  const uses = (h: number) => recentUses(looks, "palette", hueFamily(h));
+  const near = [opts.slice(0, 2), opts.slice(2, 4), opts.slice(4)].map((ring) => [...ring].sort((a, b) => uses(a) - uses(b))[0]);
+  const best = near.find((h) => uses(h) < 2) ?? hue;
+  return ((best % 360) + 360) % 360;
+}
+
+function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverride?: number, mono = false, hints?: DesignHints, looks?: readonly RecentLook[]): Palette {
   const top = imagery[0]?.imagery;
   const jitter = ((seed >>> 8) % 21) - 10;
   // the song's strongest image (or its genre's colour tendency) leads; the seed keeps songs apart
   const base = hints?.hue ?? top?.hue ?? null;
-  const hue = hueOverride ?? (base != null ? base + jitter : seed % 360);
+  const own = base != null ? base + jitter : seed % 360;
+  const hue = hueOverride ?? freshHue(own, looks);
+  const shift = hue - own;
   const scheme = hints?.scheme ?? MOOD_SCHEMES[mood.mood][(seed >>> 4) % 2] ?? SCHEMES[0];
   const saturation = mono ? 0 : Math.min(1, MOOD_SATURATION[mood.mood] * (hints ? hints.saturation : (top?.saturation ?? 1)));
-  const jittered = hints?.accentHues && hueOverride == null ? ([hints.accentHues[0] + jitter / 2, hints.accentHues[1] + jitter / 2] as [number, number]) : undefined;
+  const jittered = hints?.accentHues && hueOverride == null ? ([hints.accentHues[0] + jitter / 2 + shift, hints.accentHues[1] + jitter / 2 + shift] as [number, number]) : undefined;
   const entries = buildPalette({ hue, scheme, saturation, brightness: mood.brightness, ...(jittered && !mono ? { hues: jittered } : {}) });
   const at = (i: number) => entries[Math.min(i, entries.length - 1)].hex;
   return { entries, bg: at(0), primary: at(1), accent: at(2), lyric: at(3), highlight: at(4), bg2: at(5) };
@@ -220,6 +240,8 @@ interface SectionPlanCtx {
   wantsMotif: boolean;
   /** the first section's scene once chosen (the outro may return to it) */
   opening: SceneId | null;
+  /** round 18: the previous chorus's scene (the next one climbs past it) */
+  lastChorus?: SceneId | null;
 }
 
 const CLIMAX_SALT = 0xe9b5dba5;
@@ -241,19 +263,24 @@ function unit(seed: number, salt: number): number {
  * allows — the genre's own family first when it names one of them, otherwise by the seed — and
  * never the band's previous song's climax, so the catalogue does not end every song in 隧道.
  */
-export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, chorusCount = 2, salt = CLIMAX_SALT): SceneId {
+export function chooseClimax(ladder: readonly SceneId[], findings: Findings, seed: number, bandClimax: SceneId | null, calm = false, chorusCount = 2, salt = CLIMAX_SALT, looks?: readonly RecentLook[]): SceneId {
   // a calm song never climaxes on a tunnel or on shards: its biggest chorus is still a quiet
   // picture (particles, the grid's horizon, the waves' bands)
   const base = calm ? [...ladder.filter((sc) => sc !== "tunnel" && sc !== "shards"), "waves" as SceneId] : [...ladder];
-  // three or more choruses need room to climb: the climax is then one of the bigger scenes
-  const roomy = chorusCount >= 3 ? base.filter((sc) => rankOf(sc) >= 2) : base;
+  // several choruses need room to climb (round 18: the smallest scene is never the climax of two,
+  // or both choruses showed the same picture); three or more climb to one of the bigger scenes
+  const lowest = Math.min(...base.map(rankOf));
+  // (unless the library's last songs already ended twice on every bigger one)
+  const above = base.filter((sc) => rankOf(sc) > lowest && recentUses(looks, "climax", sc) < 2);
+  const roomy = chorusCount >= 3 ? base.filter((sc) => rankOf(sc) >= 2) : chorusCount === 2 && above.length ? above : base;
   const pool = (roomy.length ? roomy : base).filter((sc) => sc !== bandClimax);
   const list = pool.length ? pool : roomy.length ? roomy : base;
   if (!list.length) return "particles";
   // a weighted draw: the genre's own scenes count three times, the rest once (so a genre leans
   // but does not lock, and the seed spreads a catalogue of one genre over the ladder)
   const preferred = new Set(findings.genre ? findings.hints.scenes.slice(0, 3) : []);
-  const weights = list.map((sc) => (preferred.has(sc) ? 3 : 1));
+  // round 18: a climax the library's last songs ended on weighs RECENT_USE_FACTORS by its count
+  const weights = list.map((sc) => (preferred.has(sc) ? 3 : 1) * (looks?.length ? recentFactor(looks, "climax", sc) : 1));
   const total = weights.reduce((a, b) => a + b, 0);
   let u = unit(seed, salt) * total;
   for (let k = 0; k < list.length; k++) {
@@ -295,10 +322,20 @@ function chooseSceneRaw(s: StructSection, i: number, prev: SceneId | null, ordin
     const genreStart = ctx.findings.genre ? ladder.findIndex((sc) => sc !== climax && ctx.findings.hints.scenes.slice(0, 3).includes(sc)) : -1;
     const base0idx = genreStart >= 0 ? Math.min(genreStart, ladder.length - 2) : ctx.mood.mood === "explosive" ? Math.min(1, ladder.length - 2) : ctx.mood.mood === "calm" ? 0 : (ctx.seed >>> 3) % Math.max(1, ladder.length - 1);
     const base = Math.max(0, Math.min(ladder.length - 1, base0idx));
-    let idx = Math.min(ladder.length - 1, base + ordinal);
-    if (ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65) idx = ladder.length - 1;
-    const pick = ladder[idx];
-    return pick === prev ? ladder[(idx + ladder.length - 1) % ladder.length] : pick;
+    const top = ladder.length - 1;
+    const isLast = ordinal === ctx.chorusCount - 1 && ctx.chorusCount > 1 && e >= 0.65;
+    // round 18: the climax is kept for the last chorus (the ones before stop a rung below it), and
+    // a chorus never wears the previous chorus's scene again (the ladder climbs, it does not stand still)
+    const idx = isLast ? top : Math.min(base + ordinal, ordinal < ctx.chorusCount - 1 && top > 0 ? top - 1 : top);
+    let pick = ladder[idx];
+    if (isLast) {
+      if (pick === prev) pick = ladder[(idx + ladder.length - 1) % ladder.length];
+    } else {
+      const used = new Set([prev, ctx.lastChorus ?? null]);
+      if (used.has(pick)) pick = [...ladder.slice(idx + 1, ordinal < ctx.chorusCount - 1 ? top : undefined), ...ladder.slice(0, idx).reverse()].find((sc) => !used.has(sc)) ?? (pick === prev ? ladder[(idx + ladder.length - 1) % ladder.length] : pick);
+    }
+    ctx.lastChorus = pick;
+    return pick;
   }
   if (s.kind === "breakdown" && e < 0.18 && s.lineIds.length) return "blackout";
   const kindList = cands(s.kind);
@@ -740,7 +777,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const moodboard = combinedMood(input.moodboard, input.collected);
   const collectedColours = (input.collected ?? []).some((c) => c.stats?.palette.length);
   const fromMood = !fromBible && options.hue == null && !options.mono ? moodPalette(moodboard) : null;
-  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono, hints);
+  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono, hints, input.recentLooks);
   let loudestLyricIndex = -1;
   st.sections.forEach((s, i) => {
     if (s.lineIds.length && (loudestLyricIndex < 0 || s.energy > st.sections[loudestLyricIndex].energy)) loudestLyricIndex = i;
@@ -757,7 +794,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     loudestLyricIndex,
     moodScenes: moodScenes(moodboard),
     findings,
-    voice: chooseVoice(findings, st.cjk),
+    voice: chooseVoice(findings, st.cjk, input.recentLooks),
     calm: isCalmSong(findings),
     climax: "tunnel",
     bandClimax: input.bandSongs?.[0]?.chorusScene ?? null,
@@ -771,6 +808,8 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     ctx.bandClimax,
     ctx.calm,
     ctx.chorusCount,
+    CLIMAX_SALT,
+    input.recentLooks,
   );
   // the band's uploads as before; the research's collected material with restraint (one or two sections)
   const collectedIds = new Set((input.collected ?? []).map((c) => c.id));
@@ -831,7 +870,10 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     bandName: input.bandName,
     title: input.meta?.title,
     program: true,
+    recentLooks: input.recentLooks,
   });
+  // round 18: the key visual names the fonts the words are set in (a fresh pair when the library wore this one)
+  const typo = bible || (typeSystem.fonts.cjk === typography.cjkFont && typeSystem.fonts.latin === typography.latinFont) ? typography : { ...typography, cjkFont: typeSystem.fonts.cjk, latinFont: typeSystem.fonts.latin, rationale: `${FONT_CATALOG[typeSystem.fonts.cjk].label}＋${FONT_CATALOG[typeSystem.fonts.latin].label}：${VOICES[typeSystem.voice].label}的字，和片庫最近幾首歌錯開；字重 ${typography.weight} 在 LED 上也清楚。` };
   const plan: DesignPlan = {
     version: 1,
     keyVisual: {
@@ -841,7 +883,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       palette: palette.entries,
       motifs: motifs.length >= 2 ? motifs : [...motifs, ...MOOD_VOCABULARY[findings.audio.quadrant].motifs].filter((m, i, a) => a.indexOf(m) === i).slice(0, 4),
       motifSvg: generateMotifSvg(`${input.meta?.title ?? ""}|${input.meta?.artist ?? ""}`, emblem),
-      typography,
+      typography: typo,
     },
     sections,
     lines,
