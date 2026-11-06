@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Type script · @KT_TITLE@</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23F2643D'/%3E%3Ctext x='16' y='23' font-family='Arial' font-weight='900' font-size='20' text-anchor='middle' fill='%23fff'%3EK%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=Caveat:wght@700&family=Courier+Prime:wght@400;700&family=Roboto+Flex:opsz,slnt,wdth,wght@8..144,-10..0,25..151,100..1000&display=swap" rel="stylesheet" />
+<style>
+  /* The type-script page: Claude's draft of a video's typography, line by line, for the user
+     to preview and change. make-page.mjs fills in the menu, the previews and the data. */
+  :root {
+    --paper: #F4EFE6; --ink: #1E1E24; --muted: #6F6A60; --faint: #D9D2C3; --line: #E6DFD1;
+    --orange: #F2643D; --card: #FFFDF8; --chip: #E9E2D4;
+    --font: Poppins, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); }
+  button, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 130px; }
+
+  /* header */
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 24px; margin: 0; line-height: 1.2; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .mode { display: flex; background: var(--chip); border-radius: 999px; padding: 4px; }
+  .mode button { border: 0; background: transparent; font-size: 14px; font-weight: 600; padding: 7px 16px; border-radius: 999px; color: var(--muted); }
+  .mode button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .linkbtn { border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; padding: 0; }
+
+  /* the player: the whole video, in order */
+  .player { margin-top: 18px; background: var(--card); border-radius: 18px; padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .screen { position: relative; margin: 0 auto; max-width: 100%; background: var(--paper); border-radius: 12px; overflow: hidden; }
+  .screen.dark { background: #16171D; }
+  .screen .box { height: 100%; padding: 0 8%; }
+  .screen-label { position: absolute; left: 14px; top: 10px; z-index: 1; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .screen.dark .screen-label { color: #A9A6B4; }
+  .controls { display: flex; align-items: center; gap: 12px; }
+  .play { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); font-size: 16px; flex-shrink: 0; }
+  .strip { position: relative; flex: 1; display: flex; gap: 3px; height: 44px; min-width: 0; }
+  .blk { position: relative; min-width: 0; border-radius: 8px; background: var(--chip); overflow: hidden; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; white-space: nowrap; border: 2px solid transparent; }
+  .blk.acc { background: var(--orange); color: #fff; }
+  .blk.now { border-color: var(--ink); }
+  .blk span { overflow: hidden; text-overflow: ellipsis; }
+  .playhead { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--ink); border-radius: 2px; pointer-events: none; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  h2 { font-size: 17px; margin: 30px 0 2px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+
+  /* previews (the boxes themselves get KT.BOX_CSS) */
+  .stage { position: relative; height: 96px; border-radius: 10px; background: var(--paper); overflow: hidden; }
+  .stage.dark { background: #16171D; }
+  .stage .box { height: 100%; padding: 0 10px; font-size: 26px; }
+  .static { font-size: 12.5px; color: var(--muted); text-align: center; margin: 0; }
+
+  /* house cards */
+  .houses { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .house { background: var(--card); border: 2px solid transparent; border-radius: 16px; padding: 10px; cursor: pointer; text-align: left; }
+  .house:hover { border-color: var(--faint); }
+  .house.sel { border-color: var(--orange); }
+  .house h3 { font-size: 14px; margin: 8px 2px 0; display: flex; justify-content: space-between; gap: 8px; }
+  .house p { font-size: 12.5px; color: var(--muted); margin: 2px; }
+  .tick { color: var(--orange); font-weight: 800; }
+
+  /* line rows */
+  .rows { display: flex; flex-direction: column; gap: 10px; }
+  .row { background: var(--card); border-radius: 16px; padding: 12px; border: 2px solid transparent; transition: border-color .3s; scroll-margin: 90px 0 120px; }
+  .row.flash { border-color: var(--ink); }
+  .row-main { display: grid; grid-template-columns: 44px minmax(150px, 1fr) minmax(230px, 1.35fr) 150px; gap: 14px; align-items: center; }
+  .num { font-weight: 800; font-size: 15px; line-height: 1.25; }
+  .num small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .txt { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+  .wd { border: 0; background: none; padding: 0 1px; border-radius: 4px; font-size: inherit; line-height: inherit; }
+  .wd:hover { background: #F6E3D2; }
+  .wd.key { color: var(--orange); font-weight: 800; }
+  .txt-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chip { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 6px; max-width: 100%; }
+  .chip.h { background: var(--chip); }
+  .chip.a { background: var(--orange); color: #fff; }
+  .chip.changed::after { content: " · changed"; font-weight: 400; }
+  .swap { border: 2px solid var(--ink); background: transparent; border-radius: 10px; font-weight: 700; font-size: 13px; padding: 7px 10px; width: 100%; }
+  .swap:hover, .swap[aria-expanded="true"] { background: var(--ink); color: var(--paper); }
+  .notebtn { border: 0; background: none; color: var(--muted); font-size: 12px; margin-top: 6px; padding: 0; text-decoration: underline; }
+  .note { width: 100%; margin-top: 10px; font-size: 13px; border: 1px solid var(--faint); border-radius: 10px; padding: 8px 10px; background: #fff; resize: vertical; }
+
+  /* the Swap panel */
+  .drawer { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .dt { font-size: 12px; font-weight: 700; color: var(--muted); margin: 8px 2px; letter-spacing: .6px; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 10px; }
+  .opt { background: var(--paper); border: 2px solid transparent; border-radius: 12px; padding: 6px; cursor: pointer; }
+  .opt:hover { border-color: var(--faint); }
+  .opt.sel { border-color: var(--orange); }
+  .opt .stage { height: 74px; background: #fff; }
+  .opt .stage.dark { background: #16171D; }
+  .opt .box { font-size: 17px; }
+  .opt .name { font-size: 12.5px; font-weight: 700; margin: 6px 2px 0; }
+  .opt .why { font-size: 11.5px; color: var(--muted); margin: 1px 2px 2px; line-height: 1.35; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+  .tag.exit { background: #E3E2EA; color: #4A4A5A; }
+  .fam { margin-top: 4px; }
+  .fam summary { font-size: 13px; font-weight: 700; cursor: pointer; padding: 6px 2px; }
+  .fam summary .c { font-weight: 400; color: var(--muted); }
+  .fam .gloss { font-size: 12px; color: var(--muted); margin: 0 2px 8px; }
+
+  /* footer and the summary sheet */
+  .foot { position: fixed; left: 0; right: 0; bottom: 0; background: var(--ink); color: var(--paper); padding: 12px 20px; display: flex; justify-content: center; gap: 10px 14px; align-items: center; flex-wrap: wrap; z-index: 5; }
+  .foot .sum { font-size: 14px; }
+  .foot .go { background: var(--orange); color: #fff; border: 0; border-radius: 12px; font-weight: 800; padding: 11px 20px; font-size: 15px; }
+  .foot .ghost { background: transparent; color: var(--paper); border: 2px solid #4A4A55; border-radius: 12px; font-weight: 700; padding: 9px 16px; font-size: 14px; }
+  .modal { position: fixed; inset: 0; background: rgba(30,30,36,.45); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
+  .sheet { background: var(--card); border-radius: 18px; padding: 22px; max-width: 560px; width: 100%; max-height: 80vh; overflow: auto; }
+  .sheet h3 { margin: 0 0 6px; }
+  .sheet ol { padding-left: 20px; font-size: 14px; }
+  .sheet li { margin: 4px 0; }
+  .sheet li small { color: var(--muted); }
+  .sheet p { font-size: 14px; }
+  .sheet textarea { width: 100%; height: 180px; font-family: "Courier New", monospace; font-size: 12px; border: 1px solid var(--faint); border-radius: 10px; padding: 8px; }
+  .sheet .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sheet .ok { margin-top: 12px; background: var(--ink); color: var(--paper); border: 0; border-radius: 10px; padding: 9px 16px; font-weight: 700; }
+  .sheet .ok.alt { background: transparent; color: var(--ink); border: 1px solid var(--faint); }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 18px 16px 150px; }
+    .head-right { align-items: flex-start; }
+    .row-main { grid-template-columns: 34px minmax(0, 1fr); }
+    .row-main .pv, .row-main .side { grid-column: 1 / -1; }
+    .foot { padding: 10px 12px; gap: 8px; }
+    .foot .sum { width: 100%; text-align: center; font-size: 13px; }
+    .foot .go { padding: 9px 14px; font-size: 14px; }
+    .foot .ghost { padding: 7px 12px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="title"></h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="head-right">
+      <div class="mode" role="group" aria-label="Which styles Swap offers">
+        <button type="button" data-mode="teaching" aria-pressed="false">Teaching mode</button>
+        <button type="button" data-mode="free" aria-pressed="false">Free rein</button>
+      </div>
+      <button type="button" class="linkbtn" id="reset">Reset to my suggestions</button>
+    </div>
+  </header>
+
+  <div class="player">
+    <div class="screen" id="screen"><div class="screen-label" id="screenLabel"></div></div>
+    <div class="controls">
+      <button type="button" class="play" id="playBtn" aria-label="Pause">❚❚</button>
+      <div class="strip" id="strip"></div>
+    </div>
+    <div class="legend"><span><span class="dot" style="background:var(--chip)"></span>House style</span><span><span class="dot" style="background:var(--orange)"></span>Accent</span><span>Click a block to jump to that line.</span></div>
+  </div>
+
+  <h2>1 · House style</h2>
+  <p class="hint">How every ordinary line appears. I picked three that suit this video. Point at one to play it; click to choose it.</p>
+  <div class="houses" id="houses"></div>
+
+  <h2>2 · Line by line</h2>
+  <p class="hint">Point at a preview to play it. Click any word to make it the key word (accents act on it). <b>Swap</b> shows other styles on that exact line.</p>
+  <div class="rows" id="rows"></div>
+</div>
+
+<div class="foot">
+  <span class="sum" id="summary" aria-live="polite"></span>
+  <button type="button" class="ghost" id="copy">Copy choices</button>
+  <button type="button" class="go" id="approve">Looks good: send to Claude</button>
+</div>
+<div class="modal" id="modal" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div></div>
+
+<script>/*@KT_MENU@*/</script>
+<script>/*@KT_PREVIEWS@*/</script>
+<script>window.TYPE_SCRIPT = /*@KT_DATA@*/null;</script>
+<script>
+(function () {
+  "use strict";
+
+  var DATA = window.TYPE_SCRIPT;
+  var esc = KT.esc;
+  var MENU = {};
+  KT_MENU.forEach(function (m) { MENU[m.id] = m; });
+  var FAMILIES = KT_FAMILIES.slice().sort(function (a, b) { return a.num - b.num; });
+  var STORE = "kt-type-script:" + DATA.title;
+  var PUNCTUATION = /[.,!?;:"'()“”‘’]/g; // the same marks KT.keyMatch ignores (ruling R4)
+  var TOTAL = DATA.lines.reduce(function (a, L) { return Math.max(a, L.t + L.dur); }, 0);
+  var HOUSE_IDS = DATA.houseOptions.map(function (h) { return h.id; });
+
+  /** Which draft this is, so saved choices from an older draft of the same title aren't applied to a new one. */
+  var DRAFT = (function (s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(16);
+  })(JSON.stringify(DATA));
+
+  // ---------------------------------------------------------------- state
+
+  /** Claude's suggestions: what "Reset to my suggestions" goes back to. */
+  function suggested() {
+    return {
+      mode: DATA.mode,
+      house: DATA.house,
+      lines: DATA.lines.map(function (L) { return { style: L.style, key: L.key, note: "" }; }),
+      approved: false,
+    };
+  }
+  var S = suggested();
+  var openLine = -1;       // the line whose Swap panel is open
+  var openFams = {};       // family numbers open in that panel (free rein)
+
+  function validStyle(id) { return id === "house" || Object.prototype.hasOwnProperty.call(MENU, id); }
+
+  /** Restores the choices saved in this browser for this draft, if there are any. */
+  function restore() {
+    var saved;
+    try { saved = JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return; }
+    if (!saved || saved.draft !== DRAFT) return;
+    if (saved.mode === "teaching" || saved.mode === "free") S.mode = saved.mode;
+    if (HOUSE_IDS.indexOf(saved.house) >= 0) S.house = saved.house;
+    (saved.lines || []).forEach(function (l, i) {
+      var L = DATA.lines[i];
+      if (!L || !l || l.text !== L.text) return;
+      if (validStyle(l.style)) S.lines[i].style = l.style;
+      if (typeof l.key === "string") S.lines[i].key = l.key;
+      if (typeof l.note === "string") S.lines[i].note = l.note;
+    });
+    S.approved = saved.approved === true;
+  }
+
+  /** Writes the choices to window.TYPE_SCRIPT_RESULT and to this browser's storage. */
+  function save() {
+    var result = {
+      title: DATA.title,
+      mode: S.mode,
+      house: S.house,
+      lines: DATA.lines.map(function (L, i) {
+        var s = S.lines[i];
+        return { text: L.text, key: s.key, style: s.style, note: s.note };
+      }),
+      approved: S.approved,
+      draft: DRAFT,
+    };
+    window.TYPE_SCRIPT_RESULT = result;
+    try { localStorage.setItem(STORE, JSON.stringify(result)); } catch (e) { /* storage blocked: the page still works */ }
+  }
+
+  /** Applies a change, then saves and redraws. Any change to the video withdraws an earlier "Looks good". */
+  function change(fn, keepApproval) {
+    fn();
+    if (!keepApproval) S.approved = false;
+    save();
+    renderAll();
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  function styleOf(i) { return S.lines[i].style === "house" ? S.house : S.lines[i].style; }
+  function lineFor(i) { return { text: DATA.lines[i].text, key: S.lines[i].key }; }
+  function nameOf(id) { return MENU[id] ? MENU[id].name : id; }
+  function fmt(s) {
+    var tenths = Math.round(s * 10), m = Math.floor(tenths / 600), rest = tenths - m * 600;
+    return m + ":" + String(Math.floor(rest / 10)).padStart(2, "0") + (rest % 10 ? "." + (rest % 10) : "");
+  }
+  function clamp(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+  function changedLine(i) {
+    var o = DATA.lines[i], s = S.lines[i];
+    return o.style !== s.style || o.key !== s.key;
+  }
+  function el(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  }
+  function exitTag(id) { return MENU[id] && MENU[id].exit ? '<span class="tag exit" title="Ends with the words gone">exit</span>' : ""; }
+  /** Calls fn on click, and on Enter or Space for elements that aren't real buttons. */
+  function onPress(node, fn) {
+    node.addEventListener("click", fn);
+    if (node.tagName !== "BUTTON") {
+      node.addEventListener("keydown", function (e) {
+        if (e.target === node && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); fn(e); }
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------- previews
+  // Only the preview being pointed at (or focused) moves; the rest rest on their settled frame.
+
+  var previews = [];
+  var hovered = [];
+
+  /** Settled frame, sized to its box (the previews.js box contract). */
+  function settle(c) {
+    c.box.style.opacity = "";
+    if (!c.live) return;
+    try {
+      c.T.tick(c.box, KT.REST, c.line);
+      KT.fit(c.box);
+      c.T.tick(c.box, KT.REST, c.line);
+    } catch (e) { console.error("preview " + c.id, e); }
+  }
+
+  /** Adds a preview of technique `id` on `line` to `host`; `trigger` is what you point at to play it. */
+  function preview(host, id, line, trigger) {
+    var T = KT_PREVIEWS[id];
+    var stage = el("div", "stage" + (T && T.dark ? " dark" : ""));
+    var box = el("div", "box");
+    box.style.cssText = KT.BOX_CSS;
+    stage.appendChild(box);
+    host.appendChild(stage);
+    var c = { id: id, T: T, box: box, line: line, live: !!(T && !T.static) };
+    try {
+      box.innerHTML = c.live ? T.build(line) : '<p class="static">' + esc(MENU[id] ? MENU[id].look : id) + "</p>";
+    } catch (e) { console.error("preview " + id, e); }
+    settle(c);
+    previews.push(c);
+    trigger = trigger || stage;
+    trigger.addEventListener("mouseenter", function () { play(c); });
+    trigger.addEventListener("mouseleave", function () { if (!trigger.matches(":focus-visible")) stop(c); });
+    trigger.addEventListener("focus", function () { play(c); });
+    trigger.addEventListener("blur", function () { if (!trigger.matches(":hover")) stop(c); });
+    return c;
+  }
+  function play(c) {
+    if (!c.live || hovered.indexOf(c) >= 0) return;
+    c.start = performance.now();
+    hovered.push(c);
+    kick();
+  }
+  function stop(c) {
+    var i = hovered.indexOf(c);
+    if (i < 0) return;
+    hovered.splice(i, 1);
+    settle(c);
+  }
+
+  // ---------------------------------------------------------------- the big player
+
+  var playing = true, playT = 0, lastTs = null, running = false;
+  var screen = { idx: -2, c: null };
+
+  /** Seconds into the line -> preview time: the entrance plays, the settled frame holds,
+      and the preview's last stretch (where exits leave) plays as the line ends. */
+  function previewTime(local, dur) {
+    var tail = KT.LOOP - KT.REST;
+    if (dur < KT.LOOP) return local * KT.LOOP / dur;
+    if (local < KT.REST) return local;
+    if (local > dur - tail) return KT.REST + (local - (dur - tail));
+    return KT.REST;
+  }
+  function lineAt(t) {
+    for (var i = 0; i < DATA.lines.length; i++) if (t >= DATA.lines[i].t && t < DATA.lines[i].t + DATA.lines[i].dur) return i;
+    return -1;
+  }
+  function sizeScreen() {
+    var scr = document.getElementById("screen");
+    var ar = (DATA.aspect || "16:9").split(":").map(Number);
+    scr.style.aspectRatio = ar[0] + " / " + ar[1];
+    scr.style.width = "min(100%, " + Math.round(340 * ar[0] / ar[1]) + "px)";
+  }
+  function showOnScreen(idx) {
+    var scr = document.getElementById("screen");
+    if (screen.c) screen.c.box.remove();
+    screen = { idx: idx, c: null };
+    document.querySelectorAll(".blk").forEach(function (b, i) { b.classList.toggle("now", i === idx); });
+    var label = document.getElementById("screenLabel");
+    scr.classList.remove("dark");
+    if (idx < 0) { label.textContent = ""; return; }
+    var id = styleOf(idx), T = KT_PREVIEWS[id];
+    label.textContent = (idx + 1) + " · " + (S.lines[idx].style === "house" ? "House · " : "Accent · ") + nameOf(id);
+    if (!T || T.static) return;
+    scr.classList.toggle("dark", !!T.dark);
+    var box = el("div", "box");
+    box.style.cssText = KT.BOX_CSS;
+    box.style.fontSize = Math.round(Math.max(16, Math.min(56, scr.clientWidth / 10))) + "px";
+    scr.appendChild(box);
+    var c = { id: id, T: T, box: box, line: lineFor(idx) };
+    try {
+      box.innerHTML = T.build(c.line);
+      T.tick(box, KT.REST, c.line);
+      KT.fit(box);
+    } catch (e) { console.error("player " + id, e); }
+    screen.c = c;
+  }
+  function drawScreen() {
+    var idx = lineAt(playT);
+    if (idx !== screen.idx) showOnScreen(idx);
+    var ph = document.getElementById("playhead");
+    if (ph) ph.style.left = "calc(" + ((playT / TOTAL) * 100).toFixed(3) + "% - 1px)";
+    var c = screen.c;
+    if (!c) return;
+    var L = DATA.lines[idx], local = playT - L.t;
+    try { c.T.tick(c.box, previewTime(local, L.dur), c.line); } catch (e) { console.error("player " + c.id, e); screen.c = null; return; }
+    c.box.style.opacity = String(1 - clamp((local - (L.dur - 0.3)) / 0.3));
+  }
+  function setPlaying(on) {
+    playing = on;
+    var b = document.getElementById("playBtn");
+    b.textContent = on ? "❚❚" : "▶";
+    b.setAttribute("aria-label", on ? "Pause" : "Play");
+    if (on) kick();
+  }
+  function jumpTo(i) {
+    playT = DATA.lines[i].t;
+    showOnScreen(i);
+    drawScreen();
+    setPlaying(true);
+    var row = document.querySelectorAll(".row")[i];
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("flash");
+    setTimeout(function () { row.classList.remove("flash"); }, 1200);
+  }
+
+  /** One animation loop for the player and the pointed-at previews; it stops when nothing moves. */
+  function kick() {
+    if (running) return;
+    running = true;
+    lastTs = null;
+    requestAnimationFrame(frame);
+  }
+  function frame(ts) {
+    if (!playing && !hovered.length) { running = false; return; }
+    var dt = lastTs == null ? 0 : Math.min(0.1, (ts - lastTs) / 1000);
+    lastTs = ts;
+    if (playing && TOTAL > 0) { playT = (playT + dt) % TOTAL; drawScreen(); }
+    hovered.slice().forEach(function (c) {
+      if (!c.box.isConnected) { stop(c); return; }
+      var p = Math.max(0, ((ts - c.start) / 1000) % KT.LOOP);
+      try { c.T.tick(c.box, p, c.line); } catch (e) { console.error("preview " + c.id, e); stop(c); return; }
+      c.box.style.opacity = String(1 - clamp((p - (KT.LOOP - 0.3)) / 0.3));
+    });
+    requestAnimationFrame(frame);
+  }
+
+  // ---------------------------------------------------------------- drawing the page
+
+  function renderHeader() {
+    document.getElementById("title").textContent = "Type script · " + DATA.title;
+    var n = DATA.lines.length;
+    document.getElementById("sub").textContent = n + (n === 1 ? " line" : " lines") + " · " + (DATA.aspect || "16:9") + " · " + fmt(TOTAL) +
+      " · I suggested everything below; change anything. Your choices save as you go.";
+    document.querySelectorAll("[data-mode]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode)); });
+  }
+
+  function renderStrip() {
+    var strip = document.getElementById("strip");
+    strip.innerHTML = "";
+    DATA.lines.forEach(function (L, i) {
+      var acc = S.lines[i].style !== "house";
+      var b = el("button", "blk" + (acc ? " acc" : ""), "<span>" + (i + 1) + (acc ? " · " + esc(nameOf(S.lines[i].style)) : "") + "</span>");
+      b.type = "button";
+      b.style.flex = String(L.dur);
+      b.title = (i + 1) + " · " + fmt(L.t) + " · " + L.text;
+      b.setAttribute("aria-label", "Jump to line " + (i + 1));
+      onPress(b, function () { jumpTo(i); });
+      strip.appendChild(b);
+    });
+    var ph = el("div", "playhead");
+    ph.id = "playhead";
+    strip.appendChild(ph);
+  }
+
+  function renderHouses() {
+    var wrap = document.getElementById("houses");
+    wrap.innerHTML = "";
+    var cards = DATA.houseOptions.map(function (h) {
+      var sel = S.house === h.id;
+      var card = el("div", "house" + (sel ? " sel" : ""), '<div class="hpv"></div><h3>' + esc(nameOf(h.id)) + (sel ? '<span class="tick">✓</span>' : "") + "</h3><p>" +
+        (h.id === DATA.house ? "<b>My pick.</b> " : "") + esc(h.why) + "</p>");
+      card.tabIndex = 0;
+      card.setAttribute("role", "radio");
+      card.setAttribute("aria-checked", String(sel));
+      card.setAttribute("aria-label", "House style: " + nameOf(h.id));
+      wrap.appendChild(card);
+      onPress(card, function () { if (S.house !== h.id) change(function () { S.house = h.id; }); });
+      return card;
+    });
+    // Previews go in once every card is there: the grid only settles each card's width then.
+    cards.forEach(function (card, i) { preview(card.querySelector(".hpv"), DATA.houseOptions[i].id, lineFor(0), card); });
+    wrap.setAttribute("role", "radiogroup");
+    wrap.setAttribute("aria-label", "House style");
+  }
+
+  function textHTML(i) {
+    var words = DATA.lines[i].text.split(/\s+/).filter(Boolean);
+    var key = S.lines[i].key, k = -1;
+    for (var j = 0; j < words.length; j++) if (KT.keyMatch(words[j], key)) { k = j; break; }
+    return words.map(function (w, j) {
+      return '<button type="button" class="wd' + (j === k ? " key" : "") + '" data-w="' + j + '"' + (j === k ? ' aria-pressed="true"' : "") + ">" + esc(w) + "</button>";
+    }).join(" ");
+  }
+
+  function chipHTML(i) {
+    var s = S.lines[i], acc = s.style !== "house";
+    return '<span class="chip ' + (acc ? "a" : "h") + (changedLine(i) ? " changed" : "") + '">' + (acc ? "Accent · " + esc(nameOf(s.style)) : "House") + "</span>";
+  }
+  /** The row's own preview, in its current style. */
+  function rowPreview(row, i) {
+    var pv = row.querySelector(".pv");
+    pv.innerHTML = "";
+    var c = preview(pv, styleOf(i), lineFor(i));
+    c.box.parentNode.tabIndex = 0;
+    c.box.parentNode.setAttribute("aria-label", "Preview of line " + (i + 1) + ": point at it or focus it to play");
+  }
+
+  /** Picks a style in the open Swap panel. The panel stays as it is (rebuilding every open
+      family's previews would be slow); only the marks, the row, the strip and the player change. */
+  function pick(i, id) {
+    var s = S.lines[i];
+    if (s.style === id) return;
+    s.style = id;
+    S.approved = false;
+    save();
+    var row = document.querySelectorAll(".row")[i];
+    row.querySelector(".chip").outerHTML = chipHTML(i);
+    rowPreview(row, i);
+    row.querySelectorAll(".opt").forEach(function (o) {
+      var on = o.dataset.id === id;
+      o.classList.toggle("sel", on);
+      o.setAttribute("aria-checked", String(on));
+    });
+    renderStrip();
+    renderSummary();
+    screen.idx = -2;
+    drawScreen();
+    previews = previews.filter(function (c) { return c.box.isConnected; });
+  }
+
+  function renderRows() {
+    var wrap = document.getElementById("rows");
+    wrap.innerHTML = "";
+    DATA.lines.forEach(function (L, i) {
+      var s = S.lines[i];
+      var row = el("div", "row");
+      row.innerHTML = '<div class="row-main">' +
+        '<div class="num">' + (i + 1) + "<small>" + fmt(L.t) + "</small></div>" +
+        '<div><div class="txt">' + textHTML(i) + "</div>" + (i === 0 ? '<div class="txt-hint">click a word to make it the key word</div>' : "") + "</div>" +
+        '<div class="pv"></div>' +
+        '<div class="side">' + chipHTML(i) +
+        '<button type="button" class="swap" aria-expanded="' + (openLine === i) + '">Swap ▾</button>' +
+        '<button type="button" class="notebtn">' + (s.note ? "edit note" : "+ note for Claude") + "</button></div>" +
+        "</div>" +
+        '<textarea class="note" rows="2" placeholder="e.g. make this one funnier, or slow it down" aria-label="Note for Claude about line ' + (i + 1) + '"' + (s.note ? "" : " hidden") + "></textarea>" +
+        '<div class="drawer"' + (openLine === i ? "" : " hidden") + "></div>";
+      wrap.appendChild(row);
+
+      rowPreview(row, i);
+
+      row.querySelectorAll(".wd").forEach(function (b) {
+        onPress(b, function () {
+          var word = DATA.lines[i].text.split(/\s+/).filter(Boolean)[+b.dataset.w];
+          var bare = word.replace(PUNCTUATION, "");
+          if (!bare) return;
+          change(function () { s.key = KT.keyMatch(word, s.key) ? "" : bare; });
+        });
+      });
+
+      var note = row.querySelector(".note"), noteBtn = row.querySelector(".notebtn");
+      note.value = s.note;
+      onPress(noteBtn, function () { note.hidden = false; note.focus(); });
+      note.addEventListener("input", function () {
+        s.note = note.value;
+        S.approved = false;
+        noteBtn.textContent = s.note ? "edit note" : "+ note for Claude";
+        save();
+        renderSummary();
+      });
+
+      var drawer = row.querySelector(".drawer");
+      onPress(row.querySelector(".swap"), function () {
+        openLine = openLine === i ? -1 : i;
+        openFams = {};
+        renderRows();
+      });
+      if (openLine === i) fillDrawer(drawer, i);
+    });
+    previews = previews.filter(function (c) { return c.box.isConnected; });
+  }
+
+  /** One choice in the Swap panel. */
+  function option(grid, id, i, why) {
+    var s = S.lines[i];
+    var real = id === "house" ? S.house : id;
+    var sel = s.style === id;
+    var o = el("div", "opt" + (sel ? " sel" : ""));
+    o.tabIndex = 0;
+    o.setAttribute("role", "radio");
+    o.setAttribute("aria-checked", String(sel));
+    o.dataset.id = id;
+    grid.appendChild(o);
+    preview(o, real, lineFor(i), o);
+    var name = id === "house" ? "House style · " + esc(nameOf(S.house)) : esc(nameOf(id)) + exitTag(id);
+    o.insertAdjacentHTML("beforeend", '<div class="name">' + name + '</div><div class="why">' + esc(why || (MENU[id] ? MENU[id].reachFor : "")) + "</div>");
+    o.setAttribute("aria-label", id === "house" ? "House style" : nameOf(id));
+    onPress(o, function () { pick(i, id); });
+  }
+
+  function fillDrawer(drawer, i) {
+    var s = S.lines[i], L = DATA.lines[i];
+    var add = function (title) {
+      drawer.appendChild(el("div", "dt", esc(title)));
+      var g = el("div", "opts");
+      g.setAttribute("role", "radiogroup");
+      g.setAttribute("aria-label", title);
+      drawer.appendChild(g);
+      return g;
+    };
+    var top = add("MY SUGGESTIONS FOR THIS LINE");
+    var shown = { house: true };
+    option(top, "house", i, "Keep it calm, like the lines around it.");
+    L.suggest.forEach(function (sg) {
+      if (shown[sg.id]) return;
+      shown[sg.id] = true;
+      option(top, sg.id, i, sg.why);
+    });
+    // A style picked from further down stays in view here.
+    if (!shown[s.style]) { shown[s.style] = true; option(top, s.style, i, "Your pick."); }
+
+    if (S.mode === "teaching") {
+      var rest = KT_MENU.filter(function (m) { return m.teach && !shown[m.id]; });
+      if (rest.length) {
+        var g = add("OTHER ACCENTS THAT SUIT A LESSON");
+        rest.forEach(function (m) { option(g, m.id, i); });
+      }
+      return;
+    }
+    drawer.appendChild(el("div", "dt", "EVERYTHING, BY FAMILY"));
+    FAMILIES.forEach(function (f) {
+      var ids = KT_MENU.filter(function (m) { return m.family === f.num && !shown[m.id]; }).map(function (m) { return m.id; });
+      if (!ids.length) return;
+      var d = el("details", "fam");
+      d.innerHTML = "<summary>" + f.num + " · " + esc(f.name) + ' <span class="c">· ' + ids.length + '</span></summary><p class="gloss">' + esc(f.gloss) + "</p>";
+      var g = el("div", "opts");
+      g.setAttribute("role", "radiogroup");
+      g.setAttribute("aria-label", f.name);
+      d.appendChild(g);
+      drawer.appendChild(d);
+      var fill = function () { if (d.open && !g.children.length) ids.forEach(function (id) { option(g, id, i); }); };
+      d.addEventListener("toggle", function () {
+        if (d.open) openFams[f.num] = true; else delete openFams[f.num];
+        fill();
+      });
+      if (openFams[f.num]) { d.open = true; fill(); }
+    });
+  }
+
+  function changeCount() {
+    var n = S.house !== DATA.house ? 1 : 0;
+    S.lines.forEach(function (s, i) { if (changedLine(i) || s.note) n++; });
+    return n;
+  }
+  function renderSummary() {
+    var accents = S.lines.filter(function (s) { return s.style !== "house"; }).length;
+    var n = changeCount();
+    document.getElementById("summary").textContent = "House: " + nameOf(S.house) + " · " + accents + (accents === 1 ? " accent" : " accents") + " · " +
+      (n ? n + (n === 1 ? " change" : " changes") + " from my suggestion" : "no changes yet");
+  }
+
+  function renderAll() {
+    previews = [];
+    hovered = [];
+    renderHeader();
+    renderHouses();
+    renderRows();
+    renderStrip();
+    renderSummary();
+    screen.idx = -2; // redraw the current line in its (maybe new) style
+    drawScreen();
+    kick();
+  }
+
+  // ---------------------------------------------------------------- copy, send, sheet
+
+  function describe(i) {
+    var s = S.lines[i];
+    return (s.style === "house" ? "House · " + nameOf(S.house) : "Accent · " + nameOf(s.style)) + (s.key ? " · key word: " + s.key : "") + (s.note ? " · note: " + s.note : "");
+  }
+  function choicesText() {
+    return "TYPE SCRIPT: " + DATA.title + "\nMode: " + (S.mode === "teaching" ? "Teaching" : "Free rein") + "\nHouse style: " + nameOf(S.house) + "\n" +
+      DATA.lines.map(function (L, i) { return (i + 1) + '. "' + L.text + '" → ' + describe(i); }).join("\n") +
+      "\n\nAs data:\n" + JSON.stringify(window.TYPE_SCRIPT_RESULT);
+  }
+
+  var lastFocus = null;
+  // buttons (optional): [{ label, action }]. Each one closes the sheet, then runs its action.
+  // The first is the main, focused button. Without buttons the sheet has a single OK.
+  function showSheet(title, html, buttons) {
+    lastFocus = document.activeElement;
+    var sheet = document.getElementById("sheet");
+    sheet.innerHTML = '<h3 id="sheetTitle">' + esc(title) + "</h3>" + html + '<div class="actions"></div>';
+    var row = sheet.querySelector(".actions");
+    (buttons || [{ label: "OK" }]).forEach(function (b, i) {
+      var btn = el("button", i ? "ok alt" : "ok");
+      btn.type = "button";
+      if (!i) btn.id = "sheetOk";
+      btn.textContent = b.label;
+      btn.addEventListener("click", function () { closeSheet(); if (b.action) b.action(); });
+      row.appendChild(btn);
+    });
+    document.getElementById("modal").hidden = false;
+    document.getElementById("sheetOk").focus();
+  }
+  function closeSheet() {
+    document.getElementById("modal").hidden = true;
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  function copyChoices() {
+    var text = choicesText();
+    var show = function (ok) {
+      showSheet(ok ? "Copied" : "Copy these choices",
+        "<p>" + (ok ? "Your choices are on the clipboard. Paste them to Claude if it can't read the page." : "Select all of this (Ctrl+A, Ctrl+C) and paste it to Claude.") + "</p>" +
+        '<textarea readonly aria-label="Your choices">' + esc(text) + "</textarea>");
+      if (!ok) { var t = document.querySelector("#sheet textarea"); t.focus(); t.select(); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { show(true); }, function () { show(false); });
+    else show(false);
+  }
+
+  function approve() {
+    S.approved = true;
+    save();
+    showSheet("Sent: here's what I'll build",
+      "<p>House style: <b>" + esc(nameOf(S.house)) + "</b></p><ol>" +
+      DATA.lines.map(function (L, i) { return "<li>" + esc(L.text) + "<br><small>" + esc(describe(i)) + "</small></li>"; }).join("") +
+      "</ol><p>Go back to the chat and tell me you're done. I'll read these choices from the page.</p>");
+  }
+
+  // ---------------------------------------------------------------- wiring
+
+  document.querySelectorAll("[data-mode]").forEach(function (b) {
+    b.addEventListener("click", function () { if (S.mode !== b.dataset.mode) change(function () { S.mode = b.dataset.mode; }, true); });
+  });
+  document.getElementById("reset").addEventListener("click", function () {
+    var reset = function () { change(function () { S = suggested(); openLine = -1; openFams = {}; }); };
+    if (!changeCount()) { reset(); return; } // changeCount() counts notes too
+    showSheet("Reset to my suggestions?",
+      "<p>This clears your changes and notes, and puts back the house style, styles and key words I suggested.</p>",
+      [{ label: "Keep my changes" }, { label: "Reset", action: reset }]);
+  });
+  document.getElementById("playBtn").addEventListener("click", function () { setPlaying(!playing); });
+  document.getElementById("copy").addEventListener("click", copyChoices);
+  document.getElementById("approve").addEventListener("click", approve);
+  document.getElementById("modal").addEventListener("click", function (e) { if (e.target === e.currentTarget) closeSheet(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !document.getElementById("modal").hidden) closeSheet(); });
+
+  // Re-size every resting preview, and the player, when the window or the fonts change.
+  function refit() {
+    previews.forEach(function (c) { if (c.box.isConnected && hovered.indexOf(c) < 0) settle(c); });
+    screen.idx = -2;
+    drawScreen();
+  }
+  var resizing = null;
+  window.addEventListener("resize", function () { clearTimeout(resizing); resizing = setTimeout(refit, 150); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
+
+  restore();
+  save();
+  sizeScreen();
+  renderAll();
+})();
+</script>
+</body>
+</html>
