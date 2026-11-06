@@ -1851,7 +1851,8 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   character()`) draws it instead of the kind's legacy look: a falling change (≤ −0.12) always dissolves and
   dims, light is added only when the energy rises, the angle follows the primary's hue (mirrored section to
   section), the width the section density, the tint the incoming accent toward the primary (never white).
-  The kind still sets the duration; no full-field flash is added; the LED limiter runs after.
+  The kind still sets the duration; no full-field flash is added; the LED limiter runs after. A `flash`
+  (only possible with LED 安全模式 off) keeps its designed look.
 - **Echo trails** (`scenes/type.ts uEat`): the erosion of accent layers / ornaments is two octaves of value
   noise with a feathered threshold at full resolution (was 16 px hashed blocks: a mosaic behind the echoes).
 - **Phrases stay whole** (`type/text.ts`): no row or long-line cut starts with 上／裡／的／了／著／過 leaning left

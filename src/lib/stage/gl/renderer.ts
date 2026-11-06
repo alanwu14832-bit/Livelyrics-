@@ -1477,8 +1477,10 @@ export class StageRenderer {
     if (acc) gl.uniform3f(acc, req.current.uniforms.accent[0], req.current.uniforms.accent[1], req.current.uniforms.accent[2]);
     const uc = L.get("uClock");
     if (uc) gl.uniform1f(uc, req.clock);
-    // round 22: the song's character (0 = the kind's legacy look)
-    const look = tr.look ?? null;
+    // round 22: the song's character (0 = the kind's legacy look). A `flash` only reaches the
+    // compositor with LED 安全模式 off (safe mode turns it into a fade upstream): it is the designer's
+    // explicit flash, kept as designed
+    const look = tr.kind === "flash" ? null : (tr.look ?? null);
     const set1 = (n: string, v: number) => {
       const l = L.get(n);
       if (l) gl.uniform1f(l, Number.isFinite(v) ? v : 0);
