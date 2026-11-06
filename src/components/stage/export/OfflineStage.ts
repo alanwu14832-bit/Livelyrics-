@@ -21,6 +21,7 @@
 // looks the same however the export reached it.
 
 import { stageAssets } from "@/lib/asset-scope";
+import { transitionLook } from "@/lib/stage/transition-look";
 import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, type RGB } from "@/lib/stage/color";
 import type { SceneSlot } from "@/lib/stage/director";
@@ -478,7 +479,7 @@ export class OfflineStage {
     const ok = r.render({
       current: { ...this.slotDraw(frame.current, audio, t, beatIndex), program: noType(pd) },
       previous: frame.previous ? { ...this.slotDraw(frame.previous, audio, t, beatIndex), program: noType(prevPd) } : null,
-      transition: frame.transition,
+      transition: frame.transition ? { ...frame.transition, look: transitionLook(this.project.plan, frame.look.sectionIndex, frame.look.colorway) } : null,
       clock: t % 3600,
       media,
       // paced (the preview): the grid comes back through the fenced read, waited for off the main thread

@@ -18,6 +18,7 @@ import {
   MEDIA_TREATMENTS,
   SCENE_IDS,
   SECTION_KINDS,
+  TRANSITION_CHARACTERS,
   TYPE_VOICE_IDS,
   type CueNote,
   type DesignPlan,
@@ -42,6 +43,7 @@ import { capCues, CHECK_MIN_DURATION, genericCues, MAX_CUES, MIN_CUES, suggestCu
 import { buildPalette, darkestIndex, SCHEMES, type PaletteEntry } from "./palette";
 import { analyzeFindings, type Findings } from "./findings";
 import { analyzeStructure, cjkShare, clamp, defaultKindEnergy, isFiniteNumber, meanEnvelope, resolveDuration, round3 } from "./structure";
+import { transitionCharacterOf } from "./scene-program";
 import { generateMotifSvg, hashString, sanitizeSvg } from "./svg";
 import { chooseVoice, designTypeSystem, hookKeyOf, lineEmphasis, lineMotion, typePolicy } from "./type-design";
 import type { DesignerInput } from "./types";
@@ -703,6 +705,10 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput, opti
   const typeSystem = normalizeTypeOf(root, input, { keyVisual, sections, lines }, duration, fill, repairs);
   const plan: DesignPlan = { version: 1, keyVisual, sections, lines, cues, designerNotes };
   if (typeSystem) plan.typeSystem = typeSystem;
+  // round 22 (N6): the song's transition character — kept when valid, a design output's from its genre
+  const character = oneOf(root.transitionCharacter, TRANSITION_CHARACTERS);
+  if (character) plan.transitionCharacter = character;
+  else if (fill) plan.transitionCharacter = transitionCharacterOf(analyzeFindings(input, analyzeStructure(input)));
   // 專屬畫面: validated again (it is code), re-pointed at these sections
   if (root.sceneProgram != null) {
     const sceneProgram = normalizeSceneProgram(root.sceneProgram, { sections, repairs });

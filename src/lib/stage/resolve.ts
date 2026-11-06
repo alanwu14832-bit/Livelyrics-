@@ -69,7 +69,7 @@ export function resolveSectionIndex(plan: DesignPlan | null, state: StageState, 
   return sectionIndexAt(plan, t);
 }
 
-function resolveColorway(plan: DesignPlan | null, section: SectionDesign | null): [string, string, string] {
+export function resolveColorway(plan: DesignPlan | null, section: SectionDesign | null): [string, string, string] {
   const palette = (plan?.keyVisual?.palette ?? []).map((p) => p?.hex).filter(isHex);
   const cw = Array.isArray(section?.colorway) ? section.colorway : [];
   const pick = (i: number, fallback: string) => (isHex(cw[i]) ? cw[i] : isHex(palette[i]) ? palette[i] : fallback);

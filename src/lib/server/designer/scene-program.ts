@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { formatTimeShort } from "@/lib/timeline";
-import { TYPE_RELATIONS } from "@/lib/schema";
+import { TYPE_RELATIONS, type TransitionCharacter } from "@/lib/schema";
 import { PROGRAM_CONTRACT_DOC } from "@/lib/stage/program/contract";
 import { composeSceneProgram, FORM_IDS, TEXTURE_IDS, type ComposerPair, type FormId, type MotionId, type TextureId } from "@/lib/stage/program/composer";
 import { EXAMPLE_PROGRAMS } from "@/lib/stage/program/examples";
@@ -95,6 +95,39 @@ export function isShout(findings: Findings): boolean {
 /** The song's genre evidence calls it a ballad (a pop or R&B song tagged ballad / 抒情). */
 export function isBallad(findings: Findings): boolean {
   return findings.genres.some((g) => g.evidence.some((e) => BALLAD_RE.test(e)));
+}
+
+/** Round 22 (N6): each genre's way of changing sections (motion-art-direction: one transition family per song). */
+const CHARACTER_FOR_GENRE: Record<string, TransitionCharacter> = {
+  punk: "cut",
+  "post-punk": "cut",
+  metal: "cut",
+  emo: "cut",
+  "hip-hop": "cut",
+  "math-rock": "cut",
+  "city-pop": "scan",
+  electronic: "scan",
+  "indie-pop": "scan",
+  folk: "tide",
+  ambient: "tide",
+  "post-rock": "tide",
+  shoegaze: "swell",
+  "dream-pop": "swell",
+  rnb: "swell",
+  jazz: "swell",
+  psychedelic: "swell",
+  "indie-rock": "sweep",
+  "alt-rock": "sweep",
+  pop: "sweep",
+};
+
+/** The song's transition character: a ballad swells, a shouted song cuts, else its genre's (sweep without one). */
+export function transitionCharacterOf(findings: Findings): TransitionCharacter {
+  if (isShout(findings)) return "cut";
+  if (isBallad(findings)) return "swell";
+  const g = findings.genre?.id;
+  if (g && CHARACTER_FOR_GENRE[g]) return CHARACTER_FOR_GENRE[g];
+  return findings.hints.motion === "soft" ? "swell" : findings.hints.motion === "punchy" ? "cut" : "sweep";
 }
 
 /** Forms an imagery family calls for (most typical first) when the lexicon entry names none. */

@@ -41,7 +41,7 @@ import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./ty
 import { MOOD_VOCABULARY } from "./lexicon/moods";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
-import { offlineSceneProgram } from "./scene-program";
+import { offlineSceneProgram, transitionCharacterOf } from "./scene-program";
 import { hueFamily, recentFactor, recentUses, type RecentLook } from "./recent";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
@@ -1055,6 +1055,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   };
   // 專屬畫面: the offline composer's program (form from the findings, the rest from the seed)
   plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings);
+  plan.transitionCharacter = transitionCharacterOf(findings);
   return normalizePlan(plan, input);
 }
 
