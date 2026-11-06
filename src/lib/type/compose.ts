@@ -28,24 +28,12 @@ export interface ComposeInput {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x);
 
-const SECTION_LATIN: Record<string, string> = {
-  intro: "INTRO",
-  verse: "VERSE",
-  "pre-chorus": "PRE-CHORUS",
-  chorus: "CHORUS",
-  bridge: "BRIDGE",
-  solo: "SOLO",
-  breakdown: "BREAKDOWN",
-  outro: "OUTRO",
-  interlude: "INTERLUDE",
-};
-
 /**
- * Every character an ornament may draw besides the sung text: section labels, brackets, rules,
- * numbers, Latin. Fonts are loaded for these too, so a first frame never falls back for one.
+ * Every character an ornament may draw besides the sung text: section ordinals, the title, brackets,
+ * Latin. Fonts are loaded for these too, so a first frame never falls back for one.
  */
 export const ORNAMENT_CHARS = [
-  ...new Set(`${Object.values(SECTION_LATIN).join("")}「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
+  ...new Set(`「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
 ].join("");
 
 /** A chant's largest readable glyph, as a fraction of the frame's short side (round 17, M5). */
@@ -432,19 +420,32 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const above = b.y - gap - labelSize >= f.safe.y;
   const ly = above ? b.y - gap - labelSize : b.y + b.h + gap;
 
-  // section label and number: once per section (the first line), or a line number when the seed says so
-  const wantNumber = on.has("number") && level >= 0.3 && (sectionHead || ornamentSeed < 0.28 * level);
-  const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionKind != null;
-  if (wantNumber || wantSection) {
-    const num = sectionHead && ctx.sectionIndex != null ? String(ctx.sectionIndex + 1).padStart(2, "0") : String(ctx.lineIndex + 1).padStart(2, "0");
-    // the section label is the plan's own (副歌一); the English chrome ("02 — CHORUS") is off by
-    // default and only stands in when the plan has no label (M6: no English labels on the wall)
-    const sectionText = wantSection ? ctx.sectionLabel.trim() || SECTION_LATIN[ctx.sectionKind ?? "verse"] || "" : "";
-    const text = [wantNumber ? num : "", sectionText].filter(Boolean).join(wantNumber && sectionText ? "  —  " : "");
-    const g = label(text, b.x, ly, labelSize, sys, input.measure);
-    out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));
-    if (on.has("rule") && level >= 0.55 && above) {
-      out.push(piece("rule", [], { plate: "ink", alpha: 0.6, readable: false, rect: { x: b.x + g.w + labelSize * 0.8, y: ly + labelSize / 2 - 1, w: Math.max(labelSize * 2, Math.min(b.w * 0.5, f.W * 0.18)), h: Math.max(2, labelSize * 0.07) }, delay: 0.08 }));
+  // round 22 (N1): nothing on the wall reads as an operator label (「04 — 主歌」, a line number 「02」).
+  // `number` is a pure graphic index — a row of short bars, the section's own lit — on the section's
+  // first line only; `section` (an editor's opt-in, never automatic) adds the section's ordinal as a
+  // numeral, never its name.
+  const wantIndex = on.has("number") && level >= 0.3 && sectionHead && ctx.sectionIndex != null;
+  const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionIndex != null;
+  if (wantIndex || wantSection) {
+    let x = b.x;
+    if (wantSection) {
+      const g = label(String((ctx.sectionIndex ?? 0) + 1).padStart(2, "0"), x, ly, labelSize, sys, input.measure);
+      out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));
+      x += g.w + labelSize * 0.8;
+    }
+    if (wantIndex) {
+      const count = Math.max(1, Math.min(12, ctx.sectionCount ?? (ctx.sectionIndex ?? 0) + 1));
+      const at = Math.min(count - 1, ctx.sectionIndex ?? 0);
+      const bw = labelSize * 0.9;
+      const bh = Math.max(2, labelSize * 0.14);
+      const step = bw + labelSize * 0.4;
+      const fits = x + step * count <= f.safe.x + f.safe.w;
+      for (let k = 0; fits && k < count; k++) {
+        const lit = k === at;
+        out.push(piece("rule", [], { plate: lit ? "accent" : "ink", alpha: lit ? 0.85 : 0.28, readable: false, rect: { x: x + k * step, y: ly + labelSize / 2 - bh / 2, w: bw, h: lit ? bh * 1.6 : bh }, delay: 0.05 + 0.02 * k }));
+      }
+    } else if (on.has("rule") && level >= 0.55 && above) {
+      out.push(piece("rule", [], { plate: "ink", alpha: 0.6, readable: false, rect: { x, y: ly + labelSize / 2 - 1, w: Math.max(labelSize * 2, Math.min(b.w * 0.5, f.W * 0.18)), h: Math.max(2, labelSize * 0.07) }, delay: 0.08 }));
     }
   }
   // the song title: on the first line and the last one, quietly

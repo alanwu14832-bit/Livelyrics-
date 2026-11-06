@@ -221,6 +221,7 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     lineIndex: index,
     lineCount: lines.length,
     sectionIndex,
+    sectionCount: plan.sections.length,
     sectionKind: section?.kind ?? null,
     sectionLabel: section?.label ?? "",
     songTitle: opts.songTitle ?? "",

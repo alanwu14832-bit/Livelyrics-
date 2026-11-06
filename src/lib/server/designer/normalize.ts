@@ -646,6 +646,12 @@ function normalizeTypeOf(root: Obj, input: DesignerInput, plan: { keyVisual: Key
     keepEdits: true,
   });
   repairs.push(...more);
+  // round 22 (N1): a design output (Claude's plan, a claude.ai reply) never carries the section ordinal —
+  // it is an editor's opt-in; a stored plan the editor opted in keeps it
+  if (fill && system.ornaments.includes("section")) {
+    repairs.push("移除段落序號裝飾（現場演出不在牆上印段落名）");
+    return { ...system, ornaments: system.ornaments.filter((o) => o !== "section") };
+  }
   return system;
 }
 

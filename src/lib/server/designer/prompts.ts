@@ -319,6 +319,7 @@ export function typeCatalogBlock(): string {
     `# 字體參數 typeSystem.params（0–1，gridColumns 是 2–12 的整數）：${params}`,
     `# 配色處理 typeSystem.color：${colors}`,
     `# 裝飾 typeSystem.ornaments：${ornaments}`,
+    "  - section 只給編輯器手動開啟，不是給現場演出用的：不要放進 ornaments（會被移除）。牆上不可出現段落名稱（主歌、副歌、Verse、Chorus）或行號；number 只會畫成一排小刻度，不會印出數字。",
     "# motionWord 的意象：風／吹＝飄動、雨／淚＝落下、火／燃燒＝閃爍、心跳＝隨拍脈動、海／浪＝波浪、夜＝從暗處浮起、光＝綻開、碎／破＝碎裂、奔跑／衝＝衝刺、轉＝旋轉。",
   ].join("\n");
 }

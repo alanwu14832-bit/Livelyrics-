@@ -38,7 +38,7 @@ function compose(text: string, recipe: TypeRecipeId, canvas: CanvasSpec, over: P
   const lines: LyricLine[] = [{ id: "l0", text, start: 10, end: 16 }];
   const h = hint(recipe, over);
   const lt = prepareLineText(lines, 0, h.emphasis, 60)!;
-  const { system } = normalizeTypeSystem({ voice: "mv-card", ornaments: ["bracket", "number", "rule", "section"], params: { ornament: 0.8 } }, { lines, sections: [], duration: 60, voice: "mv-card" });
+  const { system } = normalizeTypeSystem({ voice: "mv-card", ornaments: ["bracket", "number", "rule", "section"], params: { ornament: 0.8 } }, { lines, sections: [], duration: 60, voice: "mv-card", keepEdits: true });
   return composeLine({ lt, lineId: "l0", hint: h, system: resolveSystem(system), canvas, ctx: { lineIndex: 2, lineCount: 10, sectionIndex: 2, sectionKind: "chorus", sectionLabel: "副歌一", songTitle: "午夜高速公路上那盞不會熄滅的燈", first: true }, measure: approxMeasure });
 }
 
@@ -175,10 +175,12 @@ describe("the line-length policy (compose.ts)", () => {
     }
   });
 
-  it("the section label on a Mandarin line is the plan's own, not English chrome", () => {
+  it("round 22: an opted-in section ornament prints the ordinal only, never the section's name", () => {
     const c = compose(SHORT[0], "giant-word", C169, { key: false });
     const labels = c.pieces.filter((p) => p.role === "label").flatMap((p) => p.glyphs.map((g) => g.ch));
-    expect(labels.some((t) => /副歌一/.test(t))).toBe(true);
-    expect(labels.some((t) => /CHORUS|VERSE/.test(t))).toBe(false);
+    expect(labels.some((t) => /副歌|CHORUS|VERSE/.test(t))).toBe(false);
+    for (const t of labels) expect(t).toMatch(/^\d{2}$/);
+    // the number ornament is a graphic index: short bars, no numeral
+    expect(c.pieces.filter((p) => p.role === "rule" && p.rect).length).toBeGreaterThan(1);
   });
 });

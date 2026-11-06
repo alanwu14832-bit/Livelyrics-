@@ -72,7 +72,7 @@ export const VOICES: Record<TypeVoiceId, VoiceInfo> = {
     fonts: { cjk: "noto-sans-tc", latin: "bebas-neue" },
     fontsOk: { cjk: ["noto-sans-tc", "chiron-hei-hk", "noto-serif-tc", "cactus-classical-serif"], latin: ["bebas-neue", "anton", "space-grotesk", "playfair-display"] },
     weight: 900,
-    ornaments: ["rule", "number", "section", "title"],
+    ornaments: ["rule", "number", "title"],
     enter: "wipe",
     exit: "wipe",
     snap: false,
@@ -108,7 +108,7 @@ export const VOICES: Record<TypeVoiceId, VoiceInfo> = {
     fonts: { cjk: "chiron-hei-hk", latin: "space-grotesk" },
     fontsOk: { cjk: ["chiron-hei-hk", "noto-sans-tc"], latin: ["space-grotesk", "anton", "bebas-neue"] },
     weight: 800,
-    ornaments: ["number", "section", "rule"],
+    ornaments: ["number", "rule"],
     enter: "glitch",
     exit: "glitch",
     snap: true,
@@ -197,8 +197,8 @@ export const COLOR_TREATMENTS: Record<TypeColorTreatment, { label: string; descr
 
 export const ORNAMENTS: Record<TypeOrnamentId, string> = {
   rule: "細線",
-  number: "編號",
-  section: "段落名",
+  number: "段落刻度",
+  section: "段落序號（僅手動）",
   title: "歌名",
   seal: "印章",
   bracket: "「」括號",

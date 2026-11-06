@@ -244,8 +244,8 @@ export type TypeColorTreatment = z.infer<typeof TypeColorTreatmentSchema>;
 
 export const TYPE_ORNAMENT_IDS = [
   "rule", // hairline rules
-  "number", // line / section numbers
-  "section", // the section name as a small label
+  "number", // a graphic index of the sections (short bars, never a numeral)
+  "section", // editor opt-in: the section's ordinal numeral (never its name, never automatic)
   "title", // the song title as a small label
   "seal", // a red seal stamp (印章)
   "bracket", // 「」 corner brackets as graphics
