@@ -195,6 +195,69 @@ export function endsOnFunctionWord(units: readonly TextUnit[], i: number): boole
   return !!u && u.kind === "latin" && LATIN_NO_END.has(u.text.toLowerCase());
 }
 
+/**
+ * Round 22 (m5): characters a row never starts with when they lean on the word before them — a
+ * localizer or an aspect particle (「高速公路 /上」, 「唱 /過」); 過去 / 上車 (a word with the next character) may.
+ */
+const NO_ROW_START = new Set([..."上裡的了著過"]);
+/** Measure words and time units that open a noun phrase with a numeral or a demonstrative (那一年 夏天, 兩罐 冰汽水). */
+const MEASURE = new Set([..."年天夜晚月日個盞罐條首張次片道群隻杯瓶本封朵顆場聲句"]);
+const NUMERAL = new Set([..."一二三四五六七八九十兩幾半那這每某"]);
+
+/** Breaking between units i and i + 1 would start a row with a localizer / particle leaning left (高速公路｜上). */
+export function startsOnLeaner(units: readonly TextUnit[], i: number): boolean {
+  const a = units[i];
+  const b = units[i + 1];
+  if (!a || !b || a.kind !== "cjk" || b.kind !== "cjk" || !NO_ROW_START.has(b.text)) return false;
+  // 過去, 上車: the character begins a word of its own
+  return !splitsWord(units, i + 1);
+}
+
+/** Breaking between units i and i + 1 would cut a numeral + measure word from its head (那一年｜夏天). */
+export function cutsMeasureFromHead(units: readonly TextUnit[], i: number): boolean {
+  const a = units[i];
+  const b = units[i + 1];
+  if (!a || !b || a.kind !== "cjk" || b.kind !== "cjk" || !MEASURE.has(a.text)) return false;
+  const c = units[i - 1];
+  return !!c && c.kind === "cjk" && (NUMERAL.has(c.text) || /[0-9０-９]/.test(c.text));
+}
+
+/** Latin words a row may well start with (a preposition or conjunction opens a phrase: 「river stones /in both my coat pockets」). */
+const LATIN_BREAK_BEFORE = new Set(["in", "on", "at", "with", "when", "where", "while", "and", "but", "or", "so", "to", "the", "a", "an", "my", "your", "our", "from", "into", "onto", "for", "until", "till", "like", "through", "over", "under", "across", "before", "after", "because", "if", "that", "who"]);
+/** Function words that do not hold a phrase together with the next word. */
+const LATIN_LIGHT = new Set([...LATIN_BREAK_BEFORE, "i", "you", "me", "we", "it", "is", "are", "was", "be", "of", "oh", "yeah", "hey", "la", "de", "el", "en", "y", "the", "this"]);
+
+/**
+ * Round 22 (m4): the cost of breaking a Latin passage at the boundary before unit `k`: after a
+ * comma or a dash it is free, before a preposition or a conjunction it is good, between two content
+ * words (an adjective and its noun, a compound such as 「river stones」) it costs, and inside a run of
+ * capitalised words (a name: 「Midnight Avenida」) it costs more. Null when no Latin word is on either side.
+ */
+export function latinBreakCost(units: readonly TextUnit[], k: number): number | null {
+  let p = k - 1;
+  let punct = false;
+  while (p >= 0 && (units[p].kind === "space" || units[p].kind === "punct")) {
+    if (units[p].kind === "punct" && !NO_LINE_END.has(units[p].text)) punct = true;
+    p--;
+  }
+  let n = k;
+  while (n < units.length && units[n].kind === "space") n++;
+  const prev = units[p];
+  const next = units[n];
+  if (!prev || !next || (prev.kind !== "latin" && next.kind !== "latin")) return null;
+  if (punct || next.kind === "punct") return -3.4;
+  if (prev.kind !== "latin" || next.kind !== "latin") return -1.4;
+  const pl = prev.text.toLowerCase();
+  const nl = next.text.toLowerCase();
+  if (LATIN_BREAK_BEFORE.has(nl)) return -2.4;
+  if (LATIN_LIGHT.has(pl) || LATIN_LIGHT.has(nl)) return -1.2;
+  // a verb ends its own phrase (「carried / river stones」)
+  if (/(ed|ing)$/.test(pl) && pl.length > 4) return -0.6;
+  const cap = (w: string) => /^\p{Lu}/u.test(w) && !/^\p{Lu}+$/u.test(w);
+  if (cap(prev.text) && cap(next.text)) return 6;
+  return 2.6;
+}
+
 /** Breaking between units i and i + 1 would leave a one-character fragment of a run (夜行巴士 開｜往海). */
 export function leavesFragment(units: readonly TextUnit[], i: number): boolean {
   const a = units[i];
@@ -283,6 +346,19 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
     if (!lt.emph[i] || !isWordUnit(units[i])) continue;
     let j = i;
     while (j < units.length && lt.emph[j] && units[j].kind !== "space") j++;
+    // round 22 (m4): a Latin emphasis is its whole phrase — across the spaces of a multi-word
+    // emphasis (「Midnight avenida」), and grown to the content words the breaker holds to it
+    // (「river」 → 「river stones」), at most three words and 18 letters
+    if (units[i].kind === "latin") {
+      const word = (k: number) => units[k]?.kind === "latin" && !dark[k];
+      const letters = (a: number, b: number) => units.slice(a, b).reduce((n, u) => n + (u.kind === "latin" ? u.text.length : 0), 0);
+      const words = (a: number, b: number) => units.slice(a, b).filter((u) => u.kind === "latin").length;
+      while (units[j]?.kind === "space" && lt.emph[j + 1] && word(j + 1)) j += 2;
+      while (units[j]?.kind === "space" && word(j + 1) && !LATIN_STOP.has(units[j + 1].text.toLowerCase()) && (latinBreakCost(units, j + 1) ?? -1) > 0 && words(i, j + 2) <= 3 && letters(i, j + 2) <= 18) j += 2;
+      if (!darkIn(i, j)) return [i, j];
+      i = j;
+      continue;
+    }
     // (grown to the whole word it cuts into: an emphasized 「醒」 of 醒來 features 醒來)
     const g = wholeWord(lt, [i, j], maxCjk);
     if (darkIn(g[0], g[1])) {
@@ -296,16 +372,34 @@ export function keySpan(lt: LineText, motionWord: string, maxCjk = 4): [number, 
   const mw = mw0 ? wholeWord(lt, mw0, maxCjk) : null;
   if (mw && cjkCount(lt, mw[0], mw[1]) <= maxCjk && !darkIn(mw[0], mw[1])) return mw;
   if (!lt.phrases.length) return null;
-  // 3. Latin: the longest content word
+  // 3. Latin: the longest content phrase — round 22 (m4): a run of content words the breaker holds
+  // together (「river stones」, a name such as 「Midnight avenida」, at most three words and 18
+  // letters), else the longest content word
   if (lt.latinOnly) {
-    let best = -1;
+    const content = (i: number) => units[i]?.kind === "latin" && !LATIN_STOP.has(units[i].text.toLowerCase()) && !dark[i];
+    let best: [number, number] | null = null;
+    let bestLen = -1;
     for (let i = 0; i < units.length; i++) {
-      const u = units[i];
-      if (u.kind !== "latin" || LATIN_STOP.has(u.text.toLowerCase()) || dark[i]) continue;
-      if (best < 0 || u.text.length > units[best].text.length) best = i;
+      if (!content(i)) continue;
+      let j = i;
+      let words = 1;
+      // the next word across one space, while the boundary holds the phrase together
+      while (words < 3 && units[j + 1]?.kind === "space" && content(j + 2) && (latinBreakCost(units, j + 2) ?? -1) > 0) {
+        j += 2;
+        words++;
+      }
+      const letters = units.slice(i, j + 1).reduce((n, u) => n + (u.kind === "latin" ? u.text.length : 0), 0);
+      const span: [number, number] = letters <= 18 ? [i, j + 1] : [i, i + 1];
+      const len = letters <= 18 ? letters : units[i].text.length;
+      if (len > bestLen) {
+        best = span;
+        bestLen = len;
+      }
+      i = j;
     }
-    if (best < 0) best = units.findIndex((u, i) => u.kind === "latin" && !dark[i]);
-    return best >= 0 ? [best, best + 1] : null;
+    if (best) return best;
+    const first = units.findIndex((u, i) => u.kind === "latin" && !dark[i]);
+    return first >= 0 ? [first, first + 1] : null;
   }
   // 4. CJK: a short line is its own key; a line that repeats one phrase (「我不要 我不要」, 「殺了我
   // 殺了我」) features that phrase whole; else the best 2-character window
@@ -529,6 +623,10 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     const after = units[atoms[k][0]];
     // round 17: a row never ends on 「a」「the」「and」「of」「to」「it」「in」「my」…
     if (endsOnFunctionWord(units, atoms[k - 1][atoms[k - 1].length - 1])) return 300;
+    // round 22 (m4): Latin breaks follow the phrase — after a comma, before a preposition, never
+    // between an adjective and its noun or inside a name
+    const latin = latinBreakCost(units, atoms[k][0]);
+    if (latin != null && (before.kind === "space" || after.kind === "space" || before.kind === "punct")) return latin;
     if (before.kind === "space" || after.kind === "space") return -2.4;
     if (before.kind === "punct") return -2;
     if ((before.kind === "latin") !== (after.kind === "latin")) return -0.8;
@@ -537,6 +635,10 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
     // (both cost more than an overflowing row: the caller then sets the type a little smaller)
     const at = atoms[k - 1][atoms[k - 1].length - 1];
     if (splitsWord(units, at)) return 2000;
+    // round 22 (m5): no row starts with 上／裡／的／了／著／過 leaning on the word before (高速公路｜上),
+    // a numeral + measure word stays with its head (那一年｜夏天)
+    if (startsOnLeaner(units, at)) return 400;
+    if (cutsMeasureFromHead(units, at)) return 40;
     if (after.kind === "cjk" && ATTACH_LEFT.has(after.text)) return 4.5;
     // a one-character fragment of a phrase is left behind (夜行巴士 開｜往海的方向)
     const frag = leavesFragment(units, at) ? 60 : 0;
@@ -584,7 +686,7 @@ export function breakRows(units: readonly TextUnit[], from: number, to: number, 
       splits.unshift(rowOf(j, k));
       if (j > 0) {
         const at = atoms[j - 1][atoms[j - 1].length - 1];
-        if (splitsWord(units, at) || leavesFragment(units, at)) torn = true;
+        if (splitsWord(units, at) || leavesFragment(units, at) || startsOnLeaner(units, at)) torn = true;
       }
       k = j;
     }
@@ -652,15 +754,18 @@ export function splitLongLine(units: readonly TextUnit[], wordStarts: ReadonlySe
     const before = units[k - 1];
     const after = units[k];
     let cost: number;
-    if (before.kind === "space" || after.kind === "space") cost = 0;
+    const latin = latinBreakCost(units, k);
+    if (latin != null && (before.kind === "space" || after.kind === "space")) cost = Math.max(0, latin + 3.4) * 0.5;
+    else if (before.kind === "space" || after.kind === "space") cost = 0;
     else if (before.kind === "punct" && PHRASE_PUNCT.has(before.text)) cost = 0;
     else if (after.kind === "punct" && NO_LINE_END.has(after.text)) cost = 0.6;
     else if (before.kind === "punct" || after.kind === "punct") continue;
     else if (before.kind === "latin" && after.kind === "latin") continue;
     else if (before.kind === "cjk" && after.kind === "cjk") {
-      if (splitsWord(units, k - 1) || leavesFragment(units, k - 1)) continue;
+      if (splitsWord(units, k - 1) || leavesFragment(units, k - 1) || startsOnLeaner(units, k - 1)) continue;
       if (ATTACH_LEFT.has(after.text)) continue;
-      if (wordStarts.size && !wordStarts.has(k)) cost = 2.4;
+      if (cutsMeasureFromHead(units, k - 1)) cost = 3;
+      else if (wordStarts.size && !wordStarts.has(k)) cost = 2.4;
       else if (PHRASE_PARTICLE.has(before.text)) cost = 0.9;
       else if (BREAK_BEFORE.has(after.text)) cost = 1.1;
       else cost = 1.8;
