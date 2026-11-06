@@ -200,25 +200,15 @@ vec2 legibleCover(vec2 uv, float halo) {
   vec2 px = 1.0 / uRes;
   float m = 0.0;
   float mi = 0.0;
-  // round 22 (m7): 8 taps on the inner ring, 12 on a middle one, 20 on the outer — the old 6 + 10
-  // left gaps of ~8 px between outer taps, so the dilation was a union of shifted glyph copies that
-  // stamped a blocky mosaic into the echo layers it darkens; this spacing (≤ 4 px) reads as one
-  // smooth dilation
-  for (int i = 0; i < 8; i++) {
-    float an = float(i) * 0.785398;
+  // 6 taps on the inner ring, 10 on the outer (so a thin stroke between two outer taps is not missed)
+  for (int i = 0; i < 6; i++) {
+    float an = float(i) * 1.047198;
     vec4 t1 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r1 * px, 0.0, 1.0));
     m = max(m, max(t1.r, t1.g));
     mi = max(mi, t1.r);
   }
-  float rm = 0.5 * (r1 + r2);
-  for (int i = 0; i < 12; i++) {
-    float an = float(i) * 0.523599 + 0.26;
-    vec4 tm = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * rm * px, 0.0, 1.0));
-    m = max(m, max(tm.r, tm.g) * 0.92);
-    mi = max(mi, tm.r * 0.92);
-  }
-  for (int i = 0; i < 20; i++) {
-    float an = float(i) * 0.314159 + 0.16;
+  for (int i = 0; i < 10; i++) {
+    float an = float(i) * 0.628319 + 0.31;
     vec4 t2 = TEX(uType, clamp(uv + vec2(cos(an), sin(an)) * r2 * px, 0.0, 1.0));
     m = max(m, max(t2.r, t2.g) * 0.85);
     mi = max(mi, t2.r * 0.85);
