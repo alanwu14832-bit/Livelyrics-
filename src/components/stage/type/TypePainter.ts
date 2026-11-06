@@ -134,9 +134,9 @@ export class TypePainter {
     return c;
   }
 
-  private sprite(g: GlyphBox, px: number, kind: "plate" | "halo", color: string): Sprite {
+  private sprite(g: GlyphBox, px: number, kind: "plate" | "halo", color: string, soft = 0): Sprite {
     const b = bucket(px);
-    const key = `${kind}|${g.font}|${g.weight}|${b}|${g.font === "latin" ? Math.round((g.tracking / Math.max(1, g.size)) * 1000) : 0}|${color}|${g.ch}`;
+    const key = `${kind}|${g.font}|${g.weight}|${b}|${g.font === "latin" ? Math.round((g.tracking / Math.max(1, g.size)) * 1000) : 0}|${color}|${soft}|${g.ch}`;
     const hit = this.sprites.get(key);
     if (hit) {
       hit.used = this.tick;
@@ -146,8 +146,10 @@ export class TypePainter {
     const cellW = Math.max(1, (g.w / Math.max(1, g.size)) * b);
     const cellH = Math.max(1, (g.h / Math.max(1, g.size)) * b);
     const halo = kind === "halo" ? Math.min(64, Math.max(3, b * 0.16)) : 0;
+    // an echo's softness (round 22): a blur that grows with how far back the copy is
+    const blur = soft > 0 ? Math.min(32, b * (0.012 + 0.01 * soft)) : 0;
     // sideways runs are drawn unrotated (the transform turns them): the cell is along the text
-    const pad = Math.ceil(b * 0.34 + halo * 2.2);
+    const pad = Math.ceil(b * 0.34 + halo * 2.2 + blur * 2.5);
     const w = cellW + pad * 2;
     const h = Math.max(cellH, b) + pad * 2;
     const canvas = makeCanvas(w, h);
@@ -169,6 +171,13 @@ export class TypePainter {
       ctx.fillText(g.ch, cx - 100000, baseline);
       ctx.shadowColor = "transparent";
       ctx.fillText(g.ch, cx, baseline);
+    } else if (blur > 0.4) {
+      // only the blurred shadow lands in the sprite, in the plate's colour
+      ctx.shadowColor = color;
+      ctx.shadowBlur = blur * 2;
+      ctx.shadowOffsetX = 100000;
+      ctx.fillStyle = color;
+      ctx.fillText(g.ch, cx - 100000, baseline);
     } else {
       ctx.fillStyle = color;
       ctx.fillText(g.ch, cx, baseline);
@@ -318,7 +327,8 @@ export class TypePainter {
       const alpha = pa * gf.alpha;
       if (alpha <= 0.002 || gf.reveal <= 0.001) continue;
       const px = g.size * scale;
-      const s = this.sprite(g, px, kind, color);
+      // round 22 (m7): an echo is a trail — each step back a softer sprite (cached, no per-frame filter)
+      const s = this.sprite(g, px, kind, color, p.echo && kind === "plate" ? Math.min(5, Math.max(1, p.echo.index)) : 0);
       const f = (px / bucket(px)) * gf.scale;
       const x = (g.x + gf.dx + ex) * scale;
       const y = (g.y + gf.dy + ey) * scale;
