@@ -12,6 +12,7 @@ import type { PaletteEntry } from "./palette";
 import type { Findings } from "./findings";
 import { MOOD_VOCABULARY } from "./lexicon/moods";
 import type { SongStructure } from "./structure";
+import { hasDarkWord } from "@/lib/type/sensitive";
 import type { ImageryHit } from "./imagery";
 import { artistWhere } from "./free-research";
 import { isBallad } from "./scene-program";
@@ -257,7 +258,10 @@ function normalizeTitle(t: string): string {
 
 /** Title candidates from the imagery and the emotion, most fitting first (the seed rotates the start). */
 export function titleCandidates(c: ConceptContext, skeleton: SkeletonId): string[] {
-  const [a, b] = images(c);
+  // round 22 (N8): a title never names an image the song only reached through dark words (凋零 for
+  // 血滴, 碎片 for 刀片: 「把凋零留在碎片」) — only images it also sings in plain words
+  const plain = c.imagery.filter((h) => h.words.some((w) => !hasDarkWord(w))).map((h) => h.imagery.name);
+  const [a, b] = [plain[0] ?? null, plain[1] ?? null];
   const f = c.findings;
   const out: string[] = [];
   const add = (t: string) => {

@@ -11,6 +11,7 @@ import { EMPTY_BOX, glyphBox, pieceBox, unionBox, type Box, type CanvasSpec, typ
 import { motionKindOf } from "./motion-words";
 import { RECIPE_FALLBACK, RECIPE_FNS, longLine, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
 import { createRng, hash32 } from "./rng";
+import { DARK_SEAL } from "./sensitive";
 import { canvasZone } from "../stage/program/model";
 import { isLongUnits, type LineText } from "./text";
 import { VOICES, type MotionKind } from "./vocab";
@@ -28,24 +29,12 @@ export interface ComposeInput {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x);
 
-const SECTION_LATIN: Record<string, string> = {
-  intro: "INTRO",
-  verse: "VERSE",
-  "pre-chorus": "PRE-CHORUS",
-  chorus: "CHORUS",
-  bridge: "BRIDGE",
-  solo: "SOLO",
-  breakdown: "BREAKDOWN",
-  outro: "OUTRO",
-  interlude: "INTERLUDE",
-};
-
 /**
- * Every character an ornament may draw besides the sung text: section labels, brackets, rules,
- * numbers, Latin. Fonts are loaded for these too, so a first frame never falls back for one.
+ * Every character an ornament may draw besides the sung text: section ordinals, the title, brackets,
+ * Latin. Fonts are loaded for these too, so a first frame never falls back for one.
  */
 export const ORNAMENT_CHARS = [
-  ...new Set(`${Object.values(SECTION_LATIN).join("")}「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
+  ...new Set(`「」﹁﹂『』《》—–…|·・×/:：-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`),
 ].join("");
 
 /** A chant's largest readable glyph, as a fraction of the frame's short side (round 17, M5). */
@@ -409,10 +398,13 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const out = [...pieces];
   const labelSize = Math.max(f.minRead * 0.5, Math.min(f.minRead * 0.78, f.ref * 0.024));
   const sectionHead = ctx.first;
+  // round 22 (N8): a dark line (a dark word, an ideation phrase) carries no seal, no title, no 「」 —
+  // nothing that frames or stamps it as a moment
+  const dark = !!input.lt.dark?.some(Boolean);
   const ornamentSeed = hash32(`orn|${input.lineId}|${Math.round(input.hint.seed)}`) / 4294967296;
   const vertical = pieces.some((p) => p.readable && p.vertical && p.role === "main");
   // 「」 hang outside the text block (MV cards): the block steps in from the frame edge to make room
-  const wantBracket = on.has("bracket") && level >= 0.3 && ornamentSeed > 0.45 && ["giant-word", "vertical-column", "cross", "title-card", "whisper"].includes(input.hint.recipe);
+  const wantBracket = !dark && on.has("bracket") && level >= 0.3 && ornamentSeed > 0.45 && ["giant-word", "vertical-column", "cross", "title-card", "whisper"].includes(input.hint.recipe);
   const bs = clamp(Math.min(b.h, b.w) * 0.34, f.minRead * 0.9, f.ref * 0.16);
   let bracketFits = false;
   if (wantBracket) {
@@ -432,23 +424,36 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
   const above = b.y - gap - labelSize >= f.safe.y;
   const ly = above ? b.y - gap - labelSize : b.y + b.h + gap;
 
-  // section label and number: once per section (the first line), or a line number when the seed says so
-  const wantNumber = on.has("number") && level >= 0.3 && (sectionHead || ornamentSeed < 0.28 * level);
-  const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionKind != null;
-  if (wantNumber || wantSection) {
-    const num = sectionHead && ctx.sectionIndex != null ? String(ctx.sectionIndex + 1).padStart(2, "0") : String(ctx.lineIndex + 1).padStart(2, "0");
-    // the section label is the plan's own (副歌一); the English chrome ("02 — CHORUS") is off by
-    // default and only stands in when the plan has no label (M6: no English labels on the wall)
-    const sectionText = wantSection ? ctx.sectionLabel.trim() || SECTION_LATIN[ctx.sectionKind ?? "verse"] || "" : "";
-    const text = [wantNumber ? num : "", sectionText].filter(Boolean).join(wantNumber && sectionText ? "  —  " : "");
-    const g = label(text, b.x, ly, labelSize, sys, input.measure);
-    out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));
-    if (on.has("rule") && level >= 0.55 && above) {
-      out.push(piece("rule", [], { plate: "ink", alpha: 0.6, readable: false, rect: { x: b.x + g.w + labelSize * 0.8, y: ly + labelSize / 2 - 1, w: Math.max(labelSize * 2, Math.min(b.w * 0.5, f.W * 0.18)), h: Math.max(2, labelSize * 0.07) }, delay: 0.08 }));
+  // round 22 (N1): nothing on the wall reads as an operator label (「04 — 主歌」, a line number 「02」).
+  // `number` is a pure graphic index — a row of short bars, the section's own lit — on the section's
+  // first line only; `section` (an editor's opt-in, never automatic) adds the section's ordinal as a
+  // numeral, never its name.
+  const wantIndex = on.has("number") && level >= 0.3 && sectionHead && ctx.sectionIndex != null;
+  const wantSection = on.has("section") && level >= 0.5 && sectionHead && ctx.sectionIndex != null;
+  if (wantIndex || wantSection) {
+    let x = b.x;
+    if (wantSection) {
+      const g = label(String((ctx.sectionIndex ?? 0) + 1).padStart(2, "0"), x, ly, labelSize, sys, input.measure);
+      out.push(piece("label", [g], { plate: "ink", alpha: 0.78, readable: false, delay: 0.05 }));
+      x += g.w + labelSize * 0.8;
+    }
+    if (wantIndex) {
+      const count = Math.max(1, Math.min(12, ctx.sectionCount ?? (ctx.sectionIndex ?? 0) + 1));
+      const at = Math.min(count - 1, ctx.sectionIndex ?? 0);
+      const bw = labelSize * 0.9;
+      const bh = Math.max(2, labelSize * 0.14);
+      const step = bw + labelSize * 0.4;
+      const fits = x + step * count <= f.safe.x + f.safe.w;
+      for (let k = 0; fits && k < count; k++) {
+        const lit = k === at;
+        out.push(piece("rule", [], { plate: lit ? "accent" : "ink", alpha: lit ? 0.85 : 0.28, readable: false, rect: { x: x + k * step, y: ly + labelSize / 2 - bh / 2, w: bw, h: lit ? bh * 1.6 : bh }, delay: 0.05 + Math.min(0.5, 0.045 * k) }));
+      }
+    } else if (on.has("rule") && level >= 0.55 && above) {
+      out.push(piece("rule", [], { plate: "ink", alpha: 0.6, readable: false, rect: { x, y: ly + labelSize / 2 - 1, w: Math.max(labelSize * 2, Math.min(b.w * 0.5, f.W * 0.18)), h: Math.max(2, labelSize * 0.07) }, delay: 0.08 }));
     }
   }
   // the song title: on the first line and the last one, quietly
-  if (on.has("title") && level >= 0.7 && ctx.songTitle && (ctx.lineIndex === 0 || ctx.lineIndex === ctx.lineCount - 1)) {
+  if (!dark && on.has("title") && level >= 0.7 && ctx.songTitle && (ctx.lineIndex === 0 || ctx.lineIndex === ctx.lineCount - 1)) {
     const g = label(ctx.songTitle.toUpperCase(), b.x + b.w, b.y + b.h + gap, labelSize * 0.9, sys, input.measure, "right", 0.22);
     if (g.y + g.h / 2 < f.safe.y + f.safe.h) out.push(piece("label", [g], { plate: "ink", alpha: 0.66, readable: false, delay: 0.15 }));
   }
@@ -463,9 +468,9 @@ function ornaments(r: RecipeCtx, pieces: Piece[], input: ComposeInput): Piece[] 
     }
   }
   // the seal (印章) at the end of the text: vertical columns end at their foot, rows at their end
-  const sealText = [...(sys.seal ?? "").replace(/\s+/g, "")].slice(0, 4).join("");
+  const sealText = [...(sys.seal ?? "").replace(/\s+/g, "")].filter((ch) => !DARK_SEAL.test(ch)).slice(0, 4).join("");
   const sealLine = input.hint.recipe === "brush-write" || sectionHead || ornamentSeed < 0.2;
-  if (on.has("seal") && sealText && level >= 0.25 && sealLine) {
+  if (!dark && on.has("seal") && sealText && level >= 0.25 && sealLine) {
     const ss = Math.max(f.minRead * 1.05, Math.min(f.ref * 0.085, r.body * 0.62));
     const main = pieces.filter((p) => p.readable && p.role !== "translation");
     const last = main.flatMap((p) => p.glyphs).filter((g) => g.unit >= 0).sort((a, b2) => a.order - b2.order).pop();

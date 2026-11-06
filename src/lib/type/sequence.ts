@@ -283,7 +283,7 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
     for (let tries = 0; tries < 16 && prevSide != null && zoneFor(seed).side === prevSide; tries++) seed = rng.int(1000);
     const motionWord = dark ? "" : (input.motionFor?.(s.line, s.index) ?? findMotionWord(s.line.text)).trim();
     const mw = motionWord && s.line.text.includes(motionWord) ? motionWord : "";
-    let emphasis = exactSubstrings(input.emphasisFor?.(s.line, s.index) ?? [], s.line.text).filter((w) => !touchesDark(w, s.line.text));
+    let emphasis = dark ? [] : exactSubstrings(input.emphasisFor?.(s.line, s.index) ?? [], s.line.text).filter((w) => !touchesDark(w, s.line.text));
     if (!emphasis.length && mw && (kind === "chorus" || LOUD.includes(recipe))) emphasis = [mw];
     const hint: TypeLine = { lineId: s.line.id, recipe, emphasis, orientation, energy: r2(energy), motionWord: mw, seed };
     out.push(hint);

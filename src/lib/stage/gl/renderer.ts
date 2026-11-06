@@ -14,6 +14,7 @@
 import type { SceneId } from "../../types";
 import type { RGB } from "../color";
 import type { ActiveTransitionKind } from "../director";
+import type { TransitionLook } from "../transition-look";
 import { COMPOSITE_FRAGMENT, COMPOSITE_UNIFORMS, TRANSITION_CODE } from "../scenes/composite";
 import { MEDIA_FRAGMENT, MEDIA_UNIFORMS } from "../scenes/media";
 import {
@@ -205,7 +206,8 @@ export interface TypeDraw {
 export interface RenderRequest {
   current: SceneDraw;
   previous: SceneDraw | null;
-  transition: { kind: ActiveTransitionKind; progress: number } | null;
+  /** round 22: `look` = the song's own character for this change (transition-look.ts); absent = the kind's legacy look */
+  transition: { kind: ActiveTransitionKind; progress: number; look?: TransitionLook | null } | null;
   clock: number;
   /** band media over the scene (null / no layers = scene only) */
   media?: MediaDraw | null;
@@ -1475,6 +1477,20 @@ export class StageRenderer {
     if (acc) gl.uniform3f(acc, req.current.uniforms.accent[0], req.current.uniforms.accent[1], req.current.uniforms.accent[2]);
     const uc = L.get("uClock");
     if (uc) gl.uniform1f(uc, req.clock);
+    // round 22: the song's character (0 = the kind's legacy look). A `flash` only reaches the
+    // compositor with LED 安全模式 off (safe mode turns it into a fade upstream): it is the designer's
+    // explicit flash, kept as designed
+    const look = tr.kind === "flash" ? null : (tr.look ?? null);
+    const set1 = (n: string, v: number) => {
+      const l = L.get(n);
+      if (l) gl.uniform1f(l, Number.isFinite(v) ? v : 0);
+    };
+    set1("uChar", look ? look.character : 0);
+    set1("uAngle", look ? look.angle : 0);
+    set1("uWidth", look ? look.width : 0.5);
+    set1("uRise", look ? look.rise : 0);
+    const ut = L.get("uTint");
+    if (ut) gl.uniform3f(ut, look ? look.tint[0] : 1, look ? look.tint[1] : 1, look ? look.tint[2] : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     // unbind so the next frame can render into these textures without a feedback loop
     gl.bindTexture(gl.TEXTURE_2D, null);

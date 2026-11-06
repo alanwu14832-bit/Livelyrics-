@@ -184,7 +184,8 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
   const recipe = oneOf(edit?.recipe, TYPE_RECIPE_IDS, dark && !QUIET_RECIPES.has(designed) ? "whisper" : designed);
   let orientation = oneOf(edit?.orientation, TYPE_ORIENTATIONS, oneOf(override?.orientation ?? undefined, TYPE_ORIENTATIONS, oneOf(src.orientation, TYPE_ORIENTATIONS, "h")));
   if (latin) orientation = "h";
-  const emphasis = validSubstrings(edit?.emphasis ?? src.emphasis, line.text).filter((w) => !touchesDark(w, line.text));
+  // round 22 (N8): a dark line emphasises nothing (only the editor's own words, never a dark one)
+  const emphasis = dark && edit?.emphasis == null ? [] : validSubstrings(edit?.emphasis ?? src.emphasis, line.text).filter((w) => !touchesDark(w, line.text));
   const mw = typeof (edit?.motionWord ?? src.motionWord) === "string" ? String(edit?.motionWord ?? src.motionWord).trim() : "";
   const motionWord = dark ? "" : mw && line.text.includes(mw) ? mw : edit?.motionWord === "" ? "" : findMotionWord(line.text);
   const escalate = !dark && table.lastChorus != null && sectionIndex === table.lastChorus && table.chorusKeys.has(key);
@@ -221,6 +222,7 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     lineIndex: index,
     lineCount: lines.length,
     sectionIndex,
+    sectionCount: plan.sections.length,
     sectionKind: section?.kind ?? null,
     sectionLabel: section?.label ?? "",
     songTitle: opts.songTitle ?? "",

@@ -5,6 +5,7 @@
 // a CSS gradient, and a broken lyric layer disables itself instead of the output.
 
 import { stageAssets } from "@/lib/asset-scope";
+import { transitionLook } from "@/lib/stage/transition-look";
 import { SCENE_IDS } from "@/lib/schema";
 import { parseHex, rgba, type RGB } from "@/lib/stage/color";
 import { SceneDirector, TRANSITION_SECONDS, type SceneSlot, type SceneTarget } from "@/lib/stage/director";
@@ -813,7 +814,8 @@ export class StageEngine {
         const ok = r.render({
           current: this.slotDraw(df.current, audio),
           previous: df.previous ? this.slotDraw(df.previous, audio) : null,
-          transition: df.transition,
+          // round 22: the song's own character for this change (transition-look.ts)
+          transition: df.transition ? { ...df.transition, look: transitionLook(project.plan, look.sectionIndex, look.colorway) } : null,
           clock: this.clock,
           media,
           safety: safety.on ? { soften: safety.soften, gain: safety.gain, alpha, measure: limiter ? { ...grid, sync: false } : null } : null,

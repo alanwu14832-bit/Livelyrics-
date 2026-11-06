@@ -78,6 +78,8 @@ export interface LineContext {
   lineIndex: number;
   lineCount: number;
   sectionIndex: number | null;
+  /** how many sections the song has (the `number` ornament's graphic index) */
+  sectionCount?: number;
   sectionKind: SectionKind | null;
   sectionLabel: string;
   songTitle: string;

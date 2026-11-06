@@ -13,12 +13,13 @@ import { offlineDesign } from "./offline";
 import { DESIGN_SYSTEM, SENSITIVE_LYRICS_RULE } from "./prompts";
 import { SCENE_SYSTEM } from "./scene-program";
 import { analyzeStructure } from "./structure";
+import { sealText } from "./type-design";
 import { demoInput } from "./testing/fixtures";
 import { keyMomentOf } from "@/lib/stage/program/model";
 import { tokenizeLyric } from "@/lib/stage/lyrics/tokenize";
 import type { Composition } from "@/lib/type/model";
 import { composeProjectLine } from "@/lib/type/prepare";
-import { darkWords, hasDarkWord, touchesDark } from "@/lib/type/sensitive";
+import { DARK_SEAL, darkWords, hasDarkWord, hasIdeation, touchesDark } from "@/lib/type/sensitive";
 import { approxMeasure, keySpan, lineText } from "@/lib/type/text";
 import type { TypeRecipeId } from "@/lib/types";
 
@@ -219,5 +220,79 @@ describe("round 17: dark words are never emphasis on the wall", () => {
     expect(darkWords("热血沸腾 去血拼 杀价")).toEqual([]);
     expect(darkWords("杀了我")).toEqual(["杀"]);
     expect(hasDarkWord("拆掉這面牆")).toBe(false);
+  });
+});
+
+// Round 22 (N8) — the round-21 audit: the guard still leaked on lines with no dark word (a key still on
+// 「我不想再醒來」), a red 「割」 seal under 「我數著血滴」, 「染紅這面牆」 (of 「鮮血染紅這面牆」) as the crowd's
+// phrase, a dark chorus cue 「全場會一起唱…不帶喊」 and the title 「把凋零留在碎片」.
+describe("round 22: ideation lines and the leaks around dark lines", () => {
+  const lyrics = parseLyricsText(EMO_LRC, "user");
+  const input = { ...demoInput(), lyrics };
+  const plan = offlineDesign(input);
+  const lines = lyrics.lines;
+  const darkTexts = lines.filter((l) => hasDarkWord(l.text)).map((l) => l.text);
+
+  it("phrase-level ideation is dark; the ordinary lines it resembles are not", () => {
+    for (const t of ["我不想再醒來", "把藥全部吞下去", "活不下去了", "我不想活了", "一睡不醒", "把安眠藥吞下", "I just want to die", "I don't want to wake up", "我不要再醒過來"]) {
+      expect(hasIdeation(t) || hasDarkWord(t), t).toBe(true);
+      expect(hasDarkWord(t), t).toBe(true);
+    }
+    for (const t of ["不想醒來 這個夢太美", "吞下去的話", "吃藥了沒", "我要活下去", "要死不活的天氣", "我們要死守這裡", "死心吧", "早上醒來", "wake up", "我好想你", "把話吞下去"]) {
+      expect(hasIdeation(t), t).toBe(false);
+    }
+    expect(darkWords("我不想再醒來")).toEqual(["不想再醒來"]);
+    expect(sensitiveWords("把藥全部吞下去")).toEqual(["把藥全部吞下去"]);
+  });
+
+  it("the key still and the library card never land on an ideation line", () => {
+    const t = keyMomentOf(plan, input.meta.duration, lines);
+    const sung = [...lines].filter((l) => l.start != null && (l.start as number) <= t).pop();
+    expect(sung?.text ?? "", `key still at ${t}s`).not.toMatch(/醒來|吞下去/);
+    expect(sung ? hasDarkWord(sung.text) : false).toBe(false);
+  });
+
+  it("a dark line carries no seal, no title, no 「」 and no emphasis", () => {
+    const inked = { ...plan, typeSystem: { ...plan.typeSystem!, voice: "ink" as const, ornaments: ["seal" as const, "title" as const, "bracket" as const, "rule" as const], seal: "割喉", params: { ...plan.typeSystem!.params, ornament: 1 } } };
+    let dark = 0;
+    lines.forEach((l, i) => {
+      const r = composeProjectLine(inked, lines, i, CANVAS, approxMeasure, { duration: input.meta.duration, songTitle: "割" });
+      if (!r) return;
+      for (const p of r.comp.pieces.filter((x) => x.role === "seal")) for (const g of p.glyphs) expect(DARK_SEAL.test(g.ch), `#${i} seal ${g.ch}`).toBe(false);
+      if (!hasDarkWord(l.text)) return;
+      dark++;
+      expect(r.comp.pieces.some((p) => p.role === "seal" || p.role === "bracket" || p.role === "label"), `#${i} 「${l.text}」`).toBe(false);
+      expect(r.res.hint.emphasis, `#${i}`).toEqual([]);
+    });
+    expect(dark).toBeGreaterThanOrEqual(10);
+    expect(sealText(undefined, "割喉之夜")).toBe("喉之");
+    expect(sealText(undefined, "血色月光")).toBe("色月");
+    for (const tl of plan.typeSystem!.lines) {
+      const line = lines.find((l) => l.id === tl.lineId);
+      if (line && hasDarkWord(line.text)) expect(tl.emphasis ?? [], line.text).toEqual([]);
+    }
+  });
+
+  it("no crowd phrase, rationale or cue quotes a piece of a dark line, and no cue invites the crowd on one", () => {
+    const analysis = analyzeLyrics(lines, input.meta.title, analyzeStructure(input));
+    for (const p of analysis.singalong) for (const t of darkTexts) expect(t.includes(p.text), `「${p.text}」 in 「${t}」`).toBe(false);
+    for (const s of plan.sections) {
+      for (const [, q] of (s.rationale ?? "").matchAll(/「([^」]+)」/g)) for (const t of darkTexts) expect(t.includes(q), `${s.label}: 「${q}」`).toBe(false);
+      expect(s.rationale ?? "", s.label).not.toContain("染紅這面牆");
+    }
+    for (const c of plan.cues) {
+      expect(c.detail, c.title).not.toMatch(/一起唱[^。]*不帶喊|全場會一起唱.*不(帶喊|邀)/);
+      for (const [, q] of c.detail.matchAll(/「([^」]+)」/g)) for (const t of darkTexts) expect(t.includes(q), `${c.title}: 「${q}」`).toBe(false);
+      if (c.kind === "singalong") {
+        const sec = plan.sections.find((s) => Math.abs(s.start - c.time) < 0.6);
+        const sungDark = sec ? lines.some((l) => l.start != null && l.start >= sec.start - 0.05 && l.start < sec.end && hasDarkWord(l.text)) : false;
+        expect(sungDark, `${c.title} invites the crowd on a dark chorus`).toBe(false);
+      }
+    }
+  });
+
+  it("the title names no image the song only reached through dark words", () => {
+    expect(plan.keyVisual.title).not.toMatch(/凋零|碎片|醒來|吞/);
+    expect(plan.keyVisual.title).not.toMatch(LITERAL);
   });
 });

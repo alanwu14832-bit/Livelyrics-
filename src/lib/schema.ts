@@ -244,8 +244,8 @@ export type TypeColorTreatment = z.infer<typeof TypeColorTreatmentSchema>;
 
 export const TYPE_ORNAMENT_IDS = [
   "rule", // hairline rules
-  "number", // line / section numbers
-  "section", // the section name as a small label
+  "number", // a graphic index of the sections (short bars, never a numeral)
+  "section", // editor opt-in: the section's ordinal numeral (never its name, never automatic)
   "title", // the song title as a small label
   "seal", // a red seal stamp (印章)
   "bracket", // 「」 corner brackets as graphics
@@ -421,6 +421,16 @@ export const SceneProgramSchema = z.object({
 });
 export type SceneProgram = z.infer<typeof SceneProgramSchema>;
 
+/**
+ * Round 22 (N6): how this song's section changes move (the compositor's character; the section's
+ * transitionIn still sets the timing). swell = a ballad's bloom swell, cut = a hard cut on the
+ * downbeat (punk), scan = a scanline wipe (synth / city pop), tide = a slow tide (folk), sweep = a
+ * swept edge (rock / pop). A falling-energy change is always a dissolve or a dim, whatever the song.
+ */
+export const TRANSITION_CHARACTERS = ["swell", "cut", "scan", "tide", "sweep"] as const;
+export const TransitionCharacterSchema = z.enum(TRANSITION_CHARACTERS);
+export type TransitionCharacter = z.infer<typeof TransitionCharacterSchema>;
+
 export const DesignPlanSchema = z.object({
   version: z.literal(1),
   keyVisual: KeyVisualSchema,
@@ -434,6 +444,8 @@ export const DesignPlanSchema = z.object({
   typeSystem: TypeSystemSchema.nullable().optional(),
   /** 專屬畫面 (phase 7); absent / null = the built-in scenes of each section */
   sceneProgram: SceneProgramSchema.nullable().optional(),
+  /** round 22: the song's transition character; absent = derived from the type system (older plans) */
+  transitionCharacter: TransitionCharacterSchema.nullable().optional(),
 });
 export type DesignPlan = z.infer<typeof DesignPlanSchema>;
 
@@ -450,7 +462,7 @@ export const AUTO_LYRIC_STYLE_IDS = LYRIC_STYLE_IDS.filter((id) => id !== "karao
 export const AutoLyricStyleIdSchema = z.enum(AUTO_LYRIC_STYLE_IDS as [Exclude<LyricStyleId, "karaoke" | "subtitle">, ...Exclude<LyricStyleId, "karaoke" | "subtitle">[]]);
 
 /** The DesignPlan Claude writes: the type system for every line, no karaoke / subtitle styles. */
-export const DesignPlanDraftSchema = DesignPlanSchema.omit({ sceneProgram: true }).extend({
+export const DesignPlanDraftSchema = DesignPlanSchema.omit({ sceneProgram: true, transitionCharacter: true }).extend({
   sections: z
     .array(SectionDesignSchema.extend({ lyricStyle: AutoLyricStyleIdSchema.describe("舊版渲染器的後備樣式；有 typeSystem 時每一行都依它的構圖排版") }))
     .describe("cover the whole song from 0 to duration without gaps, in time order"),

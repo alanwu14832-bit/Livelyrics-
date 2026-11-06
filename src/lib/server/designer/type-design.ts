@@ -12,6 +12,7 @@ import { RECIPES, VOICES, voiceFonts } from "@/lib/type/vocab";
 import type { BandBible, FontId, LineDesign, LyricLine, SectionDesign, TypeParams, TypeRecipeId, TypeSystem, TypeVoiceId } from "@/lib/types";
 import type { Findings } from "./findings";
 import { recentFactor, recentUses, type RecentLook } from "./recent";
+import { DARK_SEAL, darkRanges } from "@/lib/type/sensitive";
 import { sensitiveWords } from "./lyric-analysis";
 
 export interface VoiceChoice {
@@ -125,6 +126,8 @@ export function lineEmphasis(line: LyricLine, f: Findings): string[] {
   const out: string[] = [];
   // round 14: a dark word (blood, a weapon, death…) is never blown up, nor a phrase that carries one
   const dark = sensitiveWords(text);
+  // round 22 (N8): a dark line emphasises nothing — not even its harmless words (「我數著血滴」 → no 數著)
+  if (dark.length) return [];
   const safe = (w: string) => !dark.some((d) => w.includes(d) || d.includes(w));
   const chant = CHANT.exec(text)?.[0];
   if (chant) out.push(chant);
@@ -178,7 +181,12 @@ export function typePolicy(bible: BandBible | null | undefined, f: Findings | nu
 
 /** 1–2 CJK characters for the ink voice's seal: the band's name, else the song's title. */
 export function sealText(bandName: string | undefined, title: string | undefined): string {
-  const cjk = (s: string | undefined) => Array.from(s ?? "").filter((ch) => /\p{Script=Han}/u.test(ch));
+  // round 22 (N8): a seal never stamps a dark character (a red 「割」 under 「我數著血滴」)
+  const cjk = (s: string | undefined) => {
+    const chars = Array.from(s ?? "");
+    const dark = new Set(darkRanges(s ?? "").flatMap(([a, b]) => Array.from({ length: b - a }, (_, k) => a + k)));
+    return chars.filter((ch, i) => /\p{Script=Han}/u.test(ch) && !dark.has(i) && !DARK_SEAL.test(ch));
+  };
   const band = cjk(bandName);
   if (band.length) return band.slice(0, 2).join("");
   return cjk(title).slice(0, 2).join("");

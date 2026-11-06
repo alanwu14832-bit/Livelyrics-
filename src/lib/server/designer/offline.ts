@@ -41,7 +41,7 @@ import { chooseVoice, designTypeSystem, typeNotes, type VoiceChoice } from "./ty
 import { MOOD_VOCABULARY } from "./lexicon/moods";
 import { VOICES } from "@/lib/type/vocab";
 import type { DesignerInput } from "./types";
-import { offlineSceneProgram } from "./scene-program";
+import { offlineSceneProgram, transitionCharacterOf } from "./scene-program";
 import { hueFamily, recentFactor, recentUses, type RecentLook } from "./recent";
 
 export type MoodClass = "calm" | "warm" | "driving" | "explosive";
@@ -546,7 +546,9 @@ function sectionRationale(ctx: SectionPlanCtx, list: readonly SectionDesign[], i
   const quotable = lines.find(quotes);
   const first = quotable ? clipLine(quotable.text) : null;
   const last = lines[n - 1] && quotes(lines[n - 1]) ? clipLine(lines[n - 1].text) : null;
-  const phrase = ctx.findings.hints.singalong.find((p) => p.lineIds.some((id) => ids.has(id)))?.text ?? null;
+  // round 22 (N8): never a phrase sung inside a dark line (「染紅這面牆」 of 「鮮血染紅這面牆」)
+  const darkTexts = ctx.st.lines.filter((l) => sensitiveWords(l.text).length > 0).map((l) => l.text);
+  const phrase = ctx.findings.hints.singalong.find((p) => p.lineIds.some((id) => ids.has(id)) && !darkTexts.some((t) => t.includes(p.text)))?.text ?? null;
   const dur = Math.max(1, Math.round(d.end - d.start));
   const delta = prev ? d.energy - prev.energy : 0;
   const move = !prev ? `能量 ${r2e(d.energy)}` : delta >= 0.15 ? `能量從 ${r2e(prev.energy)} 升到 ${r2e(d.energy)}` : delta <= -0.15 ? `能量從 ${r2e(prev.energy)} 掉到 ${r2e(d.energy)}` : `能量 ${r2e(d.energy)}，和前一段差不多`;
@@ -580,16 +582,18 @@ function sectionRationale(ctx: SectionPlanCtx, list: readonly SectionDesign[], i
     case "pre-chorus":
       return `導歌 ${n ? `${n} 句` : `${dur} 秒`}把張力往上推（${move}），「${sc}」一層層堆起來${next?.kind === "chorus" ? `，先不放出副歌「${SCENES[next.scene].label}」的顏色` : ""}。`;
     case "chorus": {
-      const words = hidden ? "這段不放歌詞，讓光與節拍帶動全場" : phrase ? `「${phrase}」放大成畫面的主角，邀請全場合唱` : `${n} 句歌詞${first ? `（從「${first}」起）` : ""}放大成畫面的主角`;
+      // round 22 (N8): a chorus that sings a dark line is set small and quiet — the picture speaks, nobody is invited to sing
+      const heavy = !hidden && lines.some((l) => sensitiveWords(l.text).length > 0);
+      const words = hidden ? "這段不放歌詞，讓光與節拍帶動全場" : heavy ? "字句沉重，歌詞小而安靜，不邀全場合唱，讓畫面的象徵說話" : phrase ? `「${phrase}」放大成畫面的主角，邀請全場合唱` : `${n} 句歌詞${first ? `（從「${first}」起）` : ""}放大成畫面的主角`;
       const total = list.filter((x) => x.kind === "chorus").length;
       const ordinal = list.slice(0, i).filter((x) => x.kind === "chorus").length;
       if (!earlier) return `第一次副歌（${move}）：「${sc}」打開整面牆，${words}。`;
       const climb = earlier.scene === d.scene ? `仍是「${sc}」，強度從 ${r2e(earlier.sceneParams.intensity)} 推到 ${r2e(d.sceneParams.intensity)}` : `從${earlier.label}的「${SCENES[earlier.scene].label}」換到「${sc}」`;
       if (ordinal === total - 1) {
         // only a chorus that really is the loudest is called the top; a last chorus sung softer says so
-        if (d.energy < earlier.energy - 0.1) return `最後一次副歌反而收著（${move}）：「${sc}」放低亮度，${hidden ? "不放歌詞" : phrase ? `「${phrase}」輕輕再唱一次` : "歌詞不再放大"}。`;
+        if (d.energy < earlier.energy - 0.1) return `最後一次副歌反而收著（${move}）：「${sc}」放低亮度，${hidden ? "不放歌詞" : phrase && !heavy ? `「${phrase}」輕輕再唱一次` : "歌詞不再放大"}。`;
         const top = d.energy >= Math.max(...list.map((x) => x.energy)) - 0.05;
-        return `${top ? "最後一次副歌是全曲的頂點" : "最後一次副歌"}：${climb}，${hidden ? "不放歌詞" : phrase ? `「${phrase}」再放大一次` : "歌詞再放大一次"}。`;
+        return `${top ? "最後一次副歌是全曲的頂點" : "最後一次副歌"}：${climb}，${hidden ? "不放歌詞" : heavy ? "畫面推到最滿，歌詞仍然小而安靜" : phrase ? `「${phrase}」再放大一次` : "歌詞再放大一次"}。`;
       }
       return `${d.label}${climb}，${words}。`;
     }
@@ -1051,6 +1055,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   };
   // 專屬畫面: the offline composer's program (form from the findings, the rest from the seed)
   plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings);
+  plan.transitionCharacter = transitionCharacterOf(findings);
   return normalizePlan(plan, input);
 }
 

@@ -310,6 +310,8 @@ describe("the structured output schema", () => {
     delete draft.typeSystem.generation;
     // the scene program is written by its own step (scene-program.ts), not by the design call
     delete draft.sceneProgram;
+    // round 22: the transition character is the normaliser's (from the genre), not written by Claude
+    delete draft.transitionCharacter;
     expect(DesignPlanDraftSchema.safeParse(draft).success).toBe(true);
     expect(validate(designPlanJsonSchema(), draft)).toEqual([]);
     // and rejects karaoke in a section

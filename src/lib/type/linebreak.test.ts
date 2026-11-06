@@ -143,11 +143,11 @@ describe("round 17: Intl.Segmenter word boundaries", () => {
     }
   });
 
-  it("the featured word is a whole word: 「醒來」 not 「醒」, 「我不要」 not 「我不要 我」+「不要」", () => {
-    const wake = lt("我不想再醒來");
+  it("the featured word is a whole word (round 22: 我不想再醒來 is now a dark line, never featured): 「醒來」 not 「醒」, 「我不要」 not 「我不要 我」+「不要」", () => {
+    const wake = lt("我在清晨醒來");
     const k = keySpan(wake, "醒", 3)!;
     expect(wake.units.slice(k[0], k[1]).map((u) => u.text).join("")).toBe("醒來");
-    const emph = lt("我不想再醒來", "醒");
+    const emph = lt("我在清晨醒來", "醒");
     const ke = keySpan(emph, "", 3)!;
     expect(emph.units.slice(ke[0], ke[1]).map((u) => u.text).join("")).toBe("醒來");
     const no = lt("我不要 我不要");

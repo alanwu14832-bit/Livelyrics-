@@ -151,7 +151,12 @@ export function normalizeTypeSystem(raw: unknown, c: TypeNormalizeContext): Type
   const w = num(o.weight);
   const weight = Math.round(clamp(w ?? d.weight, 600, 900) / 100) * 100;
   if (given && w != null && w < 600) repairs.push("字體語言的字重提高到 600（大螢幕可讀性）");
-  const ornaments = (Array.isArray(o.ornaments) ? o.ornaments : given ? [] : d.ornaments).map((x) => oneOf(x, TYPE_ORNAMENT_IDS)).filter((x, i, a): x is TypeOrnamentId => x != null && a.indexOf(x) === i);
+  // round 22 (N1): the section ordinal is an editor's opt-in, never part of a designed plan (Claude's,
+  // the offline designer's): a live show never prints section labels on the wall
+  const ornaments = (Array.isArray(o.ornaments) ? o.ornaments : given ? [] : d.ornaments)
+    .map((x) => oneOf(x, TYPE_ORNAMENT_IDS))
+    .filter((x, i, a): x is TypeOrnamentId => x != null && a.indexOf(x) === i && (x !== "section" || !!c.keepEdits));
+  if (!c.keepEdits && Array.isArray(o.ornaments) && o.ornaments.includes("section")) repairs.push("移除段落序號裝飾（現場演出不在牆上印段落名）");
   const seal = typeof o.seal === "string" ? [...o.seal.replace(/\s+/g, "")].filter((ch) => CJK_RE.test(ch) || /[A-Za-z0-9]/.test(ch)).slice(0, 4).join("") : "";
   const rationale = typeof o.rationale === "string" ? o.rationale.replace(/\s+/g, " ").trim().slice(0, 300) : "";
 

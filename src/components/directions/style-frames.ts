@@ -44,10 +44,22 @@ export function frameSize(project: Pick<Project, "output">): { width: number; he
   return aspect >= 1 ? { width: STYLE_FRAME_EDGE, height: Math.max(2, Math.round(STYLE_FRAME_EDGE / aspect / 2) * 2) } : { width: Math.max(2, Math.round((STYLE_FRAME_EDGE * aspect) / 2) * 2), height: STYLE_FRAME_EDGE };
 }
 
+/** JSON with object keys sorted: the same plan hashes the same whatever order its fields were set in. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableJson(obj[k])}`)
+    .join(",")}}`;
+}
+
 export function frameKey(project: Project, direction: DesignDirection): string {
   const { width, height } = frameSize(project);
   const lyrics = project.lyrics.lines.map((l) => `${l.id}:${l.start}:${l.text}`).join("|");
-  return `${project.id}|${direction.id}|${width}x${height}|${fnv(JSON.stringify(direction.plan))}|${fnv(lyrics)}|${fnv(JSON.stringify(project.output?.safety ?? null))}`;
+  return `${project.id}|${direction.id}|${width}x${height}|${fnv(stableJson(direction.plan))}|${fnv(lyrics)}|${fnv(JSON.stringify(project.output?.safety ?? null))}`;
 }
 
 const cache = new Map<string, StyleFrame[]>();
