@@ -70,23 +70,30 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
     const prev = sections[i - 1];
     const scene = SCENES[s.scene].label;
     const rise = prev ? s.energy - prev.energy : 0;
+    // round 17 / 22: a chorus that sings a dark line (blood, a weapon, ending one's life…) is never shouted
+    // from the wall and never handed to the crowd: its cue says so, without inviting anyone to sing
+    const darkChorus = hasLyrics && s.kind === "chorus" && lines.some((l) => typeof l.start === "number" && l.start >= s.start - 0.05 && l.start < s.end && hasDarkWord(l.text ?? ""));
     if (prev && rise >= DROP_RISE) {
       const how = transitionWording(s.transitionIn, ledSafe);
       cues.push({
         time: round2(Math.max(0, s.start - 0.2)),
-        title: calm ? `${s.label}亮起` : `${s.label}爆點`,
-        detail: calm
+        title: calm || darkChorus ? `${s.label}亮起` : `${s.label}爆點`,
+        detail: calm || darkChorus
           ? `${how}進「${scene}」，讓亮度慢慢爬上來就好，不推強度、不閃。`
           : `${how}進「${scene}」（能量 ${prev.energy.toFixed(2)} → ${s.energy.toFixed(2)}），衝上來時可把強度推到 1.2。`,
         kind: "drop",
       });
     }
-    if (hasLyrics && s.kind === "chorus" && s.lyricStyle !== "hidden" && chorusCount >= SINGALONG_CHORUSES) {
-      // round 17: a chorus that sings a dark word (blood, a weapon, death…) is never shouted from the wall
-      const dark = lines.some((l) => typeof l.start === "number" && l.start >= s.start - 0.05 && l.start < s.end && hasDarkWord(l.text ?? ""));
-      const how = dark
-        ? "這段副歌有暗黑的字句：歌詞以小字安靜呈現，不放大、不帶喊，讓畫面的象徵說話"
-        : s.lyricStyle === "impact" && !calm
+    if (darkChorus && s.lyricStyle !== "hidden") {
+      cues.push({
+        time: round2(s.start),
+        title: `${s.label}：安靜呈現`,
+        detail: "這段副歌的字句沉重：歌詞以小字安靜呈現，不放大、不邀觀眾合唱，強度維持不推，讓畫面的象徵說話。",
+        kind: "quiet",
+      });
+    } else if (hasLyrics && s.kind === "chorus" && s.lyricStyle !== "hidden" && chorusCount >= SINGALONG_CHORUSES) {
+      const how =
+        s.lyricStyle === "impact" && !calm
           ? "口號以巨字呈現，帶全場一起喊"
           : s.lyricStyle === "karaoke" || s.lyricStyle === "subtitle"
             ? `歌詞以「${LYRIC_STYLES[s.lyricStyle].label}」呈現`

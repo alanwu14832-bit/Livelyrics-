@@ -13,7 +13,7 @@
 // Simplified lyrics are matched through a char-by-char traditional mapping (the same code point
 // positions), so every phrase and word reported is an exact substring of the original line.
 
-import { hasDarkWord } from "@/lib/type/sensitive";
+import { hasDarkWord, ideationPhrases } from "@/lib/type/sensitive";
 import { toTraditional } from "@/lib/zh-variants";
 import { IMAGERY_FAMILIES, SENSITIVE_WORDS, STOP_WORDS, type ImageryFamily } from "./lexicon/imagery";
 import { CHANTS, INTENSIFIERS, NEGATORS, SENTIMENT } from "./lexicon/sentiment";
@@ -113,9 +113,12 @@ const SENSITIVE_SET: ReadonlySet<string> = new Set(SENSITIVE_WORDS.map((w) => w.
 
 /** The dark words of a line, as written (see SENSITIVE_WORDS): never an emphasis, never a motion word. */
 export function sensitiveWords(text: string): string[] {
-  return tokenize(text)
+  const words = tokenize(text)
     .filter((t) => SENSITIVE_SET.has(t.key))
     .map((t) => t.surface);
+  // round 22 (N8): a line that speaks of ending one's life without a dark word (「我不想再醒來」)
+  const phrases = ideationPhrases(text).filter((p) => !words.some((w) => p.includes(w) || w.includes(p)));
+  return [...words, ...phrases];
 }
 
 /**
@@ -537,12 +540,15 @@ export function singalongPhrases(lines: ReadonlyArray<{ id: string; text: string
   const breaths = new Set<string>();
   for (const t of texts) for (const g of gramsOf(t, wholeLines)) if (g.complete) breaths.add(g.cjk ? g.text : g.text.toLowerCase());
   const seen = new Map<string, { gram: Gram; score: number; lines: number[] }>();
+  // round 22 (N8): a phrase sung inside a dark line is never the crowd's either (「染紅這面牆」 of 「鮮血染紅這面牆」)
+  const darkTexts = texts.filter((t) => sensitiveWords(t).length > 0).map((t) => t.toLowerCase());
   for (const l of pool) {
     for (const g of gramsOf(l.text ?? "", wholeLines)) {
       const key = g.cjk ? g.text : g.text.toLowerCase();
       if (seen.has(key)) continue;
       // round 17: a phrase with a dark word (「殺了我」, 「let me bleed」) is never the crowd's chant
       if (hasDarkWord(g.text)) continue;
+      if (darkTexts.some((t) => t.includes(key))) continue;
       if (breaths.has(key)) g.complete = true;
       const containing = texts.map((t, i) => (containsGram(t, g) ? i : -1)).filter((i) => i >= 0);
       if (containing.length < 2 && !g.chant) continue;

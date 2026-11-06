@@ -16,8 +16,53 @@ export const SENSITIVE_WORDS: readonly string[] = [
   "drug", "drugs", "pill", "pills", "cocaine", "heroin", "sex", "naked", "nude", "lust",
 ];
 
+/** Characters a seal (印章) never stamps, whatever word they are part of (round 22). */
+export const DARK_SEAL = /[血死殺刀槍割屍墳墓骷髏毒藥彈傷葬喪]/u;
+
 /** Everyday compounds that hold a dark character but are not dark (熱血 is passion, 血拼 shopping). */
 const NOT_DARK: readonly string[] = ["熱血", "血拼", "殺價", "心血", "血汗", "血緣", "血型", "殺青", "抹殺"];
+
+/**
+ * Round 22 (N8): phrase-level ideation — lines with no dark word that still speak of ending one's life
+ * (「我不想再醒來」, 「把藥全部吞下去」, 「活不下去」). Matched on the traditional text as whole phrases;
+ * the ordinary lines they resemble are left alone (「不想醒來 這個夢太美」, 「吞下去的話」, 「吃藥了沒」,
+ * 「活下去」; 「想死你了」 is affection).
+ */
+export const IDEATION_PATTERNS: readonly RegExp[] = [
+  /(不想|不願|不要|別)再(醒來|醒過來|睜開眼)了?|永遠不(要|想)?(醒來|醒過來)/u,
+  /不想再?活(了|下去)?/u,
+  /活不下去/u,
+  /(想|要|好想|讓我)死(?![你守心不])/u,
+  /(結束|了結|終結)掉?(自己|我自己|這條命|生命)/u,
+  /一睡不醒|長眠不醒|永遠睡去/u,
+  /[^\s，。,]{0,4}藥[^\s，。,]{0,4}(吞下去|吞下|吞光|吞掉|全吞)/u,
+  /(吞下|吞光|吞掉)[^\s，。,]{0,4}(安眠藥|藥丸|整瓶藥|所有的藥|全部的藥)/u,
+  /\b(kill(ing)? myself|want(ed)? to die|wanna die|end it all|end my life|never wake up|don'?t want to wake up|take all the pills|swallow(ed)? the pills)\b/iu,
+];
+
+/** The ideation phrases of a text as code-point ranges [from, to). */
+function ideationRanges(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const re of IDEATION_PATTERNS) {
+    for (const m of text.matchAll(new RegExp(re.source, `${re.flags}g`))) {
+      if (!m[0]) continue;
+      const a = Array.from(text.slice(0, m.index)).length;
+      out.push([a, a + Array.from(m[0]).length]);
+    }
+  }
+  return out;
+}
+
+/** The text speaks of ending one's life without a dark word (round 22): a quiet line, never a hook. */
+export function hasIdeation(text: string): boolean {
+  return ideationRanges(toTraditional(String(text ?? ""))).length > 0;
+}
+
+/** The ideation phrases of a text, as written. */
+export function ideationPhrases(text: string): string[] {
+  const chars = Array.from(String(text ?? ""));
+  return ideationRanges(Array.from(toTraditional(String(text ?? ""))).join("")).map(([a, b]) => chars.slice(a, b).join(""));
+}
 
 const CJK_WORDS = SENSITIVE_WORDS.filter((w) => /\p{Script=Han}/u.test(w)).sort((a, b) => b.length - a.length);
 const LATIN_WORDS = new Set(SENSITIVE_WORDS.filter((w) => !/\p{Script=Han}/u.test(w)));
@@ -59,6 +104,14 @@ export function darkRanges(text: string): Array<[number, number]> {
     while (j < chars.length && /[A-Za-z]/.test(chars[j])) j++;
     if (LATIN_WORDS.has(chars.slice(i, j).join("").toLowerCase())) out.push([i, j]);
     i = j;
+  }
+  // round 22: whole ideation phrases (unless a dark word already marks them: 「想死」)
+  for (const [a, b] of ideationRanges(joined)) {
+    let free = true;
+    for (let k = a; k < b; k++) if (taken[k] === 1) free = false;
+    if (!free) continue;
+    for (let k = a; k < b; k++) taken[k] = 1;
+    out.push([a, b]);
   }
   return out.sort((x, y) => x[0] - y[0]);
 }
