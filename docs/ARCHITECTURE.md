@@ -1829,6 +1829,37 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   stub (`/lrclib/api/search` → `[]`, `/get` → 404; `scripts/lrclib-stub.cjs` standalone for every e2e script,
   the same paths in `e2e-free-research.cjs`'s stub), so the home page's automatic search never reaches the internet.
 
+### Round 22: nothing amateur on the wall
+
+- **No operator labels** (`type/compose.ts ornaments`): `number` is a graphic index — a row of short bars, the
+  section's own lit in the accent, staggered like a list — on a section's first line only, never a numeral;
+  `section` is an editor opt-in that prints the section's ordinal (「02」), never its name. Designed plans never
+  carry it: `type/normalize.ts` drops it without `keepEdits`, `designer/normalize.ts` drops it from a design
+  output (`fill`), the voices no longer list it, and `typeCatalogBlock` tells Claude it is not for live shows.
+- **Ideation is dark** (`type/sensitive.ts IDEATION_PATTERNS`): phrases with no dark word that speak of ending
+  one's life (不想再醒來, 不想活, 活不下去, 把藥…吞下去, want to die…) are dark ranges, so every round-17 rule
+  applies (quiet recipe, no key still, no crowd phrase); 「不想醒來 這個夢太美」, 「吞下去的話」, 「要死不活」 are not.
+  A dark line emphasises nothing (`resolve.ts`, `sequence.ts`, `lineEmphasis`) and carries no seal, title or
+  「」 (`compose.ts`); a seal never stamps a dark character (`DARK_SEAL`). `singalongPhrases` and
+  `sectionRationale` never quote a piece of a dark line (「染紅這面牆」); a dark chorus gets a quiet cue
+  (「副歌一：安靜呈現」, no crowd invitation, no intensity push) and a calm rationale; `titleCandidates` only names
+  images the song also sings in plain words (no 「把凋零留在碎片」).
+- **Transitions from the song** (`DesignPlan.transitionCharacter`: swell / cut / scan / tide / sweep; offline and
+  `fill` normalisation from `transitionCharacterOf(findings)` — a ballad swells, a shouted song cuts, else the
+  genre's; older plans read it from the type system in `stage/transition-look.ts songCharacter`). The engines
+  pass `transitionLook(plan, section, colorway)` with every transition; the compositor (`scenes/composite.ts
+  character()`) draws it instead of the kind's legacy look: a falling change (≤ −0.12) always dissolves and
+  dims, light is added only when the energy rises, the angle follows the primary's hue (mirrored section to
+  section), the width the section density, the tint the incoming accent toward the primary (never white).
+  The kind still sets the duration; no full-field flash is added; the LED limiter runs after.
+- **Echo trails** (`scenes/type.ts uEat`): the erosion of accent layers / ornaments is two octaves of value
+  noise with a feathered threshold at full resolution (was 16 px hashed blocks: a mosaic behind the echoes).
+- **Phrases stay whole** (`type/text.ts`): no row or long-line cut starts with 上／裡／的／了／著／過 leaning left
+  (`startsOnLeaner`; 過去 / 上車 may), a numeral + measure word keeps its head (`cutsMeasureFromHead`: 那一年夏天);
+  Latin breaks cost by phrase (`latinBreakCost`: free after a comma, good before a preposition, held between
+  content words, more inside a capitalised name); a Latin featured word is its phrase (river → river stones,
+  a multi-word emphasis across its spaces).
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
