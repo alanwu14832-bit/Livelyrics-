@@ -14,7 +14,9 @@ key visual + lyric/animation plan → operator console drives a projection windo
 
 ## Design skills
 
-When building or restyling UI, load a design skill first: `taste-skill` (vendored in
-`.claude/skills/taste-skill/`, read its `LIVELYRICS.md` for scope) for the home / library / upload /
-process pages, and `frontend-design` or `frontend-ui-engineering` for the console, editors and
-projection. Subagents working on UI should be told to do the same.
+Vendored in `.claude/skills/` (sources and scope: `.claude/skills/SOURCES.md`). Load the matching ones
+before the work, and tell UI / visual subagents to do the same:
+- public pages (home, library, upload, process, settings): `taste-skill` (read its `LIVELYRICS.md`);
+- console, editors: `frontend-design` / `frontend-ui-engineering`;
+- stage visuals and scene GLSL: `shader-art-coding`, `motion-art-direction`, `shot-composition`, `color-motion`;
+- lyric typography and motion: `kinetic-type`, `kinetic-type-director`, `animation-principles`, `beat-sync-editing`.
