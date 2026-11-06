@@ -197,8 +197,12 @@ void main() {
   // round 18: only outside the readable area (ornaments, display type beyond it) and the accent
   // layers; the readable letters keep the legibility guarantee over any picture
   if (uEat > 0.001) {
-    float blk = hash12(floor(fc / (16.0 * s)) + vec2(uSeed * 3.1, uSeed));
-    float e = step(1.0 - uEat * 0.5, blk) * (0.55 + 0.45 * smoothstep(0.2, 0.7, luma(scene)));
+    // round 22 (m7): a soft, full-resolution erosion — two octaves of value noise with a feathered
+    // threshold — instead of 16 px hashed blocks, which turned the echo trails into a blocky mosaic
+    vec2 en = fc / (9.0 * s) + vec2(uSeed * 3.1, uSeed);
+    float grain = vnoise(en) * 0.62 + vnoise(en * 2.7 + 5.3) * 0.38;
+    float th = 0.7 - uEat * 0.2;
+    float e = smoothstep(th - 0.07, th + 0.07, grain) * (0.55 + 0.45 * smoothstep(0.2, 0.7, luma(scene)));
     bool readable = uv.x >= uTypeArea.x && uv.y >= uTypeArea.y && uv.x <= uTypeArea.z && uv.y <= uTypeArea.w;
     float eI = readable ? 0.0 : e;
     ink *= 1.0 - eI;
