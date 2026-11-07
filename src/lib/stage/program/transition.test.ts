@@ -163,12 +163,15 @@ describe("same-program section transitions (round 18)", () => {
   for (const form of ["horizon", "orbits"] as FormId[]) {
     it(`${form}: the subject is never shown twice mid-transition`, () => {
       const code = program(form);
+      // round 23: the orbits chorus draws its rings as bands of light (many blobs by this count),
+      // so the subject is followed into a build (mode 1) — the same planet, the zone moving across
+      const next = form === "orbits" ? { ...cur, mode: 1 } : cur;
       const a = render(code, prev);
-      const b = render(code, cur);
+      const b = render(code, next);
       const most = Math.max(blobs(a), blobs(b));
       expect(blobs(mix(a, b, 0.5))).toBeGreaterThan(most);
       for (const p of [0.25, 0.5, 0.75]) {
-        const one = blobs(render(code, blendProgramDraw(prev, cur, p)));
+        const one = blobs(render(code, blendProgramDraw(prev, next, p)));
         expect(one).toBeLessThanOrEqual(most);
       }
     });
