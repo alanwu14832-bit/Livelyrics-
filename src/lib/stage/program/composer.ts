@@ -269,7 +269,7 @@ float T() { return uTime * K_SPEED; }
  * a sun filling the sky while a slab doubling leaves the frame.
  */
 export const CHORUS_GROW: Record<FormId, number> = {
-  horizon: 1.45,
+  horizon: 2.1,
   pillars: 1.7,
   orbits: 2.3,
   strata: 1.6,
@@ -391,12 +391,13 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float hz = horizonY();
   float light = uParams.z;
   vec2 fu = vec2(focalUv().x, hz);
-  vec2 c = toP(fu) + mo() + vec2(0.0, K_R * SC() * (uParams.x * 1.3 - 0.45));
+  // the chorus sun is setting: it sits low on the horizon, so its size fills the sky without the sky lifting
+  vec2 c = toP(fu) + mo() + vec2(0.0, K_R * SC() * (uParams.x * 1.3 - 0.45) * (1.0 - 0.75 * OPEN()));
   float r = K_R * SC() * br() * (aspect() < 0.8 ? 1.3 : 1.0);
   vec2 q = p - c;
   float d = length(q);
   float up = sat((uv.y - hz) / (1.0 - hz));
-  float lift = 0.42 + 0.38 * max(OPEN(), BUILD());
+  float lift = 0.42 + 0.3 * BUILD();
   vec3 col = mix(mix(uBg, uPri, (0.2 + 0.25 * light) * lift), uBg * 0.5, pow(up, 0.65));
   vec2 sp = fc / min(uRes.x, uRes.y) * 160.0;
   col += vec3(0.85) * step(0.993, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5)) * up * (1.0 - light) * 0.7;
@@ -414,7 +415,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     col = mix(col, uBg * 0.3, fill(d - r));
     col += mix(uAcc, vec3(1.0), 0.3) * (stroke(d - r, 0.004) + exp(-abs(d - r) * 50.0) * 0.5);
   } else {
-    col = mix(col, disc * (0.7 + 0.45 * light), fill(d - r) * (1.0 - cut) * step(hz, uv.y));
+    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()), fill(d - r) * (1.0 - cut) * step(hz, uv.y));
   }
   ${
     city
@@ -525,7 +526,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float d = length(q);
   float pr = 0.06 * SC() * br() * (0.8 + 0.4 * uParams.x);
   // round 23: in the chorus the rings are bands of light (wider each later chorus), not hairlines
-  float bandW = OPEN() * (0.015 + 0.005 * ESC());
+  float bandW = OPEN() * (0.012 + 0.005 * ESC());
   vec3 lc = mix(uAcc, vec3(1.0), 0.35);
   float lines = 0.0;
   float moons = 0.0;
