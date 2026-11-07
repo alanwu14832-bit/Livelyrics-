@@ -15,6 +15,16 @@ export function keyLineBudget(distinct: number): number {
   return Math.max(1, Math.min(MAX_KEY_LINES, Math.round(distinct * 0.1)));
 }
 
+/**
+ * Round 23 (N7): a chorus line's largest readable glyph is at least this fraction of the frame's
+ * short side (the last chorus LAST_CHORUS_FLOOR); verse lines keep under CHORUS_FLOOR. Each time a
+ * chorus lyric comes back it grows by REPEAT_GROWTH (up to three times) or, where it cannot grow
+ * (a long line already filling its zone), changes treatment.
+ */
+export const CHORUS_FLOOR = 0.09;
+export const LAST_CHORUS_FLOOR = 0.12;
+export const REPEAT_GROWTH = 0.1;
+
 /** A hook sung at least this many times is the crowd's line (set large every time). */
 export const CHANT_REPEATS = 4;
 const CHANT_WORD = /^(?:hey|oh+|yeah|woah|whoa|la+|na+|go|嘿|喔|哦|啦)+$/i;

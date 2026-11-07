@@ -37,6 +37,17 @@ export const FORM_LABELS: Record<FormId, string> = {
   ribbons: "絲帶",
   threads: "落下的光絲",
 };
+/** Round 23 (N5): an instrumental's picture builds up over the song; its name says so. */
+export const INSTRUMENTAL_TITLES: Record<FormId, string> = {
+  horizon: "慢慢升起的地平線",
+  pillars: "一座座立起的碑",
+  orbits: "越轉越多的軌道",
+  strata: "一層層亮起的山",
+  bars: "越疊越密的斜線",
+  brush: "一圈圈的墨",
+  ribbons: "一條條展開的光帶",
+  threads: "越下越密的光絲",
+};
 export const TEXTURE_LABELS: Record<TextureId, string> = { film: "底片顆粒", halftone: "網點", paper: "紙纖維", scan: "掃描線" };
 export const MOTION_LABELS: Record<MotionId, string> = { drift: "漂移", breathe: "呼吸", rise: "上升", orbit: "繞行", sweep: "掃過" };
 
@@ -233,6 +244,9 @@ float horizonY() {
   return K_FY;
 }
 float T() { return uTime * K_SPEED; }
+// round 23: a sung song's form does not build up over the song (its choruses do); words share the frame
+float SONG() { return 0.0; }
+float WORDS() { return 1.0; }
 `;
 
 /**
@@ -250,18 +264,62 @@ const float K_PH = ${f(c.focalX * 9.0)};
 vec2 toP(vec2 q) { return (q * uRes - 0.5 * uRes) / min(uRes.x, uRes.y); }
 vec2 zc() { return vec2(0.5, 0.5); }
 vec4 zn() { return vec4(2.0, 2.0, 2.4, 2.4); }
-// no words: the form crosses the frame over the song, from one side through the centre to the other
+// no words: the form drifts a little across the frame over the song (round 23: it builds up —
+// SONG() adds layers, height and light — rather than sliding one shape from side to side)
 vec2 focalUv() {
   float s = sin(uSongProgress * 4.4 + K_PH);
-  if (aspect() < 0.8) return vec2(0.5, 0.44 + 0.12 * s);
-  return vec2(0.5 + 0.2 * s, K_FY + 0.18 + 0.04 * cos(uSongProgress * 3.1 + K_PH));
+  if (aspect() < 0.8) return vec2(0.5, 0.44 + 0.08 * s);
+  return vec2(0.5 + 0.12 * s, K_FY + 0.18 + 0.04 * cos(uSongProgress * 3.1 + K_PH));
 }
 float horizonY() {
   if (aspect() < 0.8) return 0.42;
   return K_FY + 0.05 * sin(uSongProgress * 2.7 + K_PH);
 }
 float T() { return uTime * K_SPEED; }
+// round 23 (N5): how far the song has built (0 at the start, 1 near the end, continuous)
+float SONG() { return smoothstep(0.02, 0.92, uSongProgress); }
+float WORDS() { return 0.0; }
 `;
+
+/**
+ * Round 23 (N2): how far the form grows when a chorus opens it — the subject passes the frame edge
+ * instead of staying one small object that only gets brighter. Per form, because a disc doubling is
+ * a sun filling the sky while a slab doubling leaves the frame.
+ */
+export const CHORUS_GROW: Record<FormId, number> = {
+  horizon: 2.1,
+  pillars: 1.7,
+  orbits: 2.3,
+  strata: 1.6,
+  bars: 1.6,
+  brush: 1.7,
+  ribbons: 1.2,
+  threads: 1.6,
+};
+/** How much more the last of several choruses grows than the first (on top of CHORUS_GROW − 1). */
+export const CHORUS_ESCALATE = 0.2;
+
+/**
+ * The section grammar every form reads (round 23): OPEN() is the chorus (mode 2), BUILD() the build
+ * state (mode 1: a pre-chorus, or the verse that leads into a chorus) rising through the section,
+ * ESC() which chorus this is (0 the first … 1 the last, from the composer's section list; past the
+ * list, the song's progress), and SC() the form's scale — K_SCALE in a verse, × CHORUS_GROW in a
+ * chorus, a little more each later chorus, halfway there by the end of a build.
+ */
+function stageGrammar(form: FormId, sections: readonly ComposerSection[]): string {
+  const choruses = sections.map((s, i) => ({ s, i })).filter((x) => x.s.kind === "chorus");
+  const lines = choruses.length > 1 ? choruses.map((c, n) => `  if (abs(uSection - ${f(c.i)}) < 0.5) return ${f(n / (choruses.length - 1))};`) : [];
+  return `
+const float K_GROW = ${f(CHORUS_GROW[form])};
+float OPEN() { return smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode)); }
+float BUILD() { return step(0.5, uMode) * (1.0 - step(1.5, uMode)) * smoothstep(0.0, 1.0, uSectionProgress); }
+float ESC() {
+${lines.join("\n")}${lines.length ? "\n" : ""}  return ${sections.length ? `step(${f(sections.length - 0.5)}, uSection) * sat(uSongProgress * 1.4 - 0.4)` : "sat(uSongProgress * 1.4 - 0.4)"};
+}
+float GROW() { return (1.0 + (K_GROW - 1.0) * (OPEN() * (1.0 + ${f(CHORUS_ESCALATE)} * ESC()) + 0.45 * BUILD())) * (1.0 + 0.3 * SONG() * (1.0 - 0.8 * OPEN())); }
+float SC() { return K_SCALE * GROW(); }
+`;
+}
 
 /** An instrumental's form reads the zone helpers instead of the (unreserved) text zone. */
 const fullFrame = (code: string) => code.replace(/zoneCenter\(\)/g, "zc()").replace(/\buZone\b/g, "zn()");
@@ -351,23 +409,34 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float hz = horizonY();
   float light = uParams.z;
   vec2 fu = vec2(focalUv().x, hz);
-  vec2 c = toP(fu) + mo() + vec2(0.0, K_R * K_SCALE * (uParams.x * 1.3 - 0.45));
-  float r = K_R * K_SCALE * br() * (aspect() < 0.8 ? 1.3 : 1.0);
+  // the chorus sun is setting: it sits low on the horizon, so its size fills the sky without the sky lifting
+  vec2 c = toP(fu) + mo() + vec2(0.0, K_R * SC() * (uParams.x * 1.3 - 0.45 + 0.6 * SONG()) * (1.0 - 0.75 * OPEN()));
+  float r = K_R * SC() * br() * (aspect() < 0.8 ? 1.3 : 1.0);
   vec2 q = p - c;
   float d = length(q);
   float up = sat((uv.y - hz) / (1.0 - hz));
-  vec3 col = mix(mix(uBg, uPri, 0.2 + 0.25 * light), uBg * 0.5, pow(up, 0.65));
+  float lift = 0.42 + 0.3 * BUILD() + 0.45 * SONG();
+  vec3 col = mix(mix(uBg, uPri, (0.2 + 0.25 * light) * lift), uBg * 0.5, pow(up, 0.65));
   vec2 sp = fc / min(uRes.x, uRes.y) * 160.0;
   col += vec3(0.85) * step(0.993, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5)) * up * (1.0 - light) * 0.7;
-  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light)) * (0.12 + 0.4 * light);
+  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN());
   vec3 disc = mix(mix(uPri, uAcc, 0.3), mix(uAcc, vec3(1.0), 0.4), smoothstep(-1.0, 1.0, q.y / r));
   float ny = q.y / r;
   float cut = K_BANDS > 0.5 ? step(fract((0.3 - ny) * K_BANDS * 0.5 + T() * 0.02), sat((0.15 - ny) * 0.5)) * step(ny, 0.15) : 0.0;
+  // round 23: the chorus sun fills the sky and passes the frame's edge; rings of its light spread
+  // around it, one more ring each later chorus (the second layer)
+  float rings = OPEN() * (1.0 + ESC()) + 2.0 * SONG() * (1.0 - OPEN());
+  float rr = fract((d - r) / (r * 0.22));
+  float ringN = floor((d - r) / (r * 0.22));
+  col += mix(uPri, uAcc, 0.4) * step(0.0, d - r) * step(ringN, rings - 0.5) * smoothstep(0.5, 0.0, abs(rr - 0.5) - 0.18) * (0.3 + 0.25 * SONG() - 0.06 * ringN) * (0.55 + 0.45 * light) * step(hz, uv.y);
   if (uMode > 2.5) {
     col = mix(col, uBg * 0.3, fill(d - r));
     col += mix(uAcc, vec3(1.0), 0.3) * (stroke(d - r, 0.004) + exp(-abs(d - r) * 50.0) * 0.5);
   } else {
-    col = mix(col, disc * (0.7 + 0.45 * light), fill(d - r) * (1.0 - cut) * step(hz, uv.y));
+    // round 23: the chorus sun is large enough to stand behind the words: it gives way under the line
+    // on screen (dims, never cut), like the other forms do (wordsMask: nothing when no line is shown)
+    float giveWay = 1.0 - 0.5 * wordsMask(uv, 0.04) * OPEN();
+    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * giveWay, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
   }
   ${
     city
@@ -382,7 +451,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float depth = sat((hz - uv.y) / max(hz, 0.05));
     // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
     // reflection (a full one on water, a faint sheen on a road or a floor)
-    vec3 ground = mix(uBg * 1.1 + uPri * 0.18, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
+    vec3 ground = mix(uBg * 1.1 + uPri * 0.18 * lift, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
     ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
     float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
@@ -410,7 +479,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float light = uParams.z;
   float open = smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
   vec2 base = toP(vec2(focalUv().x, fy)) + vec2(mo().x, 0.0);
-  float h = (aspect() < 0.8 ? 0.32 : 0.5) * K_SCALE * br();
+  float h = (aspect() < 0.8 ? 0.32 : 0.5) * SC() * br();
   // the sky is dark but never black: a gradient of the background, the primary low in the fog
   vec3 col = mix(uBg * 0.7, uBg * 1.1 + uPri * 0.05, uv.y);
   float fog = smoothstep(fy + 0.22, fy - 0.05, uv.y) * (0.45 + 0.3 * fbm3(vec2(uv.x * 3.0 * aspect() + T() * 0.03, uv.y * 6.0)));
@@ -425,17 +494,27 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float ang = atan(p.y - lp.y, p.x - lp.x);
   float rays = pow(vnoise(vec2(ang * 6.0 + uSeed, T() * 0.06)), 3.0) * exp(-r * 3.4) * open;
   col += lc * (exp(-r * (8.0 - 3.0 * light)) * (0.14 + 0.42 * light) + rays * (0.55 + 0.25 * kick()));
+  // round 23: the chorus opens the wall behind the slabs — a field of the accent light rising from
+  // their feet across most of the sky, so they stand as silhouettes against it (not a brighter dot)
+  float wall = smoothstep(1.0, 0.0, length((p - base - vec2(0.0, h * 0.3)) * vec2(0.8, 1.1)) / (0.66 + 0.16 * ESC()));
+  col = mix(col, mix(lc * 0.7, mix(uPri, uAcc, 0.5) * 0.55, sat((uv.y - fy) * 1.4)), wall * wall * max(OPEN(), 0.55 * SONG()) * (0.7 + 0.3 * light));
   float front = 0.0;
   float rim = 0.0;
-  for (int i = 0; i < 3; i++) {
+  // round 23: the chorus raises two more slabs, one on each side (three more in the last chorus),
+  // and the row is symmetric — the middle tallest, the sides stepping down evenly, never a
+  // descending bar chart
+  float n = K_N + 2.0 * OPEN() * (1.0 + step(0.5, ESC())) + 2.0 * SONG();
+  for (int i = 0; i < 9; i++) {
     float fi = float(i);
-    if (fi >= K_N) break;
-    float off = (fi - (K_N - 1.0) * 0.5) * K_W * 3.2 * (aspect() < 0.8 ? 0.7 : 1.0);
-    float spread = step(2.5, uMode) * (fi - (K_N - 1.0) * 0.5) * 0.05 * (0.5 + uSectionProgress);
-    float hh = h * (1.0 - 0.18 * fi * step(1.5, K_N));
+    if (fi >= n) break;
+    float from = fi - (n - 1.0) * 0.5;
+    float off = from * K_W * 3.2 * (aspect() < 0.8 ? 0.7 : 1.0);
+    float spread = step(2.5, uMode) * from * 0.05 * (0.5 + uSectionProgress);
+    // (a mirror-symmetric variation: the same hash for the slabs at ±from)
+    float hh = h * (1.0 - 0.16 * abs(from) * step(1.5, n)) * (0.88 + 0.24 * hash11(floor(abs(from) + 0.5) + K_N * 7.0));
     vec2 c = base + vec2(off + spread, hh * 0.5);
     float d = sdBox(p - c, vec2(K_W * (aspect() < 0.8 ? 0.65 : 1.0), hh * 0.5));
-    front = max(front, fill(d));
+    front = max(front, fill(d) * sat(n - fi));
     rim = max(rim, exp(-abs(d) * (150.0 - 90.0 * uParams.x)));
   }
   col = mix(col, uBg * 0.16 + vec3(0.01), front);
@@ -467,7 +546,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   vec2 q = rot(K_LEAN) * (p - c);
   q.y /= K_TILT;
   float d = length(q);
-  float pr = 0.06 * K_SCALE * br() * (0.8 + 0.4 * uParams.x);
+  float pr = 0.06 * SC() * br() * (0.8 + 0.4 * uParams.x);
+  // round 23: in the chorus the rings are bands of light (wider each later chorus), not hairlines
+  float bandW = OPEN() * (0.012 + 0.005 * ESC()) + 0.007 * SONG() * (1.0 - OPEN());
   vec3 lc = mix(uAcc, vec3(1.0), 0.35);
   float lines = 0.0;
   float moons = 0.0;
@@ -475,9 +556,9 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   for (int i = 0; i < 7; i++) {
     float fi = float(i);
     if (fi >= K_RINGS) break;
-    float rr = (pr * 1.8 + fi * 0.055 * K_SCALE) * (1.0 - collapse * (fi / K_RINGS));
-    float on = step(fi, K_RINGS * (0.35 + 0.65 * uParams.y));
-    lines += stroke(d - rr, 0.0012 + 0.0008 * light) * on * (0.55 - 0.05 * fi);
+    float rr = (pr * 1.8 + fi * 0.055 * SC()) * (1.0 - collapse * (fi / K_RINGS));
+    float on = step(fi, K_RINGS * (0.35 + 0.65 * min(1.0, uParams.y + 0.6 * SONG())));
+    lines += stroke(d - rr, 0.0012 + 0.0008 * light + bandW * (1.0 - 0.1 * fi)) * on * (0.55 - 0.05 * fi);
     float a = T() * (0.05 + 0.03 * hash11(fi)) * (step(2.5, uMode) > 0.5 ? -1.0 : 1.0) + hash11(fi + 9.0) * TAU;
     vec2 mp = vec2(cos(a), sin(a)) * rr;
     moons += fill(length(q - mp) - 0.006) * on;
@@ -489,8 +570,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   for (int i = 0; i < 7; i++) {
     float fi = float(i);
     if (fi >= K_RINGS) break;
-    float rr = (pr * 1.8 + fi * 0.055 * K_SCALE) * (1.0 - collapse * (fi / K_RINGS));
-    float on = step(fi, K_RINGS * (0.35 + 0.65 * uParams.y));
+    float rr = (pr * 1.8 + fi * 0.055 * SC()) * (1.0 - collapse * (fi / K_RINGS));
+    float on = step(fi, K_RINGS * (0.35 + 0.65 * min(1.0, uParams.y + 0.6 * SONG())));
     halo += exp(-abs(d - rr) * 70.0) * on * (1.0 - 0.08 * fi);
   }
   // the orbits give way to the words on screen (and only then: an empty zone shows the rings)
@@ -529,14 +610,17 @@ float ridge(float x, float k) {
 }
 vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float light = uParams.z;
-  float hz = horizonY() + 0.12;
-  vec3 col = mix(mix(uBg, uPri, 0.18 + 0.3 * light), uBg * 0.55, sat((uv.y - hz) / (1.0 - hz)));
+  // round 23: an instrumental's range rises and gains ridges as the song builds (SONG())
+  float hz = horizonY() + 0.12 + 0.08 * SONG();
+  float nL = K_LAYERS + 2.0 * SONG();
+  float lift = 0.3 + 0.7 * max(max(OPEN(), BUILD()), 0.6 * SONG());
+  vec3 col = mix(mix(uBg, uPri, (0.18 + 0.3 * light) * lift), uBg * 0.55, sat((uv.y - hz) / (1.0 - hz)));
   vec2 fu = focalUv();
   float dy = hz + 0.06 + 0.12 * uParams.x;
   // a tall frame: the disc stays clear of the words' band above it
   if (aspect() < 0.8 && zoneCenter().y > 0.5) dy = min(dy, uZone.y - 0.1);
   vec2 c = toP(vec2(fu.x, dy)) + mo();
-  float dr = 0.07 * K_SCALE * br();
+  float dr = 0.07 * SC() * br() * (1.0 + 0.6 * OPEN());
   if (K_DISC > 0.5) {
     float d = length(p - c);
     col += mix(uPri, uAcc, 0.5) * exp(-d * 6.0) * (0.12 + 0.35 * light);
@@ -545,15 +629,21 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float mirror = step(2.5, uMode);
   float y = uv.y;
   if (mirror > 0.5 && y < hz - 0.2) y = 2.0 * (hz - 0.2) - y;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 8; i++) {
     float fi = float(i);
-    if (fi >= K_LAYERS) break;
-    float k = fi / max(1.0, K_LAYERS - 1.0);
-    float top = hz - k * 0.26 + (ridge(uv.x * aspect() + T() * 0.004 * (1.0 + fi), fi) - 0.5) * (0.14 + 0.08 * k) * K_SCALE;
-    vec3 lc = mix(mix(uBg, uPri, 0.5 - 0.35 * k), uBg * (0.25 - 0.1 * k), k);
+    if (fi >= nL) break;
+    float k = fi / max(1.0, nL - 1.0);
+    float grow = sat(nL - fi);
+    // round 23: outside the chorus the range rises on the form's side and falls away under the
+    // words (the words change sides, so the mountains do too); the chorus lifts it across the frame
+    float lean = WORDS() * (1.0 - OPEN()) * 0.16 * (smoothstep(0.0, 1.0, abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0))) - 0.5);
+    float top = hz - k * 0.26 - lean + (ridge(uv.x * aspect() + T() * 0.004 * (1.0 + fi), fi) - 0.5) * (0.14 + 0.08 * k) * SC();
+    vec3 lc = mix(mix(uBg, uPri, (0.5 - 0.35 * k) * (0.55 + 0.45 * lift)), uBg * (0.25 - 0.1 * k), k);
     float mist = exp(-max(0.0, top - y) * 18.0) * (0.35 - 0.2 * k) * (1.0 - 0.4 * light);
-    col = mix(col, lc, step(y, top));
-    col = mix(col, mix(uBg, uInk, 0.25), mist * step(y, top));
+    col = mix(col, lc, step(y, top) * grow);
+    col = mix(col, mix(uBg, uInk, 0.25), mist * step(y, top) * grow);
+    // the ridge line catches the light more as the song builds (an instrumental only)
+    col += mix(uPri, uAcc, 0.5) * exp(-abs(y - top) * uRes.y * 0.03) * 0.3 * SONG() * (1.0 - 0.6 * k) * grow * step(y, top + 0.2);
   }
   if (mirror > 0.5 && uv.y < hz - 0.2) col = mix(col * 0.55, uBg * 0.3, 0.3) + uAcc * 0.03 * vnoise(vec2(uv.x * 60.0, uv.y * 200.0 + T()));
   return col;
@@ -573,11 +663,11 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float open = step(1.5, uMode) * (1.0 - upright);
   float ang = mix(K_ANG, 1.5708, upright);
   vec2 r = rot(ang) * (p + mo());
-  float freq = mix(5.0, 10.0, uParams.y) / K_SCALE;
+  float freq = mix(5.0, 10.0, uParams.y) / SC();
   float s = r.x * freq;
   float id = floor(s);
-  float duty = mix(0.26, 0.5, uParams.x);
-  float present = step(0.3, hash11(id * 7.13 + uSeed));
+  float duty = mix(0.26, 0.5, uParams.x) + 0.08 * OPEN() * ESC();
+  float present = step(mix(0.5, 0.3, max(OPEN(), BUILD())), hash11(id * 7.13 + uSeed));
   float shift = (hash11(id * 3.7 + floor(uBeatN * 0.5) * 1.3) - 0.5) * 0.5 * uReact * (1.0 - upright);
   float segF = mix(1.1, 2.4, uParams.w);
   float sy = r.y * segF + hash11(id) * 3.0 + shift;
@@ -624,13 +714,13 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float zr = 0.5 * length((uZone.zw - uZone.xy) * uRes / min(uRes.x, uRes.y));
   float around = closeUp * (1.0 - K_SHAPE) * step(0.8, aspect()) * step(zr * 1.34 + 0.01, 0.47);
   vec2 c = toP(mix(focalUv(), zc, around)) + mo() * (1.0 - around);
-  float R = mix(0.24 * K_SCALE, zr * 1.34 + 0.01, around);
+  float R = mix(0.24 * SC(), zr * 1.34 + 0.01, around);
   float sweep = min(uParams.x, 0.08 + 0.92 * smoothstep(0.0, 0.7, uSectionProgress)) * 0.97;
   vec3 col = uBg * (0.9 + 0.1 * vnoise(fc * 0.02));
   float wash = fbm(uv * vec2(aspect(), 1.0) * 2.0 + vec2(T() * 0.01, 0.0));
   col = mix(col, mix(uBg, uInk, 0.3), smoothstep(0.62, 0.0, length((uv - vec2(zc.x < 0.5 ? 1.0 : 0.0, 0.0)) * vec2(aspect(), 1.0)) - wash * 0.3) * (0.2 + 0.25 * uParams.y));
   float ink = 0.0;
-  float w = R * (0.1 + 0.05 * uParams.y);
+  float w = R * (0.1 + 0.05 * uParams.y) * (1.0 + 0.9 * OPEN() * (1.0 - 0.45 * ESC()));
   if (uMode > 2.5) {
     float d = length(p - c);
     for (int i = 0; i < 4; i++) ink += stroke(d - R * (0.35 + 0.25 * float(i)), 0.0015) * (1.0 - 0.2 * float(i));
@@ -640,12 +730,20 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float t = fract((1.9 - atan(q.y, q.x)) / TAU);
     float press = smoothstep(0.0, 0.04, t) * (0.55 + 0.45 * sin(t * PI * 0.9 + 0.4)) * (1.0 - 0.7 * smoothstep(0.55, 1.0, t));
     ink = brushAt(t, length(q) - R * (1.0 + 0.03 * sin(t * 5.0 + uSeed)), w * (0.3 + 0.9 * press)) * step(t, sweep) * smoothstep(sweep, sweep - 0.02, t);
+    // round 23: the chorus draws a second ring inside the first (and the last chorus a third
+    // outside it), each started a little later — the circle repeats instead of only brightening
+    float t2 = fract(t + 0.37);
+    ink = max(ink, OPEN() * brushAt(t2, length(q) - R * 0.68, w * 0.7 * (0.3 + 0.9 * press)) * step(t2, sweep * 0.9));
+    ink = max(ink, OPEN() * step(0.5, ESC()) * brushAt(fract(t + 0.71), length(q) - R * 1.3, w * 0.25 * (0.3 + 0.9 * press)) * step(fract(t + 0.71), sweep * 0.85));
   } else {
     vec2 a = c - vec2(R * 1.6, 0.0);
     float t = sat((p.x - a.x) / (R * 3.2));
     float yy = a.y + sin(t * 3.1 + uSeed * 0.01) * R * 0.25 - t * R * 0.2;
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
+    // round 23: the chorus sweeps a second stroke under the first (a third above it in the last)
+    ink = max(ink, OPEN() * brushAt(t, p.y - yy + R * 0.62, w * 1.1 * (0.3 + 0.9 * press)) * step(t, sweep * 0.92) * step(0.0005, t) * step(t, 0.9995));
+    ink = max(ink, OPEN() * step(0.5, ESC()) * brushAt(t, p.y - yy - R * 0.6, w * 0.3 * (0.3 + 0.9 * press)) * step(t, sweep * 0.85) * step(0.0005, t) * step(t, 0.9995));
   }
   // round 13: in the chorus the paper warms around the stroke (the accent soaked into it)
   col += mix(uPri, uAcc, 0.6) * closeUp * 0.07 * smoothstep(1.0, 0.0, length(p - c) / (R * 1.8)) * (0.6 + 0.4 * uParams.z);
@@ -674,25 +772,32 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float tight = step(2.5, uMode);
   // round 13: the chorus lights the ribbons from within (never darker than the verse)
   float open = smoothstep(1.5, 2.0, uMode) * (1.0 - tight);
-  for (int i = 0; i < 4; i++) {
+  // round 23: a verse keeps two thin ribbons; the chorus adds two more and spreads them over the
+  // frame's height (a third more in the last chorus) — the silk fills the wall
+  float n = mix(min(K_N, 2.0), K_N + 1.0, OPEN()) + 2.0 * SONG() * (1.0 - OPEN());
+  float spreadY = 0.18 + OPEN() * (0.14 + 0.06 * ESC());
+  for (int i = 0; i < 8; i++) {
     float fi = float(i);
-    if (fi >= K_N) break;
+    if (fi >= n) break;
+    float grow = sat(n - fi);
     float ph = hash11(fi * 3.1 + uSeed) * TAU;
     // each ribbon flows through the focal side of the frame, away from the words
-    float cy = mix(fu.y - 0.18, fu.y + 0.18, fi / max(1.0, K_N - 1.0));
+    float cy = mix(fu.y - spreadY, fu.y + spreadY, fi / max(1.0, n - 1.0));
     float amp = (0.08 + 0.05 * uParams.x) * mix(1.0, 0.35, tight);
     float x = uv.x * aspect();
     float yc = cy + sin(x * K_F + ph + T() * 0.15) * amp + sin(x * K_F * 2.3 - T() * 0.1) * amp * 0.3;
     float slope = cos(x * K_F + ph + T() * 0.15) * amp * K_F;
-    float wd = (0.022 + 0.05 * (0.5 + 0.5 * sin(x * 1.3 + ph))) * K_SCALE * br();
+    float wd = (0.022 + 0.05 * (0.5 + 0.5 * sin(x * 1.3 + ph))) * SC() * br() * (0.6 + 0.4 * max(OPEN(), BUILD())) * (1.0 + 0.15 * OPEN() * ESC());
     float d = abs(uv.y - yc);
     float band = 1.0 - smoothstep(wd * 0.8, wd, d);
     float fold = 0.5 + 0.5 * sin(x * K_F * 2.0 + ph * 2.0 + slope * 3.0);
-    vec3 rc = mix(mix(uPri, uAcc, fi / max(1.0, K_N)), mix(uAcc, vec3(1.0), 0.3), pow(fold, 3.0) * (0.3 + 0.6 * light));
-    float fade = smoothstep(0.0, 0.25, abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0)));
+    vec3 rc = mix(mix(uPri, uAcc, fi / max(1.0, n)), mix(uAcc, vec3(1.0), 0.3), pow(fold, 3.0) * (0.3 + 0.6 * light));
+    // round 23: outside the chorus the silk leaves the words' half of the frame to the words
+    float fade = mix(1.0, smoothstep(0.0, mix(0.7, 0.25, OPEN()), abs(uv.x - (fu.x < 0.5 ? 1.0 : 0.0))), WORDS()) * grow;
     // the ribbons thin under the words on screen (they light them: a lit relation)
     float away = 1.0 - wordsMask(uv, 0.05) * 0.9;
-    col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y));
+    // (an instrumental's chorus has no words to leave room for: the silk is a little sheerer)
+    col = mix(col, rc * (0.7 + 0.5 * fold), band * fade * away * (0.8 + 0.2 * uParams.y) * (1.0 - 0.3 * (1.0 - WORDS()) * OPEN()));
     col += rc * exp(-d / max(wd, 1e-3) * 1.5) * (0.06 * light + 0.1 * open) * fade * away;
   }
   return col;
@@ -715,10 +820,10 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float id = floor(x);
   float fx = fract(x);
   float speed = (0.25 + 0.6 * hash11(id)) * (1.0 - still * 0.97) * K_SPEED;
-  float len = 0.08 + 0.25 * hash11(id + 3.0);
+  float len = (0.08 + 0.25 * hash11(id + 3.0)) * (1.0 + 2.2 * OPEN() + 1.4 * SONG() * (1.0 - OPEN()));
   float y = fract(uv.y * 0.6 + T() * speed * 0.2 + hash11(id + 7.0));
-  float thread = smoothstep(0.08, 0.0, abs(fx - 0.5) - 0.02) * smoothstep(len, 0.0, y) * smoothstep(0.0, 0.02, y);
-  float on = step(0.3, hash11(id * 1.37 + uSeed));
+  float thread = smoothstep(0.08, 0.0, abs(fx - 0.5) - 0.02 - (0.2 + 0.03 * ESC()) * OPEN() - 0.12 * SONG() * (1.0 - OPEN())) * smoothstep(len, 0.0, y) * smoothstep(0.0, 0.02, y);
+  float on = step(mix(0.3, 0.05, OPEN()) - 0.15 * SONG(), hash11(id * 1.37 + uSeed));
   // the rain thins around the words on screen (an empty zone rains like the rest of the frame)
   float clear = 1.0 - wordsMask(uv, 0.04) * 0.85;
   vec3 lc = mix(uPri, mix(uAcc, vec3(1.0), 0.4), 0.3 + 0.5 * light);
@@ -772,55 +877,66 @@ export const INSTRUMENTAL_ZONE: Zone = { x: 0.19, y: 0.66, w: 0.62, h: 0.26 };
 
 function instrumentalNote(kind: SectionKind, form: FormId): string {
   const name = FORM_LABELS[form];
-  if (kind === "chorus" || kind === "solo") return `沒有字：${name}完全展開，佔滿整個畫面`;
+  if (kind === "chorus" || kind === "solo") return `沒有字：${name}完全展開，越出畫面，層次隨歌曲一直加上去`;
   if (kind === "bridge" || kind === "breakdown") return `${name}換一個規則，在畫面中間停下來`;
-  if (kind === "outro") return `${name}慢慢收回，只留一點光`;
-  return `沒有字：${name}用整個畫面，慢慢移到另一側`;
+  if (kind === "outro") return `${name}已經疊到最滿，慢慢收回光`;
+  return `沒有字：${name}用整個畫面，一層一層慢慢加上去`;
 }
 
 /** Round 18: how much denser and livelier the last of several choruses is than the first (uParams.y and .w). */
 export const CHORUS_CLIMB = 0.25;
 
+/**
+ * Round 23: the verse that leads straight into a chorus (no pre-chorus between them) is a build —
+ * mode 1: it starts as the verse and grows towards the chorus over its length (BUILD()).
+ */
+export function isBuildSection(sections: readonly ComposerSection[], i: number): boolean {
+  const s = sections[i];
+  const next = sections[i + 1];
+  return !!next && next.kind === "chorus" && (s.kind === "verse" || s.kind === "interlude");
+}
+
 function sectionStates(input: ComposerInput, choice: ComposerChoice, r: () => number): SceneProgramSection[] {
   const first: "left" | "right" = r() < 0.5 ? "left" : "right";
-  const other = first === "left" ? "right" : "left";
-  let verseSide = first;
+  const flip = (x: "left" | "right"): "left" | "right" => (x === "left" ? "right" : "left");
   const out: SceneProgramSection[] = [];
-  let prevKind: SectionKind | null = null;
   // round 18: the choruses climb — 一次比一次更亮: each one after the first fills in denser and moves
-  // more (up to CHORUS_CLIMB), so the second chorus is never the first one's picture again
+  // more (up to CHORUS_CLIMB), so the second chorus is never the first one's picture again; round 23:
+  // and it grows (ESC() in the program: the form's scale, its rings, slabs, strokes)
   const choruses = input.sections.filter((s) => s.kind === "chorus").length;
   let chorusN = 0;
-  for (const s of input.sections) {
+  // round 23 (N2): the words — and so the form, which stands opposite them — change sides at every
+  // section (an intro shares the first verse's side, an outro the last section's), so the wall is
+  // never the same slide for the whole song
+  let side: "left" | "right" = first;
+  input.sections.forEach((s, i) => {
+    const build = isBuildSection(input.sections, i);
     const d = KIND_DEFAULTS[s.kind] ?? KIND_DEFAULTS.verse;
+    const mode = build ? 1 : d.mode;
     const e = Math.min(1, Math.max(0, s.energy ?? 0.5));
-    const climb = s.kind === "chorus" && choruses > 1 ? 1 + CHORUS_CLIMB * (chorusN++ / (choruses - 1)) : 1;
-    // the words change sides when the song turns a page: a verse after a chorus, the pre-chorus, the bridge
-    let side: "left" | "right" | "wide";
-    if (s.kind === "chorus") side = first;
-    else if (s.kind === "bridge" || s.kind === "pre-chorus") side = other;
-    else {
-      if (s.kind === "verse" && prevKind === "chorus") verseSide = verseSide === first ? other : first;
-      side = s.kind === "verse" ? verseSide : first;
-    }
-    const params = d.params.map((v, i) => Math.round(Math.min(1, Math.max(0, v * (i === 0 || i === 2 ? 0.75 + 0.5 * e : climb))) * 1000) / 1000);
-    const relation: TypeRelation = s.kind === "chorus" || s.kind === "solo" ? RELATION_FOR_FORM[choice.form] : choice.form === "horizon" || choice.form === "orbits" ? "plain" : "plain";
+    const nth = s.kind === "chorus" ? chorusN++ : 0;
+    const climb = s.kind === "chorus" && choruses > 1 ? 1 + CHORUS_CLIMB * (nth / (choruses - 1)) : 1;
+    if (i > 0 && s.kind !== "outro" && input.sections[i - 1].kind !== "intro") side = flip(side);
+    const params = d.params.map((v, k) => Math.round(Math.min(1, Math.max(0, v * (k === 0 || k === 2 ? 0.75 + 0.5 * e : climb))) * 1000) / 1000);
+    const relation: TypeRelation = s.kind === "chorus" || s.kind === "solo" ? RELATION_FOR_FORM[choice.form] : "plain";
+    const grows = nth > 0 ? `，比上一次更大${nth === choruses - 1 ? "、層次最多" : ""}` : "";
     const note =
       s.kind === "chorus"
-        ? `${FORM_LABELS[choice.form]}完全展開，字${relation === "lit" ? "被光照亮" : relation === "knockout" ? "從形狀裡挖空" : relation === "behind" ? "從形狀後面走過" : "留在空白裡"}`
-        : s.kind === "bridge"
-          ? `橋段換一個規則：${FORM_LABELS[choice.form]}變形`
-          : s.kind === "verse"
-            ? "畫面退後，字在留白的一側"
-            : s.kind === "pre-chorus"
-              ? "光慢慢打開，字換到另一側"
-              : "只留一點點光";
+        ? `${FORM_LABELS[choice.form]}放大到越出畫面${grows}，字${relation === "lit" ? "被光照亮" : relation === "knockout" ? "從形狀裡挖空" : relation === "behind" ? "從形狀後面走過" : "留在空白裡"}`
+        : build
+          ? "主歌後半慢慢長大，準備在副歌打開"
+          : s.kind === "bridge"
+            ? `橋段換一個規則：${FORM_LABELS[choice.form]}變形`
+            : s.kind === "verse"
+              ? "畫面退後，形狀小小地站在另一側"
+              : s.kind === "pre-chorus"
+                ? "光慢慢打開，形狀開始長大"
+                : "只留一點點光";
     // an instrumental reserves no text zone: a caption band low in the frame (where an operator's
     // title would go) that the program ignores
     const zone = input.lyrics === false ? { ...INSTRUMENTAL_ZONE } : zoneFor(side, s.kind, r);
-    out.push({ sectionId: s.id, mode: d.mode, params, zone, relation: input.lyrics === false ? "plain" : relation, note: input.lyrics === false ? instrumentalNote(s.kind, choice.form) : note });
-    prevKind = s.kind;
-  }
+    out.push({ sectionId: s.id, mode, params, zone, relation: input.lyrics === false ? "plain" : relation, note: input.lyrics === false ? instrumentalNote(s.kind, choice.form) : note });
+  });
   return out;
 }
 
@@ -833,6 +949,7 @@ export function composeSceneProgram(input: ComposerInput): SceneProgram {
   const instrumental = input.lyrics === false;
   const source = `// ${input.title ?? ""} — 離線作曲器：${FORM_LABELS[choice.form]} × ${TEXTURE_LABELS[choice.texture]} × ${MOTION_LABELS[choice.motion]}${instrumental ? "（器樂曲）" : ""}
 ${instrumental ? INSTRUMENTAL_COMMON(choice) : COMMON(choice)}
+${stageGrammar(choice.form, input.sections)}
 ${motionGlsl(choice.motion)}
 ${instrumental ? fullFrame(form.code) : form.code}
 ${textureGlsl(choice.texture, textureAmount)}
@@ -848,12 +965,12 @@ ${instrumental ? "  col = quiet(fc, uv, col);\n" : ""}  vec2 vq = (uv - 0.5) * v
   return surface(col, fc, uv);
 }
 `;
-  const title = input.title?.trim() ? `${FORM_LABELS[choice.form]}` : FORM_LABELS[choice.form];
+  const title = instrumental ? INSTRUMENTAL_TITLES[choice.form] : FORM_LABELS[choice.form];
   return {
     version: 1,
     engine: "offline",
     title,
-    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；${instrumental ? "沒有歌詞，不留文字區：形狀用整個畫面，隨著歌曲從一側慢慢走到另一側；安靜的段落有緩緩上升的微塵，每八秒一道光慢慢掃過，隨能量變亮；" : "形狀永遠站在字的另一側，"}主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
+    concept: `${form.recipe}，印在${TEXTURE_LABELS[choice.texture]}上，以${MOTION_LABELS[choice.motion]}的方式移動；${instrumental ? "沒有歌詞，不留文字區：形狀用整個畫面，隨著歌曲一層一層加上去（數量、高度、光）；安靜的段落有緩緩上升的微塵，每八秒一道光慢慢掃過，隨能量變亮；" : "形狀永遠站在字的另一側，"}主歌退後、副歌打開，橋段換一個規則。${input.world ? input.world : ""}`.slice(0, 400),
     source,
     sections: sectionStates(input, choice, r),
     keyMoment: null,

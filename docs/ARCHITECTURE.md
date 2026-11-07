@@ -1861,6 +1861,43 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   content words, more inside a capitalised name); a Latin featured word is its phrase (river → river stones,
   a multi-word emphasis across its spaces).
 
+### Round 23: the chorus opens the wall
+
+- **Section grammar in every composer program** (`stage/program/composer.ts stageGrammar`): `OPEN()` (mode 2),
+  `BUILD()` (mode 1, rising with `uSectionProgress`), `ESC()` (which chorus: 0 the first … 1 the last, an
+  if-chain on `uSection` generated from the composer's sections; past the list, the song's progress), `SC()`
+  = `K_SCALE` × `CHORUS_GROW[form]` in a chorus (+ `CHORUS_ESCALATE` by the last, half of it by the end of a
+  build). The chorus no longer only brightens: the subject passes the frame's edge and gains a second layer —
+  a setting sun low on the horizon with rings of its light, two (then three) more slabs in a symmetric row
+  against an opened wall of light, ring bands, a second (third) brush ring or stroke, more ribbons spread over
+  the frame, thick pouring threads. Mode 1 is used: a verse (or interlude) that leads straight into a chorus
+  is a build (`isBuildSection`). The words — so the form, which stands opposite them — change sides at every
+  section (an intro shares the first verse's side, an outro the last section's); strata and ribbons lean to
+  the form's side outside the chorus. Notes say 「放大到越出畫面」, a later chorus 「比上一次更大」.
+- **Coverage** (`probe.ts`): `ProbeSample.cover` (fraction above `PROBE_COVER` = sRGB luma 0.2) and `cx` (the
+  lit area's horizontal centre). Measured on the audit songs: verse 1–10 %, first chorus 19–39 %, last chorus
+  27–49 %, lit (> 0.5) never above 31 % (the cap stays 35 %). `stage-grammar.test.ts`: for every form a chorus
+  covers ≥ 2 × its verse, a verse < 12 %, the last chorus never smaller than the first, the subject moves
+  ≥ 0.15 of the width across the song.
+- **Chorus type floor** (`type/key-lines.ts CHORUS_FLOOR` 0.09, `LAST_CHORUS_FLOOR` 0.12, `REPEAT_GROWTH`
+  0.1; `resolve.ts` → `ResolvedHint.floor / repeat / ceiling`; `compose.ts`): a chorus line's largest glyph
+  reaches its floor of the size reference (never a dark line); verse, pre-chorus and intro lines (not the
+  crowd's line) keep under 0.09 (`ceiling`: the recipes' giant / cap / cross halves). The line is set again
+  with every size × `sizeK` so the recipe breaks its rows for the new size (`recipeCtx(…, sizeK)`); a line
+  that cannot reach the floor in its zone — a long line, a long Latin line — is a poster across the readable
+  width at the zone's height (`composeLine` → `composeIn` with the zone widened to x 0.06–0.94; `longLine`,
+  `mainBlock` and `titleCard` use the whole width and one more row under a floor). A lyric that comes back
+  grows 10 % a time up to the fourth (from the floor or its own size below a fifth of the frame, the chant
+  display floor too), and where its zone holds it changes treatment (one phrase in the accent plate,
+  alternating). `chorus-size.test.ts` (16:9 and 9:16; a long line on a 9:16 band reaches ≥ 90 % of the floor).
+- **Instrumentals build up** (`INSTRUMENTAL_COMMON SONG()` = smoothstep of `uSongProgress`; `WORDS()` 0):
+  ribbons / ridges / slabs fade in one by one, the horizon and range rise, rings fill in and widen, threads
+  lengthen, the light behind the slabs opens — over the song, not one shape sliding side to side (the focal
+  drift is now ± 0.12). `formWeights` with `lyrics: false` adds ribbons 1.4, strata 1.2, horizon 0.9,
+  threads 0.9 and multiplies pillars 0.3, bars 0.5. Pillars (every song) stand in a mirror-symmetric row
+  with varied heights. The program title and the key visual title are `INSTRUMENTAL_TITLES[form]`
+  (「一層層亮起的山」…) instead of the mood pool's 「暗處的一道光」.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

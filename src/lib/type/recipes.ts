@@ -407,6 +407,9 @@ function cross(r: RecipeCtx): Piece[] | null {
   const aBig = r.rng.chance(0.55);
   let sa = r.body * (aBig ? lerp(1.2, 1.6, r.c) : 0.86);
   let sb = r.body * (aBig ? 0.84 : lerp(1.15, 1.45, r.c));
+  // round 23: a verse line's ceiling (r.cap) holds the cross's large half too
+  sa = Math.max(f.minRead, Math.min(sa, r.cap));
+  sb = Math.max(f.minRead, Math.min(sb, r.cap));
   const aEm = columnEm(lt, aIdx, r.weight, 0.06, r.measure);
   const bEm = rowEm(lt, bIdx, r.weight, 0.04, r.measure);
   for (let guard = 0; guard < 30; guard++) {
@@ -776,13 +779,14 @@ function mainBlock(r: RecipeCtx, sizeK: number, maxRows: number, align: "left" |
   const rd = f.read;
   const vertical = lt.cjk && r.hint.orientation === "v";
   if (vertical) {
-    const fit = fitColumns(r, 0, lt.units.length, { wanted: r.body * sizeK, min: f.minRead, maxW: rd.w * 0.5, maxH: rd.h * 0.8, maxCols: maxRows, tracking: 0.06, gap: 0.5 });
+    const fit = fitColumns(r, 0, lt.units.length, { wanted: r.body * sizeK, min: f.minRead, maxW: rd.w * (r.hint.floor ? 0.8 : 0.5), maxH: rd.h * 0.8, maxCols: r.hint.floor ? Math.min(3, maxRows + 1) : maxRows, tracking: 0.06, gap: 0.5 });
     if (!fit) return null;
     const x = sideX(r, fit.w);
     const y = bandY(r, fit.h, 0.08, 0.42);
     return { pieces: [piece("main", placeColumns(r, fit, x + fit.w, y, style(r, fit.size, 0.06)), { plate: r.mainPlate, vertical: true })], box: { x, y, w: fit.w, h: fit.h }, size: fit.size };
   }
-  const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * sizeK, min: f.minRead, maxW: rd.w * (f.aspect < 1 ? 0.92 : 0.72), maxH: rd.h * 0.6, maxRows, tracking: 0.02, leading: 1.18, pyramid: true });
+  // round 23: a chorus line at its size floor may use the whole readable width and one more row
+  const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * sizeK, min: f.minRead, maxW: rd.w * (r.hint.floor ? 0.97 : f.aspect < 1 ? 0.92 : 0.72), maxH: rd.h * 0.6, maxRows: r.hint.floor ? Math.min(3, maxRows + 1) : maxRows, tracking: 0.02, leading: 1.18, pyramid: true });
   if (!fit) return null;
   const x = sideX(r, fit.w);
   const y = bandY(r, fit.h, 0.12, 0.42);
@@ -919,7 +923,9 @@ function titleCard(r: RecipeCtx): Piece[] | null {
       rule(x + fit.w + fit.size * 0.6 - t, y - fit.size * 0.3, t, fit.h + fit.size * 0.6),
     ];
   }
-  const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * lerp(0.82, 0.98, r.e), min: f.minRead, maxW: rd.w * (f.aspect < 1 ? 0.92 : 0.7), maxH: rd.h * 0.42, maxRows: 2, tracking, leading: 1.3, pyramid: true });
+  // round 23: a chorus line at its size floor may use the whole readable width, three rows, more height
+  const floor = !!r.hint.floor;
+  const fit = fitRows(r, 0, lt.units.length, { wanted: r.body * lerp(0.82, 0.98, r.e), min: f.minRead, maxW: rd.w * (floor ? 0.97 : f.aspect < 1 ? 0.92 : 0.7), maxH: rd.h * (floor ? 0.62 : 0.42), maxRows: floor ? 3 : 2, tracking, leading: 1.3, pyramid: true });
   if (!fit) return null;
   const x = rd.x + (rd.w - fit.w) / 2;
   const y = rd.y + (rd.h - fit.h) * (r.zone.band === "top" ? 0.28 : 0.44);
@@ -979,13 +985,17 @@ export function longLine(r: RecipeCtx): Piece[] | null {
   }
   const tracking = lt.latinOnly ? 0.0 : 0.03;
   const size = r.body * lerp(0.92, 1.05, r.e);
-  const measureW = rd.w * (f.aspect < 1 ? 0.9 : f.aspect > 2.4 ? 0.42 : 0.6);
-  const fa = fitRows(r, a[0], a[1], { wanted: size, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 });
-  const fb = fitRows(r, b[0], b[1], { wanted: size, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 });
+  // round 23 (N7): a chorus line (a size floor) is a poster — each phrase two rows across the whole
+  // readable width — rather than a sentence shrunk to fit the narrow measure
+  const poster = !!r.hint.floor;
+  const measureW = rd.w * (poster ? 0.98 : f.aspect < 1 ? 0.9 : f.aspect > 2.4 ? 0.42 : 0.6);
+  const maxH = rd.h * (poster ? 0.47 : 0.4);
+  const fa = fitRows(r, a[0], a[1], { wanted: size, min: f.minRead, maxW: measureW, maxH, maxRows: 2, tracking, leading: 1.24 });
+  const fb = fitRows(r, b[0], b[1], { wanted: size, min: f.minRead, maxW: measureW, maxH, maxRows: 2, tracking, leading: 1.24 });
   if (!fa || !fb) return null;
   const s = Math.min(fa.size, fb.size);
-  const A = fitRows(r, a[0], a[1], { wanted: s, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 }) ?? fa;
-  const B = fitRows(r, b[0], b[1], { wanted: s, min: f.minRead, maxW: measureW, maxH: rd.h * 0.4, maxRows: 2, tracking, leading: 1.24 }) ?? fb;
+  const A = fitRows(r, a[0], a[1], { wanted: s, min: f.minRead, maxW: measureW, maxH, maxRows: 2, tracking, leading: 1.24 }) ?? fa;
+  const B = fitRows(r, b[0], b[1], { wanted: s, min: f.minRead, maxW: measureW, maxH, maxRows: 2, tracking, leading: 1.24 }) ?? fb;
   // the second phrase steps across by two ems (towards the frame's centre) and down a gap
   const gap = s * 0.55;
   const step = Math.min(s * 2, Math.max(0, rd.w - Math.max(A.w, B.w)));

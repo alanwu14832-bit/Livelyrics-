@@ -23,6 +23,11 @@ export const PROBE_BLACK_MEAN = 0.012;
 /** Mid luminance: the lit-area threshold (sRGB luma of the displayed colour). */
 export const PROBE_MID = 0.5;
 /**
+ * Round 23: the coverage threshold — what reads as "something lit" on a dark LED wall (sRGB luma
+ * 0.2). A verse keeps under 10 % of the frame above it, a chorus opens to 25–45 % (`cover`).
+ */
+export const PROBE_COVER = 0.2;
+/**
  * Round 13: a chorus must reach a visible protagonist. Measured with the words on screen (the type
  * box over the section's zone, so the form gives way under them as it does live), over the picture
  * around the words: its mean luminance may not fall below this floor, nor below the brightest verse
@@ -47,6 +52,10 @@ export interface ProbeSample {
   dark: number;
   /** mean sRGB luma of the picture around the words, with the words on screen (the type box over the zone) */
   around: number;
+  /** round 23: fraction of samples above PROBE_COVER (how much of the wall the picture covers) */
+  cover: number;
+  /** round 23: the horizontal centre (0–1) of the samples above PROBE_COVER — where the subject stands; null when none */
+  cx: number | null;
 }
 
 export interface ProbeResult {
@@ -78,7 +87,7 @@ const rgb = (hex: string | undefined, fb: string): [number, number, number] => {
 };
 const luma = (c: [number, number, number]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
-function stateUniforms(program: SceneProgram, ps: SceneProgramSection, section: SectionDesign | undefined, index: number, total: number, opts: ProbeOptions): Uniforms {
+export function stateUniforms(program: SceneProgram, ps: SceneProgramSection, section: SectionDesign | undefined, index: number, total: number, opts: ProbeOptions): Uniforms {
   const res = opts.res ?? [1920, 1080];
   const pal = (opts.palette?.length ? [...opts.palette] : FALLBACK_PALETTE).filter((h) => typeof h === "string");
   const kind = section?.kind ?? "verse";
@@ -169,6 +178,8 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       let sum = 0;
       let lit = 0;
       let dark = 0;
+      let cover = 0;
+      let cxSum = 0;
       const n = cols * rows;
       const at = (i: number, j: number): [number, number] => [((i + 0.5) / cols) * res[0], ((j + 0.5) / rows) * res[1]];
       for (let j = 0; j < rows; j++) {
@@ -177,6 +188,10 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
           sum += l;
           if (l > PROBE_MID) lit++;
           if (l < 0.04) dark++;
+          if (l > PROBE_COVER) {
+            cover++;
+            cxSum += (i + 0.5) / cols;
+          }
         }
       }
       // the same state with the words on screen: the type box over the zone, measured around it
@@ -196,7 +211,7 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       }
       compiled.setUniforms(u);
       const r3 = (x: number) => Math.round(x * 1000) / 1000;
-      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n) };
+      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null };
       seen.set(sig, sample);
       samples.push(sample);
     });
