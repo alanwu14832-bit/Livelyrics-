@@ -8,6 +8,7 @@ import { DEFAULT_LYRIC_SAFE } from "../output";
 import type { TypeEnterId, TypeExitId, TypeOrientation, TypeRecipeId, TypeVoiceId } from "../types";
 import { makeFrame, type Frame } from "./frame";
 import { EMPTY_BOX, glyphBox, pieceBox, unionBox, type Box, type CanvasSpec, type Composition, type GlyphBox, type LineContext, type Measure, type Piece, type PlateId, type ResolvedHint, type ResolvedTypeSystem } from "./model";
+import { REPEAT_GROWTH } from "./key-lines";
 import { motionKindOf } from "./motion-words";
 import { RECIPE_FALLBACK, RECIPE_FNS, longLine, piece, translationPiece, zoneFor, type RecipeCtx } from "./recipes";
 import { createRng, hash32 } from "./rng";
@@ -43,7 +44,7 @@ export const CHANT_DISPLAY = 0.14;
 /** The knockout treatment opens the display word of lines at least this strong (choruses, peaks). */
 const KNOCK_ENERGY = 0.6;
 
-function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): RecipeCtx {
+function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId, sizeK = 1): RecipeCtx {
   const { hint, system: sys } = input;
   const p = sys.params;
   const e = clamp(hint.energy + (hint.escalate ? 0.14 : 0), 0, 1);
@@ -67,8 +68,11 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
   // round 17: the crowd's line (a hook sung four times, a shouted chant) is never the smallest type
   // on the wall: at least a tenth of the frame's short side, every time it comes back
   const chantFloor = hint.chant ? ref * 0.1 : 0;
-  const body = Math.max(frame.minRead, chantFloor, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc);
-  const giantFull = ref * lerp(0.34, 0.66, c) * lerp(0.86, 1.06, e) * esc;
+  // round 23: sizeK re-sets a line at a chorus floor or under a verse ceiling (every size in proportion)
+  const k = sizeK;
+  const ceil = hint.ceiling ? Math.max(frame.minRead, ref * hint.ceiling) : Infinity;
+  const body = Math.max(frame.minRead, chantFloor, ref * (restrained ? lerp(0.052, 0.078, e) * lerp(0.95, 1.05, d) : lerp(0.068, 0.11, e) * lerp(0.92, 1.1, d)) * esc * k);
+  const giantFull = ref * lerp(0.34, 0.66, c) * lerp(0.86, 1.06, e) * esc * k;
   return {
     lt: input.lt,
     hint,
@@ -82,10 +86,11 @@ function recipeCtx(input: ComposeInput, frame: Frame, recipe: TypeRecipeId): Rec
     c,
     d,
     body,
-    small: Math.max(frame.minRead, chantFloor * 0.6, ref * (restrained ? lerp(0.046, 0.056, e) : lerp(0.05, 0.064, e)) * esc),
+    small: Math.max(frame.minRead, chantFloor * 0.6, ref * (restrained ? lerp(0.046, 0.056, e) : lerp(0.05, 0.064, e)) * esc * Math.min(1.4, k)),
     // a key line may be set huge; every other line's display word stays a step or two above the body
-    giant: restrained ? Math.min(giantFull, body * lerp(1.6, 2.3, c) * lerp(0.95, 1.08, e)) : giantFull,
-    cap: restrained ? body * 1.7 : Infinity,
+    // round 23: a verse line's display word stays under the chorus floor (hint.ceiling)
+    giant: Math.min(ceil, restrained ? Math.min(giantFull, body * lerp(1.6, 2.3, c) * lerp(0.95, 1.08, e)) : giantFull),
+    cap: Math.min(ceil, restrained ? body * 1.7 : Infinity),
     weight: sys.weight,
     displayPlate,
     displayWindow,
@@ -601,6 +606,8 @@ export function composeKey(input: Omit<ComposeInput, "measure">): string {
     h.escalate ? 1 : 0,
     h.key == null ? "" : h.key ? "k" : "n",
     h.chant ? "c" : "",
+    h.floor ? `f${h.floor}/${h.repeat ?? 0}` : "",
+    h.ceiling ? `x${h.ceiling}` : "",
     h.recipeFixed ? 1 : 0,
     h.motion ?? "",
     s.voice,
@@ -663,8 +670,27 @@ function compositionView(canvas: CanvasSpec, hint: ResolvedHint): { canvas: Canv
   return { canvas: { width: Ws, height: H, safe: { top: s.top, bottom: s.bottom, left: Math.min(0.3, left), right: Math.min(0.3, right) } }, x0 };
 }
 
+function largestReadable(pieces: readonly Piece[]): number {
+  let m = 0;
+  for (const p of pieces) if (p.readable) for (const g of p.glyphs) m = Math.max(m, g.size);
+  return m;
+}
+
 /** Lay one line out (never throws; an empty line gives an empty composition). */
 export function composeLine(given: ComposeInput): Composition {
+  const c = composeIn(given);
+  // round 23 (N7): a chorus line that cannot reach its floor inside the section's zone (a long line,
+  // a long Latin line) becomes a poster across the wall — the zone widened to the readable width at
+  // the same height — rather than a sentence shrunk into the narrow column
+  const z = given.ctx.zone;
+  const ref = makeFrame(given.canvas, given.system.params).ref;
+  const want = given.hint.floor ? ref * given.hint.floor : 0;
+  if (!z || !want || given.canvas.width / given.canvas.height < 0.8 || z.w >= 0.8 || largestReadable(c.pieces) >= want * 0.97) return c;
+  const wide = composeIn({ ...given, ctx: { ...given.ctx, zone: { x: 0.06, y: z.y, w: 0.88, h: z.h } } });
+  return largestReadable(wide.pieces) > largestReadable(c.pieces) * 1.05 ? wide : c;
+}
+
+function composeIn(given: ComposeInput): Composition {
   const full = makeFrame(given.canvas, given.system.params);
   // 專屬畫面: the section's text zone (the image's negative space) narrows the readable area
   const zone = given.ctx.zone ? canvasZone(given.ctx.zone, full.aspect) : null;
@@ -685,6 +711,7 @@ export function composeLine(given: ComposeInput): Composition {
     }
     if (pieces && !pieces.some((p) => p.glyphs.length)) pieces = null;
   }
+  const viaLong = !!pieces;
   const tried = new Set<TypeRecipeId>();
   for (let guard = 0; guard < 4 && !pieces; guard++) {
     tried.add(recipe);
@@ -700,14 +727,62 @@ export function composeLine(given: ComposeInput): Composition {
       recipe = next;
     }
   }
-  const r = recipeCtx(input, frame, recipe);
   pieces = pieces ?? [];
+  // round 23 (N7): a chorus line reaches its floor (a little larger each time the lyric comes back),
+  // a verse line keeps under the chorus floor: the line is set again with every size in proportion,
+  // so the recipe breaks its rows for the new size (a long line becomes a poster of rows, not a
+  // shrunken sentence)
+  const repeat = Math.min(3, Math.max(0, hint.repeat ?? 0));
+  const floorPx = hint.floor ? frame.ref * hint.floor * (1 + REPEAT_GROWTH * repeat) : 0;
+  const ceilPx = hint.ceiling ? frame.ref * hint.ceiling : Infinity;
+  let sizeK = 1;
+  // (a 鏤空窗's window word counts: it is read through the plate, though not drawn as ink)
+  const biggest = (ps: readonly Piece[]) => {
+    let m = 0;
+    for (const p of ps) if (p.readable || p.role === "giant") for (const g of p.glyphs) m = Math.max(m, g.size);
+    return m;
+  };
+  const big0 = biggest(pieces);
+  // a repeat grows from its own size too (a line already above the floor: 「我不要 我不要」 the second
+  // time) — not a display word already over a fifth of the frame (it has nowhere to grow)
+  const wantPx = hint.floor ? Math.max(floorPx, big0 < frame.ref * 0.2 ? big0 * (1 + REPEAT_GROWTH * repeat) : 0) : 0;
+  const readCount = (ps: readonly Piece[]) => ps.reduce((n, p) => n + (p.readable ? p.glyphs.length : 0), 0);
+  if (big0 > 0 && (big0 < wantPx * 0.995 || big0 > ceilPx)) {
+    sizeK = clamp((big0 < wantPx ? wantPx : ceilPx) / big0, 0.3, 3);
+    try {
+      const again = viaLong ? longLine(recipeCtx(input, frame, recipe, sizeK)) : RECIPE_FNS[recipe](recipeCtx(input, frame, recipe, sizeK));
+      // (never a layout that lost words: a display word that no longer fits is dropped by its recipe)
+      if (again && again.some((p) => p.glyphs.length) && readCount(again) >= readCount(pieces)) pieces = again;
+      else sizeK = 1;
+    } catch {
+      sizeK = 1;
+    }
+  }
+  const r = recipeCtx(input, frame, recipe, sizeK);
+  if (floorPx > 0) {
+    const big = biggest(pieces);
+    if (big > 0 && big < wantPx) {
+      const b = readableBox(pieces);
+      scaleAll(pieces, Math.min(2.2, wantPx / big), b.x + b.w / 2, b.y + b.h / 2);
+    }
+  }
+  if (ceilPx < Infinity) {
+    const big = biggest(pieces);
+    const smallest = minReadable(pieces);
+    if (big > ceilPx) {
+      const b = readableBox(pieces);
+      scaleAll(pieces, Math.max(ceilPx / big, smallest > 0 ? Math.min(1, frame.minRead / smallest) : 0), b.x + b.w / 2, b.y + b.h / 2);
+    }
+  }
   // round 17: the crowd's line is set at display scale every time it comes back — its largest
   // readable glyph at least CHANT_DISPLAY of the frame's short side (the fit below keeps it inside)
+  let chantPx = 0;
   if (hint.chant) {
     let big = 0;
     for (const p of pieces) if (p.readable) for (const g of p.glyphs) big = Math.max(big, g.size);
-    const want = frame.ref * CHANT_DISPLAY;
+    // round 23: in a chorus the crowd's line grows each time it comes back, on top of the display floor
+    const want = frame.ref * CHANT_DISPLAY * (floorPx > 0 ? 1 + REPEAT_GROWTH * repeat : 1);
+    chantPx = want;
     if (big > 0 && big < want) {
       const b = readableBox(pieces);
       scaleAll(pieces, Math.min(2.2, want / big), b.x + b.w / 2, b.y + b.h / 2);
@@ -716,6 +791,14 @@ export function composeLine(given: ComposeInput): Composition {
   if (hint.color === "invert") pieces = invertDisplay(pieces);
   // legibility: the readable text stays in the readable area before anything else is added
   fitInto(pieces, frame.read, frame.minRead);
+  // round 23: a chorus repeat that could not grow (a line already filling its zone) changes
+  // treatment: one phrase takes the accent, the other phrase on the next repeat (a one-piece line:
+  // every other repeat)
+  if (floorPx > 0 && repeat > 0 && biggest(pieces) < Math.max(wantPx, chantPx) * 0.98) {
+    const mains = pieces.filter((p) => p.role === "main" && p.readable && p.glyphs.length);
+    if (mains.length >= 2) mains[repeat % 2 === 1 ? 1 : 0].plate = "accent";
+    else if (mains.length === 1 && repeat % 2 === 1) mains[0].plate = "accent";
+  }
   pieces = ornaments(r, pieces, input);
   pieces = placeTranslation(pieces, frame, r);
   // an ultra-wide canvas: the view slides into place

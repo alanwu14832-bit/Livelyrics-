@@ -12,7 +12,7 @@ import type { LineContext, ResolvedHint, ResolvedTypeSystem } from "./model";
 import { findMotionWord } from "./motion-words";
 import { autoHint, textKey } from "./sequence";
 import { VOICES } from "./vocab";
-import { chantLineKeys, keyLineKeys } from "./key-lines";
+import { CHORUS_FLOOR, chantLineKeys, keyLineKeys, LAST_CHORUS_FLOOR } from "./key-lines";
 import { hasDarkWord, touchesDark } from "./sensitive";
 import { sectionComposition } from "../stage/program/model";
 import type { StageOverrides } from "../stage/protocol";
@@ -76,6 +76,10 @@ interface LineTable {
   keys: Set<string>;
   /** the crowd's lines (a hook sung ≥ 4 times, a shouted chant): large every time */
   chants: Set<string>;
+  /** round 23: the song has a chorus (verse lines then keep under the chorus floor) */
+  hasChorus: boolean;
+  /** round 23: per line index, how many times its lyric was sung before */
+  repeats: number[];
 }
 
 const tables = new WeakMap<object, { lines: readonly LyricLine[]; title: string; table: LineTable }>();
@@ -104,7 +108,15 @@ function lineTable(plan: DesignPlan & { typeSystem: TypeSystem }, lines: readonl
     const si = sectionIndexForLine(plan, lines as LyricLine[], i, duration);
     if (si != null && plan.sections[si]?.kind === "chorus" && si !== lastChorus) chorusKeys.add(textKey(l.text));
   });
-  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title), chants: chantLineKeys(plan, lines) };
+  const seen = new Map<string, number>();
+  const repeats = lines.map((l) => {
+    const k = textKey(l?.text ?? "");
+    if (!k) return 0;
+    const n = seen.get(k) ?? 0;
+    seen.set(k, n + 1);
+    return n;
+  });
+  const table = { byId, firstIndex, lastChorus, chorusKeys, keys: keyLineKeys(plan, lines, duration, title), chants: chantLineKeys(plan, lines), hasChorus: chorusCount > 0, repeats };
   tables.set(plan.typeSystem, { lines, title, table });
   return table;
 }
@@ -190,6 +202,13 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
   const motionWord = dark ? "" : mw && line.text.includes(mw) ? mw : edit?.motionWord === "" ? "" : findMotionWord(line.text);
   const escalate = !dark && table.lastChorus != null && sectionIndex === table.lastChorus && table.chorusKeys.has(key);
   const energy = Math.min(clamp(src.energy, 0, 1, fallback.energy), dark ? 0.4 : 1);
+  // round 23 (N7): every chorus line has a size floor (higher on the last chorus) — a dark line stays
+  // quiet; a verse line (not the crowd's line) keeps under the chorus floor, so the chorus is never
+  // the smallest type on the wall
+  const chorusLine = section?.kind === "chorus" && !dark;
+  const floor = chorusLine ? (table.lastChorus != null && sectionIndex === table.lastChorus ? LAST_CHORUS_FLOOR : CHORUS_FLOOR) : undefined;
+  const chant = !dark && edit?.key !== false && table.chants.has(key);
+  const ceiling = table.hasChorus && !chant && (section?.kind === "verse" || section?.kind === "pre-chorus" || section?.kind === "intro") ? CHORUS_FLOOR : undefined;
   const hint: ResolvedHint = {
     recipe,
     emphasis,
@@ -209,7 +228,9 @@ export function resolveLine(plan: DesignPlan & { typeSystem: TypeSystem }, lines
     orientationFixed: edit?.orientation != null || override?.orientation != null,
     recipeFixed: edit?.recipe != null || override?.recipe != null,
     key: typeof edit?.key === "boolean" ? edit.key : !dark && (table.keys.has(key) || table.chants.has(key)),
-    chant: !dark && edit?.key !== false && table.chants.has(key),
+    chant,
+    ...(floor ? { floor, repeat: table.repeats[index] ?? 0 } : {}),
+    ...(ceiling ? { ceiling } : {}),
   };
   // the first lyric line of its section carries the section's label and number
   let first0 = true;

@@ -65,6 +65,18 @@ export interface ResolvedHint {
    * at key-line scale every time it comes back, never smaller than the display floor
    */
   chant?: boolean;
+  /**
+   * round 23 (N7): a chorus line's size floor — its largest readable glyph as a fraction of the
+   * frame's short side (CHORUS_FLOOR, LAST_CHORUS_FLOOR on the last chorus); never on a dark line
+   */
+  floor?: number;
+  /** round 23: how many times this lyric was sung before (0 the first time): a chorus repeat grows or changes treatment */
+  repeat?: number;
+  /**
+   * round 23: the largest a verse line may be set (fraction of the short side), so the chorus is
+   * never the smallest type on the wall; undefined = no ceiling
+   */
+  ceiling?: number;
   /** the section's motion override (0..1), null = the system's */
   motion: number | null;
   /** the orientation was set in the editor (line or section): the canvas may not adapt it */

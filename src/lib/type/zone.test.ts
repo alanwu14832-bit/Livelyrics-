@@ -184,7 +184,10 @@ describe("the program's zones reach the type engine", () => {
         const r = composeProjectLine(plan, lines, i, canvas, approxMeasure, { duration: p.meta.duration, songTitle: p.meta.title });
         if (!r || !r.res.ctx.zone) return;
         const z = canvasZone(r.res.ctx.zone, canvas.width / canvas.height);
-        expect(inside(r.comp, canvas, z, 3), `${l.text} ${canvas.width}x${canvas.height}`).toBe(true);
+        // round 23: a chorus line that cannot reach its size floor in the zone is a poster across the
+        // readable width, at the zone's height
+        const poster = { ...z, x: 0.06, w: 0.88 };
+        expect(inside(r.comp, canvas, z, 3) || (!!r.res.hint.floor && inside(r.comp, canvas, poster, 3)), `${l.text} ${canvas.width}x${canvas.height}`).toBe(true);
         checked++;
       });
     }
