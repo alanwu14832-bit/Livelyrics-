@@ -433,7 +433,10 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     col = mix(col, uBg * 0.3, fill(d - r));
     col += mix(uAcc, vec3(1.0), 0.3) * (stroke(d - r, 0.004) + exp(-abs(d - r) * 50.0) * 0.5);
   } else {
-    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()), fill(d - r) * (1.0 - cut) * step(hz, uv.y));
+    // round 23: the chorus sun is large enough to stand behind the words: it gives way under the line
+    // on screen (dims, never cut), like the other forms do (wordsMask: nothing when no line is shown)
+    float giveWay = 1.0 - 0.5 * wordsMask(uv, 0.04) * OPEN();
+    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * giveWay, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
   }
   ${
     city
