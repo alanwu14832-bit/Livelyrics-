@@ -5,8 +5,12 @@
 // a build (mode 1), a later chorus grows, and the subject stands in more than one place.
 
 import { describe, expect, it } from "vitest";
-import { composeSceneProgram, FORM_IDS, isBuildSection } from "./composer";
-import { PROBE_LIT_MAX, probePlanProgram } from "./probe";
+import { composeSceneProgram, FORM_IDS, INSTRUMENTAL_TITLES, isBuildSection } from "./composer";
+import { compileForCpu } from "./glsl-eval";
+import { PROBE_COVER, PROBE_LIT_MAX, probePlanProgram, stateUniforms } from "./probe";
+import { validateProgram } from "./validate";
+
+const luma = (c: readonly number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 import { offlineDesign } from "@/lib/server/designer/offline";
 import { AUDIT_SONGS, auditInput } from "@/lib/server/designer/testing/audit-songs";
 
@@ -64,5 +68,49 @@ describe("the chorus opens the wall (round 23)", () => {
     const notes = prog.sections.filter((_, i) => sections[i].kind === "chorus").map((s) => s.note);
     expect(notes[0]).toMatch(/越出畫面/);
     if (notes.length > 1) expect(notes[notes.length - 1]).toMatch(/比上一次更大/);
+  });
+});
+
+// Round 23 (N5): the post-rock instrumental was three descending black slabs for 73 s. An instrumental
+// now favours forms that build up, and uSongProgress adds layers (count, height, light) across the song.
+describe("the instrumental builds up over the song (round 23)", () => {
+  const inst = AUDIT_SONGS.find((s) => s.key === "instrumental")!;
+  const plan = offlineDesign(auditInput(inst));
+
+  it("draws a form that builds (ribbons, strata, horizon, threads), named after the picture", () => {
+    const form = plan.sceneProgram!.recipe!.split("/")[0];
+    expect(["ribbons", "strata", "horizon", "threads"]).toContain(form);
+    expect(plan.sceneProgram!.title).toBe(INSTRUMENTAL_TITLES[form as keyof typeof INSTRUMENTAL_TITLES]);
+    expect(plan.keyVisual.title).toBe(plan.sceneProgram!.title);
+    expect(plan.keyVisual.title).not.toBe("暗處的一道光");
+    expect(plan.sceneProgram!.concept).toMatch(/一層一層/);
+  });
+
+  it("every form covers more of the wall late in the song than early, in the same section state", { timeout: 60_000 }, () => {
+    const sections = plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy }));
+    for (const form of ["ribbons", "strata", "horizon", "threads", "pillars", "orbits"] as const) {
+      const prog = composeSceneProgram({ seed: 5, forms: [form], sections, lyrics: false });
+      const v = validateProgram(prog.source);
+      if (!v.ok) throw new Error(`${form}: ${v.errors.join("; ")}`);
+      const ps = prog.sections.find((s) => sections.find((x) => x.id === s.sectionId)?.kind === "verse") ?? prog.sections[0];
+      const section = plan.sections.find((s) => s.id === ps.sectionId);
+      const palette = plan.keyVisual.palette.map((p) => p.hex);
+      const cover = (progress: number) => {
+        const u = { ...stateUniforms(prog, ps, section, 1, plan.sections.length, { palette }), uSongProgress: progress };
+        const c = compileForCpu(v.code, u);
+        let n = 0;
+        for (let j = 0; j < 18; j++) for (let i = 0; i < 32; i++) if (luma(c.scene([((i + 0.5) / 32) * 1920, ((j + 0.5) / 18) * 1080]).color) > PROBE_COVER) n++;
+        return n / (32 * 18);
+      };
+      const early = cover(0.05);
+      const late = cover(0.9);
+      expect(late, `${form}: ${early} → ${late}`).toBeGreaterThan(early + 0.02);
+    }
+  });
+
+  it("pillars stand in a symmetric row, never a descending bar chart", () => {
+    const prog = composeSceneProgram({ seed: 5, forms: ["pillars"], sections: [{ id: "a", kind: "chorus", energy: 0.8 }], lyrics: false });
+    expect(prog.source).toContain("abs(from)");
+    expect(prog.source).not.toMatch(/0\.18 \* fi/);
   });
 });

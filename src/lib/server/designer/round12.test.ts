@@ -58,9 +58,11 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
     expect(folk.brush).toBeGreaterThan(folk.bars);
     // every form keeps a weight: nothing is forbidden, only rarer
     for (const f of FORM_IDS) expect(punk[f]).toBeGreaterThan(0);
-    // an instrumental leans to shapes that hold a frame without words
+    // an instrumental leans to shapes that hold a frame without words and build up over the song
+    // (round 23: ribbons / strata / horizon / threads; the pillars read as a bar chart for 73 s)
     const inst = analyzeFindings(auditInput(auditSong("instrumental")));
-    expect(formWeights(inst, { lyrics: false }).pillars).toBeGreaterThan(formWeights(inst, { lyrics: true }).pillars);
+    expect(formWeights(inst, { lyrics: false }).ribbons).toBeGreaterThan(formWeights(inst, { lyrics: true }).ribbons);
+    expect(formWeights(inst, { lyrics: false }).pillars).toBeLessThan(formWeights(inst, { lyrics: true }).pillars);
     expect(formWeights(inst, { lyrics: false }).bars).toBeLessThan(formWeights(inst, { lyrics: true }).bars);
   });
 

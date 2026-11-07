@@ -1055,6 +1055,14 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   };
   // 專屬畫面: the offline composer's program (form from the findings, the rest from the seed)
   plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings);
+  // round 23 (N5): an instrumental has no words to name: the key visual is named after its picture
+  // (the program's form, which builds up over the song), not a mood-pool title
+  if (!st.lines.length && plan.sceneProgram?.title && !(input.takenTitles ?? []).includes(plan.sceneProgram.title)) {
+    const named = plan.sceneProgram.title;
+    plan.keyVisual = { ...plan.keyVisual, title: named };
+    plan.designerNotes = plan.designerNotes.split(title).join(named);
+    plan.keyVisual.concept = plan.keyVisual.concept.split(title).join(named);
+  }
   plan.transitionCharacter = transitionCharacterOf(findings);
   return normalizePlan(plan, input);
 }

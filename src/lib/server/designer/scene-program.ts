@@ -250,12 +250,16 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.pillars += 0.5;
     w.horizon += 0.3;
   }
-  // an instrumental: shapes that hold a frame without words (bars are a backdrop for type)
+  // an instrumental: shapes that hold a frame without words and can build up over a long song —
+  // round 23 (N5): ribbons, strata, a horizon, threads gain layers with uSongProgress; pillars read
+  // as a bar chart for 73 s (the audit) and bars are a backdrop for type
   if (opts.lyrics === false) {
-    w.pillars += 0.5;
-    w.strata += 0.4;
-    w.orbits += 0.3;
-    w.bars *= 0.6;
+    w.ribbons += 1.4;
+    w.strata += 1.2;
+    w.horizon += 0.9;
+    w.threads += 0.9;
+    w.pillars *= 0.45;
+    w.bars *= 0.5;
   }
   // round 18: what the library's last songs wore, by count (one use a nudge, two nearly a ban)
   const recent = (opts.recentForms ?? []).slice(0, RECENT_WINDOW).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
