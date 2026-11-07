@@ -1894,7 +1894,7 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   ribbons / ridges / slabs fade in one by one, the horizon and range rise, rings fill in and widen, threads
   lengthen, the light behind the slabs opens — over the song, not one shape sliding side to side (the focal
   drift is now ± 0.12). `formWeights` with `lyrics: false` adds ribbons 1.4, strata 1.2, horizon 0.9,
-  threads 0.9 and multiplies pillars 0.45, bars 0.5. Pillars (every song) stand in a mirror-symmetric row
+  threads 0.9 and multiplies pillars 0.3, bars 0.5. Pillars (every song) stand in a mirror-symmetric row
   with varied heights. The program title and the key visual title are `INSTRUMENTAL_TITLES[form]`
   (「一層層亮起的山」…) instead of the mood pool's 「暗處的一道光」.
 

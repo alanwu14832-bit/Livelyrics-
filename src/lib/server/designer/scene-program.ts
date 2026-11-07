@@ -258,7 +258,7 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.strata += 1.2;
     w.horizon += 0.9;
     w.threads += 0.9;
-    w.pillars *= 0.45;
+    w.pillars *= 0.3;
     w.bars *= 0.5;
   }
   // round 18: what the library's last songs wore, by count (one use a nudge, two nearly a ban)
