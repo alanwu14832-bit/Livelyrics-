@@ -332,7 +332,7 @@ function normalizeTitle(t: string): string {
  */
 export const TEMPLATE_TITLE_PATTERNS: readonly RegExp[] = [/^.{1,4}與.{1,4}$/, /^穿過/, /之後的/, /落在/, /^把.+留在/, /^.{1,4}裡的.{1,4}$/, /・\d+$/, /的回聲$/, /進行式$/];
 
-const LEAD_WORDS = /^(?:我們?|你們?|他們?|她們?|就算|如果|後來|以為|因為|所以|但是|可是|還是|只是|誰|把|讓|在|像|就|和|跟|再|也|都|又|才)/;
+const LEAD_WORDS = /^(?:我們?|你們?|他們?|她們?|就算|如果|後來|以為|因為|所以|但是|可是|還是|只是|誰|在|像|就|和|跟|再|也|都|又|才)/;
 const TAIL_WORDS = /(?:了|的|嗎|呢|吧|啊|著|過)$/;
 const CHANT_ONLY_TITLE = /^(?:\s*(?:hey|oh+|yeah|woah|whoa|la+|na+|ooh+)[\s!,.]*)+$/i;
 
@@ -365,7 +365,7 @@ export function lyricTitleCandidates(c: ConceptContext): string[] {
       if (l.cluster === hook && hook != null) score += 2;
       if (l.repeats >= 2) score += 1;
       if (cjk >= 4 && cjk <= 6) score += 1;
-      if (cjk && LEAD_WORDS.test(chunk)) score -= 2;
+      if (cjk && LEAD_WORDS.test(chunk)) score -= 3;
       if (cjk && TAIL_WORDS.test(chunk)) score -= 1;
       if (!cjk && /^(?:i|you|we|and|so|the|oh|where|when)\b/i.test(chunk)) score -= 1;
       score -= order * 0.01;

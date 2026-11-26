@@ -1155,7 +1155,7 @@ function honestTimingCues(plan: DesignPlan, input: DesignerInput, st: SongStruct
   const estimated = lines.filter((l) => l.estimated || l.start == null).length;
   let note: CueNote | null = null;
   if (st.silent) {
-    plan.cues = plan.cues.filter((c) => c.title !== "第一句歌詞");
+    plan.cues = plan.cues.map((c) => (c.title === "第一句歌詞" ? { ...c, detail: "音檔沒有聲音，這個時間是平均分配的：確認歌詞層已開啟（L），主唱開口時按 → 送出第一句。" } : c));
     note = { time: 0, title: "手動送出歌詞", detail: "音檔沒有聲音，歌詞時間只是平均分配：全程用手動切換，主唱開口時按 → 逐句送出。", kind: "warning" };
   } else if (estimated > 0 && !input.lyrics?.synced) {
     note = { time: 0, title: "歌詞時間是估的", detail: `${estimated} 句的時間是估的：先用手動切換逐句送出；到歌詞編輯器對時後重新設計，段落會跟著真正的歌詞時間。`, kind: "warning" };
