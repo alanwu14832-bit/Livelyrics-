@@ -176,7 +176,7 @@ describe("kinetic-type · the technique by what the line does", () => {
     const lines = punk.input.lyrics.lines;
     const sys = punk.plan.typeSystem!;
     const wall = lines.findIndex((l) => l.text === "拆掉這面牆");
-    expect(["split", "echo", "poster"]).toContain(sys.lines.find((x) => x.lineId === lines[wall].id)!.recipe);
+    expect(["split", "poster", "echo"]).toContain(sys.lines.find((x) => x.lineId === lines[wall].id)!.recipe);
     // the chorus releases: a meaning never puts a chorus line in a calm recipe
     for (const s of songs) {
       const p = s.plan;

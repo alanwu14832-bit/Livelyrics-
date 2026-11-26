@@ -23,7 +23,7 @@ export interface LineMeaning {
 }
 
 export const LINE_MEANINGS: Record<LineMeaningId, LineMeaning> = {
-  break: { id: "break", label: "斷裂、拆開", recipes: ["split", "echo", "poster"], technique: "slice／shatter", cue: "拆、碎、撕、break" },
+  break: { id: "break", label: "斷裂、拆開", recipes: ["split", "poster", "echo"], technique: "slice／shatter", cue: "拆、碎、撕、break" },
   shout: { id: "shout", label: "口號、喊出來", recipes: ["giant-word", "poster", "echo"], technique: "stomp", cue: "Hey、帶驚嘆號的短句" },
   vanish: { id: "vanish", label: "消失、遠去", recipes: ["scatter", "whisper", "vertical-column"], technique: "disintegrate／smoke", cue: "消失、忘記、再見" },
   write: { id: "write", label: "寫下、名字", recipes: ["brush-write", "title-card", "vertical-column"], technique: "stroke write-on", cue: "寫、名字、信" },
