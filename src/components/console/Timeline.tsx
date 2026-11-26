@@ -21,6 +21,7 @@ import { formatCountdown, withAlpha } from "@/lib/console/format";
 import { selectTimeDecis, useStageValue } from "@/lib/console/hooks";
 import { CUE_KIND_LABELS, CUE_KIND_TOKENS, SCENE_LABELS, cueColor } from "@/lib/console/labels";
 import { CUE_ACTIVE_WINDOW, sortedCues } from "@/lib/console/navigation";
+import { sectionWall } from "@/lib/stage/program/wall";
 import {
   followStart,
   maxStart,
@@ -169,6 +170,7 @@ function TimelineImpl({
   const analysis = project.analysis;
   const lines = useMemo(() => project.lyrics?.lines ?? [], [project.lyrics]);
   const cues = useMemo(() => sortedCues(plan), [plan]);
+  const walls = useMemo(() => (plan?.sections ?? []).map((_, i) => sectionWall(plan, i).name), [plan]);
   const peaks = useMemo(() => (analysis?.peaks?.length ? analysis.peaks : (fallbackPeaks ?? null)), [analysis, fallbackPeaks]);
   const peaksDuration = analysis?.peaks?.length && analysis.duration > 0 ? analysis.duration : duration;
   const beats = analysis?.beats ?? [];
@@ -459,6 +461,7 @@ function TimelineImpl({
       hover: hv,
       dragging: scrubRef.current != null,
       sections: plan?.sections ?? [],
+      walls,
       peaks,
       peaksDuration,
       beats,
@@ -588,6 +591,8 @@ interface DrawInput {
   hover: Hover | null;
   dragging: boolean;
   sections: SectionDesign[];
+  /** round 24 (N4): what the wall shows per section (the program's form, else the built-in scene) */
+  walls: string[];
   peaks: readonly number[] | null;
   peaksDuration: number;
   beats: readonly number[];
@@ -617,7 +622,7 @@ function drawTag(ctx: CanvasRenderingContext2D, pal: Palette, text: string, x: n
 }
 
 function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
-  const { w, h, dpr, pal, view, t, sections, peaks, peaksDuration, beats, analysis, lines, duration, cues } = d;
+  const { w, h, dpr, pal, view, t, sections, walls, peaks, peaksDuration, beats, analysis, lines, duration, cues } = d;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const X = (time: number) => timeToX(time, view, w);
@@ -673,7 +678,7 @@ function drawTimeline(ctx: CanvasRenderingContext2D, d: DrawInput) {
     ctx.fillStyle = pal.label;
     ctx.fillText(s.label, x0 + 8, SECTION_TOP + SECTION_H / 2 + 0.5);
     const nameW = ctx.measureText(s.label).width;
-    const scene = SCENE_LABELS[s.scene];
+    const scene = walls[i] ?? SCENE_LABELS[s.scene];
     if (scene) {
       ctx.font = `400 12px ${pal.font}`;
       ctx.fillStyle = tokenAlpha(pal.label, 0.7);

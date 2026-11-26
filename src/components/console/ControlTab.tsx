@@ -12,6 +12,7 @@ import { ConsoleController, type OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, selectSectionIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, SCENE_HINTS, SCENE_LABELS } from "@/lib/console/labels";
 import { sceneBank } from "@/lib/console/plan-edit";
+import { programName, sectionWall } from "@/lib/stage/program/wall";
 import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
 import type { StageOverrides, StageStore } from "@/lib/stage/protocol";
 import type { Project, SceneId } from "@/lib/types";
@@ -66,6 +67,10 @@ function ControlTabImpl({
   const planScene = sectionIndex != null ? plan?.sections[sectionIndex]?.scene : undefined;
   const planStyle = sectionIndex != null ? plan?.sections[sectionIndex]?.lyricStyle : undefined;
   const others = SCENE_IDS.filter((s) => !bank.includes(s));
+  // round 24 (N4): with a scene program the wall shows the program, not the section's built-in scene:
+  // the program is the 「跟隨設計」 tile (key 0), keys 1–9 replace it with a built-in scene
+  const program = noun === "歌詞" ? programName(plan) : null;
+  const wall = program ? sectionWall(plan, sectionIndex) : null;
   const anyOverride =
     ov.blackout || !ov.lyricsVisible || ov.freeze || ov.scene != null || ov.lyricStyle != null || ov.testPattern || ov.intensity !== 1 || ov.lyricScale !== 1;
   const safety = safetyOf(project);
@@ -113,10 +118,31 @@ function ControlTabImpl({
         >
           場景覆寫
         </GroupTitle>
-        <div className="mt-1 grid grid-cols-3 gap-1.5">
+        {program && wall && (
+          <button
+            type="button"
+            aria-pressed={ov.scene == null}
+            aria-keyshortcuts="0"
+            data-program-tile=""
+            onClick={() => controller.setSceneOverride(null)}
+            className={cx(
+              "press-tile mt-1 flex w-full min-w-0 flex-col justify-center gap-0.5 rounded-sm px-2.5 py-2 text-left",
+              ov.scene == null ? cx("bg-tint-soft shadow-[inset_0_0_0_2px_var(--tint)]", TINT_ON_SOFT) : "bg-fill-3 text-label hover:bg-fill-2",
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Kbd className={cx(ov.scene == null && "bg-tint-soft")}>0</Kbd>
+              <span className="min-w-0 truncate text-c-body font-medium">專屬畫面：{program}</span>
+              <PlanMark label={planLabel} className={cx("ml-auto", ov.scene == null && TINT_ON_SOFT)} />
+            </span>
+            <span className={cx("min-w-0 truncate text-c-footnote", ov.scene == null ? TINT_ON_SOFT : "text-label-2")}>{wall.note || wall.name}</span>
+          </button>
+        )}
+        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
           {bank.map((scene, i) => {
             const active = ov.scene === scene;
-            const inPlan = planScene === scene;
+            // with a program the built-in scene never shows on its own: no 「目前段落」 mark on it
+            const inPlan = !program && planScene === scene;
             return (
               <Tooltip key={scene} content={SCENE_HINTS[scene]} shortcut={String(i + 1)}>
                 <button
@@ -161,6 +187,7 @@ function ControlTabImpl({
             })}
           </div>
         )}
+        {program && <Footnote>專屬畫面是這首歌設計好的畫面。按 1–9 會換成內建場景（套用到所有段落），按 0 或「跟隨設計」回到專屬畫面。</Footnote>}
       </section>
 
       <section aria-labelledby="ctl-style">
