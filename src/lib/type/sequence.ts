@@ -10,6 +10,7 @@ import { lineAnchor, sectionIndexAt } from "../timeline";
 import type { LyricLine, SectionDesign, SectionKind, TypeLine, TypeOrientation, TypeParams, TypeRecipeId, TypeVoiceId } from "../types";
 import { findMotionWord } from "./motion-words";
 import { zoneFor } from "./recipes";
+import { LOUD_MEANINGS, lineMeaning, type LineMeaning } from "./technique";
 import { createRng, hash32 } from "./rng";
 import { hasDarkWord, touchesDark } from "./sensitive";
 import { RECIPES, VOICES } from "./vocab";
@@ -180,6 +181,33 @@ function exactSubstrings(list: readonly string[], text: string): string[] {
   return list.filter((w, i) => typeof w === "string" && w.trim() && text.includes(w.trim()) && list.indexOf(w) === i).map((w) => w.trim()).slice(0, 2);
 }
 
+/** The recipe a line's meaning asks for, when the song's voice speaks it and the moment allows it. */
+export function meaningRecipe(
+  meaning: LineMeaning | null,
+  palette: Partial<Record<TypeRecipeId, number>>,
+  energy: number,
+  kind: SectionKind | null,
+  prev: TypeRecipeId | null,
+  cjk: boolean,
+  program: boolean,
+  avoid?: ReadonlySet<TypeRecipeId>,
+): TypeRecipeId | null {
+  if (!meaning) return null;
+  // restraint: a quiet line keeps its quiet type whatever it says
+  if (energy < 0.3 && LOUD_MEANINGS.has(meaning.id)) return null;
+  for (const id of meaning.recipes) {
+    const info = RECIPES[id];
+    if (palette[id] == null || (id === prev && id !== "whisper") || avoid?.has(id) || (info.cjkOnly && !cjk) || (program && id === "window")) continue;
+    // the chorus releases: a meaning never shrinks a chorus line to a calm recipe
+    if (kind === "chorus" && !LOUD.includes(id)) continue;
+    if (energy < info.energy[0] - 0.08 || energy > info.energy[1] + 0.1) continue;
+    if (kind === "chorus" && id === "whisper") continue;
+    if ((kind === "verse" || kind === "pre-chorus") && (id === "bleed" || id === "window")) continue;
+    return id;
+  }
+  return null;
+}
+
 /** A hint for every non-empty line, in lyric order. */
 export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
   const salt = input.salt ?? 0;
@@ -273,6 +301,10 @@ export function sequenceTypeLines(input: SequenceInput): TypeLine[] {
       }
     }
     if (quiet && voice.recipes.whisper == null && recipe !== "whisper" && rng.chance(0.5)) recipe = "whisper";
+    // round 24: the technique by what the line does (kinetic-type: choose by meaning) — the first
+    // recipe that says it, inside the voice's palette, fitting the energy and not the previous one
+    const meant: TypeRecipeId | null = dark ? null : meaningRecipe(lineMeaning(s.line.text), voice.recipes, energy, kind, prevRecipe, s.cjk, !!input.program, bridge ? new Set([...verseRecipes, ...chorusRecipes]) : undefined);
+    if (meant) recipe = meant;
     recipeUse.set(recipe, (recipeUse.get(recipe) ?? 0) + 1);
     if (kind === "verse" || kind === "pre-chorus") verseRecipes.add(recipe);
     if (kind === "chorus") chorusRecipes.add(recipe);
