@@ -240,6 +240,76 @@ export function buildConcept(c: ConceptContext, skeleton = chooseSkeleton(c)): s
 }
 
 // ---------------------------------------------------------------------------
+// round 24 (N9 + N4): one clear sentence — what is on the wall, how it changes, which words it serves
+// ---------------------------------------------------------------------------
+
+/** The offline composer's forms as a thing on the wall. */
+const FORM_THING: Record<string, string> = {
+  horizon: "地平線上的一個圓",
+  pillars: "一排佇立的碑",
+  orbits: "幾道繞著一顆星的軌道",
+  strata: "一層層的山脈",
+  bars: "一組印刷的斜線",
+  brush: "一筆墨畫成的圓",
+  ribbons: "幾條交錯的光帶",
+  threads: "一片落下的光絲",
+};
+
+export interface WallFacts {
+  /** the scene program's title and recipe (offline: form/texture/motion#salt) */
+  title: string;
+  recipe?: string;
+  chorusCount: number;
+  /** the song has a section that leads into a chorus (a build) */
+  builds: boolean;
+}
+
+/** The thing the wall shows, in words. */
+export function wallThing(w: Pick<WallFacts, "title" | "recipe">): string {
+  const form = /^([a-z]+)\//.exec(w.recipe ?? "")?.[1];
+  return (form && FORM_THING[form]) || `「${w.title}」`;
+}
+
+/**
+ * The key visual's lead sentence: 「title」：the thing on the wall, what it does in the verses and how
+ * the chorus opens it, tied to the phrase the crowd sings (or the song's last plain line).
+ */
+export function wallSentence(c: ConceptContext, skeleton: SkeletonId, w: WallFacts): string {
+  const thing = wallThing(w);
+  const T = quote(c.title);
+  const f = c.findings;
+  const phrase = singalong(c);
+  // the title is often the hook itself: then the chorus says 「這一句」, not the title a second time
+  const hook = phrase && !hasDarkWord(phrase) ? (normalizeTitle(phrase) === normalizeTitle(c.title) ? "這一句" : quote(phrase)) : null;
+  if (skeleton === "fragment") return opening(c, skeleton);
+  if (skeleton === "instrumental") {
+    const peak = f.audio.peakAt != null && !c.structure.flat ? `，到 ${formatTimeShort(f.audio.peakAt)} 撐滿整面牆` : "，一直加到最滿";
+    return `${T}：牆上只有${thing}，沒有字，它隨著歌一層一層加上去${peak}。`;
+  }
+  const short = `「${w.title}」`;
+  const verse = w.builds ? "主歌時它小小地站在字的另一側，進副歌前慢慢長大" : "主歌時它小小地站在字的另一側";
+  let chorus: string;
+  if (!w.chorusCount) chorus = `唱到最亮的那一段才長到最大${hook ? `，${hook}留在畫面上` : ""}`;
+  else if (skeleton === "chant") chorus = `每喊一次${hook ?? "口號"}${short}就放大一次，最後一次越出整面牆`;
+  else if (skeleton === "ballad") chorus = `${hook ? `唱到${hook}` : "副歌"}${short}才慢慢漲滿畫面，整首不閃白、不硬切`;
+  else if (w.chorusCount >= 2) chorus = `副歌${hook ? `唱到${hook}` : ""}時${short}放大到越出畫面，一次比一次大`;
+  else chorus = `副歌${hook ? `唱到${hook}` : ""}時${short}打開整面牆`;
+  return `${T}：牆上只有${thing}，${verse}；${chorus}。`;
+}
+
+/** The concept with the wall sentence first; the palette and (confident) arc sentences follow. */
+export function wallConcept(c: ConceptContext, skeleton: SkeletonId, w: WallFacts): string {
+  const variant = (c.seed >>> 5) % 3;
+  // the colours come from the song's own image when it sings one in plain words
+  const image = c.imagery.find((h) => h.words.some((x) => !hasDarkWord(x)))?.imagery.name;
+  const palette = skeleton === "fragment" ? "" : paletteSentence(c, skeleton, variant);
+  const fact = skeleton === "fragment" ? "" : factSentence(c, variant);
+  // one claim about where the colours come from: the genre's (the fact sentence says so) or the song's image
+  const parts = [wallSentence(c, skeleton, w), fact, image && palette && !fact.includes("配色") ? `顏色從歌裡的「${image}」來：${palette}` : palette, arcSentence(c)];
+  return parts.map((p) => p.replace(/^\s+/, "")).filter(Boolean).join("");
+}
+
+// ---------------------------------------------------------------------------
 // title
 // ---------------------------------------------------------------------------
 
@@ -256,7 +326,57 @@ function normalizeTitle(t: string): string {
   return t.replace(/[\s（）()「」]/g, "").toLowerCase();
 }
 
-/** Title candidates from the imagery and the emotion, most fitting first (the seed rotates the start). */
+/**
+ * Round 24 (N9): title patterns that read as a template, not as this song (「穿過夜色的遠方」「雨之後的
+ * 夜色」「把燈火留在遠方」, a numbered repeat). A title never matches one.
+ */
+export const TEMPLATE_TITLE_PATTERNS: readonly RegExp[] = [/^.{1,4}與.{1,4}$/, /^穿過/, /之後的/, /落在/, /^把.+留在/, /^.{1,4}裡的.{1,4}$/, /・\d+$/, /的回聲$/, /進行式$/];
+
+const LEAD_WORDS = /^(?:我們?|你們?|他們?|她們?|就算|如果|後來|以為|因為|所以|但是|可是|還是|只是|誰|在|像|就|和|跟|再|也|都|又|才)/;
+const TAIL_WORDS = /(?:了|的|嗎|呢|吧|啊|著|過)$/;
+const CHANT_ONLY_TITLE = /^(?:\s*(?:hey|oh+|yeah|woah|whoa|la+|na+|ooh+)[\s!,.]*)+$/i;
+
+function han(s: string): number {
+  return Array.from(s).filter((ch) => /\p{Script=Han}/u.test(ch)).length;
+}
+
+/**
+ * Round 24 (N9): a title is a concrete fragment the song sings — a phrase between its pauses, 3–8
+ * characters (2–5 Latin words), never from a dark line, never the song's own title — scored by the
+ * song's strongest images in plain words, the hook and the chorus, best first.
+ */
+export function lyricTitleCandidates(c: ConceptContext): string[] {
+  const plain = c.imagery.filter((h) => h.words.some((w) => !hasDarkWord(w)));
+  const imageWords = plain.flatMap((h, i) => h.words.filter((w) => !hasDarkWord(w)).map((w) => [w, i] as const));
+  const song = normalizeTitle(c.songTitle);
+  const hook = c.structure.hookCluster;
+  const scored = new Map<string, number>();
+  c.structure.lines.forEach((l, order) => {
+    if (!l.text || hasDarkWord(l.text) || CHANT_ONLY_TITLE.test(l.text)) return;
+    for (const raw of l.text.split(/[，,、。！？!?；;：:]+|\s{1,}(?=\p{Script=Han})|(?<=\p{Script=Han})\s+/u)) {
+      const chunk = raw.trim().replace(/^["'「『]|["'」』]$/g, "");
+      if (!chunk) continue;
+      const cjk = han(chunk);
+      const words = chunk.split(/\s+/).filter(Boolean).length;
+      const ok = cjk ? cjk >= 3 && cjk <= 8 && cjk === Array.from(chunk.replace(/\s/g, "")).length : words >= 2 && words <= 5 && chunk.length <= 28;
+      if (!ok || normalizeTitle(chunk) === song || song.includes(normalizeTitle(chunk))) continue;
+      let score = 0;
+      for (const [w, rank] of imageWords) if (chunk.toLowerCase().includes(w.toLowerCase())) score = Math.max(score, 4 - Math.min(3, rank));
+      if (l.cluster === hook && hook != null) score += 2;
+      if (l.repeats >= 2) score += 1;
+      if (cjk >= 4 && cjk <= 6) score += 1;
+      if (cjk && LEAD_WORDS.test(chunk)) score -= 3;
+      if (cjk && TAIL_WORDS.test(chunk)) score -= 1;
+      if (!cjk && /^(?:i|you|we|and|so|the|oh|where|when)\b/i.test(chunk)) score -= 1;
+      score -= order * 0.01;
+      const prev = scored.get(chunk);
+      if (prev == null || score > prev) scored.set(chunk, score);
+    }
+  });
+  return [...scored.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).filter((t) => !TEMPLATE_TITLE_PATTERNS.some((re) => re.test(t)));
+}
+
+/** Title candidates, most fitting first: the song's own phrases, then (no usable lyric) its imagery and mood. */
 export function titleCandidates(c: ConceptContext, skeleton: SkeletonId): string[] {
   // round 22 (N8): a title never names an image the song only reached through dark words (凋零 for
   // 血滴, 碎片 for 刀片: 「把凋零留在碎片」) — only images it also sings in plain words
@@ -269,19 +389,15 @@ export function titleCandidates(c: ConceptContext, skeleton: SkeletonId): string
     if (n >= 2 && n <= 12 && !out.includes(t)) out.push(t);
   };
   const phrase = singalong(c);
-  if (skeleton === "chant" && phrase && Array.from(phrase).length <= 8 && !/\s/.test(phrase)) add(phrase);
+  if (skeleton === "chant" && phrase && Array.from(phrase).length <= 8 && !/\s/.test(phrase) && normalizeTitle(phrase) !== normalizeTitle(c.songTitle)) add(phrase);
+  for (const t of lyricTitleCandidates(c)) add(t);
+  // no usable lyric (every line dark, an instrumental): the song's own title when it is a plain image
+  if (c.songTitle && !hasDarkWord(c.songTitle) && Array.from(c.songTitle).length <= 12) add(c.songTitle);
   const emotion = EMOTION_TITLES[f.lyrics.emotion.label];
-  if (a && b) {
-    const pair = [`${a}與${b}`, `${a}裡的${b}`, `${b}落在${a}`, `穿過${a}的${b}`, `${a}之後的${b}`, `把${b}留在${a}`];
-    const start = c.seed % pair.length;
-    for (let i = 0; i < pair.length; i++) add(pair[(start + i) % pair.length]);
-  }
   if (a && emotion) for (const t of emotion(a)) add(t);
   if (b && emotion) for (const t of emotion(b)) add(t);
-  if (a) for (const t of [`${a}的回聲`, `${a}進行式`, `點亮${a}`, `${a}之間`]) add(t);
-  if (f.genre && a) add(`${f.genre.motifs[0]}與${a}`);
   for (const t of MOOD_VOCABULARY[f.audio.quadrant].titles) add(t);
-  return out;
+  return out.filter((t) => !TEMPLATE_TITLE_PATTERNS.some((re) => re.test(t)));
 }
 
 /** The first candidate not already used in the library; the last resort numbers the first one. */
@@ -291,8 +407,9 @@ export function makeTitle(c: ConceptContext, skeleton: SkeletonId, taken: readon
   const free = cands.find((t) => !used.has(normalizeTitle(t)));
   if (free) return free;
   const base = cands[0] ?? MOOD_VOCABULARY[c.findings.audio.quadrant].titles[0];
+  const nums = ["二", "三", "四", "五", "六", "七", "八", "九"];
   for (let n = 2; n < 50; n++) {
-    const t = `${base}・${n}`;
+    const t = `${base}（${nums[n - 2] ?? n}）`;
     if (!used.has(normalizeTitle(t))) return t;
   }
   return base;

@@ -4,6 +4,7 @@
 // specimen, designer notes, and one inset group per section with quick edits (pop-up selects and
 // the scale slider). Edits apply to the projection at once and save automatically.
 
+import { sectionWall, type SectionWall } from "@/lib/stage/program/wall";
 import { memo, useMemo } from "react";
 import { AssetLibrary } from "@/components/assets/AssetLibrary";
 import { stageAssets } from "@/lib/asset-scope";
@@ -271,6 +272,7 @@ function SectionGroup({
   disabled,
   assets,
   typeMode = false,
+  wall,
 }: {
   controller: ConsoleController;
   section: SectionDesign;
@@ -280,6 +282,8 @@ function SectionGroup({
   assets: Asset[];
   /** 字體藝術: the lyrics are compositions (show / hide only; the 排版 page does the rest) */
   typeMode?: boolean;
+  /** round 24 (N4): what the wall shows in this section */
+  wall: SectionWall;
 }) {
   const [bg, primary, accent] = section.colorway;
   const name = sectionName(section);
@@ -306,6 +310,12 @@ function SectionGroup({
         </Tooltip>
       </div>
       <div className="px-3 pb-3">
+        {wall.program && (
+          <p className="mb-1 text-c-footnote text-label">
+            <span className="font-semibold">畫面：{wall.name}</span>
+            {wall.note && <span className="text-label-2">　{wall.note}</span>}
+          </p>
+        )}
         {section.rationale && <p className="text-c-footnote text-label-2">{section.rationale}</p>}
         <KeyValues
           className="mt-1.5"
@@ -315,9 +325,9 @@ function SectionGroup({
           ]}
         />
         <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-2.5">
-          <Tooltip content={SCENE_HINTS[section.scene]}>
+          <Tooltip content={wall.program ? `專屬畫面播放時不會出現；只有按數字鍵或關閉專屬畫面時才顯示。${SCENE_HINTS[section.scene]}` : SCENE_HINTS[section.scene]}>
             <div className="min-w-0">
-              <PopupSelect<SceneId> label="場景" value={section.scene} options={SCENE_OPTIONS} onChange={(scene) => controller.updateSection(index, { scene })} disabled={disabled} />
+              <PopupSelect<SceneId> label={wall.program ? "備用內建場景" : "場景"} value={section.scene} options={SCENE_OPTIONS} onChange={(scene) => controller.updateSection(index, { scene })} disabled={disabled} />
             </div>
           </Tooltip>
           {typeMode ? (
@@ -424,9 +434,11 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
       <section aria-labelledby="design-sections">
         <GroupTitle id="design-sections">段落設計（{plan.sections.length}）</GroupTitle>
         {redesigning ? <Footnote className="mt-0 mb-1.5">重新設計進行中，完成前暫停手動修改。</Footnote> : <Footnote className="mt-0 mb-1.5">修改會即時套用到投影並自動儲存。</Footnote>}
+        {/* round 24 (m9): the term, where it appears */}
+        {plan.sections.some((s) => s.rationale.includes("IMAG")) && <Footnote className="mt-0 mb-1.5">IMAG＝大螢幕上主唱的即時特寫畫面；歌詞會避開它所在的位置（畫面中央偏下）。</Footnote>}
         <div className="flex flex-col gap-2">
           {plan.sections.map((s, i) => (
-            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} active={i === sectionIndex} disabled={redesigning} assets={pickable} typeMode={hasTypeSystem(plan)} />
+            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} wall={sectionWall(plan, i)} active={i === sectionIndex} disabled={redesigning} assets={pickable} typeMode={hasTypeSystem(plan)} />
           ))}
         </div>
       </section>

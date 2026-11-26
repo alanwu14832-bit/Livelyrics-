@@ -30,6 +30,11 @@ export interface CueContext {
   calm?: boolean;
   /** LED 安全模式 converts flash / bloom into a fade on the wall (on by default) */
   ledSafe?: boolean;
+  /**
+   * Round 24 (N4): what the wall shows in a section when a scene program draws it (its form and the
+   * section's note); without it the cues name the section's built-in scene
+   */
+  wall?: (s: SectionDesign, i: number) => { name: string; note: string };
 }
 
 const PRIORITY: Record<CueNote["kind"], number> = {
@@ -66,9 +71,15 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
       kind: "transition",
     });
   }
+  // round 24 (m9): the standing advice is said once — on the first chorus / quiet cue — not on every cue
+  let firstSingalong: SectionDesign | null = null;
+  let quietSaid = false;
   sections.forEach((s, i) => {
     const prev = sections[i - 1];
-    const scene = SCENES[s.scene].label;
+    const wall = ctx.wall?.(s, i) ?? null;
+    const scene = wall ? wall.name : SCENES[s.scene].label;
+    // 「進『粒子星空』」 → 「進副歌一：軌道放大到越出畫面」 when the program draws the wall
+    const into = wall ? `進${s.label}：${wall.note ? wall.note.replace(/^沒有字：/, "").split(/[，；]/)[0] : `「${scene}」打開`}` : `進「${scene}」`;
     const rise = prev ? s.energy - prev.energy : 0;
     // round 17 / 22: a chorus that sings a dark line (blood, a weapon, ending one's life…) is never shouted
     // from the wall and never handed to the crowd: its cue says so, without inviting anyone to sing
@@ -79,8 +90,8 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
         time: round2(Math.max(0, s.start - 0.2)),
         title: calm || darkChorus ? `${s.label}亮起` : `${s.label}爆點`,
         detail: calm || darkChorus
-          ? `${how}進「${scene}」，讓亮度慢慢爬上來就好，不推強度、不閃。`
-          : `${how}進「${scene}」（能量 ${prev.energy.toFixed(2)} → ${s.energy.toFixed(2)}），衝上來時可把強度推到 1.2。`,
+          ? `${how}${into}，讓亮度慢慢爬上來就好，不推強度、不閃。`
+          : `${how}${into}（能量 ${prev.energy.toFixed(2)} → ${s.energy.toFixed(2)}），衝上來時可把強度推到 1.2。`,
         kind: "drop",
       });
     }
@@ -98,24 +109,29 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
           : s.lyricStyle === "karaoke" || s.lyricStyle === "subtitle"
             ? `歌詞以「${LYRIC_STYLES[s.lyricStyle].label}」呈現`
             : "副歌的每一句都放大成畫面的主角";
+      const again = firstSingalong;
+      if (!again) firstSingalong = s;
       cues.push({
         time: round2(s.start),
         title: `${s.label}合唱`,
-        detail: `${how}；主唱把麥克風交給觀眾時，保持歌詞在畫面上。`,
+        detail: again ? `${how}；和${again.label}一樣，歌詞留在畫面上${wall ? "，畫面比上一次更大" : ""}。` : `${how}；主唱把麥克風交給觀眾時，保持歌詞在畫面上。`,
         kind: "singalong",
       });
     } else if (prev && i < sections.length - 1 && s.energy <= 0.32 && rise <= -0.2) {
       cues.push({
         time: round2(s.start),
         title: `${s.label}收`,
-        detail: hasLyrics ? "畫面降到低亮度，把焦點還給樂手；若主唱即興延長，改用手動 cue。" : "畫面降到低亮度，把焦點還給樂手；若樂團即興延長，改用手動 cue。",
+        detail: quietSaid ? "畫面降到低亮度，把焦點還給樂手。" : hasLyrics ? "畫面降到低亮度，把焦點還給樂手；若主唱即興延長，改用手動 cue。" : "畫面降到低亮度，把焦點還給樂手；若樂團即興延長，改用手動 cue。",
         kind: "quiet",
       });
+      quietSaid = true;
     } else if (prev && (s.kind === "solo" || s.kind === "interlude") && s.lyricStyle === "hidden") {
       cues.push({
         time: round2(s.start),
         title: `${s.label}：畫面主導`,
-        detail: `${hasLyrics ? "歌詞隱藏，" : ""}讓「${scene}」隨鼓點脈動；需要時可用數字鍵切換場景。`,
+        detail: wall
+          ? `${hasLyrics ? "歌詞隱藏，" : ""}「${scene}」${wall.note ? wall.note.replace(/^沒有字：/, "").split(/[，；]/)[0] : "撐滿畫面"}；需要時按 1–9 換成內建場景，按 0 回到專屬畫面。`
+          : `${hasLyrics ? "歌詞隱藏，" : ""}讓「${scene}」隨鼓點脈動；需要時可用數字鍵切換場景。`,
         kind: "highlight",
       });
     }

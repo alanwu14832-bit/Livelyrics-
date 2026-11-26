@@ -35,6 +35,11 @@ export interface StageLook {
   transitionIn: TransitionKind;
   /** LED 安全模式 is on: params and transition above are already the safe ones */
   safe: boolean;
+  /**
+   * Round 24 (N4): the operator forced a built-in scene (overrides.scene, keys 1–9) — even the
+   * section's own planned scene: the scene program steps aside so every key changes the wall
+   */
+  sceneForced?: boolean;
   /** identifies scene + colors + params; equal keys look identical */
   lookKey: string;
 }
@@ -126,7 +131,8 @@ export function resolveLook(project: Project | null, state: StageState, t: numbe
     accentColor,
     transitionIn,
     safe: safety.on,
-    lookKey,
+    sceneForced: isSceneId(overrides?.scene),
+    lookKey: isSceneId(overrides?.scene) ? `${lookKey}|forced` : lookKey,
   };
 }
 
