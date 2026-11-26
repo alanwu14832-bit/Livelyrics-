@@ -59,8 +59,6 @@ describe("M1 · concept skeletons, titles, motifs, colour names", () => {
 
   it("the concept's words come from the findings, never from a fixed filler", () => {
     expect(plan("punk").keyVisual.concept).toContain("拆掉這面牆");
-    // round 24: the colours name the song's own image
-    expect(plan("punk").keyVisual.concept).toContain("「牆」");
     // round 24 (N9): one clear lead sentence about the wall — the title, the program's form, the hook
     for (const s of AUDIT_SONGS) expect(plan(s.key).keyVisual.concept.startsWith(`「${plan(s.key).keyVisual.title}」：牆上只有`)).toBe(true);
     expect(plan("ballad").keyVisual.concept).toContain("不閃白");

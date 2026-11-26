@@ -303,7 +303,9 @@ export function wallConcept(c: ConceptContext, skeleton: SkeletonId, w: WallFact
   // the colours come from the song's own image when it sings one in plain words
   const image = c.imagery.find((h) => h.words.some((x) => !hasDarkWord(x)))?.imagery.name;
   const palette = skeleton === "fragment" ? "" : paletteSentence(c, skeleton, variant);
-  const parts = [wallSentence(c, skeleton, w), skeleton === "fragment" ? "" : factSentence(c, variant), image && palette ? `顏色從歌裡的「${image}」來：${palette}` : palette, arcSentence(c)];
+  const fact = skeleton === "fragment" ? "" : factSentence(c, variant);
+  // one claim about where the colours come from: the genre's (the fact sentence says so) or the song's image
+  const parts = [wallSentence(c, skeleton, w), fact, image && palette && !fact.includes("配色") ? `顏色從歌裡的「${image}」來：${palette}` : palette, arcSentence(c)];
   return parts.map((p) => p.replace(/^\s+/, "")).filter(Boolean).join("");
 }
 
