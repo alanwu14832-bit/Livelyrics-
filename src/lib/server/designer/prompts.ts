@@ -18,6 +18,7 @@ import {
 } from "@/lib/schema";
 import { COLOR_TREATMENTS, ORNAMENTS, PARAM_INFO, RECIPES, VOICES } from "@/lib/type/vocab";
 import { textKey } from "@/lib/type/sequence";
+import { LINE_MEANINGS, type LineMeaningId } from "@/lib/type/technique";
 import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
 import { ARC_ROLE_INFO, PALETTE_EMPHASIS_INFO } from "@/lib/show";
 import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta } from "@/lib/types";
@@ -302,6 +303,8 @@ export function catalogBlock(): string {
   ].join("\n");
 }
 
+const LINE_MEANING_IDS = Object.keys(LINE_MEANINGS) as LineMeaningId[];
+
 /** 字體藝術: the type system's vocabularies for the design prompt. */
 export function typeCatalogBlock(): string {
   const voices = TYPE_VOICE_IDS.map((id) => `- ${id}（${VOICES[id].label}）：${VOICES[id].description}常用構圖：${Object.keys(VOICES[id].recipes).join("、")}。`);
@@ -320,6 +323,9 @@ export function typeCatalogBlock(): string {
     `# 配色處理 typeSystem.color：${colors}`,
     `# 裝飾 typeSystem.ornaments：${ornaments}`,
     "  - section 只給編輯器手動開啟，不是給現場演出用的：不要放進 ornaments（會被移除）。牆上不可出現段落名稱（主歌、副歌、Verse、Chorus）或行號；number 只會畫成一排小刻度，不會印出數字。",
+    "# 依字義選構圖（先問這句在做什麼；普通的句子用字體語言的常用構圖）",
+    ...LINE_MEANING_IDS.map((id) => `- ${LINE_MEANINGS[id].label}（${LINE_MEANINGS[id].cue}）→ ${LINE_MEANINGS[id].recipes.join("、")}`),
+    "  - 副歌只用大構圖；主歌與安靜的句子字義再大也保持小字。",
     "# motionWord 的意象：風／吹＝飄動、雨／淚＝落下、火／燃燒＝閃爍、心跳＝隨拍脈動、海／浪＝波浪、夜＝從暗處浮起、光＝綻開、碎／破＝碎裂、奔跑／衝＝衝刺、轉＝旋轉。",
   ].join("\n");
 }
@@ -336,17 +342,20 @@ export const DESIGN_SYSTEM = `你是這個樂團的專職舞台視覺總監，�
 
 # 設計原則
 1. 視覺是配角、托起樂團。螢幕是樂團背後的一道牆，不和主唱搶戲。每一段先決定螢幕的角色：傳達意象、顯示歌詞，還是像燈光一樣堆疊能量。
-2. 先有世界觀。先訂主視覺概念（這首歌在舞台上是一個什麼樣的世界、為什麼），再由它推出配色與母題，最後才是逐段畫面。配色與母題優先取自研究到的樂團識別（專輯封面、MV、招牌色、符號），其次才是歌詞意象。整首歌要像同一個世界，而不是 12 種特效的拼貼。
+2. 先有世界觀。先訂主視覺概念（這首歌在舞台上是一個什麼樣的世界、為什麼），再由它推出配色與母題，最後才是逐段畫面。配色與母題優先取自研究到的樂團識別（專輯封面、MV、招牌色、符號），其次才是歌詞意象。整首歌要像同一個世界，而不是 12 種特效的拼貼。keyVisual.title 是只屬於這首歌的具體名字（取自歌詞的物件、地點或一句話），不用「X與Y」「穿過X的Y」這類套版、不堆形容詞；keyVisual.concept 第一句清楚說出牆上是什麼、怎麼隨段落變化、連到哪句歌詞。
 3. 歌詞的排版是視覺藝術（字體藝術）——不是卡拉 OK，也不是字幕。唱到的每一句都會出現，而且每一句都是一張設計過的構圖，像日系 MV 的字卡、電影片頭、書法或實驗海報：
    - typeSystem：先為整首歌選一個字體語言 voice，訂出字級對比、留白、直排比例、網格、動態與質地（params）、字體配對、配色處理與裝飾。整首歌是同一套系統；字體要和主視覺的 typography 一致（有樂團視覺聖經時用聖經字體）。
    - typeSystem.lines：每一行有字的歌詞一筆構圖（依歌詞順序，lineId 用提供的 id）。完全相同的重複句只寫第一次就好，系統會沿用同一個構圖讓全場認得，最後一次副歌會自動放大。
    - 相鄰的句子換構圖（recipe）與位置（seed 不同）；主歌安靜、字小（whisper、vertical-column、title-card、cross、grid-poem、brush-write），副歌大（giant-word、poster、bleed、window、echo、split），橋段要和前面形成對比，安靜的句子用 whisper。
+   - 構圖依字義選（見「依字義選構圖」）：一兩個構圖當基調，強調只留給 hook、轉折與最後一句；越少越有力。
    - emphasis 選 0–2 個逐字相同的關鍵字（意象、hook、口號），它們會被放大或換成點綴色；motionWord 選一個會動的意象詞（逐字相同），它決定這一句怎麼動；沒有就空字串。
    - orientation：中文詩句可以直排（v）或直橫交錯（mixed）；拉丁文字只能 h。energy 0–1：安靜約 0.2、主歌 0.3–0.45、副歌 0.65 以上。
    - 字很密的段落（每秒超過約 5 個字，例如饒舌、快歌主歌）：用安靜、字小的構圖（whisper、title-card），不要逐字動畫。
    - 段落的 lyricStyle 只是舊版渲染器的後備：前奏、間奏、solo 這類沒有歌詞的段落用 hidden，有歌詞的段落選一個符合氣質的樣式；不要用 karaoke 或 subtitle。
 4. 大螢幕可讀性：字重 600 以上（建議 700–900）；歌詞色與該段背景 colorway[0] 的對比至少 4.5:1（建議 7:1 以上）。構圖引擎會守住最小字級、閱讀順序與中文排版的禁則，並避開主唱 IMAG（畫面中央偏下、主唱臉的位置）與畫面最下緣（會被觀眾的頭、旗子與手機擋住）；後備的 lyricPlacement 用 center 或 upper-third。
 5. 能量對應：場景、速度、密度、亮度與音訊反應跟著音訊能量走；副歌一次比一次強，最後一次副歌是全曲最高點；安靜段真的要安靜（低 intensity、慢、少元素）。轉場配合能量：爆點用 flash 或 cut，推進用 wipe，進入抒情用 bloom，回落用 fade。相鄰段落避免用同一個場景（刻意延續除外）。
+   - 一首歌一套動態語言，全曲同一種緩動：抒情＝慢而長的減速、不回彈；律動＝跟拍滑入；高能＝快、硬切、落在拍點。
+   - 每個畫面只有一個主角（字或形狀），其他退成配角。主歌克制，副歌才釋放；副歌前一兩小節先收一點，打開才有力。
 6. 樂團自己的素材是最強的識別。有提供素材時，像專業 VJ 一樣使用它們，讓畫面一看就是「這個樂團」而不是通用特效：
    - 專輯封面就是這首歌的世界：開場、橋段或最後一次副歌用 slow-drift 或 duotone 把封面鋪成整個畫面，配色與母題也從封面取。
    - 照片（排練、後台、樂手特寫）用 duotone 或 grain-film 處理成 colorway 的顏色，不要原色直接貼上；它們和場景要像同一個世界。

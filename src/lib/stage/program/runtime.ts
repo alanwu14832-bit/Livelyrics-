@@ -36,7 +36,9 @@ export function programFrame(f: ProgramFrameInput): ProgramDraw | null {
   const plan = f.project.plan;
   const program = activeProgram(plan);
   if (!program || !plan) return null;
-  // an operator scene override (1–9) shows that built-in scene
+  // an operator scene override (1–9) shows that built-in scene — round 24 (N4): also when it is the
+  // section's own planned scene (that key used to keep drawing the program: a no-op on the wall)
+  if (f.look.sceneForced) return null;
   const planScene = f.look.section?.scene;
   if (f.look.section && planScene && f.look.scene !== planScene) return null;
   if (f.look.scene === "blackout") return null;

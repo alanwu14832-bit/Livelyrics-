@@ -454,14 +454,20 @@ export function ProcessClient({
 
           {showDone && (
             <Banner
-              tone="success"
-              title="設計完成"
+              tone={silentFile ? "warning" : "success"}
+              title={silentFile ? "設計完成，但音檔幾乎沒有聲音" : "設計完成"}
               animateIn
               description={
-                <>
-                  {lastRequest?.instruction ? `已依指示「${lastRequest.instruction}」重新設計` : "主視覺與每一段的畫面都準備好了"}
-                  {elapsed >= 1000 && `，用時 ${formatElapsed(elapsed)}`}。檢查段落安排，沒問題就進入控制台準備上台。
-                </>
+                // round 24 (m10): never 「每一段的畫面都準備好了」 for a file with no sound, or a song whose times are guesses
+                silentFile ? (
+                  <>只做了一個安靜的單一畫面，沒有段落可以排{project.lyrics.lines.length > 0 ? "；歌詞時間只是平均分配，上台請用手動切換逐句送出" : ""}。換上有聲音的音檔後再重新設計。</>
+                ) : (
+                  <>
+                    {lastRequest?.instruction ? `已依指示「${lastRequest.instruction}」重新設計` : "主視覺與每一段的畫面都準備好了"}
+                    {elapsed >= 1000 && `，用時 ${formatElapsed(elapsed)}`}。
+                    {estimatedLines > 0 ? "段落是依估計的歌詞時間排的：先到歌詞編輯器對時，再重新設計會更準；現在進控制台也能用手動切換上台。" : "檢查段落安排，沒問題就進入控制台準備上台。"}
+                  </>
+                )
               }
               actions={
                 <Button href={consoleHref} transitionTypes={PUSH} variant="filled" icon={MonitorPlayIcon}>
@@ -500,7 +506,9 @@ export function ProcessClient({
               description={
                 project.lyrics.lines.length === 0
                   ? "畫面會全程不顯示歌詞。到歌詞編輯器加入歌詞後，可以用新歌詞重新設計段落呈現。"
-                  : project.analysis?.vocal?.length
+                  : silentFile
+                    ? "音檔沒有聲音，沒有人聲可以對：時間只是平均分配。上台用手動切換逐句送出，或換上有聲音的音檔再對時。"
+                    : project.analysis?.vocal?.length
                     ? "時間是依人聲估的，大致落在唱的地方，但不一定準。上台前到歌詞編輯器用「AI 自動對時」或對拍：對好的句子是真的，其餘的會跟著重新估算。"
                     : "時間是依音訊能量估的。上台前建議到歌詞編輯器用「AI 自動對時」或對拍校正，歌詞才會準時出場。"
               }

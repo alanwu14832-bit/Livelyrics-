@@ -3,6 +3,8 @@
 // Centre column: the live preview (the projection's look, at the output window's aspect) with the
 // keyboard HUD over its lower third, and the readout of what is on stage now and next.
 
+import { isReadableLabel } from "@/lib/section-names";
+import { sectionWall } from "@/lib/stage/program/wall";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { StageView, type StageStats } from "@/components/stage/StageView";
 import { HUD, StatusCapsule, Tag, cx, type HudHandle } from "@/components/ui";
@@ -36,7 +38,8 @@ function windowMismatch(o: OutputStatus, canvasAspect: number): boolean {
 /** Section name, plus its kind only when the name does not already say it (「前奏 前奏」 never). */
 export function sectionName(s: Pick<SectionDesign, "label" | "kind">): { label: string; kind: string | null } {
   const kind = SECTION_KIND_LABELS[s.kind] ?? s.kind;
-  const label = s.label || kind;
+  // round 24 (m6): a raw 「Verse 1」 from an older plan reads as its kind
+  const label = isReadableLabel(s.label) ? s.label : kind;
   return { label, kind: kind && kind !== label ? kind : null };
 }
 
@@ -209,6 +212,8 @@ function StageReadoutImpl({ controller, project, mode }: { controller: ConsoleCo
   const lineDesign = line ? plan?.lines?.find((l) => l.lineId === line.id) : undefined;
   const style: LyricStyleId | undefined = ov.lyricStyle ?? lineDesign?.styleOverride ?? section?.lyricStyle;
   const scene = ov.scene ?? section?.scene;
+  // round 24 (N4): the program's form when it draws the wall, the built-in scene only when forced
+  const wall = ov.scene ? null : sectionWall(plan, sectionIndex);
   const lyricHidden = !ov.lyricsVisible || style === "hidden" || ov.blackout;
   const live = mode === "live";
   const name = section ? sectionName(section) : null;
@@ -253,7 +258,7 @@ function StageReadoutImpl({ controller, project, mode }: { controller: ConsoleCo
           <KeyValues
             className="mt-2"
             items={[
-              scene && { key: "場景", value: SCENE_LABELS[scene] ?? scene },
+              wall?.program ? { key: "畫面", value: wall.name, title: wall.note } : scene && { key: "場景", value: `${ov.scene ? "內建・" : ""}${SCENE_LABELS[scene] ?? scene}` },
               style && { key: "歌詞", value: LYRIC_STYLE_LABELS[style] ?? style, tone: style === "hidden" ? "orange" : "default" },
               section && { key: "位置", value: PLACEMENT_LABELS[section.lyricPlacement] ?? section.lyricPlacement },
               section && { key: "字級", value: `×${(section.lyricScale * ov.lyricScale).toFixed(2)}` },

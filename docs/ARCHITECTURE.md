@@ -1898,6 +1898,45 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   with varied heights. The program title and the key visual title are `INSTRUMENTAL_TITLES[form]`
   (「一層層亮起的山」…) instead of the mood pool's 「暗處的一道光」.
 
+### Round 24: say what the wall shows
+
+- **The wall's name** (`stage/program/wall.ts sectionWall`): with an active scene program a section is named by
+  the program's form and its role there (`programRole`: 退後 / 長大 / 打開 / 變形 / 留白 / 微光 / 收光 / 展開) plus
+  the program section's `note`; without one, the built-in scene's label. The console readout (「畫面」), the lyric
+  list headers, the timeline and the design tab's sections use it; the design tab shows the built-in scene as
+  「備用內建場景」 (it only appears on a number key or with the program off).
+- **Every scene key changes the wall**: `StageLook.sceneForced` (any valid `overrides.scene`) makes
+  `programFrame` step aside, so key N shows its built-in scene even when it is the section's own planned scene
+  (that key used to keep drawing the program: a no-op). The control tab shows the program as the key-0 tile
+  (「專屬畫面：…」, marked 目前段落); the bank tiles carry no plan mark while a program draws.
+- **The designer's copy from the program** (`offline.ts sayWhatTheWallShows`): once the offline program exists
+  the section rationales (keeping what media placement appended), the cues (`CueContext.wall`: 「進副歌一：軌道
+  放大到越出畫面」) and the notes are rewritten in its vocabulary; no built-in scene label is named.
+- **Titles and concept** (`concept.ts lyricTitleCandidates`, `TEMPLATE_TITLE_PATTERNS`, `wallSentence`): a title
+  is a concrete phrase the song sings (3–8 characters / 2–5 Latin words, scored by plain-word imagery, the hook,
+  the chorus; never a dark line, never the song's own title unless nothing else is usable); the old pair
+  templates (「穿過X的Y」「X之後的Y」…) and numbered repeats are banned. The concept leads with one sentence:
+  「title」：牆上只有 + the program's form, how it behaves in the verses and how the chorus opens it, tied to the
+  crowd's phrase; then one fact sentence, one colour sentence and the confident arc sentence.
+- **Section names** (`section-names.ts`): one Chinese vocabulary; `readableLabels` replaces raw labels (「Verse 1」)
+  in `normalizePlan` and `sectionName`; a line or two after the last chorus is the 尾奏 (`structure.ts`); a silent
+  or too-short file is one section 「全曲」.
+- **Copy said once**: the microphone / 手動 cue advice only on the first chorus / quiet cue, the genre's live habit
+  drops a repeat of it; `briefForPanel` hides a free brief's leading disclaimer and its 參考來源 section where the
+  panel already shows both; the cue panel and the design tab explain 「cue」 and 「IMAG」 where they appear.
+- **Silent file, untimed lyrics** (m10): the upload card warns before the run, the done banner says 「設計完成，但
+  音檔幾乎沒有聲音」 / that the sections follow estimated times, the lyric banner no longer claims a voice for a silent
+  file, and the plan carries a 0 s warning cue (「手動送出歌詞」 / 「歌詞時間是估的」, `honestTimingCues`).
+- **Skills baked into the designers** (digest of the vendored MIT skills `kinetic-type`, `kinetic-type-director`
+  — dricosnyman/kinetic-type-skills — and `motion-art-direction`, `animation-principles` —
+  iart-ai/motion-design-skills; see `.claude/skills/SOURCES.md`): `type/technique.ts lineMeaning` reads what a
+  line does (斷裂 / 口號 / 消失 / 寫下 / 遼闊 / 並列 / 低語) and maps it onto rendered recipes; `sequence.ts
+  meaningRecipe` applies it deterministically inside the voice's palette (not the previous recipe, energy fit,
+  never a calm recipe in a chorus, never a loud meaning on a quiet line, bridge avoids used recipes). The design
+  prompt's `typeCatalogBlock` lists the same table and `DESIGN_SYSTEM` adds: few accents, one motion language with
+  easing by energy, one hero per frame, verse restraint vs chorus release with a held bar before the chorus, and the
+  concrete-title / one-sentence-concept rule (≈ +590 tokens estimated; no verbatim skill text).
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

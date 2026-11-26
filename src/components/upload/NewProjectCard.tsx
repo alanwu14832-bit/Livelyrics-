@@ -15,6 +15,7 @@ import { MusicNotesIcon, WarningIcon } from "@/components/ui/Icon";
 import { parseFileName, type AudioFileMetadata } from "@/lib/audio/metadata";
 import { prefersReducedMotion } from "@/lib/motion";
 import { formatTimeShort } from "@/lib/timeline";
+import { isNearlySilent, SILENT_TITLE } from "@/lib/silence";
 import type { AudioAnalysis, BandSummary } from "@/lib/types";
 
 /** the pop-up chevron of a borderless row select (label-2 on both appearances) */
@@ -332,7 +333,15 @@ export function NewProjectCard({
                   <div className="mt-4 [clip-path:inset(0_0_0_0)] transition-[clip-path] duration-[600ms] ease-out starting:[clip-path:inset(0_100%_0_0)] motion-reduce:transition-none">
                     <Waveform peaks={analysis.peaks} duration={analysis.duration} boundaries={bounds} className="h-16" label="音訊波形與偵測到的段落邊界" />
                   </div>
-                  <p className="mt-2 text-[12px] leading-4 text-label-2">藍線是偵測到的段落邊界，設計師會據此安排每段畫面。</p>
+                  {isNearlySilent(analysis) ? (
+                    // round 24 (m10): say it before the run, not after it
+                    <p className="mt-2 flex items-start gap-2 text-[13px] leading-5 text-orange-text" data-silent-warning="">
+                      <WarningIcon size={16} weight="fill" className="mt-0.5 shrink-0 text-orange" />
+                      <span className="min-w-0">{SILENT_TITLE}：沒有段落、節拍可以讀，只會得到一個安靜的單一畫面，歌詞也只能平均分配時間。先確認沒有選錯檔案。</span>
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[12px] leading-4 text-label-2">藍線是偵測到的段落邊界，設計師會據此安排每段畫面。</p>
+                  )}
                 </>
               ) : (
                 <p className="mt-4 flex items-start gap-2 text-[13px] leading-5 text-orange-text">

@@ -46,6 +46,10 @@ function CuePanelImpl({ controller, project }: { controller: ConsoleController; 
         <p className="flex flex-1 items-center justify-center px-4 pb-6 text-center text-c-body text-label-2">設計方案沒有現場提示</p>
       ) : (
         <ol ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pb-1.5" onWheel={() => scroller.stop()}>
+          {/* round 24 (m9): the term, once, for a first-time operator */}
+          <li className="px-2 pt-0.5 pb-1 text-c-footnote text-label-2" data-cue-help="">
+            提示（cue）是設計師留給你的操作提醒，時間到會亮起。「手動 cue」＝切到現場模式，用 → 鍵一句一句送出歌詞。
+          </li>
           {cues.map((cue, i) => {
             const isUp = i === upIndex;
             const past = cue.time <= t - CUE_ACTIVE_WINDOW;

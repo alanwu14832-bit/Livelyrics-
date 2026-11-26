@@ -14,7 +14,8 @@ import { CrosshairIcon, MusicNotesIcon, PencilSimpleIcon, SparkleIcon } from "@/
 import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import type { ConsoleController } from "@/lib/console/controller";
 import { selectLineIndex, useStageValue } from "@/lib/console/hooks";
-import { LYRIC_STYLE_LABELS, SCENE_LABELS } from "@/lib/console/labels";
+import { LYRIC_STYLE_LABELS } from "@/lib/console/labels";
+import { sectionWall } from "@/lib/stage/program/wall";
 import { sectionOfLine, untimedCount } from "@/lib/console/navigation";
 import type { PlaybackMode } from "@/lib/stage/protocol";
 import { lineProgress } from "@/lib/timeline";
@@ -90,7 +91,7 @@ function CurrentProgress({ controller, project, index, duration }: { controller:
   );
 }
 
-function SectionHeader({ section, onJump }: { section: SectionDesign; onJump: () => void }) {
+function SectionHeader({ section, wall, onJump }: { section: SectionDesign; wall: string; onJump: () => void }) {
   const [, primary, accent] = section.colorway;
   const name = sectionName(section);
   const hidden = section.lyricStyle === "hidden";
@@ -104,7 +105,7 @@ function SectionHeader({ section, onJump }: { section: SectionDesign; onJump: ()
         {name.kind && <span className="shrink-0 text-c-footnote text-label-2-on-material">{name.kind}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-2 text-c-footnote text-label-2-on-material">
           <span>
-            <span className="hidden min-[1500px]:inline">{SCENE_LABELS[section.scene] ?? section.scene}・</span>
+            <span className="hidden min-[1500px]:inline">{wall}・</span>
             <span className={cx(hidden && "text-orange-text")}>{LYRIC_STYLE_LABELS[section.lyricStyle] ?? section.lyricStyle}</span>
           </span>
           <span className="tabular">{formatLineTime(section.start)}</span>
@@ -368,7 +369,7 @@ function LyricsListImpl({
           />
           {groups.map((g) => (
             <div key={g.key} role={g.section ? "group" : undefined} aria-label={g.section ? sectionName(g.section).label : undefined}>
-              {g.section && g.sectionIndex != null && <SectionHeader section={g.section} onJump={() => controller.jumpToSection(g.sectionIndex!)} />}
+              {g.section && g.sectionIndex != null && <SectionHeader section={g.section} wall={sectionWall(project.plan, g.sectionIndex).name} onJump={() => controller.jumpToSection(g.sectionIndex!)} />}
               {g.lines.map((i) => {
                 const line = lines[i];
                 const isCurrent = i === current;
