@@ -771,5 +771,7 @@ function assignKinds(sections: StructSection[], source: SongStructure["source"],
     else if (chorusesSeen >= 1 && s.repeatedRatio === 0 && s.start >= sections[n - 1].end * 0.55 && sections.slice(i + 1).some((x) => x.kind === "chorus"))
       s.kind = "bridge";
     else if (i === n - 1 && chorusesSeen >= 1 && isFiniteNumber(s.energy) && s.energy <= meanEnergy) s.kind = "outro";
+    // round 24 (m6): a line or two left after the last chorus is the song's tag, not 「主歌二」
+    else if (i === n - 1 && i > 0 && prev?.kind === "chorus" && s.lineIds.length <= 2) s.kind = "outro";
   });
 }

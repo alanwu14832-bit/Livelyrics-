@@ -51,3 +51,15 @@ export function designStatusLabel(p: Pick<Project, "research" | "planSource">): 
   const engine = p.planSource?.engine ?? p.research?.engine;
   return engine ? (DESIGN_STATUS[engine] ?? null) : null;
 }
+
+/**
+ * Round 24 (m9): the brief as the research panel shows it. The panel already says where a free or
+ * offline brief comes from (its footnote) and lists the sources as links, so the brief's own leading
+ * disclaimer and its 「參考來源」 section are not shown a second time.
+ */
+export function briefForPanel(brief: string, opts: { footnote: boolean; sourcesListed: boolean }): string {
+  let out = brief.trim();
+  if (opts.footnote) out = out.replace(/^(?:>[^\n]*\n?)+\s*/, "");
+  if (opts.sourcesListed) out = out.replace(/\n#{2,3}\s*參考來源[^\n]*\n[\s\S]*?(?=\n#{1,2}\s|\s*$)/, "");
+  return out.trim();
+}

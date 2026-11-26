@@ -7,7 +7,7 @@ import { Button, EmptyState, Tag } from "@/components/ui";
 import { ArrowSquareOutIcon, BooksIcon } from "@/components/ui/Icon";
 import { Markdown } from "@/components/ui/Markdown";
 import { hostOf } from "@/lib/console/format";
-import { FREE_RESEARCH_LABEL, isClaudeResearch } from "@/lib/research-labels";
+import { FREE_RESEARCH_LABEL, briefForPanel, isClaudeResearch } from "@/lib/research-labels";
 import type { CollectedVisual, DesignPlan, Project, Research } from "@/lib/types";
 import { CollectedVisuals } from "@/components/process/CollectedVisuals";
 import { Footnote, Group, GroupTitle } from "./ui";
@@ -65,7 +65,7 @@ function ResearchTabImpl({ project, onCollected }: { project: Project; onCollect
         {FOOTNOTE[research.engine] && <Footnote className="mt-1">{FOOTNOTE[research.engine]}</Footnote>}
       </div>
       {(project.collected?.length ?? 0) > 0 && onCollected && <CollectedVisuals compact projectId={project.id} items={project.collected!} onChange={onCollected} />}
-      <Group className="px-3 py-1">{research.brief.trim() ? <Markdown>{research.brief}</Markdown> : <p className="py-3 text-c-body text-label-2">研究內容是空的。</p>}</Group>
+      <Group className="px-3 py-1">{research.brief.trim() ? <Markdown>{briefForPanel(research.brief, { footnote: !!FOOTNOTE[research.engine], sourcesListed: sources.length > 0 })}</Markdown> : <p className="py-3 text-c-body text-label-2">研究內容是空的。</p>}</Group>
       {sources.length > 0 && (
         <section aria-labelledby="research-sources">
           <GroupTitle id="research-sources">參考來源（{sources.length}）</GroupTitle>

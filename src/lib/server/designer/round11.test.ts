@@ -59,7 +59,10 @@ describe("M1 · concept skeletons, titles, motifs, colour names", () => {
 
   it("the concept's words come from the findings, never from a fixed filler", () => {
     expect(plan("punk").keyVisual.concept).toContain("拆掉這面牆");
+    // round 24: the colours name the song's own image
     expect(plan("punk").keyVisual.concept).toContain("「牆」");
+    // round 24 (N9): one clear lead sentence about the wall — the title, the program's form, the hook
+    for (const s of AUDIT_SONGS) expect(plan(s.key).keyVisual.concept.startsWith(`「${plan(s.key).keyVisual.title}」：牆上只有`)).toBe(true);
     expect(plan("ballad").keyVisual.concept).toContain("不閃白");
     expect(plan("instrumental").keyVisual.concept).not.toMatch(/主唱把|留給主唱|合唱|歌詞是/);
     expect(plan("demo").keyVisual.concept).toContain("跟著我唱");
@@ -124,7 +127,10 @@ describe("M2 · evidence-gated cues", () => {
     expect(transitionWording("wipe")).toBe("擦除");
     const drop = cues("demo").find((c) => c.kind === "drop")!;
     expect(drop.detail).toMatch(/^淡入/);
-    expect(drop.detail).toContain(SCENE_LABELS[plan("demo").sections.find((s) => s.label === drop.title.replace("爆點", ""))!.scene]);
+    // round 24 (N4): the cue says what the program does on the wall, not the built-in scene it never shows
+    const into = plan("demo").sections.find((s) => s.label === drop.title.replace("爆點", ""))!;
+    expect(drop.detail).toContain(`進${into.label}：${plan("demo").sceneProgram!.title}`);
+    expect(drop.detail).not.toContain(SCENE_LABELS[into.scene]);
   });
 
   it("a 爆點 needs an energy rise of 0.25, a 合唱 two choruses and lyrics", () => {
@@ -226,7 +232,10 @@ describe("M9 · one label source, real 強調", () => {
       expect(PROCESS_SCENE_LABEL[id]).toBe(SCENE_LABELS[id]);
       expect(SCENES[id].label).toBe(SCENE_LABELS[id]);
     }
-    expect(plan("demo").sections.some((s) => s.rationale.includes(`「${SCENE_LABELS[s.scene]}」`))).toBe(true);
+    // round 24 (N4): with a scene program the prose names the program's form, never a built-in scene the wall never shows
+    const demo = plan("demo");
+    expect(demo.sections.every((s) => s.rationale.includes(`「${demo.sceneProgram!.title}」`))).toBe(true);
+    expect(demo.sections.some((s) => s.rationale.includes(`「${SCENE_LABELS[s.scene]}」`))).toBe(false);
   });
 
   it("強調 chips come from the type system's resolved hint, one word for a giant-word line", () => {
