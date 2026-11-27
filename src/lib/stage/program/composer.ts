@@ -427,9 +427,12 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float up = sat((uv.y - hz) / (1.0 - hz));
   float lift = 0.42 + 0.3 * BUILD() + 0.45 * SONG();
   vec3 col = mix(mix(uBg, uPri, (0.2 + 0.25 * light) * lift), uBg * 0.5, pow(up, 0.65));
+  // round 25: everything the sun adds — its glow, its rings, the disc, its reflection, the horizon
+  // line — gives way under the line on screen (0.85, like the other forms; nothing without a line)
+  float away = 1.0 - 0.85 * wordsMask(uv, 0.04);
   vec2 sp = fc / min(uRes.x, uRes.y) * 160.0;
   col += vec3(0.85) * step(0.993, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5)) * up * (1.0 - light) * 0.7;
-  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN());
+  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN()) * away;
   vec3 disc = mix(mix(uPri, uAcc, 0.3), mix(uAcc, vec3(1.0), 0.4), smoothstep(-1.0, 1.0, q.y / r));
   float ny = q.y / r;
   float cut = K_BANDS > 0.5 ? step(fract((0.3 - ny) * K_BANDS * 0.5 + T() * 0.02), sat((0.15 - ny) * 0.5)) * step(ny, 0.15) : 0.0;
@@ -438,15 +441,15 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float rings = OPEN() * (1.0 + ESC()) + 2.0 * SONG() * (1.0 - OPEN());
   float rr = fract((d - r) / (r * 0.22));
   float ringN = floor((d - r) / (r * 0.22));
-  col += mix(uPri, uAcc, 0.4) * step(0.0, d - r) * step(ringN, rings - 0.5) * smoothstep(0.5, 0.0, abs(rr - 0.5) - 0.18) * (0.3 + 0.25 * SONG() - 0.06 * ringN) * (0.55 + 0.45 * light) * step(hz, uv.y);
+  col += mix(uPri, uAcc, 0.4) * step(0.0, d - r) * step(ringN, rings - 0.5) * smoothstep(0.5, 0.0, abs(rr - 0.5) - 0.18) * (0.3 + 0.25 * SONG() - 0.06 * ringN) * (0.55 + 0.45 * light) * step(hz, uv.y) * away;
   if (uMode > 2.5) {
     col = mix(col, uBg * 0.3, fill(d - r));
     col += mix(uAcc, vec3(1.0), 0.3) * (stroke(d - r, 0.004) + exp(-abs(d - r) * 50.0) * 0.5);
   } else {
     // round 23: the chorus sun is large enough to stand behind the words: it gives way under the line
-    // on screen (dims, never cut), like the other forms do (wordsMask: nothing when no line is shown)
-    float giveWay = 1.0 - 0.5 * wordsMask(uv, 0.04) * OPEN();
-    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * giveWay, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
+    // on screen (dims, never cut); round 25: as far as the other forms (the last chorus' grown sun
+    // behind a poster line read 4.2:1 at half), in every section
+    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * away, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
   }
   ${
     city
@@ -462,16 +465,16 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
     // reflection (a full one on water, a faint sheen on a road or a floor)
     vec3 ground = mix(uBg * 1.1 + uPri * 0.18 * lift, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
-    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
+    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light) * away;
     float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
     float wid = r * (0.5 + uParams.x) * (1.0 + depth * 0.6);
     float rf = (1.0 - smoothstep(wid * 0.55, wid, abs(p.x - c.x))) * step(0.5, rip) * (1.0 - depth * 0.8);
-    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
+    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0) * away;
     ${refl ? "" : "ground *= 0.92 + 0.08 * vnoise(vec2(uv.x * 40.0, depth * 90.0));"}
     col = ground;
   }
-  col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light);
+  col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light) * away;
   return col;
 }`,
       };
