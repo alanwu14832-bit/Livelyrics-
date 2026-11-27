@@ -74,6 +74,11 @@ export interface ComposerInput {
    * (「重新產生畫面」) walks the weighted order; `forms` is then only the fallback.
    */
   weights?: Partial<Record<FormId, number>>;
+  /**
+   * Round 25 (N3): the forms that fit the song's genre. The salt (「重新產生畫面」) and the band's
+   * worn pairs walk these first; the forms outside come only after every fitting one.
+   */
+  fit?: readonly FormId[];
   /** form + texture pairs the band's other songs wear, most recent first: the first is never repeated */
   avoid?: readonly ComposerPair[];
   /** texture weights the song suggests (the type voice, the genre's surface, the imagery) */
@@ -168,6 +173,8 @@ export function weightedOrder<K extends string>(weights: Partial<Record<K, numbe
 export const FORM_SHARPEN = 1.15;
 /** Two forms within this fraction of the top weight are a tie the seed settles. */
 export const TIE_BAND = 0.2;
+/** Round 25: how much the song's surface weights are sharpened against the type voice's textures. */
+export const SURFACE_SHARPEN = 1.5;
 
 /** The composer's choices for a song (exported for the UI label and the tests). */
 export function chooseComposition(input: ComposerInput): ComposerChoice {
@@ -186,7 +193,9 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
     const tied = ranked.filter(([, w]) => w >= top[1] * (1 - TIE_BAND));
     const lead = tied[Math.floor(rng(input.seed >>> 0)() * tied.length)][0];
     const rest = Object.fromEntries(ranked.filter(([k]) => k !== lead).map(([k, w]) => [k, Math.pow(w, FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
-    const order: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
+    const drawn: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
+    const fit = input.fit?.length ? input.fit : null;
+    const order: FormId[] = fit ? [...drawn.filter((f) => fit.includes(f)), ...drawn.filter((f) => !fit.includes(f))] : drawn;
     form = order[salt % order.length] ?? forms[0] ?? "horizon";
     // the band's previous song wears this form with every texture it could: another form
     const worn = (input.avoid ?? []).filter((a) => a.form === form).map((a) => a.texture);
@@ -199,7 +208,8 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
   // texture: the voice's surfaces, weighted by what the song suggests; never the band's previous pair
   const texW: Partial<Record<TextureId, number>> = {};
   const voiceTex = TEXTURE_FOR_VOICE[input.voice ?? "mv-card"] ?? TEXTURE_FOR_VOICE["mv-card"];
-  for (const t of TEXTURE_IDS) texW[t] = (voiceTex[t] ?? 0.2) * (input.surface?.[t] ?? 1);
+  // round 25 (N3): the song's surface (its genre, its images) counts more than the voice's habit
+  for (const t of TEXTURE_IDS) texW[t] = (voiceTex[t] ?? 0.2) * Math.pow(input.surface?.[t] ?? 1, SURFACE_SHARPEN);
   const banned = input.avoid?.[0]?.form === form ? input.avoid[0].texture : null;
   if (banned) texW[banned] = 0;
   const texOrder = weightedOrder(texW, r);
@@ -417,9 +427,12 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float up = sat((uv.y - hz) / (1.0 - hz));
   float lift = 0.42 + 0.3 * BUILD() + 0.45 * SONG();
   vec3 col = mix(mix(uBg, uPri, (0.2 + 0.25 * light) * lift), uBg * 0.5, pow(up, 0.65));
+  // round 25: everything the sun adds — its glow, its rings, the disc, its reflection, the horizon
+  // line — gives way under the line on screen (0.85, like the other forms; nothing without a line)
+  float away = 1.0 - 0.85 * wordsMask(uv, 0.04);
   vec2 sp = fc / min(uRes.x, uRes.y) * 160.0;
   col += vec3(0.85) * step(0.993, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5)) * up * (1.0 - light) * 0.7;
-  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN());
+  col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN()) * away;
   vec3 disc = mix(mix(uPri, uAcc, 0.3), mix(uAcc, vec3(1.0), 0.4), smoothstep(-1.0, 1.0, q.y / r));
   float ny = q.y / r;
   float cut = K_BANDS > 0.5 ? step(fract((0.3 - ny) * K_BANDS * 0.5 + T() * 0.02), sat((0.15 - ny) * 0.5)) * step(ny, 0.15) : 0.0;
@@ -428,15 +441,15 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float rings = OPEN() * (1.0 + ESC()) + 2.0 * SONG() * (1.0 - OPEN());
   float rr = fract((d - r) / (r * 0.22));
   float ringN = floor((d - r) / (r * 0.22));
-  col += mix(uPri, uAcc, 0.4) * step(0.0, d - r) * step(ringN, rings - 0.5) * smoothstep(0.5, 0.0, abs(rr - 0.5) - 0.18) * (0.3 + 0.25 * SONG() - 0.06 * ringN) * (0.55 + 0.45 * light) * step(hz, uv.y);
+  col += mix(uPri, uAcc, 0.4) * step(0.0, d - r) * step(ringN, rings - 0.5) * smoothstep(0.5, 0.0, abs(rr - 0.5) - 0.18) * (0.3 + 0.25 * SONG() - 0.06 * ringN) * (0.55 + 0.45 * light) * step(hz, uv.y) * away;
   if (uMode > 2.5) {
     col = mix(col, uBg * 0.3, fill(d - r));
     col += mix(uAcc, vec3(1.0), 0.3) * (stroke(d - r, 0.004) + exp(-abs(d - r) * 50.0) * 0.5);
   } else {
     // round 23: the chorus sun is large enough to stand behind the words: it gives way under the line
-    // on screen (dims, never cut), like the other forms do (wordsMask: nothing when no line is shown)
-    float giveWay = 1.0 - 0.5 * wordsMask(uv, 0.04) * OPEN();
-    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * giveWay, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
+    // on screen (dims, never cut); round 25: as far as the other forms (the last chorus' grown sun
+    // behind a poster line read 4.2:1 at half), in every section
+    col = mix(col, disc * (0.7 + 0.45 * light) * (1.0 - 0.15 * OPEN()) * away, fill(d - r) * (1.0 - cut) * step(hz, uv.y));
   }
   ${
     city
@@ -452,16 +465,16 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     // the ground plane is never black: the sky's light falls on it and the disc lies on it as a
     // reflection (a full one on water, a faint sheen on a road or a floor)
     vec3 ground = mix(uBg * 1.1 + uPri * 0.18 * lift, uBg * 0.55 + uPri * 0.06, pow(depth, 0.6));
-    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light);
+    ground += mix(uPri, uAcc, 0.4) * exp(-depth * 3.0) * (0.1 + 0.2 * light) * away;
     float lanes = pow(depth, 0.45) * 80.0;
     float rip = fract(lanes - T() * 0.3 + vnoise(vec2(uv.x * 26.0, lanes * 0.4)) * 0.6);
     float wid = r * (0.5 + uParams.x) * (1.0 + depth * 0.6);
     float rf = (1.0 - smoothstep(wid * 0.55, wid, abs(p.x - c.x))) * step(0.5, rip) * (1.0 - depth * 0.8);
-    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0);
+    ground += disc * rf * (${refl ? "0.2 + 0.55 * light" : "0.12 + 0.3 * light"}) * (uMode > 2.5 ? 0.25 : 1.0) * away;
     ${refl ? "" : "ground *= 0.92 + 0.08 * vnoise(vec2(uv.x * 40.0, depth * 90.0));"}
     col = ground;
   }
-  col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light);
+  col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.3) * (0.2 + 0.45 * light) * away;
   return col;
 }`,
       };

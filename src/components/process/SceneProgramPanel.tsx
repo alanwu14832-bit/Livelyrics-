@@ -104,6 +104,11 @@ export function SceneProgramPanel({ project, actions }: { project: Project; acti
             <figcaption className="mt-2 px-1 text-[13px] leading-5 text-label-2">
               主視覺：{still.status === "ready" ? `${formatTimeShort(still.still.t)} 這一格` : "副歌裡的一格"}，畫面與歌詞一起構圖
             </figcaption>
+            {program.check?.summary && (
+              <p className="mt-1 px-1 text-[13px] leading-5 text-label-2" data-testid="scene-check">
+                {program.check.summary}
+              </p>
+            )}
           </figure>
           {failed && (
             <Banner

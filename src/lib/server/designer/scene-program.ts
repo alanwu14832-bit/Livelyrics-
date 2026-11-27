@@ -14,8 +14,8 @@ import { z } from "zod";
 import { formatTimeShort } from "@/lib/timeline";
 import { TYPE_RELATIONS, type TransitionCharacter } from "@/lib/schema";
 import { PROGRAM_CONTRACT_DOC } from "@/lib/stage/program/contract";
-import { composeSceneProgram, FORM_IDS, TEXTURE_IDS, type ComposerPair, type FormId, type MotionId, type TextureId } from "@/lib/stage/program/composer";
-import { EXAMPLE_PROGRAMS } from "@/lib/stage/program/examples";
+import { composeSceneProgram, FORM_IDS, FORM_LABELS, MOTION_LABELS, TEXTURE_IDS, TEXTURE_LABELS, type ComposerPair, type FormId, type MotionId, type TextureId } from "@/lib/stage/program/composer";
+import { EXAMPLE_PROGRAMS, type ExampleProgram } from "@/lib/stage/program/examples";
 import { normalizeSceneProgram } from "@/lib/stage/program/model";
 import { probePlanProgram, type ProbeResult } from "@/lib/stage/program/probe";
 import { validateProgram } from "@/lib/stage/program/validate";
@@ -210,14 +210,61 @@ export const RECENT_LATEST_FACTOR = 0.6;
 /** Round 18: how much an image adds to a form the genre itself barely wears (the genre's weight below 1, square-rooted, floored here). */
 export const IMAGERY_GENRE_FLOOR = 0.4;
 
-/** Weights over the forms for a song (exported for the tests and the stage lab). */
+/**
+ * Round 25 (N3): the genre's own weights over the forms — the genre family (or the ballad table), what a
+ * shouted song adds to the brush, what an instrumental needs — before any image, energy or rotation.
+ * Null without a genre.
+ */
+export function genreFormWeights(findings: Findings, opts: Pick<FormWeightOptions, "lyrics"> = {}): Record<FormId, number> | null {
+  const genre = findings.genre ? (isBallad(findings) ? BALLAD_FORMS : FORM_WEIGHTS_BY_GENRE[findings.genre.id]) : null;
+  if (!genre) return null;
+  const g = Object.fromEntries(FORM_IDS.map((f) => [f, genre[f] ?? 0.3])) as Record<FormId, number>;
+  if (isShout(findings)) g.brush += SHOUT_BRUSH;
+  if (opts.lyrics === false) {
+    g.ribbons += 1.4;
+    g.strata += 1.2;
+    g.horizon += 0.9;
+    g.threads += 0.9;
+    g.pillars *= 0.3;
+    g.bars *= 0.5;
+  }
+  return g;
+}
+
+/** A form fits the genre when the genre weighs it at least this share of its favourite. */
+export const GENRE_FIT_SHARE = 0.5;
+/** A form outside the genre's set weighs at most this share of the least fitting form in it (never chosen first). */
+export const OFF_GENRE_SHARE = 0.5;
+/** Round 25: inside the genre's set the library's rotation only breaks near ties (0, 1, 2+ uses; the latest once more). */
+export const GENRE_RECENT_FACTORS = [1, 0.55, 0.3] as const;
+export const GENRE_RECENT_LATEST = 0.6;
+/** Round 25: while the library rotates a genre's own surfaces, a surface the genre does not print on weighs this much less. */
+export const OFF_GENRE_SURFACE = 0.1;
+
+/**
+ * Round 25 (N3): the forms that fit the song's genre (its favourite and every form it weighs at least
+ * GENRE_FIT_SHARE of that; at least two), best first. Without a genre every form fits.
+ */
+export function genreFitForms(findings: Findings, opts: Pick<FormWeightOptions, "lyrics"> = {}): FormId[] {
+  const g = genreFormWeights(findings, opts);
+  if (!g) return [...FORM_IDS];
+  const ranked = [...FORM_IDS].sort((a, b) => g[b] - g[a] || FORM_IDS.indexOf(a) - FORM_IDS.indexOf(b));
+  const top = g[ranked[0]];
+  return ranked.filter((f, i) => i < 2 || g[f] >= top * GENRE_FIT_SHARE);
+}
+
+/**
+ * Weights over the forms for a song (exported for the tests and the stage lab). Round 25 (N3): the
+ * genre decides which forms may lead — images, the energy shape and the library's rotation reorder
+ * the forms inside the genre's set, a form outside it stays below every form in it.
+ */
 export function formWeights(findings: Findings, opts: FormWeightOptions = {}): Record<FormId, number> {
   const w = Object.fromEntries(FORM_IDS.map((f) => [f, 1])) as Record<FormId, number>;
-  const genre = findings.genre ? (isBallad(findings) ? BALLAD_FORMS : FORM_WEIGHTS_BY_GENRE[findings.genre.id]) : null;
-  if (genre) for (const f of FORM_IDS) w[f] = genre[f] ?? 0.3;
+  const genre = genreFormWeights(findings, { lyrics: opts.lyrics });
+  if (genre) for (const f of FORM_IDS) w[f] = genre[f];
   // an image pulls less towards a form the genre itself rarely wears (a wall in a punk song is torn
   // print, not a monument; rain in a ballad is a sky, not threads)
-  const fit = (f: FormId) => (genre ? Math.max(IMAGERY_GENRE_FLOOR, Math.min(1, Math.sqrt(genre[f] ?? 0.3))) : 1);
+  const fit = (f: FormId) => (genre ? Math.max(IMAGERY_GENRE_FLOOR, Math.min(1, Math.sqrt(genre[f]))) : 1);
   // the imagery families, by their share of the strongest
   const top = findings.imagery.slice(0, 4);
   const max = top[0]?.weight || 1;
@@ -227,8 +274,6 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     if (forms[0]) w[forms[0]] += IMAGERY_LEAD * share * fit(forms[0]);
     if (forms[1]) w[forms[1]] += IMAGERY_SECOND * share * fit(forms[1]);
   }
-  // round 18: a hardcore / shouted song is one hard brush stroke across the wall
-  if (isShout(findings)) w.brush += SHOUT_BRUSH;
   // the energy shape
   const a = findings.audio;
   if (a.arousal > 0.62) {
@@ -250,10 +295,8 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.pillars += 0.5;
     w.horizon += 0.3;
   }
-  // an instrumental: shapes that hold a frame without words and can build up over a long song —
-  // round 23 (N5): ribbons, strata, a horizon, threads gain layers with uSongProgress; pillars read
-  // as a bar chart for 73 s (the audit) and bars are a backdrop for type
-  if (opts.lyrics === false) {
+  // an instrumental without a genre still leans to shapes that build up over a long song (round 23)
+  if (!genre && opts.lyrics === false) {
     w.ribbons += 1.4;
     w.strata += 1.2;
     w.horizon += 0.9;
@@ -261,10 +304,18 @@ export function formWeights(findings: Findings, opts: FormWeightOptions = {}): R
     w.pillars *= 0.3;
     w.bars *= 0.5;
   }
-  // round 18: what the library's last songs wore, by count (one use a nudge, two nearly a ban)
+  // round 18: what the library's last songs wore, by count; round 25: with a genre only a near tie
+  // inside the genre's set (one use 0.55, two 0.3), without one as before (a nudge, nearly a ban)
+  const factors: readonly number[] = genre ? GENRE_RECENT_FACTORS : RECENT_USE_FACTORS;
   const recent = (opts.recentForms ?? []).slice(0, RECENT_WINDOW).filter((f): f is FormId => (FORM_IDS as readonly string[]).includes(f));
-  for (const f of new Set(recent)) w[f] *= RECENT_USE_FACTORS[Math.min(2, recent.filter((x) => x === f).length)];
-  if (recent[0]) w[recent[0]] *= RECENT_LATEST_FACTOR;
+  for (const f of new Set(recent)) w[f] *= factors[Math.min(2, recent.filter((x) => x === f).length)];
+  if (recent[0]) w[recent[0]] *= genre ? GENRE_RECENT_LATEST : RECENT_LATEST_FACTOR;
+  // the genre's set leads: a form outside it stays under every form in it
+  if (genre) {
+    const inSet = genreFitForms(findings, { lyrics: opts.lyrics });
+    const floor = Math.min(...inSet.map((f) => w[f]));
+    for (const f of FORM_IDS) if (!inSet.includes(f)) w[f] = Math.min(w[f], floor * OFF_GENRE_SHARE);
+  }
   for (const f of FORM_IDS) w[f] = Math.round(Math.max(0.02, w[f]) * 1000) / 1000;
   return w;
 }
@@ -322,8 +373,20 @@ export function surfaceWeights(findings: Findings, looks?: readonly RecentLook[]
   // altogether while another one is still fresh)
   if (looks?.length) {
     const worn = (t: TextureId) => recentUses(looks, "texture", t) >= 2;
-    const fresh = TEXTURE_IDS.some((t) => !worn(t));
-    for (const t of TEXTURE_IDS) w[t] = fresh && worn(t) ? 0 : (w[t] ?? 1) * recentFactor(looks, "texture", t);
+    // round 25 (N3): a genre's own surfaces (halftone for punk, paper for folk) stay its own — the
+    // rotation moves between them (one worn twice gives way to another of them that is fresh) and
+    // never hands the song a surface the genre does not print on
+    const own = g ? TEXTURE_IDS.filter((t) => (g[t] ?? 1) >= 1.2) : [];
+    if (own.length) {
+      const ownFresh = own.some((t) => !worn(t));
+      for (const t of TEXTURE_IDS) {
+        if (own.includes(t)) w[t] = ownFresh && worn(t) ? (w[t] ?? 1) * 0.05 : (w[t] ?? 1) * GENRE_RECENT_FACTORS[Math.min(2, recentUses(looks, "texture", t))];
+        else w[t] = (w[t] ?? 1) * OFF_GENRE_SURFACE * recentFactor(looks, "texture", t);
+      }
+    } else {
+      const fresh = TEXTURE_IDS.some((t) => !worn(t));
+      for (const t of TEXTURE_IDS) w[t] = fresh && worn(t) ? 0 : (w[t] ?? 1) * recentFactor(looks, "texture", t);
+    }
   }
   return w;
 }
@@ -341,10 +404,41 @@ const MOTION_BY_IMAGERY: Record<string, Partial<Record<MotionId, number>>> = {
   drift: { drift: 1.3 },
 };
 
-/** Motion weights the strongest image suggests (rain falls, a river flows, a planet orbits). */
+/** Round 25 (N3): how each genre moves (a punk song cuts across, folk drifts and breathes, post-rock rises). */
+const MOTION_BY_GENRE: Record<string, Partial<Record<MotionId, number>>> = {
+  punk: { sweep: 2, drift: 0.6, breathe: 0.5 },
+  "post-punk": { sweep: 1.7, drift: 0.8 },
+  metal: { sweep: 1.6, rise: 1.3, breathe: 0.6 },
+  emo: { sweep: 1.5, drift: 1.1, breathe: 0.7 },
+  "hip-hop": { sweep: 1.4, breathe: 1.2 },
+  "math-rock": { sweep: 1.4, orbit: 1.4 },
+  electronic: { orbit: 1.6, sweep: 1.4, breathe: 0.8 },
+  "city-pop": { sweep: 1.4, drift: 1.3, rise: 0.7 },
+  "indie-rock": { sweep: 1.3, rise: 1.1 },
+  "alt-rock": { sweep: 1.3, rise: 1.2 },
+  "indie-pop": { drift: 1.3, sweep: 1.1 },
+  pop: { drift: 1.2, rise: 1.2 },
+  folk: { drift: 1.5, breathe: 1.4, sweep: 0.5 },
+  ambient: { breathe: 1.5, drift: 1.4, sweep: 0.4 },
+  "post-rock": { rise: 1.6, drift: 1.2, sweep: 0.6 },
+  shoegaze: { drift: 1.5, breathe: 1.2, sweep: 0.6 },
+  "dream-pop": { drift: 1.5, breathe: 1.2, sweep: 0.6 },
+  rnb: { breathe: 1.4, drift: 1.3, sweep: 0.6 },
+  jazz: { drift: 1.4, breathe: 1.2, sweep: 0.7 },
+  psychedelic: { orbit: 1.6, drift: 1.3 },
+};
+const BALLAD_MOTION: Partial<Record<MotionId, number>> = { breathe: 1.5, drift: 1.4, sweep: 0.4 };
+
+/**
+ * Motion weights for the song: the genre's way of moving (round 25), bent by what the strongest image
+ * does (rain falls, a river flows, a planet orbits).
+ */
 export function motionBias(findings: Findings): Partial<Record<MotionId, number>> {
+  const out: Partial<Record<MotionId, number>> = { ...((findings.genre && (isBallad(findings) ? BALLAD_MOTION : MOTION_BY_GENRE[findings.genre.id])) || {}) };
+  if (isShout(findings)) out.sweep = Math.max(out.sweep ?? 1, 1.8);
   const top = findings.imagery[0];
-  return top ? { ...(MOTION_BY_IMAGERY[top.family.motion] ?? {}) } : {};
+  for (const [m, k] of Object.entries((top && MOTION_BY_IMAGERY[top.family.motion]) || {}) as Array<[MotionId, number]>) out[m] = Math.round((out[m] ?? 1) * k * 1000) / 1000;
+  return out;
 }
 
 /** The form + texture pairs the band's other songs wear (most recent first), from their program recipes. */
@@ -372,6 +466,7 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
     seed: songSeed(req),
     forms: sceneForms(f, wopts),
     weights: formWeights(f, wopts),
+    fit: genreFitForms(f, wopts),
     avoid: bandPairs(req),
     surface: surfaceWeights(f, req.recentLooks),
     motionBias: motionBias(f),
@@ -477,6 +572,16 @@ export const SCENE_SYSTEM = `你是這個樂團的專職舞台視覺總監，也
 7. 顏色只用 uniform 提供的配色（uBg、uPri、uAcc、uInk、uPal0…uPal5），不要寫死色相，這樣樂團的色盤與 LED 安全的調整才會生效。
 8. 效能：這支程式每一格、每個像素都要跑，大螢幕是 1920×1080 以上。保持簡單：幾個距離場、兩三層雜訊就夠了。
 9. ${SENSITIVE_LYRICS_RULE}
+10. 著色器的寫法與送出前檢查：
+   - 形狀用 2D 距離場：sdCircle／sdBox／sdSegment 加 fill／stroke（px() 抗鋸齒），min 聯集、max 交集；重複用 floor 取格子 id、hash 決定每格的差異。
+   - 質地：vnoise／fbm3 做霧與紙紋；domain warp（先用 fbm 推動座標再取一次）做流動。
+   - WebGL1／2 都要跑：迴圈上限是常數；除數用 max(x, 1e-4)，pow／sqrt 的底先 max(0.0)，atan 避開 (0,0)，normalize 避開零向量——不能有 NaN。
+   - 亮度有界：用 mix 疊色、少用一路相加；最亮處仍是 uPri／uAcc 的顏色，不會變白。
+11. 構圖與光的比例：
+   - 一個主角，靠三分線、站在文字區的另一側；其他形狀用大小與對比讓位。
+   - 安全區：主角與亮部離畫面邊緣 5% 以上（直式上 12%、下 18%）。
+   - 亮的面積（亮度 > 0.2）：主歌 < 10%，副歌 25–45%，副歌至少是主歌兩倍，最後一次副歌最大；用形狀變大、層數變多打開，不是整個畫面調亮。
+   - 顏色在感知空間裡走：同色相改明度與彩度，換段走鄰近色相、不經過灰；暗部帶一點主色。
 
 用繁體中文寫 title、concept、rationale 與每段的 note；程式碼只用 ASCII（註解可以中文）。`;
 
@@ -502,30 +607,87 @@ function lyricsBySection(req: DesignRequest, plan: DesignPlan): string {
   return out.join("\n") || lines.slice(0, 8).map((l) => `- ${l.text}`).join("\n");
 }
 
-/** One complete example (source and its section states) as few-shot guidance. */
-function exampleBlock(): string {
-  const ex = EXAMPLE_PROGRAMS.find((e) => e.id === "monolith") ?? EXAMPLE_PROGRAMS[0];
-  const states = Object.entries(ex.byKind)
-    .map(([kind, s]) => `  - ${kind}：mode ${s!.mode}，params [${s!.params.join(", ")}]，zone ${JSON.stringify(s!.zone)}，${s!.relation}（${s!.note}）`)
-    .join("\n");
-  const others = EXAMPLE_PROGRAMS.filter((e) => e.id !== ex.id)
-    .map((e) => `- 「${e.title}」（${e.brief}）：${e.concept}`)
-    .join("\n");
-  return [
-    `以下是一個品質參考（不要照抄，這首歌要有它自己的畫面）：「${ex.title}」，為${ex.brief}寫的。`,
-    `概念：${ex.concept}`,
-    "```glsl",
-    ex.source.trim(),
-    "```",
-    "各段落的狀態：",
-    states,
-    "",
-    "其他幾個參考的概念（說明同一套合約能做出多不同的畫面）：",
-    others,
-  ].join("\n");
+/**
+ * Round 25 (N3): the two hand-written examples closest to a genre (most typical first). The few-shot
+ * examples follow the song's genre instead of always showing the post-rock monolith.
+ */
+const EXAMPLES_BY_GENRE: Record<string, [string, string]> = {
+  punk: ["signal", "monolith"],
+  "post-punk": ["signal", "night-drive"],
+  "hip-hop": ["signal", "night-drive"],
+  "math-rock": ["signal", "monolith"],
+  electronic: ["signal", "night-drive"],
+  metal: ["monolith", "signal"],
+  emo: ["monolith", "signal"],
+  "alt-rock": ["monolith", "signal"],
+  "indie-rock": ["signal", "night-drive"],
+  "post-rock": ["monolith", "tidal-flat"],
+  ambient: ["tidal-flat", "monolith"],
+  shoegaze: ["tidal-flat", "night-drive"],
+  "dream-pop": ["night-drive", "tidal-flat"],
+  "city-pop": ["night-drive", "signal"],
+  "indie-pop": ["night-drive", "enso"],
+  pop: ["night-drive", "enso"],
+  rnb: ["night-drive", "enso"],
+  jazz: ["enso", "night-drive"],
+  psychedelic: ["night-drive", "tidal-flat"],
+  folk: ["tidal-flat", "enso"],
+};
+const BALLAD_EXAMPLES: [string, string] = ["enso", "tidal-flat"];
+
+/** The few-shot examples for a song's genre (a ballad gets the brush circle and the tidal flat; no genre: rotated by the seed). */
+export function examplesForSong(findings: Findings, seed = 0): ExampleProgram[] {
+  const ids = findings.genre ? (isBallad(findings) ? BALLAD_EXAMPLES : EXAMPLES_BY_GENRE[findings.genre.id]) : null;
+  const pick = ids ?? [EXAMPLE_PROGRAMS[seed % EXAMPLE_PROGRAMS.length].id, EXAMPLE_PROGRAMS[(seed + 2) % EXAMPLE_PROGRAMS.length].id];
+  return pick.map((id) => EXAMPLE_PROGRAMS.find((e) => e.id === id)).filter((e): e is ExampleProgram => !!e);
 }
 
-export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { errors?: string[]; previous?: SceneProgram | null } = {}): string {
+/** An example's source without its comment-only and blank lines (the few-shot stays short). */
+function shortSource(src: string): string {
+  return src
+    .split("\n")
+    .filter((l) => l.trim() && !/^\s*\/\//.test(l))
+    .join("\n");
+}
+
+/** Two short examples (source and section states) chosen by the song's genre, as few-shot guidance. */
+function exampleBlock(findings: Findings, seed: number): string {
+  const out: string[] = ["以下是兩個品質參考，依這首歌的曲風挑的（不要照抄，這首歌要有它自己的畫面）："];
+  for (const ex of examplesForSong(findings, seed)) {
+    const states = (["verse", "chorus", "bridge"] as const)
+      .map((k) => [k, ex.byKind[k]] as const)
+      .filter((e): e is [typeof e[0], NonNullable<typeof e[1]>] => !!e[1])
+      .map(([kind, st]) => `  - ${kind}：mode ${st.mode}，params [${st.params.join(", ")}]，zone ${JSON.stringify(st.zone)}，${st.relation}（${st.note}）`)
+      .join("\n");
+    out.push("", `「${ex.title}」（${ex.brief}）：${ex.concept}`, "```glsl", shortSource(ex.source.trim()), "```", "段落狀態：", states);
+  }
+  return out.join("\n");
+}
+
+/** Round 25 (N3): the genre's look, which the song's picture keeps (forms, surface, motion, transitions). */
+function genreLookBlock(findings: Findings, lyrics: boolean): string {
+  if (!findings.genre) return "";
+  const fit = genreFitForms(findings, { lyrics }).slice(0, 4);
+  const surfaces = Object.entries(SURFACE_BY_GENRE[findings.genre.id] ?? {})
+    .filter(([, k]) => (k ?? 0) >= 1.2)
+    .map(([t]) => TEXTURE_LABELS[t as TextureId]);
+  const motion = Object.entries(motionBias(findings))
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+    .slice(0, 2)
+    .map(([m]) => MOTION_LABELS[m as MotionId]);
+  const label = isBallad(findings) ? `${findings.genre.label}（抒情）` : findings.genre.label;
+  return [
+    `- 曲風：${label}。這首歌的畫面要先看得出曲風，其次才是和樂團其他歌不同。`,
+    `- 適合的主角形狀：${fit.map((f) => FORM_LABELS[f]).join("、")}（其中一種或它的變體）`,
+    surfaces.length ? `- 質地：${surfaces.join("、")}` : "",
+    motion.length ? `- 動態：${motion.join("、")}；換段方式：${TRANSITION_WORDS[transitionCharacterOf(findings)]}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+const TRANSITION_WORDS: Record<TransitionCharacter, string> = { swell: "慢慢漲起", cut: "硬切", scan: "掃描", tide: "像潮水推進", sweep: "掃過" };
+
+export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { errors?: string[]; previous?: SceneProgram | null; critique?: string } = {}): string {
   const st = analyzeStructure(req);
   const duration = st.duration;
   const kv = plan.keyVisual;
@@ -568,11 +730,17 @@ export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { e
     );
   }
   if (req.arc) parts.push("", "# 整場弧線", `- 第 ${req.arc.position + 1}／${req.arc.total} 首，角色 ${req.arc.role}，目標能量 ${req.arc.energy.toFixed(2)}：${req.arc.note}`);
-  parts.push("", "# uniform 合約（逐字）", PROGRAM_CONTRACT_DOC, "", "# 參考", exampleBlock());
+  const findings = analyzeFindings(req);
+  const lyrics = (req.lyrics?.lines ?? []).some((l) => typeof l?.text === "string" && l.text.trim());
+  const look = genreLookBlock(findings, lyrics);
+  if (look) parts.push("", "# 曲風的畫面語言（優先於和其他歌不同）", look);
+  parts.push("", "# uniform 合約（逐字）", PROGRAM_CONTRACT_DOC, "", "# 參考", exampleBlock(findings, songSeed(req)));
   if (opts.previous) parts.push("", "# 目前的專屬畫面（要修改它，不是從頭再做，除非指示要求）", `「${opts.previous.title}」：${opts.previous.concept}`, "```glsl", opts.previous.source.slice(0, 9000), "```");
   const instruction = req.instruction?.trim();
   if (instruction) parts.push("", "# 這次的指示（最優先）", instruction);
   if (opts.errors?.length) parts.push("", "# 上一次的程式沒有通過檢查，請修正這些問題後整個重寫", ...opts.errors.map((e) => `- ${e}`));
+  // round 25: the render self-check of the program above — one corrected version, same world
+  if (opts.critique) parts.push("", "# 渲染檢查（修正上面這支程式：保留它的世界與主角，依數字調整形狀大小、層數與亮度，輸出完整的 source 與 sections）", opts.critique);
   parts.push("", "請輸出 JSON：title、concept、rationale、source、keyMoment、sections（每個段落一筆）。");
   return parts.filter((p) => p !== "").join("\n");
 }

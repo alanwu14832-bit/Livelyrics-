@@ -15,7 +15,7 @@ import type { ConsoleController } from "@/lib/console/controller";
 import { motifDataUrl, readableTextOn, withAlpha } from "@/lib/console/format";
 import { selectSectionIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, MEDIA_TREATMENT_HINTS, MEDIA_TREATMENT_LABELS, PLACEMENT_LABELS, SCENE_HINTS, SCENE_LABELS, TRANSITION_LABELS } from "@/lib/console/labels";
-import { LYRIC_SCALE_MAX, LYRIC_SCALE_MIN } from "@/lib/console/plan-edit";
+import { LYRIC_SCALE_MAX, LYRIC_SCALE_MIN, offeredLyricStyles } from "@/lib/console/plan-edit";
 import { FONTS, fontStack } from "@/lib/fonts";
 import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_TREATMENTS, SCENE_IDS } from "@/lib/schema";
 import { formatTimeShort } from "@/lib/timeline";
@@ -27,7 +27,6 @@ import { SafetyCheck } from "./SafetyControls";
 import { Footnote, Group, GroupTitle, KeyValues, PopupSelect } from "./ui";
 
 const SCENE_OPTIONS = SCENE_IDS.map((id) => ({ value: id, label: SCENE_LABELS[id] }));
-const STYLE_OPTIONS = LYRIC_STYLE_IDS.map((id) => ({ value: id, label: LYRIC_STYLE_LABELS[id] }));
 const PLACEMENT_OPTIONS = LYRIC_PLACEMENTS.map((id) => ({ value: id, label: PLACEMENT_LABELS[id] }));
 const TREATMENT_OPTIONS = MEDIA_TREATMENTS.map((id) => ({ value: id, label: MEDIA_TREATMENT_LABELS[id] }));
 /** 字體藝術: a section's lyrics are compositions or hidden (the legacy styles only apply without a type system) */
@@ -273,6 +272,7 @@ function SectionGroup({
   assets,
   typeMode = false,
   wall,
+  styles = LYRIC_STYLE_IDS,
 }: {
   controller: ConsoleController;
   section: SectionDesign;
@@ -284,6 +284,8 @@ function SectionGroup({
   typeMode?: boolean;
   /** round 24 (N4): what the wall shows in this section */
   wall: SectionWall;
+  /** round 25 (m8): the lyric styles the engine renders for this section's lines */
+  styles?: readonly LyricStyleId[];
 }) {
   const [bg, primary, accent] = section.colorway;
   const name = sectionName(section);
@@ -348,7 +350,7 @@ function SectionGroup({
                 <PopupSelect<LyricStyleId>
                   label="歌詞呈現"
                   value={section.lyricStyle}
-                  options={STYLE_OPTIONS}
+                  options={styles.map((id) => ({ value: id, label: LYRIC_STYLE_LABELS[id] }))}
                   onChange={(lyricStyle) => controller.updateSection(index, { lyricStyle })}
                   disabled={disabled}
                 />
@@ -427,6 +429,12 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <KeyVisualCard controller={controller} plan={plan} sampleText={sampleText} />
+      {/* round 25: Claude's program was rendered and checked (and maybe corrected once) */}
+      {plan.sceneProgram?.check?.summary && (
+        <div className="-mt-3 px-1" data-testid="design-scene-check">
+          <Footnote className="mt-0">{plan.sceneProgram.check.summary}</Footnote>
+        </div>
+      )}
       <TypeCard controller={controller} plan={plan} />
       {/* LED 安全模式 pre-show check: what safe mode changes in this song */}
       <SafetyCheck project={project} />
@@ -438,7 +446,7 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
         {plan.sections.some((s) => s.rationale.includes("IMAG")) && <Footnote className="mt-0 mb-1.5">IMAG＝大螢幕上主唱的即時特寫畫面；歌詞會避開它所在的位置（畫面中央偏下）。</Footnote>}
         <div className="flex flex-col gap-2">
           {plan.sections.map((s, i) => (
-            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} wall={sectionWall(plan, i)} active={i === sectionIndex} disabled={redesigning} assets={pickable} typeMode={hasTypeSystem(plan)} />
+            <SectionGroup key={s.id || i} controller={controller} section={s} index={i} wall={sectionWall(plan, i)} active={i === sectionIndex} disabled={redesigning} assets={pickable} typeMode={hasTypeSystem(plan)} styles={offeredLyricStyles(project, { sectionIndex: i, current: s.lyricStyle })} />
           ))}
         </div>
       </section>

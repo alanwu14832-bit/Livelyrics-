@@ -103,11 +103,21 @@ const MOOD_SATURATION: Record<MoodClass, number> = { calm: 0.55, warm: 0.7, driv
  * neighbouring family (either side, the less worn first) — so a catalogue of one genre is not three
  * blue songs. An operator's hue is never moved.
  */
-export function freshHue(hue: number, looks: readonly RecentLook[] | undefined): number {
+/** Round 25 (N3): how far the library's rotation may move a genre's hue (degrees). */
+export const GENRE_HUE_REACH = 40;
+
+export function freshHue(hue: number, looks: readonly RecentLook[] | undefined, reach = 180): number {
   if (!looks?.length) return hue;
   const fam = hueFamily(hue);
   if (recentUses(looks, "palette", fam) < 2) return hue;
-  // the nearest family worn fewer than twice (the less worn neighbour first), else the hue stays
+  // the nearest family worn fewer than twice (the less worn neighbour first), else the hue stays;
+  // round 25 (N3): a genre's hue moves at most GENRE_HUE_REACH (to the neighbouring family's edge),
+  // so a punk song's red never turns into a folk song's green for variety's sake
+  if (reach < 60) {
+    const near = [-reach, reach].map((d) => hue + d).filter((h) => hueFamily(h) !== fam).sort((a, b) => recentUses(looks, "palette", hueFamily(a)) - recentUses(looks, "palette", hueFamily(b)));
+    const best = near.find((h) => recentUses(looks, "palette", hueFamily(h)) < 2);
+    return best == null ? hue : ((best % 360) + 360) % 360;
+  }
   const opts = [-60, 60, -120, 120, 180].map((d) => hue + d);
   const uses = (h: number) => recentUses(looks, "palette", hueFamily(h));
   const near = [opts.slice(0, 2), opts.slice(2, 4), opts.slice(4)].map((ring) => [...ring].sort((a, b) => uses(a) - uses(b))[0]);
@@ -121,7 +131,7 @@ function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverrid
   // the song's strongest image (or its genre's colour tendency) leads; the seed keeps songs apart
   const base = hints?.hue ?? top?.hue ?? null;
   const own = base != null ? base + jitter : seed % 360;
-  const hue = hueOverride ?? freshHue(own, looks);
+  const hue = hueOverride ?? freshHue(own, looks, hints?.scheme ? GENRE_HUE_REACH : 180);
   const shift = hue - own;
   const scheme = hints?.scheme ?? MOOD_SCHEMES[mood.mood][(seed >>> 4) % 2] ?? SCHEMES[0];
   const saturation = mono ? 0 : Math.min(1, MOOD_SATURATION[mood.mood] * (hints ? hints.saturation : (top?.saturation ?? 1)));

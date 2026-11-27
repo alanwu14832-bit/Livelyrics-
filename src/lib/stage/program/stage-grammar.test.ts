@@ -108,6 +108,49 @@ describe("the instrumental builds up over the song (round 23)", () => {
     }
   });
 
+  it("round 25: the last chorus' horizon sun (glow, rings, disc) gives way under a line laid over it", { timeout: 60_000 }, () => {
+    const { plan } = songs.find((s) => s.song.key === "citypop")!;
+    const sections = plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy }));
+    const palette = plan.keyVisual.palette.map((p) => p.hex);
+    for (let seed = 1; seed <= 6; seed++) {
+      const prog = composeSceneProgram({ seed, forms: ["horizon"], sections });
+      const v = validateProgram(prog.source);
+      if (!v.ok) throw new Error(v.errors.join("; "));
+      const idx = plan.sections.map((s) => s.kind).lastIndexOf("chorus");
+      const section = plan.sections[idx];
+      const ps = prog.sections.find((x) => x.sectionId === section.id)!;
+      const base = stateUniforms(prog, ps, section, idx, plan.sections.length, { palette });
+      // find the sun's brightest point above the horizon, and lay a line box over it
+      const c0 = compileForCpu(v.code, base);
+      let best = { x: 0.5, y: 0.5, l: -1 };
+      for (let j = 0; j < 18; j++)
+        for (let i = 0; i < 32; i++) {
+          const x = (i + 0.5) / 32;
+          const y = (j + 0.5) / 18;
+          const l = luma(c0.scene([x * 1920, y * 1080]).color);
+          if (l > best.l) best = { x, y, l };
+        }
+      const box: [number, number, number, number] = [Math.max(0, best.x - 0.15), Math.max(0, best.y - 0.05), Math.min(1, best.x + 0.15), Math.min(1, best.y + 0.05)];
+      const inside = (amt: number) => {
+        const c = compileForCpu(v.code, { ...base, uTypeBox: box, uTypeAmt: amt });
+        let sum = 0;
+        let n = 0;
+        for (let j = 0; j < 6; j++)
+          for (let i = 0; i < 12; i++) {
+            const x = box[0] + ((i + 0.5) / 12) * (box[2] - box[0]);
+            const y = box[1] + ((j + 0.5) / 6) * (box[3] - box[1]);
+            sum += luma(c.scene([x * 1920, y * 1080]).color);
+            n++;
+          }
+        return sum / n;
+      };
+      const without = inside(0);
+      const under = inside(1);
+      // a light lyric needs a dark ground: the picture under the words keeps at most ~40 % of its light
+      expect(under, `seed ${seed}: ${without.toFixed(3)} → ${under.toFixed(3)}`).toBeLessThan(Math.max(0.12, without * 0.4));
+    }
+  });
+
   it("pillars stand in a symmetric row, never a descending bar chart", () => {
     const prog = composeSceneProgram({ seed: 5, forms: ["pillars"], sections: [{ id: "a", kind: "chorus", energy: 0.8 }], lyrics: false });
     expect(prog.source).toContain("abs(from)");

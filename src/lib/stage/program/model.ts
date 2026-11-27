@@ -4,7 +4,7 @@
 // re-designed after the program was written keeps working), and the key still's moment.
 // Pure, shared by the server (normalizePlan, the designers) and the browser (renderer, type engine).
 
-import { SCENE_PROGRAM_ENGINES, TYPE_RELATIONS } from "../../schema";
+import { SCENE_PROGRAM_ENGINES, SceneProgramCheckSchema, TYPE_RELATIONS } from "../../schema";
 import type { DesignPlan, LyricLine, SceneProgram, SceneProgramSection, SectionDesign, SectionKind, TypeRelation, Zone } from "../../types";
 import { hasDarkWord } from "../../type/sensitive";
 import { programKey, validateProgram } from "./validate";
@@ -117,6 +117,9 @@ export function normalizeSceneProgram(raw: unknown, opts: NormalizeProgramOption
   if (typeof r.createdAt === "string") out.createdAt = r.createdAt;
   if (typeof r.instruction === "string" && r.instruction.trim()) out.instruction = r.instruction.trim().slice(0, 500);
   if (typeof r.recipe === "string" && r.recipe) out.recipe = r.recipe.slice(0, 200);
+  // round 25: the render self-check travels with the program it measured
+  const check = SceneProgramCheckSchema.safeParse(r.check);
+  if (check.success) out.check = check.data;
   return out;
 }
 

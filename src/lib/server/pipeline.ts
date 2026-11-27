@@ -33,6 +33,8 @@ import { loadVisionImages } from "./directions";
 import { getBand, withBandAssets } from "./band-storage";
 import { HttpError } from "./http";
 import { findBestLyrics } from "./lrclib";
+import { planHash } from "@/lib/plan-hash";
+import { frameThumb } from "./thumb";
 import { getProject, listBandSongs, listKeyVisualTitles, listRecentForms, listRecentLooks, updateProject } from "./storage";
 import { collectForProject } from "./collect-visuals";
 import { findReleaseGroup, VISUALS_BUDGET_MS, visualsConfig } from "./research/visuals";
@@ -496,6 +498,13 @@ async function execute(run: RunInternal): Promise<void> {
             result.apply?.(p);
             if (cloud) recordStepResult(p, cloud.runId, step, status, result.message);
           });
+          // round 25 (m2): the library card shows a frame of the new plan's program right away
+          if (project.plan && project.thumb?.plan !== planHash(project.plan)) {
+            const thumb = frameThumb(project);
+            if (thumb) project = await updateProject(projectId, (p) => {
+              if (planHash(p.plan) === thumb.plan && p.thumb?.plan !== thumb.plan) p.thumb = thumb;
+            });
+          }
         }
         emit(run, { type: "step", step, status, ...(result.message ? { message: result.message } : {}) });
       } catch (err) {
