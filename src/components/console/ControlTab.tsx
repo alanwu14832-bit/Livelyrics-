@@ -11,9 +11,9 @@ import { CheckIcon, EyeSlashIcon, MoonIcon, SnowflakeIcon, SquareHalfIcon } from
 import { ConsoleController, type OutputStatus } from "@/lib/console/controller";
 import { selectOverrides, selectSectionIndex, useStageValue } from "@/lib/console/hooks";
 import { LYRIC_STYLE_HINTS, LYRIC_STYLE_LABELS, SCENE_HINTS, SCENE_LABELS } from "@/lib/console/labels";
-import { sceneBank } from "@/lib/console/plan-edit";
+import { offeredLyricStyles, sceneBank } from "@/lib/console/plan-edit";
 import { programName, sectionWall } from "@/lib/stage/program/wall";
-import { LYRIC_STYLE_IDS, SCENE_IDS } from "@/lib/schema";
+import { SCENE_IDS } from "@/lib/schema";
 import type { StageOverrides, StageStore } from "@/lib/stage/protocol";
 import type { Project, SceneId } from "@/lib/types";
 import { limiterView, useLimiterStats } from "@/lib/console/limiter-status";
@@ -203,7 +203,7 @@ function ControlTabImpl({
           {noun}呈現覆寫
         </GroupTitle>
         <div className="mt-1 grid grid-cols-3 gap-1.5">
-          {LYRIC_STYLE_IDS.map((style) => {
+          {offeredLyricStyles(project, { text: noun === "文字", current: ov.lyricStyle }).map((style) => {
             const active = ov.lyricStyle === style;
             const inPlan = planStyle === style;
             return (

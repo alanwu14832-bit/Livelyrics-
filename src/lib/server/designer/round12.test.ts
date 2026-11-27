@@ -12,7 +12,7 @@ import { probePlanProgram } from "@/lib/stage/program/probe";
 import type { SceneId, SceneProgram } from "@/lib/types";
 import { analyzeFindings } from "./findings";
 import { chooseClimax, offlineContext, offlineDesign } from "./offline";
-import { bandPairs, ensureSceneProgram, formWeights, motionBias, offlineSceneProgram, programFromDraft, sceneForms, songSeed, surfaceWeights } from "./scene-program";
+import { bandPairs, ensureSceneProgram, formWeights, genreFitForms, GENRE_RECENT_FACTORS, GENRE_RECENT_LATEST, motionBias, offlineSceneProgram, programFromDraft, sceneForms, songSeed, surfaceWeights } from "./scene-program";
 import { AUDIT_SONGS, auditInput, auditSong } from "./testing/audit-songs";
 import { lookOfPlan, type RecentLook } from "./recent";
 
@@ -67,18 +67,25 @@ describe("M4 · the form is a weighted draw seeded by the song", () => {
   });
 
   it("the forms the library's last songs wore weigh less by their count (round 18), the latest once more", () => {
+    // round 25 (N3): with a genre the rotation stays inside the genre's set (one use 0.55, two 0.3,
+    // the latest × 0.6) and a form outside the set stays below every form in it
     const f = analyzeFindings(auditInput(auditSong("demo")));
+    const fit = genreFitForms(f);
     const base = formWeights(f);
     const nudged = formWeights(f, { recentForms: ["horizon", "orbits", "bars", "strata", "ribbons", "pillars", "threads", "brush"] });
-    expect(nudged.horizon).toBeCloseTo(base.horizon * 0.45 * 0.6, 2);
-    expect(nudged.orbits).toBeCloseTo(base.orbits * 0.45, 2);
-    expect(nudged.threads).toBeCloseTo(base.threads * 0.45, 2);
-    // the eighth song back is outside the window
-    expect(nudged.brush).toBeCloseTo(base.brush, 2);
+    expect(nudged.horizon).toBeCloseTo(base.horizon * GENRE_RECENT_FACTORS[1] * GENRE_RECENT_LATEST, 2);
+    expect(nudged.orbits).toBeCloseTo(base.orbits * GENRE_RECENT_FACTORS[1], 2);
     expect(nudged.horizon).toBeGreaterThan(0);
-    // a form worn twice among the last seven is nearly banned
+    const floor = Math.min(...fit.map((x) => nudged[x]));
+    for (const x of FORM_IDS) if (!fit.includes(x)) expect(nudged[x], x).toBeLessThan(floor);
     const twice = formWeights(f, { recentForms: ["bars", "horizon", "strata", "horizon"] });
-    expect(twice.horizon).toBeCloseTo(Math.max(0.02, base.horizon * 0.04), 2);
+    expect(twice.horizon).toBeCloseTo(base.horizon * GENRE_RECENT_FACTORS[2], 1);
+    // without a genre the rotation is the only variety: a nudge for one use, nearly a ban for two
+    const bare = analyzeFindings({ ...auditInput(auditSong("demo")), publicInfo: undefined });
+    expect(bare.genre).toBeNull();
+    const b0 = formWeights(bare);
+    const b2 = formWeights(bare, { recentForms: ["bars", "horizon", "strata", "horizon"] });
+    expect(b2.horizon).toBeCloseTo(Math.max(0.02, b0.horizon * 0.04), 2);
   });
 
   it("the texture follows the genre's surface and the imagery, the motion the strongest image", () => {

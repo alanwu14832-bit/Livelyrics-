@@ -401,6 +401,41 @@ export type SceneProgramSection = z.infer<typeof SceneProgramSectionSchema>;
 
 export const SCENE_PROGRAM_ENGINES = ["claude", "offline", "example", "manual"] as const;
 
+/**
+ * Round 25: the program's render self-check — the probe's numbers in the song's arc states (a verse,
+ * the build, the first and last chorus), the composition checks, and whether Claude was sent one
+ * critique turn and which version was kept. Shown as one line in the console.
+ */
+export const SceneProgramCheckSchema = z.object({
+  passed: z.number(),
+  total: z.number(),
+  checks: z.array(z.object({ id: z.string(), ok: z.boolean(), label: z.string() })),
+  states: z.array(
+    z.object({
+      state: z.enum(["verse", "build", "chorus", "last-chorus"]),
+      sectionId: z.string(),
+      cover: z.number(),
+      mean: z.number(),
+      max: z.number(),
+      subjects: z.number(),
+      focus: z.number(),
+      cx: z.number().nullable(),
+      cy: z.number().nullable(),
+    }),
+  ),
+  /** a critique turn was sent to Claude */
+  fixTurn: z.boolean(),
+  /** which version the plan keeps */
+  kept: z.enum(["first", "fixed"]),
+  /** the first version's passed checks (when a fix turn ran) */
+  firstPassed: z.number().optional(),
+  /** the fix turn failed (an error or a refused program): the first version stays */
+  fixFailed: z.boolean().optional(),
+  /** the console line */
+  summary: z.string(),
+});
+export type SceneProgramCheck = z.infer<typeof SceneProgramCheckSchema>;
+
 export const SceneProgramSchema = z.object({
   version: z.literal(1),
   engine: z.enum(SCENE_PROGRAM_ENGINES),
@@ -418,6 +453,8 @@ export const SceneProgramSchema = z.object({
   instruction: z.string().optional(),
   /** the offline composer's choices (form × texture × composition × motion), for the UI */
   recipe: z.string().optional(),
+  /** round 25: the render self-check (Claude's programs) */
+  check: SceneProgramCheckSchema.optional(),
 });
 export type SceneProgram = z.infer<typeof SceneProgramSchema>;
 

@@ -247,8 +247,10 @@ export function coerceProject(raw: unknown, id: string, fallbackTime: string): P
   const timingChange = project.plan ? coerceTimingChange(raw.timingChange) : null;
   if (timingChange) project.timingChange = timingChange;
   // the library card's picture (a small key still of some plan)
-  if (isRecord(raw.thumb) && typeof raw.thumb.url === "string" && raw.thumb.url.startsWith("data:image/jpeg;base64,") && raw.thumb.url.length <= THUMB_MAX_CHARS && typeof raw.thumb.plan === "string") {
-    project.thumb = { url: raw.thumb.url, plan: raw.thumb.plan };
+  // (round 25: or the server's frame of the program, a PNG)
+  if (isRecord(raw.thumb) && typeof raw.thumb.url === "string" && raw.thumb.url.length <= THUMB_MAX_CHARS && typeof raw.thumb.plan === "string") {
+    if (raw.thumb.url.startsWith("data:image/jpeg;base64,")) project.thumb = { url: raw.thumb.url, plan: raw.thumb.plan };
+    else if (raw.thumb.kind === "frame" && raw.thumb.url.startsWith("data:image/png;base64,")) project.thumb = { url: raw.thumb.url, plan: raw.thumb.plan, kind: "frame" };
   }
   return project;
 }

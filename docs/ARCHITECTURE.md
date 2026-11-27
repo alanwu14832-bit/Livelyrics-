@@ -1937,6 +1937,55 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   easing by energy, one hero per frame, verse restraint vs chorus release with a held bar before the chorus, and the
   concrete-title / one-sentence-concept rule (≈ +590 tokens estimated; no verbatim skill text).
 
+### Round 25: the picture fits the genre, and Claude checks its own render
+
+- **Genre fit beats rotation** (`designer/scene-program.ts`): `genreFormWeights` (the genre family or the ballad
+  table, a shouted song's brush, an instrumental's build-up shapes) and `genreFitForms` — the genre's favourite
+  and every form it weighs ≥ `GENRE_FIT_SHARE` (0.5) of it, at least two. `formWeights` keeps a form outside that
+  set below every form in it (`OFF_GENRE_SHARE`); images and the energy shape reorder inside the set, and with a
+  genre the library's rotation is soft (`GENRE_RECENT_FACTORS` 0.55 / 0.3, the latest × 0.6) — without a genre it
+  stays round 18's nudge / near-ban. The composer (`ComposerInput.fit`) walks fitting forms first for a salt or a
+  band's worn pair. The genre's motion (`MOTION_BY_GENRE`: punk sweeps, folk drifts and breathes, post-rock
+  rises), its own surfaces (rotated among themselves; `SURFACE_SHARPEN` 1.5 lets the song's surface outweigh the
+  voice's habit) and its hue (`freshHue` moves a genre hue ≤ `GENRE_HUE_REACH` 40°) survive the rotation.
+  `round25.test.ts`: the eight audit songs wear a form from their genre's set in either library order.
+- **The scene prompt**: a `# 曲風的畫面語言` block (the genre's fitting forms, surfaces, motion, transition), two
+  few-shot examples chosen by genre (`examplesForSong`: punk → 訊號 + 碑, folk → 潮間帶 + 圓相, city pop → 夜航…;
+  comment-free source and verse / chorus / bridge states) instead of always the monolith, and `SCENE_SYSTEM`
+  items 10–11: a digest of `shader-art-coding` (2D distance fields, fbm / domain warp, the WebGL1/2 pre-flight:
+  constant loop bounds, guarded division / pow / sqrt / atan / normalize, bounded brightness) and of
+  `shot-composition` / `color-motion` (one focal subject on a third, opposite the words; safe areas; verse < 10 %,
+  chorus 25–45 % and ≥ 2 × verse; palette moves in perceptual space, never through grey or to white). Estimated
+  +453 tokens on the system prompt; no verbatim skill text.
+- **Render → metrics → one critique turn** (`stage/program/critique.ts`, `designer/index.ts critiqueAndFix`):
+  Claude's validated program is rendered by the CPU probe in the song's arc states (a verse, the build, the first
+  and last chorus; `critiqueStates`). `ProbeSample` gained `cy`, `max`, `white` (area above luma 0.95), `nan` and
+  the squint-test lit shapes (`litShapes`: cells one apart group; `subjects`, `focus` = the largest shape's share).
+  The checks (`CRITIQUE_TARGETS`): verse quiet, chorus open, chorus ≥ 2 × verse, one focal subject (≥ 50 %),
+  subject in the safe area, last chorus ≥ first, build not darker than the verse, nothing white, no NaN / blank.
+  A miss sends ONE follow-up turn (the numbers per state, the failed checks with what to change, the first program
+  as the one to correct) when ≥ `CRITIQUE_MIN_REMAINING_MS` (75 s) of the step's budget is left; the answer is
+  validated and kept only when it scores higher (passed × 10 − distance). A refused / failed / worse fix keeps the
+  first program; only cancellation propagates. `SceneProgram.check` (`SceneProgramCheckSchema`) records the
+  states, checks, `fixTurn`, `kept`, `firstPassed`, `fixFailed` and a one-line `summary` (`checkLine`:
+  「畫面自我檢查：第一版只通過 6／8 項，Claude 修正一次 → 通過 8／8 項（主歌亮 6%、副歌 28%）」), shown under the key
+  visual in the console's design tab and on the process page.
+- **m1** (`console/Preview.tsx PreviewPoster`, `console/format.ts stageLive`): the preview shows the song's still
+  (its library picture of the current plan) or its palette artwork, labelled 「正在載入畫面…」, and fades to the
+  live stage once the program compiled (or failed / is off / the GPU path gave up); 20 s at most.
+- **m2** (`server/thumb.ts frameThumb`): when a pipeline step saves a plan, one frame of its program at the key
+  moment is rendered on the CPU (128 px wide, a PNG written with `node:zlib`) as `Project.thumb` (`kind: "frame"`);
+  the design overview's full key still (JPEG, lyrics composed) replaces it.
+- **m3** (lyrics editor): one redesign banner — after a save that moved the timing, the saved banner carries the
+  timing advice and its single 「重新設計」; the timing banner shows only once it is closed.
+- **m8** (`console/plan-edit.ts offeredLyricStyles`): 卡拉 OK 填色 is offered (control-tab override, design-tab
+  section style) only where every timed line has a real start, never for a show look's free text; the style in
+  use stays listed.
+- **Skill credits** (MIT, see `.claude/skills/SOURCES.md`): the digest and the critique targets draw on
+  `shader-art-coding` (gokayfem/shader-skills) and `shot-composition` / `color-motion` (iart-ai/motion-design-skills);
+  the library / process copy followed `taste-skill` (Leonxlnx/taste-skill: every visual renders, never an empty
+  ground) and the console changes `frontend-ui-engineering` (loading states instead of a blank box).
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

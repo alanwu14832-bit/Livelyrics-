@@ -119,7 +119,8 @@ const savedThumbs = new Set<string>();
 export async function saveThumb(project: Project, still: KeyStill): Promise<string | null> {
   const plan = planHash(project.plan);
   const key = `${project.id}:${plan}`;
-  if (!plan || project.thumb?.plan === plan || savedThumbs.has(key)) return null;
+  // round 25: the server's program frame (kind "frame") is replaced by the full key still
+  if (!plan || (project.thumb?.plan === plan && project.thumb.kind !== "frame") || savedThumbs.has(key)) return null;
   savedThumbs.add(key);
   try {
     const img = new Image();

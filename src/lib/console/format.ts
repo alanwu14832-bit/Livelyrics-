@@ -1,5 +1,7 @@
 // Small display helpers for the console (numbers, colors, motif preview).
 
+import type { StageStats } from "@/components/stage/StageEngine";
+
 /** "+0.25 s" / "−0.10 s" / "±0.00 s" */
 export function formatOffset(offset: number): string {
   const v = Number.isFinite(offset) ? Math.round(offset * 100) / 100 : 0;
@@ -112,4 +114,16 @@ export function hostOf(url: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Round 25 (m1): the preview stage is drawing what the wall shows — its scene program compiled (or
+ * switched off for a reason), or there is none to compile, or the GPU path gave up (fallback / lost).
+ * Until then the console shows the song's still instead of a black box.
+ */
+export function stageLive(stats: Pick<StageStats, "backend" | "program"> | null, hasProgram: boolean): boolean {
+  if (!stats) return false;
+  if (stats.backend === "fallback" || stats.backend === "lost") return true;
+  if (!hasProgram || !stats.program) return true;
+  return stats.program.state !== "pending";
 }

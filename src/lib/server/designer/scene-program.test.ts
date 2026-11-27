@@ -5,7 +5,7 @@ import { validateProgram } from "@/lib/stage/program/validate";
 import { designSceneProgram, offlineDesign } from "./index";
 import { analyzeFindings } from "./findings";
 import { jsonOutputFormat } from "./output-schema";
-import { buildScenePrompt, composerSalt, ensureSceneProgram, offlineSceneProgram, SceneProgramDraftSchema, sceneForms } from "./scene-program";
+import { buildScenePrompt, composerSalt, examplesForSong, ensureSceneProgram, offlineSceneProgram, SceneProgramDraftSchema, sceneForms } from "./scene-program";
 import { PROGRAM_CONTRACT_DOC, PROGRAM_PRELUDE } from "@/lib/stage/program/contract";
 import { fakeTransport, message, text } from "./testing/fake-claude";
 import { SONG_FIXTURES, fixtureInput } from "./testing/songs";
@@ -146,7 +146,11 @@ describe("Claude scene step", () => {
     const prompt = buildScenePrompt({ ...req(2), instruction: "更安靜" }, plan);
     expect(prompt).toContain(PROGRAM_CONTRACT_DOC);
     for (const s of plan.sections) expect(prompt).toContain(`- ${s.id} `);
-    expect(prompt).toContain(EXAMPLE_PROGRAMS.find((e) => e.id === "monolith")!.source.trim().slice(0, 60));
+    // round 25: two examples chosen by the genre (their code without comment lines)
+    const examples = examplesForSong(analyzeFindings(req(2)));
+    expect(examples).toHaveLength(2);
+    for (const ex of examples) expect(prompt).toContain(`「${ex.title}」`);
+    expect(prompt).toContain("vec3 scene(vec2 fc) {");
     expect(prompt).toContain("更安靜");
   });
 
@@ -168,7 +172,9 @@ describe("Claude scene step", () => {
     const t = fakeTransport([message([text(draft(bad))], "end_turn"), message([text(draft(EXAMPLE_PROGRAMS[0].source))], "end_turn")]);
     const logs: string[] = [];
     const r = await designSceneProgram(req(2), plan, { onLog: (m) => logs.push(m) }, { transport: t, configured: true, model: "m1" });
-    expect(t.calls).toHaveLength(2);
+    // round 25: a third call is the render critique turn (night-drive misses a target here; its failure keeps the program)
+    expect(t.calls.length).toBeGreaterThanOrEqual(2);
+    expect(t.calls.length).toBeLessThanOrEqual(3);
     const second = JSON.stringify(t.calls[1].messages);
     expect(second).toContain("前處理");
     expect(r.engine).toBe("claude");

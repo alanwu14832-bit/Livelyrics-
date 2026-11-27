@@ -36,6 +36,7 @@ export type {
   Zone,
   SceneProgram,
   SceneProgramSection,
+  SceneProgramCheck,
 } from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -602,6 +603,11 @@ export interface TimingChange {
 export interface ProjectThumb {
   url: string;
   plan: string;
+  /**
+   * round 25 (m2): "frame" = one frame of the scene program rendered on the server when the plan was
+   * saved (data:image/png); the design overview's full key still (JPEG, lyrics composed) replaces it
+   */
+  kind?: "frame";
 }
 
 /** data URL length cap for Project.thumb (≈ 36 KB of JPEG) */

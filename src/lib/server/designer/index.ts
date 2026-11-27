@@ -14,7 +14,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { formatTimeShort } from "@/lib/timeline";
 import { coerceBible, sanitizeFonts } from "@/lib/band";
-import type { BandBible, DesignPlan, DirectionSet, Research, SceneProgram, ShowArc } from "@/lib/types";
+import type { BandBible, DesignPlan, DirectionSet, Research, SceneProgram, SceneProgramCheck, ShowArc } from "@/lib/types";
+import { checkLine, critiqueBlock, critiqueProgram } from "@/lib/stage/program/critique";
 import { applyArc, ARC_SYSTEM, ArcDraftSchema, buildArcPrompt, normalizeArc, offlineArc, type ArcInput } from "./arc";
 import { BIBLE_SYSTEM, BibleDraftSchema, buildBiblePrompt, offlineBible, type BibleInput } from "./bible";
 import { bibleBlock } from "./prompts";
@@ -144,6 +145,8 @@ function resolveDeps(deps: DesignerDeps) {
     /** a key is set but this call was asked not to use it (免費研究 chosen for this run) */
     optedOut: !configured && deps.configured === false && isClaudeConfigured(),
     model: deps.model ?? modelName(),
+    /** what is left of this call's budget (ms; Infinity without one) — round 25: the critique turn needs room */
+    remainingMs: () => (deadline == null ? Number.POSITIVE_INFINITY : deadline - Date.now()),
     /** a fresh transport per step: the deadline, then retries (a backup model sticks for that step only) */
     transport: (onLog?: (message: string) => void) => {
       const t = deps.transport ?? defaultTransport();
@@ -419,6 +422,71 @@ export async function proposeDirections(req: DesignRequest, cb: DesignerCallback
 // 專屬畫面 (phase 7)
 // ---------------------------------------------------------------------------
 
+/** Round 25: the critique turn is only sent with at least this much of the step's budget left (ms). */
+export const CRITIQUE_MIN_REMAINING_MS = 75_000;
+
+type SceneRun = (errors?: string[], critique?: { block: string; program: SceneProgram }) => Promise<{ raw: unknown; model: string }>;
+
+/**
+ * Round 25: render Claude's program on the CPU in the song's arc states (critiqueProgram), and when a
+ * composition target is missed send ONE follow-up turn with the numbers and the failed checks; the
+ * corrected program is validated and kept only when it scores better. Any failure of that turn keeps
+ * the first program; only cancellation propagates. The result carries `check` (shown in the console).
+ */
+export async function critiqueAndFix(
+  first: SceneProgram,
+  plan: DesignPlan,
+  meta: { model: string; instruction?: string; now: Date },
+  run: SceneRun,
+  remainingMs: number,
+  cbs: SafeCallbacks,
+  signal?: AbortSignal,
+): Promise<{ program: SceneProgram; model?: string }> {
+  const measure = (p: SceneProgram) => {
+    try {
+      return critiqueProgram(p, plan);
+    } catch {
+      return null;
+    }
+  };
+  const c1 = measure(first);
+  if (!c1) return { program: first };
+  let best = { program: first, critique: c1, model: undefined as string | undefined };
+  let fixTurn = false;
+  let fixFailed = false;
+  if (c1.failed.length && remainingMs >= CRITIQUE_MIN_REMAINING_MS) {
+    fixTurn = true;
+    cbs.onLog(`畫面自我檢查：通過 ${c1.check.passed}／${c1.check.total} 項（${c1.failed.slice(0, 2).map((f) => f.split("——")[0]).join("；")}），請 Claude 依渲染結果修正一次…`);
+    try {
+      const { raw, model } = await run(undefined, { block: critiqueBlock(c1), program: first });
+      const fixed = programFromDraft(raw, plan, { ...meta, model });
+      const c2 = fixed.program ? measure(fixed.program) : null;
+      if (!fixed.program) {
+        fixFailed = true;
+        cbs.onLog(`修正版沒有通過檢查（${fixed.errors.slice(0, 2).join("；")}），保留第一版。`);
+      } else if (c2 && c2.score > c1.score) {
+        best = { program: fixed.program, critique: c2, model };
+        cbs.onLog(`修正版較好：通過 ${c2.check.passed}／${c2.check.total} 項，採用修正版。`);
+      } else cbs.onLog(`修正版沒有比較好（通過 ${c2?.check.passed ?? "?"}／${c2?.check.total ?? c1.check.total} 項），保留第一版。`);
+    } catch (err) {
+      if (isCancellation(err, signal)) throw signal?.aborted ? abortReason(signal) : err;
+      fixFailed = true;
+      cbs.onLog(`畫面修正失敗：${describeError(err)}，保留第一版。`);
+    }
+  } else if (c1.failed.length) cbs.onLog(`畫面自我檢查：通過 ${c1.check.passed}／${c1.check.total} 項；這個步驟剩下的時間不夠再修正一次。`);
+  else cbs.onLog(`畫面自我檢查：通過 ${c1.check.passed}／${c1.check.total} 項。`);
+  const check: SceneProgramCheck = {
+    ...best.critique.check,
+    fixTurn,
+    kept: best.program === first ? "first" : "fixed",
+    ...(fixTurn ? { firstPassed: c1.check.passed } : {}),
+    ...(fixFailed ? { fixFailed: true } : {}),
+    summary: "",
+  };
+  check.summary = checkLine(check) ?? "";
+  return { program: { ...best.program, check }, model: best.model };
+}
+
 export interface SceneProgramResult {
   program: SceneProgram;
   engine: "claude" | "offline";
@@ -450,9 +518,17 @@ export async function designSceneProgram(req: DesignRequest, plan: DesignPlan, c
     const editing = previous && (previous.engine === "claude" || previous.engine === "manual") && instruction ? previous : null;
     // phase 8: the band's real material (cover, MV stills, key visual) as vision input
     const images = [...visionContent(req.moodboard, req.moodboardImages), ...collectedVisionContent(req.collected, req.collectedImages)];
-    const run = async (errors?: string[]) =>
+    const run = async (errors?: string[], critique?: { block: string; program: SceneProgram }) =>
       claudeStructured(
-        { system: SCENE_SYSTEM, prompt: buildScenePrompt(req, plan, { errors, previous: editing }), schema: SceneProgramDraftSchema, label: "專屬畫面", effort: "high", maxTokens: 32_000, ...(images.length ? { before: images } : {}) },
+        {
+          system: SCENE_SYSTEM,
+          prompt: buildScenePrompt(req, plan, { errors, previous: critique?.program ?? editing, critique: critique?.block }),
+          schema: SceneProgramDraftSchema,
+          label: critique ? "專屬畫面修正" : "專屬畫面",
+          effort: "high",
+          maxTokens: 32_000,
+          ...(images.length ? { before: images } : {}),
+        },
         cbs,
         { transport: d.transport(), model: d.model, now: d.now },
       );
@@ -464,7 +540,10 @@ export async function designSceneProgram(req: DesignRequest, plan: DesignPlan, c
       made = programFromDraft(raw, plan, { model, instruction, now });
     }
     if (!made.program) return offline(`Claude 的程式仍然沒有通過檢查（${made.errors.slice(0, 2).join("；")}），改用`);
-    const program = previous?.enabled === false ? { ...made.program, enabled: false } : made.program;
+    // round 25: render → metrics → at most one critique turn; the better-scoring version is kept
+    const checked = await critiqueAndFix(made.program, plan, { model, instruction, now }, run, d.remainingMs(), cbs, cb.signal);
+    model = checked.model ?? model;
+    const program = previous?.enabled === false ? { ...checked.program, enabled: false } : checked.program;
     cbs.onDelta(`### 專屬畫面「${program.title}」\n\n${program.concept}\n`);
     cbs.onLog(`專屬畫面完成（${model}）：「${program.title}」，${program.sections.length} 個段落的狀態`);
     return { program, engine: "claude", model };

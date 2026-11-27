@@ -9,7 +9,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import { StageView, type StageStats } from "@/components/stage/StageView";
 import { HUD, StatusCapsule, Tag, cx, type HudHandle } from "@/components/ui";
 import type { ConsoleController, OutputStatus } from "@/lib/console/controller";
-import { formatCountdown } from "@/lib/console/format";
+import { formatCountdown, stageLive } from "@/lib/console/format";
 import { selectLineIndex, selectOverrides, selectSectionIndex, selectTimeDecis, useStageValue } from "@/lib/console/hooks";
 import { CUE_KIND_LABELS, LYRIC_STYLE_LABELS, PLACEMENT_LABELS, SCENE_LABELS, SECTION_KIND_LABELS, TRANSITION_LABELS, cueColor } from "@/lib/console/labels";
 import { sortedCues, upcomingCue } from "@/lib/console/navigation";
@@ -21,6 +21,8 @@ import { projectSafety, safeTransition } from "@/lib/stage/safety";
 import { LedSimControls, LedSimStage, ledGeometry, useLedSim } from "./LedSim";
 import { StageSlot, useSharedStats, type SharedStage } from "./SharedStage";
 import { Dot, KeyValues, Pane } from "./ui";
+import { ProjectArt } from "@/components/home/ProjectArt";
+import { planHash } from "@/lib/plan-hash";
 
 const BACKEND_LABELS: Record<StageStats["backend"], string> = {
   webgl2: "WebGL2",
@@ -63,6 +65,46 @@ function BlackoutFrame({ controller }: { controller: StageSource }) {
         黑場中
       </StatusCapsule>
     </>
+  );
+}
+
+/** Round 25 (m1): how long the poster may cover a stage that never reports its program ready. */
+export const POSTER_MAX_MS = 20_000;
+
+
+/**
+ * Round 25 (m1): the preview is never a black box while the stage starts (the scene program's GL
+ * compile takes seconds on a slow GPU): the song's still (its library picture of the current plan)
+ * or its palette artwork shows at once, labelled, and fades to the live stage once it draws.
+ */
+function PreviewPoster({ project, stats }: { project: Project; stats: StageStats | null }) {
+  const program = project.plan?.sceneProgram;
+  const hasProgram = !!program && program.enabled !== false;
+  const live = stageLive(stats, hasProgram);
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setExpired(true), POSTER_MAX_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+  const [gone, setGone] = useState(false);
+  const hidden = live || expired;
+  useEffect(() => {
+    if (!hidden) return;
+    const t = window.setTimeout(() => setGone(true), 600);
+    return () => window.clearTimeout(t);
+  }, [hidden]);
+  if (gone || !project.plan) return null;
+  const thumb = project.thumb && project.thumb.plan === planHash(project.plan) ? project.thumb.url : undefined;
+  return (
+    <div
+      aria-hidden="true"
+      data-preview-poster={hidden ? "fading" : "on"}
+      className="pointer-events-none absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none"
+      style={{ opacity: hidden ? 0 : 1 }}
+    >
+      <ProjectArt id={project.id} palette={project.plan.keyVisual.palette.map((c) => c.hex)} thumb={thumb} placeholderIconSize={0} className="absolute inset-0 size-full" />
+      <FrameLabel className="absolute top-2 left-2">正在載入畫面…</FrameLabel>
+    </div>
   );
 }
 
@@ -144,6 +186,7 @@ function PreviewPanelImpl({
                 />
               )}
             </LedSimStage>
+            <PreviewPoster project={project} stats={stats} />
             {/* one bottom row inside the frame: the labels wrap and shrink before the LED 模擬 button,
                 so nothing is clipped at the preview's edge on a phone */}
             <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-end justify-between gap-1.5" data-preview-badges="">
