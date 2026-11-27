@@ -74,6 +74,11 @@ export interface ComposerInput {
    * (「重新產生畫面」) walks the weighted order; `forms` is then only the fallback.
    */
   weights?: Partial<Record<FormId, number>>;
+  /**
+   * Round 25 (N3): the forms that fit the song's genre. The salt (「重新產生畫面」) and the band's
+   * worn pairs walk these first; the forms outside come only after every fitting one.
+   */
+  fit?: readonly FormId[];
   /** form + texture pairs the band's other songs wear, most recent first: the first is never repeated */
   avoid?: readonly ComposerPair[];
   /** texture weights the song suggests (the type voice, the genre's surface, the imagery) */
@@ -168,6 +173,8 @@ export function weightedOrder<K extends string>(weights: Partial<Record<K, numbe
 export const FORM_SHARPEN = 1.15;
 /** Two forms within this fraction of the top weight are a tie the seed settles. */
 export const TIE_BAND = 0.2;
+/** Round 25: how much the song's surface weights are sharpened against the type voice's textures. */
+export const SURFACE_SHARPEN = 1.5;
 
 /** The composer's choices for a song (exported for the UI label and the tests). */
 export function chooseComposition(input: ComposerInput): ComposerChoice {
@@ -186,7 +193,9 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
     const tied = ranked.filter(([, w]) => w >= top[1] * (1 - TIE_BAND));
     const lead = tied[Math.floor(rng(input.seed >>> 0)() * tied.length)][0];
     const rest = Object.fromEntries(ranked.filter(([k]) => k !== lead).map(([k, w]) => [k, Math.pow(w, FORM_SHARPEN)])) as Partial<Record<FormId, number>>;
-    const order: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
+    const drawn: FormId[] = [lead, ...weightedOrder(rest, rng((input.seed ^ 0x51ed270b) >>> 0))];
+    const fit = input.fit?.length ? input.fit : null;
+    const order: FormId[] = fit ? [...drawn.filter((f) => fit.includes(f)), ...drawn.filter((f) => !fit.includes(f))] : drawn;
     form = order[salt % order.length] ?? forms[0] ?? "horizon";
     // the band's previous song wears this form with every texture it could: another form
     const worn = (input.avoid ?? []).filter((a) => a.form === form).map((a) => a.texture);
@@ -199,7 +208,8 @@ export function chooseComposition(input: ComposerInput): ComposerChoice {
   // texture: the voice's surfaces, weighted by what the song suggests; never the band's previous pair
   const texW: Partial<Record<TextureId, number>> = {};
   const voiceTex = TEXTURE_FOR_VOICE[input.voice ?? "mv-card"] ?? TEXTURE_FOR_VOICE["mv-card"];
-  for (const t of TEXTURE_IDS) texW[t] = (voiceTex[t] ?? 0.2) * (input.surface?.[t] ?? 1);
+  // round 25 (N3): the song's surface (its genre, its images) counts more than the voice's habit
+  for (const t of TEXTURE_IDS) texW[t] = (voiceTex[t] ?? 0.2) * Math.pow(input.surface?.[t] ?? 1, SURFACE_SHARPEN);
   const banned = input.avoid?.[0]?.form === form ? input.avoid[0].texture : null;
   if (banned) texW[banned] = 0;
   const texOrder = weightedOrder(texW, r);

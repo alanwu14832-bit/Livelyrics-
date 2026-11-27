@@ -10,7 +10,7 @@ import { analyzeFindings } from "./findings";
 import { freshHue, imageryEmblem, offlineDesign, symbolOnWall } from "./offline";
 import { EMBLEM_FOR_IMAGERY, generateMotifSvg, sanitizeSvg } from "./svg";
 import { hueFamily, lookOfPlan, paletteFamily, recentFactor, type RecentLook } from "./recent";
-import { formWeights, isBallad, sceneForms } from "./scene-program";
+import { formWeights, genreFitForms, isBallad, sceneForms } from "./scene-program";
 import { AUDIT_SONGS, auditInput, auditSong } from "./testing/audit-songs";
 import { fixtureInput, SONG_FIXTURES } from "./testing/songs";
 import { chooseVoice, freshFonts } from "./type-design";
@@ -74,7 +74,14 @@ describe("round 18 · variety across the library", () => {
       return fixtureInput({ ...f, id: `${f.id}-${i}`, title: `${f.title}${i}`, genre });
     });
     const forms = catalogue(inputs).map((p) => p.sceneProgram!.recipe!.split("/")[0]);
-    for (const f of FORM_IDS) expect(forms, forms.join(",")).toContain(f);
+    // round 25 (N3): the genre picks the set, the rotation picks inside it — wide variety across
+    // genres, and never a form outside the song's genre
+    expect(new Set(forms).size, forms.join(",")).toBeGreaterThanOrEqual(7);
+    inputs.forEach((input, i) => {
+      const fit = genreFitForms(analyzeFindings(input), { lyrics: input.lyrics.lines.some((l) => l.text.trim()) });
+      expect(fit, `${spread[i][1]}: ${forms[i]}`).toContain(forms[i]);
+    });
+    void FORM_IDS;
   });
 
   it("each chorus after the first changes scene or climbs in the program (denser, livelier)", () => {
@@ -151,6 +158,9 @@ describe("round 18 · the recency rules", () => {
   it("the form weights fall by count", () => {
     const f = analyzeFindings(auditInput(auditSong("folk")));
     const w = formWeights(f);
-    expect(formWeights(f, { recentForms: ["bars", "strata", "strata"] }).strata).toBeLessThan(w.strata * 0.05);
+    // round 25: inside the genre's set two uses weigh 0.3 — the folk song's next fitting form (the brush) leads
+    const worn = formWeights(f, { recentForms: ["bars", "strata", "strata"] });
+    expect(worn.strata).toBeLessThan(w.strata * 0.35);
+    expect(worn.brush).toBeGreaterThan(worn.strata);
   });
 });
