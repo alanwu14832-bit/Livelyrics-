@@ -9,7 +9,11 @@ import type { RecentLook } from "@/lib/types";
 import { analyzeFindings } from "./findings";
 import { freshHue, GENRE_HUE_REACH, offlineDesign } from "./offline";
 import { hueFamily, lookOfPlan } from "./recent";
-import { buildScenePrompt, examplesForSong, formWeights, genreFitForms, motionBias, SCENE_SYSTEM } from "./scene-program";
+import { buildScenePrompt, examplesForSong, formWeights, genreFitForms, motionBias, programFromDraft, SCENE_SYSTEM } from "./scene-program";
+import { critiqueAndFix, CRITIQUE_MIN_REMAINING_MS, designSceneProgram } from "./index";
+import { checkLine, critiqueProgram } from "@/lib/stage/program/critique";
+import { normalizeSceneProgram } from "@/lib/stage/program/model";
+import { fakeTransport, message, text } from "./testing/fake-claude";
 import { AUDIT_SONGS, auditInput, auditPublicInfo } from "./testing/audit-songs";
 import { demoMeta } from "./testing/fixtures";
 import type { DesignerInput } from "./types";
@@ -121,5 +125,131 @@ describe("N3 · the scene prompt: genre look, genre few-shot examples, the skill
     expect(prompt).toContain("「訊號」");
     expect((prompt.match(/```glsl/g) ?? []).length).toBe(2);
     for (const k of ["max(x, 1e-4)", "NaN", "迴圈上限是常數", "主歌 < 10%", "副歌 25–45%", "安全區", "不會變白", "鄰近色相"]) expect(SCENE_SYSTEM).toContain(k);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render → metrics → one critique / fix turn (mocked Claude)
+// ---------------------------------------------------------------------------
+
+/** One disc on the right whose radius is uParams.x × 0.6 (cover ≈ π r² / 1.78), lit grey (luma ≈ 0.56). */
+const DISC = `vec3 scene(vec2 fc) {
+  vec2 p = centered(fc) - vec2(0.35, 0.0);
+  float d = sdCircle(p, uParams.x * 0.6);
+  vec3 col = uBg * 0.6;
+  col = mix(col, vec3(0.62, 0.55, 0.5), fill(d));
+  return col;
+}`;
+
+/** A Claude draft of the disc: `verse` sets the verse (and the build's) radius parameter. */
+function discDraft(plan: ReturnType<typeof offlineDesign>, verse: number, source = DISC): string {
+  const choruses = plan.sections.filter((s) => s.kind === "chorus").map((s) => s.id);
+  return JSON.stringify({
+    title: "右邊的圓",
+    concept: "一個圓。",
+    rationale: "測試。",
+    source,
+    keyMoment: null,
+    sections: plan.sections.map((s) => ({
+      sectionId: s.id,
+      mode: s.kind === "chorus" ? 2 : 0,
+      params: [s.kind === "chorus" ? (s.id === choruses[choruses.length - 1] && choruses.length > 1 ? 0.7 : 0.667) : s.kind === "verse" || s.kind === "pre-chorus" ? verse : 0.25, 0.5, 0.5, 0.5],
+      zone: { x: 0.05, y: 0.2, w: 0.32, h: 0.6 },
+      relation: "plain",
+      note: "圓",
+    })),
+  });
+}
+
+describe("render → metrics → one critique turn", () => {
+  const input = { ...auditInput(AUDIT_SONGS[0]), research: null } as never;
+  const plan = offlineDesign(auditInput(AUDIT_SONGS[0]));
+  const deps = (t: ReturnType<typeof fakeTransport>) => ({ transport: t, configured: true, model: "m1" });
+
+  it("the critique measures a good and a bad program in the four arc states", () => {
+    const good = programFromDraft(JSON.parse(discDraft(plan, 0.3)), plan, { model: "m", now: new Date() }).program!;
+    const bad = programFromDraft(JSON.parse(discDraft(plan, 0.5)), plan, { model: "m", now: new Date() }).program!;
+    const g = critiqueProgram(good, plan)!;
+    const b = critiqueProgram(bad, plan)!;
+    expect(g.failed).toEqual([]);
+    expect(g.check.passed).toBe(g.check.total);
+    expect(g.check.states.map((s) => s.state)).toEqual(expect.arrayContaining(["verse", "chorus", "last-chorus"]));
+    expect(b.failed.length).toBeGreaterThan(0);
+    expect(b.check.checks.find((c) => c.id === "verse-quiet")!.ok).toBe(false);
+    expect(g.score).toBeGreaterThan(b.score);
+  });
+
+  it("a good program triggers no fix turn", async () => {
+    const t = fakeTransport([message([text(discDraft(plan, 0.3))], "end_turn")]);
+    const r = await designSceneProgram(input, plan, {}, deps(t));
+    expect(t.calls).toHaveLength(1);
+    expect(r.engine).toBe("claude");
+    expect(r.program.check).toMatchObject({ fixTurn: false, kept: "first" });
+    expect(r.program.check!.passed).toBe(r.program.check!.total);
+    expect(r.program.check!.summary).toMatch(/^畫面自我檢查：通過 \d+／\d+ 項.*不需修正$/);
+  });
+
+  it("a bad program triggers exactly one fix turn with the numbers; the better version is kept", async () => {
+    const t = fakeTransport([message([text(discDraft(plan, 0.5))], "end_turn"), message([text(discDraft(plan, 0.3))], "end_turn")]);
+    const logs: string[] = [];
+    const r = await designSceneProgram(input, plan, { onLog: (m) => logs.push(m) }, deps(t));
+    expect(t.calls).toHaveLength(2);
+    const second = JSON.stringify(t.calls[1].messages);
+    expect(second).toContain("渲染檢查");
+    expect(second).toContain("主歌亮的面積");
+    expect(second).toContain("sdCircle(p, uParams.x * 0.6)"); // the first program is shown to be corrected
+    expect(r.program.check).toMatchObject({ fixTurn: true, kept: "fixed" });
+    expect(r.program.check!.firstPassed).toBeLessThan(r.program.check!.passed);
+    expect(r.program.check!.summary).toContain("Claude 修正一次");
+    expect(logs.join("\n")).toMatch(/畫面自我檢查/);
+  });
+
+  it("a fix turn that is worse, refused or fails keeps the first program cleanly", async () => {
+    // worse: the verse even bigger
+    const worse = fakeTransport([message([text(discDraft(plan, 0.5))], "end_turn"), message([text(discDraft(plan, 0.55))], "end_turn")]);
+    const r1 = await designSceneProgram(input, plan, {}, deps(worse));
+    expect(worse.calls).toHaveLength(2);
+    expect(r1.engine).toBe("claude");
+    expect(r1.program.sections.find((s) => plan.sections.find((p) => p.id === s.sectionId)?.kind === "verse")!.params[0]).toBe(0.5);
+    expect(r1.program.check).toMatchObject({ fixTurn: true, kept: "first" });
+    // refused: the fixed program does not validate
+    const refused = fakeTransport([message([text(discDraft(plan, 0.5))], "end_turn"), message([text(discDraft(plan, 0.3, "#define X 1\n" + DISC))], "end_turn")]);
+    const r2 = await designSceneProgram(input, plan, {}, deps(refused));
+    expect(r2.engine).toBe("claude");
+    expect(r2.program.check).toMatchObject({ fixTurn: true, kept: "first", fixFailed: true });
+    expect(r2.program.check!.summary).toContain("修正失敗，保留第一版");
+    // fails: the transport errors on the second call — no offline fallback, no throw
+    const broken = fakeTransport([message([text(discDraft(plan, 0.5))], "end_turn"), new Error("overloaded")]);
+    const r3 = await designSceneProgram(input, plan, {}, deps(broken));
+    expect(broken.calls).toHaveLength(2);
+    expect(r3.engine).toBe("claude");
+    expect(r3.program.check).toMatchObject({ fixTurn: true, kept: "first", fixFailed: true });
+  });
+
+  it("without enough of the step's budget left no fix turn is sent", async () => {
+    const first = programFromDraft(JSON.parse(discDraft(plan, 0.5)), plan, { model: "m", now: new Date() }).program!;
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      return { raw: JSON.parse(discDraft(plan, 0.3)), model: "m" };
+    };
+    const cbs = { onLog: () => {}, onDelta: () => {}, onThinking: () => {} } as never;
+    const r = await critiqueAndFix(first, plan, { model: "m", now: new Date() }, run, CRITIQUE_MIN_REMAINING_MS - 1, cbs);
+    expect(calls).toBe(0);
+    expect(r.program.check).toMatchObject({ fixTurn: false, kept: "first" });
+    const r2 = await critiqueAndFix(first, plan, { model: "m", now: new Date() }, run, CRITIQUE_MIN_REMAINING_MS, cbs);
+    expect(calls).toBe(1);
+    expect(r2.program.check!.kept).toBe("fixed");
+  });
+
+  it("the check survives normalisation and reads as one Chinese line", () => {
+    const good = programFromDraft(JSON.parse(discDraft(plan, 0.3)), plan, { model: "m", now: new Date() }).program!;
+    const c = critiqueProgram(good, plan)!;
+    const check = { ...c.check, fixTurn: true, kept: "fixed" as const, firstPassed: 6, summary: "" };
+    const line = checkLine(check)!;
+    expect(line).toMatch(/^畫面自我檢查：第一版只通過 6／\d+ 項，Claude 修正一次 → 通過/);
+    const n = normalizeSceneProgram({ ...good, check: { ...check, summary: line } }, { sections: plan.sections })!;
+    expect(n.check?.summary).toBe(line);
+    expect(normalizeSceneProgram({ ...good, check: { bogus: true } }, { sections: plan.sections })!.check).toBeUndefined();
   });
 });

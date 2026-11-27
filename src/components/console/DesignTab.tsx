@@ -427,6 +427,12 @@ function DesignTabImpl({ controller, project, redesigning, onRedesign }: { contr
   return (
     <div className="flex flex-col gap-5 px-3 pt-1 pb-4">
       <KeyVisualCard controller={controller} plan={plan} sampleText={sampleText} />
+      {/* round 25: Claude's program was rendered and checked (and maybe corrected once) */}
+      {plan.sceneProgram?.check?.summary && (
+        <div className="-mt-3 px-1" data-testid="design-scene-check">
+          <Footnote className="mt-0">{plan.sceneProgram.check.summary}</Footnote>
+        </div>
+      )}
       <TypeCard controller={controller} plan={plan} />
       {/* LED 安全模式 pre-show check: what safe mode changes in this song */}
       <SafetyCheck project={project} />

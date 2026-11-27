@@ -56,6 +56,73 @@ export interface ProbeSample {
   cover: number;
   /** round 23: the horizontal centre (0–1) of the samples above PROBE_COVER — where the subject stands; null when none */
   cx: number | null;
+  /** round 25: the vertical centre (0–1, from the top) of the samples above PROBE_COVER; null when none */
+  cy?: number | null;
+  /** round 25: the brightest sample's sRGB luma */
+  max?: number;
+  /** round 25: separate lit shapes (4-connected groups of ≥ 2 samples above PROBE_COVER) */
+  subjects?: number;
+  /** round 25: the largest lit shape's share of the lit samples (0–1; one focal subject reads near 1) */
+  focus?: number;
+  /** round 25: samples that came out NaN / infinite */
+  nan?: number;
+  /** round 25: fraction of samples pushed to (near) white — sRGB luma above PROBE_WHITE */
+  white?: number;
+}
+
+/** Round 25: what reads as white on the wall (sRGB luma); a highlight may touch it, an area may not. */
+export const PROBE_WHITE = 0.95;
+
+/**
+ * Round 25: the lit shapes of a coverage mask (cols × rows, row-major) as the eye groups them — the
+ * squint test: lit cells one cell apart (a row of printed bars, ribbons side by side) read as one
+ * shape. Returns the count of groups of ≥ 2 lit cells and the largest group's share of the lit cells.
+ */
+export function litShapes(lit: readonly boolean[], cols: number, rows: number): { subjects: number; focus: number } {
+  // dilate by one cell (8-neighbourhood) to group, then count only the lit cells of each group
+  const mask: boolean[] = new Array(cols * rows).fill(false);
+  for (let j = 0; j < rows; j++)
+    for (let i = 0; i < cols; i++) {
+      if (!lit[j * cols + i]) continue;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const ni = i + di;
+          const nj = j + dj;
+          if (ni >= 0 && nj >= 0 && ni < cols && nj < rows) mask[nj * cols + ni] = true;
+        }
+    }
+  const seen = new Uint8Array(cols * rows);
+  let subjects = 0;
+  let largest = 0;
+  let total = 0;
+  const stack: number[] = [];
+  for (let k = 0; k < mask.length; k++) {
+    if (!mask[k] || seen[k]) continue;
+    let size = 0;
+    stack.push(k);
+    seen[k] = 1;
+    while (stack.length) {
+      const c = stack.pop()!;
+      if (lit[c]) size++;
+      const i = c % cols;
+      const j = (c - i) / cols;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const ni = i + di;
+        const nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) continue;
+        const n = nj * cols + ni;
+        if (mask[n] && !seen[n]) {
+          seen[n] = 1;
+          stack.push(n);
+        }
+      }
+    }
+    if (!size) continue;
+    total += size;
+    if (size >= 2) subjects++;
+    largest = Math.max(largest, size);
+  }
+  return { subjects, focus: total ? largest / total : 0 };
 }
 
 export interface ProbeResult {
@@ -180,17 +247,29 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       let dark = 0;
       let cover = 0;
       let cxSum = 0;
+      let cySum = 0;
+      let max = 0;
+      let nan = 0;
+      let white = 0;
+      const mask: boolean[] = new Array(cols * rows).fill(false);
       const n = cols * rows;
       const at = (i: number, j: number): [number, number] => [((i + 0.5) / cols) * res[0], ((j + 0.5) / rows) * res[1]];
       for (let j = 0; j < rows; j++) {
         for (let i = 0; i < cols; i++) {
-          const l = luma(compiled.scene(at(i, j)).color);
+          const raw = luma(compiled.scene(at(i, j)).color);
+          if (!Number.isFinite(raw)) nan++;
+          const l = Number.isFinite(raw) ? raw : 0;
           sum += l;
+          if (l > max) max = l;
+          if (l > PROBE_WHITE) white++;
           if (l > PROBE_MID) lit++;
           if (l < 0.04) dark++;
           if (l > PROBE_COVER) {
             cover++;
             cxSum += (i + 0.5) / cols;
+            // fc has its origin at the bottom: row j counts up, cy reads from the top
+            cySum += 1 - (j + 0.5) / rows;
+            mask[j * cols + i] = true;
           }
         }
       }
@@ -211,7 +290,7 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       }
       compiled.setUniforms(u);
       const r3 = (x: number) => Math.round(x * 1000) / 1000;
-      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null };
+      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null, cy: cover ? r3(cySum / cover) : null, max: r3(max), ...((({ subjects, focus }) => ({ subjects, focus: r3(focus) }))(litShapes(mask, cols, rows))), nan, white: r3(white / n) };
       seen.set(sig, sample);
       samples.push(sample);
     });

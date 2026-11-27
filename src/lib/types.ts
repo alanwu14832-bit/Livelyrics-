@@ -36,6 +36,7 @@ export type {
   Zone,
   SceneProgram,
   SceneProgramSection,
+  SceneProgramCheck,
 } from "./schema";
 
 // ---------------------------------------------------------------------------

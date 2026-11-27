@@ -687,7 +687,7 @@ function genreLookBlock(findings: Findings, lyrics: boolean): string {
 }
 const TRANSITION_WORDS: Record<TransitionCharacter, string> = { swell: "慢慢漲起", cut: "硬切", scan: "掃描", tide: "像潮水推進", sweep: "掃過" };
 
-export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { errors?: string[]; previous?: SceneProgram | null } = {}): string {
+export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { errors?: string[]; previous?: SceneProgram | null; critique?: string } = {}): string {
   const st = analyzeStructure(req);
   const duration = st.duration;
   const kv = plan.keyVisual;
@@ -739,6 +739,8 @@ export function buildScenePrompt(req: DesignRequest, plan: DesignPlan, opts: { e
   const instruction = req.instruction?.trim();
   if (instruction) parts.push("", "# 這次的指示（最優先）", instruction);
   if (opts.errors?.length) parts.push("", "# 上一次的程式沒有通過檢查，請修正這些問題後整個重寫", ...opts.errors.map((e) => `- ${e}`));
+  // round 25: the render self-check of the program above — one corrected version, same world
+  if (opts.critique) parts.push("", "# 渲染檢查（修正上面這支程式：保留它的世界與主角，依數字調整形狀大小、層數與亮度，輸出完整的 source 與 sections）", opts.critique);
   parts.push("", "請輸出 JSON：title、concept、rationale、source、keyMoment、sections（每個段落一筆）。");
   return parts.filter((p) => p !== "").join("\n");
 }

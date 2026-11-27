@@ -172,7 +172,9 @@ describe("Claude scene step", () => {
     const t = fakeTransport([message([text(draft(bad))], "end_turn"), message([text(draft(EXAMPLE_PROGRAMS[0].source))], "end_turn")]);
     const logs: string[] = [];
     const r = await designSceneProgram(req(2), plan, { onLog: (m) => logs.push(m) }, { transport: t, configured: true, model: "m1" });
-    expect(t.calls).toHaveLength(2);
+    // round 25: a third call is the render critique turn (night-drive misses a target here; its failure keeps the program)
+    expect(t.calls.length).toBeGreaterThanOrEqual(2);
+    expect(t.calls.length).toBeLessThanOrEqual(3);
     const second = JSON.stringify(t.calls[1].messages);
     expect(second).toContain("前處理");
     expect(r.engine).toBe("claude");
