@@ -55,7 +55,7 @@ export function ProjectArt({
   const colors = validPalette(palette);
   const a11y = title ? { role: "img" as const, "aria-label": title } : { "aria-hidden": true as const };
 
-  if (thumb && thumb.startsWith("data:image/jpeg;base64,")) {
+  if (thumb && (thumb.startsWith("data:image/jpeg;base64,") || thumb.startsWith("data:image/png;base64,"))) {
     return (
       <div {...a11y} className={cx("relative overflow-hidden bg-black", className)}>
         {/* a data URL: next/image has nothing to optimize */}

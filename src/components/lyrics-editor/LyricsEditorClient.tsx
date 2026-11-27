@@ -908,21 +908,25 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       />,
     );
   }
+  // round 25 (m3): one redesign banner at a time — after a save that moved the timing, the saved
+  // banner carries the timing advice (and its one 重新設計 button); the timing banner waits until it closes
+  const timingStale = !!project.plan && timingChanged(project.timingChange);
   if (savedInfo) {
+    const removed = savedInfo.removed > 0 ? `移除了 ${savedInfo.removed} 個空白行。` : "";
     banners.push(
       <Banner
         key="saved"
-        tone="success"
+        tone={timingStale ? "warning" : "success"}
         animateIn
-        title={`已儲存 ${savedInfo.lines} 行`}
-        description={`${savedInfo.removed > 0 ? `移除了 ${savedInfo.removed} 個空白行。` : ""}${project.plan ? "目前的主視覺與段落是依照舊歌詞設計的，可以用新歌詞重新設計。" : "還沒有設計方案，可以開始設計。"}`}
+        title={timingStale ? `已儲存 ${savedInfo.lines} 行，歌詞時間改了，建議重新設計段落與提示` : `已儲存 ${savedInfo.lines} 行`}
+        description={`${removed}${timingStale ? timingChangeDetail(project.timingChange!) : project.plan ? "目前的主視覺與段落是依照舊歌詞設計的，可以用新歌詞重新設計。" : "還沒有設計方案，可以開始設計。"}`}
         actions={
           <>
             <Button variant="gray" icon={MonitorPlayIcon} href={`/p/${encodeURIComponent(id)}`} transitionTypes={["push"]}>
               進入控制台
             </Button>
             <Button variant="tinted" icon={SparkleIcon} href={redesignHref} transitionTypes={["push"]}>
-              {project.plan ? "用新歌詞重新設計" : "開始設計"}
+              {timingStale ? "重新設計" : project.plan ? "用新歌詞重新設計" : "開始設計"}
             </Button>
             <Button variant="quiet" size="icon-sm" aria-label="關閉提示" icon={<XIcon size={16} />} onClick={() => setSavedInfo(null)} />
           </>
@@ -930,14 +934,14 @@ export function LyricsEditorClient({ id, initial = null }: { id: string; initial
       />,
     );
   }
-  if (project.plan && timingChanged(project.timingChange)) {
+  if (timingStale && !savedInfo) {
     // round 19 (M6): the plan's sections, cues and type still follow the timing it was designed with
     banners.push(
       <Banner
         key="timing-changed"
         tone="warning"
         title={TIMING_CHANGE_TITLE}
-        description={timingChangeDetail(project.timingChange)}
+        description={timingChangeDetail(project.timingChange!)}
         actions={
           <Button variant="tinted" icon={SparkleIcon} href={redesignHref} transitionTypes={["push"]}>
             重新設計

@@ -5,7 +5,11 @@
 
 import { describe, expect, it } from "vitest";
 import { parseLyricsText } from "@/lib/lyrics/lrc";
-import type { RecentLook } from "@/lib/types";
+import { THUMB_MAX_CHARS, type RecentLook } from "@/lib/types";
+import { planHash } from "@/lib/plan-hash";
+import { frameThumb } from "@/lib/server/thumb";
+import { stageLive } from "@/lib/console/format";
+import { offeredLyricStyles } from "@/lib/console/plan-edit";
 import { analyzeFindings } from "./findings";
 import { freshHue, GENRE_HUE_REACH, offlineDesign } from "./offline";
 import { hueFamily, lookOfPlan } from "./recent";
@@ -251,5 +255,56 @@ describe("render → metrics → one critique turn", () => {
     const n = normalizeSceneProgram({ ...good, check: { ...check, summary: line } }, { sections: plan.sections })!;
     expect(n.check?.summary).toBe(line);
     expect(normalizeSceneProgram({ ...good, check: { bogus: true } }, { sections: plan.sections })!.check).toBeUndefined();
+  });
+});
+
+describe("m2 · a real picture on every library card", () => {
+  it("the server renders a frame of each song's program as a small PNG at the key moment", { timeout: 60_000 }, () => {
+    const ms: number[] = [];
+    for (const s of auditEight()) {
+      const plan = offlineDesign(s.input);
+      const project = { plan, meta: s.input.meta, analysis: s.input.analysis, lyrics: s.input.lyrics } as never;
+      const t0 = Date.now();
+      const thumb = frameThumb(project)!;
+      ms.push(Date.now() - t0);
+      expect(thumb, s.key).not.toBeNull();
+      expect(thumb.url.startsWith("data:image/png;base64,")).toBe(true);
+      expect(thumb.url.length).toBeLessThanOrEqual(THUMB_MAX_CHARS);
+      expect(thumb).toMatchObject({ plan: planHash(plan), kind: "frame" });
+      // a picture, not a flat tile: the deflated PNG carries real detail
+      expect(Buffer.from(thumb.url.split(",")[1], "base64").length).toBeGreaterThan(600);
+      const off = { plan: { ...plan, sceneProgram: { ...plan.sceneProgram!, enabled: false } }, meta: s.input.meta, analysis: s.input.analysis, lyrics: s.input.lyrics } as never;
+      expect(frameThumb(off)).toBeNull();
+    }
+    expect(Math.max(...ms)).toBeLessThan(5000);
+  });
+});
+
+describe("m1 / m8 · console", () => {
+  it("the preview poster stays until the stage draws the program (or has none, or gave up)", () => {
+    const st = (backend: "webgl2" | "fallback", state?: "pending" | "ready" | "failed" | "slow" | "override") => ({ backend, program: state ? { state, title: "x" } : null });
+    expect(stageLive(null, true)).toBe(false);
+    expect(stageLive(st("webgl2", "pending"), true)).toBe(false);
+    expect(stageLive(st("webgl2", "ready"), true)).toBe(true);
+    expect(stageLive(st("webgl2", "failed"), true)).toBe(true);
+    expect(stageLive(st("webgl2"), false)).toBe(true);
+    expect(stageLive(st("fallback", "pending"), true)).toBe(true);
+  });
+
+  it("卡拉 OK 填色 is offered only for lyrics with real timing, never for a show look's text", () => {
+    const s = auditEight().find((x) => x.key === "ballad")!;
+    const plan = offlineDesign(s.input);
+    const real = { lyrics: s.input.lyrics, plan };
+    expect(offeredLyricStyles(real)).toContain("karaoke");
+    const guessed = { lyrics: { ...s.input.lyrics, lines: s.input.lyrics.lines.map((l) => ({ ...l, estimated: true as const })) }, plan };
+    expect(offeredLyricStyles(guessed)).not.toContain("karaoke");
+    expect(offeredLyricStyles(guessed, { current: "karaoke" })).toContain("karaoke");
+    expect(offeredLyricStyles(real, { text: true })).not.toContain("karaoke");
+    // per section: a section whose lines are all real offers it even when another section is guessed
+    const chorus = plan.sections.findIndex((x) => x.kind === "chorus");
+    const mixed = { lyrics: { ...s.input.lyrics, lines: s.input.lyrics.lines.map((l) => (l.start != null && l.start < plan.sections[chorus].start ? { ...l, estimated: true as const } : l)) }, plan };
+    expect(offeredLyricStyles(mixed, { sectionIndex: chorus })).toContain("karaoke");
+    expect(offeredLyricStyles(mixed)).not.toContain("karaoke");
+    for (const style of ["line-fade", "impact", "hidden"] as const) expect(offeredLyricStyles(guessed)).toContain(style);
   });
 });

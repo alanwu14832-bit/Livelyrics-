@@ -1,7 +1,7 @@
 // Pure helpers for the console's quick plan edits and the 1–9 scene bank.
 
 import { LYRIC_PLACEMENTS, LYRIC_STYLE_IDS, MEDIA_BLENDS, MEDIA_FITS, MEDIA_TREATMENTS, SCENE_IDS } from "@/lib/schema";
-import type { DesignPlan, LyricPlacement, LyricStyleId, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
+import type { DesignPlan, LyricPlacement, LyricStyleId, Project, SceneId, SectionDesign, SectionMedia } from "@/lib/types";
 
 export type SectionPatch = Partial<Pick<SectionDesign, "scene" | "lyricStyle" | "lyricPlacement" | "lyricScale" | "transitionIn" | "media">>;
 
@@ -91,4 +91,20 @@ export function sceneBank(plan: DesignPlan | null): SceneId[] {
   for (const section of plan?.sections ?? []) if (isSceneId(section.scene)) add(section.scene);
   for (const s of BANK_FILL) add(s);
   return bank;
+}
+
+/**
+ * Round 25 (m8): the lyric styles the console offers as overrides — only the ones the engine really
+ * renders for these lines. 卡拉 OK 填色 sweeps a line by its timing: it is offered only when every
+ * timed line (of the section, when given) has a real start (no estimated or untimed lines), never for
+ * a show look's free text. The style in use stays offered so it can be switched back.
+ */
+export function offeredLyricStyles(
+  project: Pick<Project, "lyrics" | "plan">,
+  opts: { text?: boolean; sectionIndex?: number | null; current?: LyricStyleId | null } = {},
+): LyricStyleId[] {
+  const section = opts.sectionIndex != null ? project.plan?.sections[opts.sectionIndex] : undefined;
+  const lines = (project.lyrics?.lines ?? []).filter((l) => l.text.trim() && (!section || (l.start != null && l.start >= section.start - 0.05 && l.start < section.end)));
+  const timed = !opts.text && lines.length > 0 && lines.every((l) => typeof l.start === "number" && !l.estimated);
+  return LYRIC_STYLE_IDS.filter((s) => s !== "karaoke" || timed || s === opts.current);
 }
