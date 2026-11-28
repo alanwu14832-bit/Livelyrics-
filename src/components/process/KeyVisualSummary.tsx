@@ -18,6 +18,7 @@ import { STAGGER_MAX, staggerDelay } from "@/lib/motion";
 import { prepareMotifSvg, svgToDataUrl } from "@/lib/stage/motif";
 import { formatTimeShort } from "@/lib/timeline";
 import { shownEmphasis } from "@/lib/type/resolve";
+import { sectionWall } from "@/lib/stage/program/wall";
 import type { DesignPlan, Project, SectionDesign } from "@/lib/types";
 import { CUE_KIND_LABEL, LYRIC_STYLE_LABEL, PLACEMENT_LABEL, SCENE_LABEL, SECTION_KIND_LABEL } from "./labels";
 import { SectionPreview } from "./SectionPreview";
@@ -172,7 +173,7 @@ export function KeyVisualSummary({ project, reveal = false, scene }: { project: 
       <Reveal {...next()}>
         <InsetGroup header="每段設計理由" footer={`${plan.sections.length} 個段落。點一列切換上方的預覽。`}>
           {plan.sections.map((s, i) => (
-            <SectionRow key={s.id} section={s} selected={i === selected} onSelect={() => setSelected(i)} />
+            <SectionRow key={s.id} section={s} wall={sectionWall(plan, i).name} selected={i === selected} onSelect={() => setSelected(i)} />
           ))}
         </InsetGroup>
       </Reveal>
@@ -301,6 +302,10 @@ function SectionDetail({ project, section: s }: { project: Project; section: Sec
   );
   const styled = lines.filter((l) => notes.has(l.id));
   const kind = kindLabel(s);
+  // round 27 (N4): what the wall shows (the program's form and its role), as the console names it; the
+  // built-in scene only as the fallback a number key or a failed compile brings up
+  const index = project.plan?.sections.indexOf(s) ?? -1;
+  const wall = sectionWall(project.plan, index >= 0 ? index : null);
   return (
     <div className="grid min-w-0 gap-x-10 gap-y-6 md:grid-cols-[minmax(0,1fr)_minmax(0,17rem)]">
       <div className="min-w-0">
@@ -321,7 +326,7 @@ function SectionDetail({ project, section: s }: { project: Project; section: Sec
       </div>
       <div className="min-w-0 space-y-4">
         <InsetGroup>
-          <ListRow title="畫面" value={SCENE_LABEL[s.scene] ?? s.scene} />
+          <ListRow title="畫面" value={wall.name} />
           <ListRow title="歌詞" value={LYRIC_STYLE_LABEL[s.lyricStyle] ?? s.lyricStyle} />
           <ListRow title="位置" value={s.lyricStyle === "hidden" ? "不顯示" : `${PLACEMENT_LABEL[s.lyricPlacement] ?? s.lyricPlacement}，${Math.round(s.lyricScale * 100)}%`} />
         </InsetGroup>
@@ -330,6 +335,11 @@ function SectionDetail({ project, section: s }: { project: Project; section: Sec
           {styled.length > 0 && `，其中 ${styled.length} 句有特別處理`}
           {s.lyricStyle === "hidden" && lines.length > 0 && "（刻意不顯示，讓畫面與燈光當主角）"}
         </p>
+        {wall.program && (
+          <p className="px-4 text-[12px] leading-4 text-label-2">
+            {wall.note && `${wall.note}。`}備用內建場景：{SCENE_LABEL[s.scene] ?? s.scene}
+          </p>
+        )}
         {styled.length > 0 && (
           <InsetGroup>
             {styled.slice(0, 4).map((l) => {
@@ -370,6 +380,7 @@ function SectionStrip({ plan, duration, selected, onSelect, grow }: { plan: Desi
         {plan.sections.map((s, i) => {
           const [c0, c1, c2] = s.colorway;
           const len = Math.max(0.5, s.end - s.start);
+          const wall = sectionWall(plan, i).name;
           return (
             <button
               key={s.id}
@@ -377,7 +388,7 @@ function SectionStrip({ plan, duration, selected, onSelect, grow }: { plan: Desi
               role="option"
               aria-selected={i === selected}
               onClick={() => onSelect(i)}
-              title={`${s.label}（${range(s)}）\n${SCENE_LABEL[s.scene]}，${LYRIC_STYLE_LABEL[s.lyricStyle]}`}
+              title={`${s.label}（${range(s)}）\n${wall}，${LYRIC_STYLE_LABEL[s.lyricStyle]}`}
               className={cx(
                 "relative min-w-0 overflow-hidden px-2 text-left transition-[filter] duration-(--dur-fast) ease-[ease] focus-inset",
                 i === selected ? "z-[1] shadow-[inset_0_0_0_2px_white]" : "hover:brightness-110",
@@ -388,7 +399,7 @@ function SectionStrip({ plan, duration, selected, onSelect, grow }: { plan: Desi
                 {s.label}
               </span>
               <span className="block truncate text-[12px] leading-4 text-white/85" style={{ textShadow: "0 1px 2px rgba(0,0,0,.7)" }}>
-                {SCENE_LABEL[s.scene]}
+                {wall}
               </span>
             </button>
           );
@@ -412,7 +423,7 @@ function SectionStrip({ plan, duration, selected, onSelect, grow }: { plan: Desi
   );
 }
 
-function SectionRow({ section: s, selected, onSelect }: { section: SectionDesign; selected: boolean; onSelect: () => void }) {
+function SectionRow({ section: s, wall, selected, onSelect }: { section: SectionDesign; wall: string; selected: boolean; onSelect: () => void }) {
   const kind = kindLabel(s);
   const [c0, c1, c2] = s.colorway;
   return (
@@ -433,7 +444,7 @@ function SectionRow({ section: s, selected, onSelect }: { section: SectionDesign
           <span className="ml-auto shrink-0 text-[13px] leading-5 text-label-2 tabular">{range(s)}</span>
         </span>
         <span className="mt-0.5 block text-[13px] leading-[18px] text-label">
-          {SCENE_LABEL[s.scene] ?? s.scene}，{LYRIC_STYLE_LABEL[s.lyricStyle] ?? s.lyricStyle}
+          {wall}，{LYRIC_STYLE_LABEL[s.lyricStyle] ?? s.lyricStyle}
           {s.lyricStyle !== "hidden" && `，${PLACEMENT_LABEL[s.lyricPlacement] ?? s.lyricPlacement}`}
         </span>
         <span className="mt-1 block text-[13px] leading-[18px] text-label-2">{s.rationale}</span>
