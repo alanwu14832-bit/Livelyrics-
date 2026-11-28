@@ -30,11 +30,13 @@ import { SILENT_DETAIL, SILENT_TITLE } from "@/lib/silence";
 import { buildConcept, chooseSkeleton, conceptKeywords, conceptMotifs, makeTitle, SHORT_SONG_SECONDS, wallConcept, type ConceptContext, type WallFacts } from "./concept";
 import { isBuildSection } from "@/lib/stage/program/composer";
 import { capCues, suggestCues } from "./cues";
+import { UNSUNG_CHORUS } from "@/lib/section-names";
 import { analyzeFindings, type DesignHints, type Findings } from "./findings";
 import { findImagery, type ImageryHit } from "./imagery";
 import { sensitiveWords } from "./lyric-analysis";
 import { normalizePlan } from "./normalize";
-import { buildPalette, SCHEMES, type PaletteEntry, type Scheme } from "./palette";
+import { type PaletteEntry } from "./palette";
+import { buildTargetPalette, type TargetPalette } from "./palette-targets";
 import { analyzeStructure, clamp, meanEnvelope, readingUnits, type SongStructure, type StructSection } from "./structure";
 import { EMBLEM_FOR_IMAGERY, generateMotifSvg, hashString, type EmblemStyle } from "./svg";
 import { moodPalette, moodScenes } from "./moodboard";
@@ -90,14 +92,6 @@ interface Palette {
   bg2: string;
 }
 
-const MOOD_SCHEMES: Record<MoodClass, [Scheme, Scheme]> = {
-  calm: ["analogous", "split"],
-  warm: ["analogous", "split"],
-  driving: ["split", "complementary"],
-  explosive: ["complementary", "triadic"],
-};
-const MOOD_SATURATION: Record<MoodClass, number> = { calm: 0.55, warm: 0.7, driving: 0.85, explosive: 0.95 };
-
 /**
  * Round 18: the song's hue, moved off a family the library's last songs wore twice already — to the
  * neighbouring family (either side, the less worn first) — so a catalogue of one genre is not three
@@ -125,20 +119,29 @@ export function freshHue(hue: number, looks: readonly RecentLook[] | undefined, 
   return ((best % 360) + 360) % 360;
 }
 
-function makePalette(seed: number, mood: Mood, imagery: ImageryHit[], hueOverride?: number, mono = false, hints?: DesignHints, looks?: readonly RecentLook[]): Palette {
-  const top = imagery[0]?.imagery;
-  const jitter = ((seed >>> 8) % 21) - 10;
-  // the song's strongest image (or its genre's colour tendency) leads; the seed keeps songs apart
-  const base = hints?.hue ?? top?.hue ?? null;
-  const own = base != null ? base + jitter : seed % 360;
-  const hue = hueOverride ?? freshHue(own, looks, hints?.scheme ? GENRE_HUE_REACH : 180);
-  const shift = hue - own;
-  const scheme = hints?.scheme ?? MOOD_SCHEMES[mood.mood][(seed >>> 4) % 2] ?? SCHEMES[0];
-  const saturation = mono ? 0 : Math.min(1, MOOD_SATURATION[mood.mood] * (hints ? hints.saturation : (top?.saturation ?? 1)));
-  const jittered = hints?.accentHues && hueOverride == null ? ([hints.accentHues[0] + jitter / 2 + shift, hints.accentHues[1] + jitter / 2 + shift] as [number, number]) : undefined;
-  const entries = buildPalette({ hue, scheme, saturation, brightness: mood.brightness, ...(jittered && !mono ? { hues: jittered } : {}) });
+const MOOD_ENERGY: Record<MoodClass, number> = { calm: 0.15, warm: 0.4, driving: 0.7, explosive: 0.95 };
+
+/**
+ * Round 28 (N2): the palette comes from the song's colour family (palette-targets.ts: OKLCH ranges per
+ * genre family, 2–3 hue relationships) — the genre names the family, the sound and the words stand in
+ * when no genre is known; the energy sets the spot inside the ranges and the seed the relationship.
+ */
+function makePalette(seed: number, mood: Mood, findings: Findings, hueOverride?: number, mono = false, looks?: readonly RecentLook[]): Palette & { family: TargetPalette["family"]; words: string } {
+  const t = buildTargetPalette({
+    genreId: findings.genre?.id ?? null,
+    quadrant: findings.audio.quadrant,
+    emotion: findings.lyrics.lineCount > 0 ? findings.lyrics.emotion.label : null,
+    energy: 0.7 * MOOD_ENERGY[mood.mood] + 0.3 * mood.meanEnergy,
+    brightness: mood.brightness,
+    seed,
+    hueOverride,
+    mono,
+    looks,
+    imageHue: (findings.imagery[0]?.weight ?? 0) >= 2 ? findings.imagery[0].family.hues[0] : null,
+  });
+  const entries = t.entries;
   const at = (i: number) => entries[Math.min(i, entries.length - 1)].hex;
-  return { entries, bg: at(0), primary: at(1), accent: at(2), lyric: at(3), highlight: at(4), bg2: at(5) };
+  return { entries, bg: at(0), primary: at(1), accent: at(2), lyric: at(3), highlight: at(4), bg2: at(5), family: t.family, words: t.words };
 }
 
 function makeTypography(mood: Mood, seed: number, imagery: ImageryHit[], findings?: Findings): DesignPlan["keyVisual"]["typography"] {
@@ -492,21 +495,22 @@ function baseLyrics(s: StructSection, ordinal: number, ctx: SectionPlanCtx, avgU
   }
 }
 
+/**
+ * A section's colourway [ground, uPri, uAcc]. Round 28 (N2): the subject keeps one hue for the whole
+ * song — uPri is the palette's primary in every section — and what moves is the ground and the accent
+ * (the folk moon used to turn green, then blue, then tan with the sections).
+ */
 function colorwayFor(kind: SectionKind, last: boolean, p: Palette): [string, string, string] {
   switch (kind) {
     case "chorus":
-      return [last ? p.bg2 : p.bg, p.accent, p.highlight];
+      return [last ? p.bg2 : p.bg, p.primary, p.accent];
     case "bridge":
     case "breakdown":
-      return [p.bg2, p.highlight, p.primary];
+      return [p.bg2, p.primary, p.highlight];
     case "solo":
-      return [p.bg2, p.accent, p.primary];
-    case "intro":
-    case "outro":
-    case "interlude":
-      return [p.bg, p.primary, p.highlight];
+      return [p.bg2, p.primary, p.accent];
     default:
-      return [p.bg, p.primary, p.accent];
+      return [p.bg, p.primary, p.highlight];
   }
 }
 
@@ -621,7 +625,11 @@ function sectionRationale(ctx: SectionPlanCtx, list: readonly SectionDesign[], i
       const words = hidden ? "這段不放歌詞，讓光與節拍帶動全場" : heavy ? "字句沉重，歌詞小而安靜，不邀全場合唱，讓畫面的象徵說話" : phrase ? `「${phrase}」放大成畫面的主角，邀請全場合唱` : `${n} 句歌詞${first ? `（從「${first}」起）` : ""}放大成畫面的主角`;
       const total = list.filter((x) => x.kind === "chorus").length;
       const ordinal = list.slice(0, i).filter((x) => x.kind === "chorus").length;
-      if (!earlier) return prog ? `第一次副歌（${move}）：「${sc}」放大到越出畫面、整面牆打開，${words}。` : `第一次副歌（${move}）：「${sc}」打開整面牆，${words}。`;
+      if (!earlier) {
+        // round 28 (m5): a non-repeating climax line is a 高潮, not the 「第一次副歌」
+        const first1 = d.label === "高潮" ? "整首最強烈的一句" : d.label.startsWith(UNSUNG_CHORUS) ? "第一個高潮" : "第一次副歌";
+        return prog ? `${first1}（${move}）：「${sc}」放大到越出畫面、整面牆打開，${words}。` : `${first1}（${move}）：「${sc}」打開整面牆，${words}。`;
+      }
       const climb = prog
         ? `「${sc}」比${earlier.label}更大、層次更多`
         : earlier.scene === d.scene
@@ -652,8 +660,9 @@ function sectionRationale(ctx: SectionPlanCtx, list: readonly SectionDesign[], i
   }
 }
 
-function sectionLabel(kind: SectionKind, n: number, total: number): string {
-  const base = SECTION_KIND_LABELS[kind];
+function sectionLabel(kind: SectionKind, n: number, total: number, sung = true, climax = false): string {
+  // round 28 (m4/m5): no singing → 「高潮／展開」; a non-repeating climax line is 「高潮」, not a repeated 「副歌」
+  const base = kind === "chorus" && !sung ? UNSUNG_CHORUS : kind === "chorus" && climax ? "高潮" : SECTION_KIND_LABELS[kind];
   if (total <= 1) return base;
   const nums = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
   return `${base}${nums[n] ?? String(n + 1)}`;
@@ -687,7 +696,7 @@ function buildSections(ctx: SectionPlanCtx): SectionDesign[] {
       id: `s${i}`,
       kind: s.kind,
       // round 24 (m10): a silent or too-short file is one picture, not a 「主歌」
-      label: st.sections.length === 1 && (st.silent || st.duration < SHORT_SONG_SECONDS) ? "全曲" : sectionLabel(s.kind, ordinal, total),
+      label: st.sections.length === 1 && (st.silent || st.duration < SHORT_SONG_SECONDS) ? "全曲" : sectionLabel(s.kind, ordinal, total, st.lines.length > 0, !!s.climax),
       start: s.start,
       end: s.end,
       energy: e,
@@ -761,14 +770,16 @@ function buildLines(ctx: SectionPlanCtx, sections: SectionDesign[]): LineDesign[
 
 function arcDescription(st: SongStructure): string {
   const parts: string[] = [];
+  // round 28 (m4/m5): no singing → 高潮; a non-repeating climax line is a 高潮 too
+  const kindName = (s: StructSection) => (s.kind === "chorus" && (s.climax || st.lines.length === 0) ? "高潮" : SECTION_KIND_LABELS[s.kind]);
   let peak = st.sections[0];
   for (const s of st.sections) if (s.energy > peak.energy) peak = s;
   st.sections.forEach((s, i) => {
     const prev = st.sections[i - 1];
     const t = formatTimeShort(s.start);
-    if (i === 0) parts.push(`${t} ${SECTION_KIND_LABELS[s.kind]}（能量 ${s.energy.toFixed(2)}）`);
+    if (i === 0) parts.push(`${t} ${kindName(s)}（能量 ${s.energy.toFixed(2)}）`);
     else if (s === peak && !st.flat) parts.push(`${t} 最高點（${s.energy.toFixed(2)}）`);
-    else if (prev && s.energy - prev.energy >= 0.25) parts.push(`${t} 衝上${SECTION_KIND_LABELS[s.kind]}（${s.energy.toFixed(2)}）`);
+    else if (prev && s.energy - prev.energy >= 0.25) parts.push(`${t} 衝上${kindName(s)}（${s.energy.toFixed(2)}）`);
     else if (prev && prev.energy - s.energy >= 0.25) parts.push(`${t} 回落（${s.energy.toFixed(2)}）`);
   });
   const end = st.sections[st.sections.length - 1];
@@ -787,6 +798,8 @@ function arcStory(sections: readonly SectionDesign[], flat: boolean, phrase: str
   const label = (s: SectionDesign) => `${s.label}「${name(s)}」`;
   const choruses = sections.filter((s) => s.kind === "chorus");
   const parts: string[] = [];
+  // round 28 (m4/m5): an unsung song has a 高潮, not a 副歌; a non-repeating climax line says so
+  const W = choruses.length && choruses.every((c) => c.label.startsWith(UNSUNG_CHORUS)) ? "高潮" : "副歌";
   if (choruses.length >= 2) {
     const a = choruses[0];
     const z = choruses[choruses.length - 1];
@@ -796,10 +809,11 @@ function arcStory(sections: readonly SectionDesign[], flat: boolean, phrase: str
     const softer = z.sceneParams.intensity < a.sceneParams.intensity - 0.01;
     const climb = program ? "一次比一次更大、越出畫面" : brighter && faster ? "一次比一次更亮、更快" : brighter ? "一次比一次更亮" : softer ? "最後一次反而收著唱" : "每一次都一樣滿";
     const sung = phrase ? `，「${phrase}」${softer ? "最後輕輕唱" : "每次都更大"}` : "";
-    parts.push(same ? `${choruses.length} 次副歌都是「${name(a)}」，${climb}${sung}` : `副歌從${choruses.map(label).join("到")}，${climb}${sung}`);
+    parts.push(same ? `${choruses.length} 次${W}都是「${name(a)}」，${climb}${sung}` : `${W}從${choruses.map(label).join("到")}，${climb}${sung}`);
   } else if (choruses.length === 1) {
     const peak = sections.reduce((p, s) => (s.energy > p.energy ? s : p), sections[0]);
-    parts.push(peak === choruses[0] || flat ? `只有一次副歌，${label(choruses[0])}是全曲最亮的一段` : `只有一次副歌（${label(choruses[0])}），最亮的反而是${label(peak)}`);
+    if (choruses[0].label.startsWith("高潮") && !choruses[0].label.startsWith(UNSUNG_CHORUS)) parts.push(`沒有重複的副歌，最強烈的一句落在${label(choruses[0])}，光到那裡才長到最大`);
+    else parts.push(peak === choruses[0] || flat ? `只有一次${W}，${label(choruses[0])}是全曲最亮的一段` : `只有一次${W}（${label(choruses[0])}），最亮的反而是${label(peak)}`);
   } else if (!flat) {
     const peak = sections.reduce((p, s) => (s.energy > p.energy ? s : p), sections[0]);
     parts.push(`沒有重複的副歌，最亮的是${label(peak)}`);
@@ -940,6 +954,8 @@ export interface OfflineOptions {
   hue?: number;
   /** monochrome palette */
   mono?: boolean;
+  /** round 28: the composer checks its own picture (default: on in production, off in the unit tests) */
+  check?: boolean;
 }
 
 export interface OfflineContext {
@@ -983,7 +999,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
   const moodboard = combinedMood(input.moodboard, input.collected);
   const collectedColours = (input.collected ?? []).some((c) => c.stats?.palette.length);
   const fromMood = !fromBible && options.hue == null && !options.mono ? moodPalette(moodboard) : null;
-  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, imagery, options.hue, options.mono, hints, input.recentLooks);
+  const palette: Palette = fromBible ?? fromMood ?? makePalette(seed, mood, findings, options.hue, options.mono, input.recentLooks);
   let loudestLyricIndex = -1;
   st.sections.forEach((s, i) => {
     if (s.lineIds.length && (loudestLyricIndex < 0 || s.energy > st.sections[loudestLyricIndex].energy)) loudestLyricIndex = i;
@@ -1099,7 +1115,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
     typeSystem,
   };
   // 專屬畫面: the offline composer's program (form from the findings, the rest from the seed)
-  plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings);
+  plan.sceneProgram = offlineSceneProgram(input, plan, 0, findings, { check: options.check });
   // round 24 (N4): the wall is the program — the rationale, cues and notes name what it draws
   sayWhatTheWallShows(ctx, plan, input, title, st.lines.length ? typeSystem : undefined);
   // round 24 (N9): the concept leads with one clear sentence about the wall and the words it serves
@@ -1109,6 +1125,7 @@ export function offlineDesign(input: DesignerInput, options: OfflineOptions = {}
       recipe: plan.sceneProgram.recipe,
       chorusCount: plan.sections.filter((s) => s.kind === "chorus").length,
       builds: plan.sections.some((s, i) => isBuildSection(plan.sections, i)),
+      climaxOnly: st.sections.some((s) => s.climax),
     };
     plan.keyVisual = { ...plan.keyVisual, concept: wallConcept(conceptCtx, skeleton, facts) + extras };
   }

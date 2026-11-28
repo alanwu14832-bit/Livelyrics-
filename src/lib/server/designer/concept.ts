@@ -9,6 +9,7 @@
 import { formatTimeShort } from "@/lib/timeline";
 import { artistKindLabel } from "@/lib/server/research/musicbrainz";
 import type { PaletteEntry } from "./palette";
+import { paletteWords } from "./palette-targets";
 import type { Findings } from "./findings";
 import { MOOD_VOCABULARY } from "./lexicon/moods";
 import type { SongStructure } from "./structure";
@@ -102,13 +103,17 @@ function factSentence(c: ConceptContext, variant: number): string {
   const who = latinPad(c.artist || "這個樂團");
   const kind = artistKindLabel(a?.type);
   const where = a ? artistWhere(a) : "";
+  // round 28 (N2/m2): what the palette really is — colour words derived from the built OKLCH values, never a
+  // promised template — and no claim that the band's own visual grammar was found: the genre's convention is the genre's
+  const built = paletteWords(c.palette);
+  const colours = built ? `配色用${built}` : "";
   switch (variant % 3) {
     case 0:
-      return `公開資料說${who}是${where}${g.label}${kind}，所以配色從${g.label}的底色出發：${g.palette.note}。`;
+      return `公開資料說${who}是${where}${g.label}${kind}，所以配色從${g.label}出發${colours ? `：${built}` : ""}。`;
     case 1:
-      return `${who}是${where}${g.label}${kind}（${f.genres[0]?.evidence[0] ?? "公開資料"}）：${g.why}`;
+      return `${who}是${where}${g.label}${kind}（${f.genres[0]?.evidence[0] ?? "公開資料"}）：${g.why}${colours ? `${colours}。` : ""}`;
     default:
-      return `曲風是${g.label}——${g.palette.note}——這是${who}這個${kind}的視覺語法，我們沿用它。`;
+      return `曲風是${g.label}，${colours || "配色"}取這個曲風的慣例，不是${who}自己的視覺語法。`;
   }
 }
 
@@ -262,6 +267,8 @@ export interface WallFacts {
   chorusCount: number;
   /** the song has a section that leads into a chorus (a build) */
   builds: boolean;
+  /** round 28 (m5): nothing repeats; its one 「chorus」 is the song's most intense line (a climax, not a hook) */
+  climaxOnly?: boolean;
 }
 
 /** The thing the wall shows, in words. */
@@ -281,19 +288,28 @@ export function wallSentence(c: ConceptContext, skeleton: SkeletonId, w: WallFac
   const phrase = singalong(c);
   // the title is often the hook itself: then the chorus says 「這一句」, not the title a second time
   const hook = phrase && !hasDarkWord(phrase) ? (normalizeTitle(phrase) === normalizeTitle(c.title) ? "這一句" : quote(phrase)) : null;
-  if (skeleton === "fragment") return opening(c, skeleton);
+  if (skeleton === "fragment") {
+    // round 28 (m7): a silent or very short file has no energy to reason about; name the form that is on the wall
+    const lead = c.structure.silent ? "這個音檔幾乎沒有聲音" : `這段音檔只有 ${Math.round(c.structure.duration)} 秒，分析不可靠`;
+    return `${lead}：${T}牆上只有${thing}，安靜、單一，沒有段落、也沒有高潮；等${c.structure.silent ? "有聲音" : "完整"}的音檔上傳後再重新設計。`;
+  }
   if (skeleton === "instrumental") {
     const peak = f.audio.peakAt != null && !c.structure.flat ? `，到 ${formatTimeShort(f.audio.peakAt)} 撐滿整面牆` : "，一直加到最滿";
     return `${T}：牆上只有${thing}，沒有字，它隨著歌一層一層加上去${peak}。`;
   }
   const short = `「${w.title}」`;
-  const verse = w.builds ? "主歌時它小小地站在字的另一側，進副歌前慢慢長大" : "主歌時它小小地站在字的另一側";
+  const v = (c.seed >>> 9) % 3;
+  const small = ["小小地站在字的另一側", "退到字的另一側，只佔一角", "安靜地站在字的對面"][v];
+  const verse = w.builds ? `主歌時它${small}，進${w.climaxOnly ? "最強烈的那一句" : "副歌"}前慢慢長大` : `主歌時它${small}`;
   let chorus: string;
   if (!w.chorusCount) chorus = `唱到最亮的那一段才長到最大${hook ? `，${hook}留在畫面上` : ""}`;
+  else if (w.climaxOnly) chorus = `整首沒有重複的副歌，唱到最強烈的那一句時${short}才長到最大，不閃白、不硬切`;
   else if (skeleton === "chant") chorus = `每喊一次${hook ?? "口號"}${short}就放大一次，最後一次越出整面牆`;
   else if (skeleton === "ballad") chorus = `${hook ? `唱到${hook}` : "副歌"}${short}才慢慢漲滿畫面，整首不閃白、不硬切`;
-  else if (w.chorusCount >= 2) chorus = `副歌${hook ? `唱到${hook}` : ""}時${short}放大到越出畫面，一次比一次大`;
-  else chorus = `副歌${hook ? `唱到${hook}` : ""}時${short}打開整面牆`;
+  else if (w.chorusCount >= 2) {
+    const at = hook ? `唱到${hook}` : "";
+    chorus = [`副歌${at}時${short}放大到越出畫面，一次比一次大`, `副歌每回來一次，${short}就再長一圈，最後一次撐出畫面的邊`, `${at ? `${at}，` : ""}第一次副歌${short}打開，第二次再往外多開一層`][v];
+  } else chorus = `副歌${hook ? `唱到${hook}` : ""}時${short}打開整面牆`;
   return `${T}：牆上只有${thing}，${verse}；${chorus}。`;
 }
 

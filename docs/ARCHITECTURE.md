@@ -2025,6 +2025,52 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   label, the LED preset reads 「戶外」, the first-lyric cue is a 重點 (highlight), not a 轉場.
   m8 (2× library thumbs) is not done: the CPU frame costs ~18× at 546 px on every saved plan.
 
+### Round 28: colour comes from the song, and the app's own pictures pass its own checks
+
+- **N2 · palette targets** (`designer/palette-targets.ts`, `stage/oklch.ts`): ten colour families (punk, city pop,
+  folk, emo, pastel, steel, neon, indie, forge, velvet), each with a lightness / chroma range per role (primary =
+  the subject, accent = what moves, highlight = the third colour), a ground (L 0.10–0.20, C ≤ 0.07) and 2–3 hue
+  relationships in OKLCH (punk: red 27° / yellow 95° / blue 262°; city pop: pink 355° + cyan 205° + amber 75°;
+  folk: ochre / moss / wheat, C 0.08–0.12; emo: slate 255° at C 0.04 + one hot 25° at C 0.2; pastel: L 0.72–0.84 at
+  C 0.08–0.13…). `familyFor` takes the genre rule's family, else the lyric emotion (痛苦掙扎 → emo, 溫柔明亮 →
+  pastel, 平靜內斂 → steel), else the sound's quadrant; the song's energy walks each range, its seed picks the
+  relationship (and the library's recent looks move it off a primary family worn twice), and a strong lyric image
+  nudges the hue ≤ 12° (with no genre or emotion naming the family the image leads it). `buildTargetPalette`
+  returns the six role entries (`[背景, 主色, 點綴, 歌詞, 高光, 對比背景]`, chroma reduced to fit sRGB) and
+  `paletteWords` — colour words derived from the built OKLCH values (「鮮紅、亮黃、藍」). `PALETTE_TEACHING` is the
+  same table in ≈ 330 tokens for `DESIGN_SYSTEM` (and two lines in `SCENE_SYSTEM`: the subject keeps one hue, highlights
+  are the same pigment at full value, never `mix(c, vec3(1.0), k)`).
+- **Subject, not white** (`composer.ts`, examples): `inkOf(c)` = `c / max(rgb) * 0.92` replaces every mix toward
+  `vec3(1.0)` (sun, rings, moon, brush stroke, ridge glow, ribbons…); the brush stroke is the palette's (it was the
+  lyric ink, near-white). `colorwayFor` keeps `uPri` = the primary in every section; the ground and the accent move
+  (chorus: ground / primary / accent; verse, intro, outro, bridge: ground / primary / highlight; solo: accent) — the
+  folk moon no longer turns green, blue and tan. The probe measures `subjectL` / `subjectC` (mean OKLCH of the
+  lit samples): a subject above L 0.9 or under C 0.03 has lost the palette (`PROBE_SUBJECT_*`).
+- **The concept says what was built**: the genre sentence quotes `paletteWords(palette)` and says 「取這個曲風的慣例，
+  不是 X 自己的視覺語法」 (the false 「沿用這個樂團的視覺語法」 is gone); the verse / chorus phrasing varies with the song
+  (three each) instead of 「…放大到越出畫面，一次比一次大」 in every concept (m2).
+- **N3 · the offline composer checks its own picture** (`stage/program/self-check.ts`): `selfCheck(make, plan)`
+  renders the program with `critiqueProgram` and walks the composer's knobs (`ComposerInput.tune`: `scale`, `verse`,
+  `chorus`, `cap`, and `reroll`, another draw of the form's own parameters) by which checks failed — verse-quiet
+  → `verse` ↓ (`K_QUIET`: everything outside a chorus or build sinks toward the ground), chorus-open → `chorus` ↑
+  (`K_GROW` and a soft field `K_WASH` in the subject's colour), no-white → `cap` ↓ (`K_CAP`), words-* → `scale` ↓,
+  subject count / safe area → reroll — for at most `MAX_TRIES` (7) renders, keeping the best score. Deterministic, no
+  LLM. One exposure normalisation (`clamp(0.5 / luma(mix(uPri, uAcc, .5)), 0.8, 1.8)`) keeps a lit area from depending
+  on how bright the palette is. `offlineSceneProgram` runs it by default in production (`selfCheckConfig.enabled`; the
+  vitest setup switches it off, tests ask with `{ check: true }`), memoises the result per input, and records
+  `program.check` with `rerolls` (the console's 「畫面自我檢查」 line: 「第一版就過」 / 「第一版只通過 8／10 項，自動調整形狀 3 次
+  → …」 / 「…仍有 1 項沒達標（…），保留最接近的一版」). The instrumental composer lacked `inkOf` (its programs were never
+  measured: probe `unsupported`) — fixed. Every composer form × the 8 audit songs passes ≥ 10 of 11 checks after
+  the self-check; the five few-shot examples (retuned: `inkOf`, the `koMask` knockout, one exposure, a flood / a wash /
+  fewer bars in a verse) pass on every audit song with at most one miss (`round28.test.ts`).
+- **m3** Latin rows: a particle (「down」「up」「out」) never starts a row away from its verb, and a row never ends on
+  「where」「when」「that」「from」… (「Oh, lay me down / where the water's slow」). **m4** a song with no singing calls its
+  high sections 「高潮／展開」 (labels, notes, arc text; `section-names.ts`); no raw 「crescendo」. **m5** when nothing
+  repeats, the middle sung section with the most intense line (`estimateEmotion` per line) becomes the peak
+  (`StructSection.climax`, labelled 「高潮」; the concept says 「整首沒有重複的副歌，唱到最強烈的那一句…」). **m7** a silent
+  file's mood has no audio reasoning, and its concept names the form on the wall. m8 (2× thumbs) is not done: the
+  CPU frame costs ~18× at 546 px on every saved plan.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between

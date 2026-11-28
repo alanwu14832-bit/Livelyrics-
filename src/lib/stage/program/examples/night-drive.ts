@@ -38,6 +38,19 @@ float skyline(float x, float hz, float sx) {
   return hz + tall * cluster * (0.6 + 0.4 * uParams.y);
 }
 
+// a colour at full value (same pigment, never toward white); the line on screen gets the picture's quiet
+vec3 inkOf(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.02) * 0.92; }
+float koMask(vec2 uv) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 pad = vec2(0.022, 0.035);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
+  vec2 lo = uTypeBox.xy - pad;
+  vec2 hi = uTypeBox.zw + pad;
+  vec2 a = smoothstep(lo - fe, lo, uv);
+  vec2 b = 1.0 - smoothstep(hi, hi + fe, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
+
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
@@ -46,7 +59,7 @@ vec3 scene(vec2 fc) {
   float light = uParams.z;
   // the sun sits opposite the words
   float sx = aspect() < 0.8 ? 0.5 : (zoneCenter().x < 0.5 ? 0.7 : 0.3);
-  float r = (0.17 + 0.07 * uParams.y) * (aspect() < 0.8 ? 1.25 : 1.0);
+  float r = (0.12 + 0.12 * uParams.y) * (aspect() < 0.8 ? 1.25 : 1.0);
   vec2 hzP = toP(vec2(sx, hz));
   vec2 sc = hzP + vec2(0.0, r * (rise * 1.25 - 0.55));
   vec2 q = p - sc;
@@ -54,17 +67,17 @@ vec3 scene(vec2 fc) {
 
   // sky: deep at the top, warm towards the horizon
   float up = sat((uv.y - hz) / (1.0 - hz));
-  vec3 sky = mix(mix(uBg, uPri, 0.28 + 0.2 * light), uBg * 0.55, pow(up, 0.7));
+  vec3 sky = mix(mix(uBg, uPri, 0.18 + 0.3 * light), uBg * 0.55, pow(up, 0.7));
   vec3 col = sky;
   // stars in the high sky, gone when the sun is up
   vec2 sp = fc / min(uRes.x, uRes.y) * 180.0;
   float st = step(0.992, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5));
   col += vec3(0.8, 0.85, 1.0) * st * smoothstep(0.2, 0.7, up) * (1.0 - 0.8 * light) * (0.6 + 0.4 * sin(uClock * 1.3 + hash12(floor(sp)) * 20.0));
   // haze around the sun
-  col += mix(uPri, uAcc, 0.5) * exp(-d * (5.0 - 2.0 * light)) * (0.18 + 0.4 * light + 0.12 * kick());
+  col += mix(uPri, uAcc, 0.5) * exp(-d * (5.0 - 2.0 * light)) * (0.18 + 0.4 * light + 0.25 * step(1.5, uMode) * (1.0 - step(2.5, uMode)) + 0.12 * kick());
 
   // the sun: a vertical gradient disc, slit by bands in its lower half (bridge: an eclipse ring)
-  vec3 sunTop = mix(uAcc, vec3(1.0), 0.35);
+  vec3 sunTop = mix(uAcc, inkOf(uAcc), 0.7);
   vec3 sunBot = mix(uPri, uAcc, 0.25);
   float ny = q.y / r;
   vec3 sun = mix(sunBot, sunTop, smoothstep(-1.0, 0.9, ny));
@@ -103,12 +116,17 @@ vec3 scene(vec2 fc) {
     col = sea;
   }
   // a thin line of light on the horizon
-  col += mix(uAcc, vec3(1.0), 0.3) * exp(-abs(uv.y - hz) * uRes.y * 0.35) * (0.25 + 0.5 * light);
+  col += mix(uAcc, inkOf(uAcc), 0.7) * exp(-abs(uv.y - hz) * uRes.y * 0.35) * (0.25 + 0.5 * light);
 
   // light behind the words when the sun lights them
   if (uRelation > 2.5) col += mix(uPri, uAcc, 0.6) * typeGlow(uv, 0.018) * 0.16;
 
   // print grain and a soft vignette
+  // one exposure for every palette: a dim palette (a slate) is lifted and a pastel is held back, so the
+  // lit area of a state does not depend on how bright the song's colours happen to be
+  col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.75, 2.0));
+  // the words come first: under the line on screen the picture settles into the ground, feathered
+  col = mix(col, mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2), koMask(uv) * 0.9);
   vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
   col *= mix(0.72, 1.0, smoothstep(1.1, 0.3, length(vq)));
   col += grain(fc, 0.03) * (0.4 + luma(col));

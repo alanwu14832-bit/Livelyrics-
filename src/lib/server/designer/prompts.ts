@@ -23,6 +23,7 @@ import { LYRIC_POLICY_INFO, bibleHasContent } from "@/lib/band";
 import { ARC_ROLE_INFO, PALETTE_EMPHASIS_INFO } from "@/lib/show";
 import type { Asset, BandBible, DesignPlan, Research, SongArcDirective, SongMeta } from "@/lib/types";
 import { formatTimeShort } from "@/lib/timeline";
+import { PALETTE_TEACHING } from "./palette-targets";
 import { FONT_CATALOG, LYRIC_PLACEMENTS_INFO, LYRIC_STYLES, MEDIA_BLEND_INFO, MEDIA_TREATMENT_INFO, SCENES, SECTION_KIND_LABELS, TRANSITIONS } from "./catalog";
 import { findImagery } from "./imagery";
 import { quotableWords } from "./lyric-analysis";
@@ -376,6 +377,7 @@ ${typeCatalogBlock()}
 - 所有給人看的文字都用繁體中文。
 - sections 依時間排序、id 依序為 s0、s1…；第一段從 0 開始、最後一段在歌曲長度 duration 結束，前一段的 end 等於下一段的 start，不可有空隙或重疊。段落邊界對齊提供的音訊段落推測與歌詞結構（重複出現的句子群通常是副歌）；每段至少約 4 秒。label 用「主歌一」「副歌二」這類好懂的名稱。
 - palette 4–6 色、色碼一律小寫 6 碼 #rrggbb；第一色是最深的背景色，並至少包含一個給歌詞用的高對比亮色。每段的 colorway 恰好 3 色、取自 palette：[背景, 主色, 點綴]。
+${PALETTE_TEACHING}
 - sceneParams 與 energy 是 0–1；lyricScale 是 0.6–1.8（1 是預設可讀大小）；typography.letterSpacing 以 em 為單位，約 -0.02 到 0.2。
 - lines 只放需要特別處理的歌詞行（hook 的強調字、改成 impact 的口號、關鍵意象字）。lineId 必須是提供的歌詞 id；emphasis 必須是該行歌詞中逐字相同的片段。
 - typeSystem.lines 要涵蓋每一行有字的歌詞（完全相同的重複句可以省略）；seed 是 0–999 的整數；typeSystem.fonts.cjk 必須是 CJK 字體、fonts.latin 必須是拉丁字體；weight 600–900；seal 是 1–4 個字（書法與水墨的印章，例如樂團名的一兩個字），不用就空字串。保持精簡：rationale 一兩句就好。

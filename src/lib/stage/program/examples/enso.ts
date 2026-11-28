@@ -45,6 +45,19 @@ float ensoStroke(vec2 p, vec2 c, float r, float a0, float sweep, float wide) {
   return body * dry * drawn * tip;
 }
 
+// a colour at full value (same pigment, never toward white); the line on screen gets the picture's quiet
+vec3 inkOf(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.02) * 0.92; }
+float koMask(vec2 uv) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 pad = vec2(0.022, 0.035);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
+  vec2 lo = uTypeBox.xy - pad;
+  vec2 hi = uTypeBox.zw + pad;
+  vec2 a = smoothstep(lo - fe, lo, uv);
+  vec2 b = 1.0 - smoothstep(hi, hi + fe, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
+
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
@@ -90,7 +103,7 @@ vec3 scene(vec2 fc) {
     }
     ink = ring * 0.8;
   } else {
-    ink = ensoStroke(p, c, r, 1.9 + uSeed * 0.001, sweep, 0.1 + 0.05 * uParams.y);
+    ink = ensoStroke(p, c, r, 1.9 + uSeed * 0.001, sweep, (0.1 + 0.05 * uParams.y) * (1.0 + 1.1 * step(1.5, uMode)));
     // a few round droplets thrown off where the brush landed (the chorus is written harder)
     vec2 g = (p - c) * 22.0;
     vec2 cell = floor(g);
@@ -100,8 +113,10 @@ vec3 scene(vec2 fc) {
     float nearStart = smoothstep(r * 0.55, 0.0, length(p - c - r * vec2(cos(1.9), sin(1.9))));
     ink = max(ink, drop * nearStart * step(0.5, uParams.y) * 0.85);
   }
-  vec3 inkC = mix(uInk, vec3(1.0), 0.1) * (0.82 + 0.18 * uParams.z);
+  vec3 inkC = inkOf(mix(uPri, uAcc, 0.3)) * (0.82 + 0.18 * uParams.z);
   col = mix(col, inkC, ink);
+  // the chorus: the ink soaks the paper around the circle (a wash of the subject's own colour)
+  col += mix(uPri, uAcc, 0.3) * exp(-abs(length(p - c) - r * 0.8) * 3.2) * 0.26 * step(1.5, uMode) * (1.0 - step(2.5, uMode));
 
   // the vermilion sun (a seal of light), small, inside or beside the circle
   vec2 sunP = c + vec2(r * 0.52, -r * 0.34) * (1.0 - closeUp) + vec2(r * 0.62, r * 0.55) * closeUp;
@@ -110,6 +125,11 @@ vec3 scene(vec2 fc) {
   col = mix(col, uAcc, fill(sd - sunR) * (0.85 + 0.15 * uParams.z));
   col += uAcc * exp(-sd * 22.0) * 0.12 * uParams.z;
 
+  // one exposure for every palette: a dim palette (a slate) is lifted and a pastel is held back, so the
+  // lit area of a state does not depend on how bright the song's colours happen to be
+  col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.75, 2.0));
+  // the words come first: under the line on screen the picture settles into the ground, feathered
+  col = mix(col, mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2), koMask(uv) * 0.9);
   vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
   col *= mix(0.78, 1.0, smoothstep(1.2, 0.35, length(vq)));
   col += grain(fc, 0.05) * (0.3 + luma(col));
