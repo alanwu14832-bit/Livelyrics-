@@ -142,6 +142,8 @@ const DISC = `vec3 scene(vec2 fc) {
   float d = sdCircle(p, uParams.x * 0.6);
   vec3 col = uBg * 0.6;
   col = mix(col, vec3(0.62, 0.55, 0.5), fill(d));
+  // round 27: the grown disc settles under the words on screen
+  col = mix(col, uBg * 0.6, wordsMask(fc / uRes, 0.05));
   return col;
 }`;
 

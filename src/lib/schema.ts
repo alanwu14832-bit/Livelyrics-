@@ -421,6 +421,9 @@ export const SceneProgramCheckSchema = z.object({
       focus: z.number(),
       cx: z.number().nullable(),
       cy: z.number().nullable(),
+      /** round 27: lit fraction / edge density behind the words (older checks lack them) */
+      boxLit: z.number().optional(),
+      boxEdge: z.number().optional(),
     }),
   ),
   /** a critique turn was sent to Claude */

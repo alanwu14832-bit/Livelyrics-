@@ -25,6 +25,14 @@ export const CRITIQUE_TARGETS = {
   safe: 0.05,
   /** nothing on the wall is pushed to white: at most this fraction of a state above PROBE_WHITE (a highlight, not an area) */
   whiteMax: 0.03,
+  /**
+   * Round 27 (N1/N6): behind the words (the padded text box, the words on screen) at most this fraction
+   * lit above PROBE_BOX_LIT — calibrated on the audit: threads 11–22 %, pillars 15–21 %, the folk moon
+   * in the chorus poster band 10–16 %, demo's last-chorus rings 7 %; city pop's sun 0 %…
+   */
+  boxLitMax: 0.06,
+  /** …and at most this fraction of neighbouring samples an edge (threads 0.20–0.26, rings 0.09–0.12; the sun 0.01–0.03) */
+  boxEdgeMax: 0.06,
 } as const;
 
 const STATE_LABEL: Record<CheckState, string> = { verse: "主歌", build: "漸強", chorus: "副歌", "last-chorus": "最後副歌" };
@@ -93,6 +101,11 @@ export function critiqueProgram(program: SceneProgram, plan: Pick<DesignPlan, "s
   }
   if (chorus && last) add("last-grows", last.cover >= chorus.cover - 0.02 && last.cover <= T.lastChorusMax, `最後副歌 ${pct(last.cover)}，第一次副歌 ${pct(chorus.cover)}（目標：不比第一次小，上限 ${pct(T.lastChorusMax)}）`, last.cover < chorus.cover ? "最後一次副歌要比第一次更大" : "最後一次副歌的亮部收一點", (chorus.cover - last.cover) / Math.max(0.05, chorus.cover));
   if (build && verse) add("build-rises", build.cover >= verse.cover - 0.01, `漸強 ${pct(build.cover)}，主歌 ${pct(verse.cover)}（目標：漸強不比主歌暗）`, "漸強段讓形狀開始長大", (verse.cover - build.cover) / Math.max(0.05, verse.cover));
+  // round 27: nothing fights the words — the box behind them stays dark and calm in every arc state
+  const boxLit = states.reduce((m, { state, s }) => ((s.boxLit ?? 0) > m.v ? { v: s.boxLit ?? 0, at: state } : m), { v: 0, at: "verse" as CheckState });
+  const boxEdge = states.reduce((m, { state, s }) => ((s.boxEdge ?? 0) > m.v ? { v: s.boxEdge ?? 0, at: state } : m), { v: 0, at: "verse" as CheckState });
+  add("words-dark", boxLit.v <= T.boxLitMax, `字後面亮的面積最多 ${pct(boxLit.v)}（${STATE_LABEL[boxLit.at]}；目標 ≤ ${pct(T.boxLitMax)}）`, "形狀長大越過字的位置時，用 wordsMask(uv, 0.05) 把它在字的周圍淡出到背景色（羽化），不要讓亮部壓在字上", (boxLit.v - T.boxLitMax) / T.boxLitMax);
+  add("words-calm", boxEdge.v <= T.boxEdgeMax, `字後面的線條／邊緣密度最多 ${pct(boxEdge.v)}（${STATE_LABEL[boxEdge.at]}；目標 ≤ ${pct(T.boxEdgeMax)}）`, "字的周圍不要有細條紋、圓環或形狀的邊緣穿過；用 wordsMask 讓它們在字後面消失", (boxEdge.v - T.boxEdgeMax) / T.boxEdgeMax);
   const whiteArea = Math.max(0, ...probe.samples.map((s) => s.white ?? 0));
   const maxMean = Math.max(0, ...probe.samples.map((s) => s.mean));
   add("no-white", whiteArea <= T.whiteMax && maxMean <= PROBE_MEAN_MAX, `接近白色的面積 ${pct(whiteArea)}、最亮的段落平均亮度 ${maxMean.toFixed(2)}（目標 ≤ ${pct(T.whiteMax)}、≤ ${PROBE_MEAN_MAX}）`, "最亮處也要是 uPri／uAcc 的顏色，用 mix 疊色，不要一路相加推到白", (whiteArea - T.whiteMax) * 10 + Math.max(0, maxMean - PROBE_MEAN_MAX) * 5);
@@ -105,7 +118,7 @@ export function critiqueProgram(program: SceneProgram, plan: Pick<DesignPlan, "s
       passed,
       total: checks.length,
       checks,
-      states: states.map(({ state, s }) => ({ state, sectionId: s.sectionId, cover: r3(s.cover), mean: r3(s.mean), max: r3(s.max ?? 0), subjects: s.subjects ?? 0, focus: r3(s.focus ?? 0), cx: s.cx, cy: s.cy ?? null })),
+      states: states.map(({ state, s }) => ({ state, sectionId: s.sectionId, cover: r3(s.cover), mean: r3(s.mean), max: r3(s.max ?? 0), subjects: s.subjects ?? 0, focus: r3(s.focus ?? 0), cx: s.cx, cy: s.cy ?? null, boxLit: r3(s.boxLit ?? 0), boxEdge: r3(s.boxEdge ?? 0) })),
     },
     score: r3(passed * 10 - miss),
     failed,
@@ -114,7 +127,7 @@ export function critiqueProgram(program: SceneProgram, plan: Pick<DesignPlan, "s
 
 /** The critique as the follow-up turn's prompt block (the numbers per state and the failed checks). */
 export function critiqueBlock(c: SceneCritique): string {
-  const rows = c.check.states.map((s) => `- ${STATE_LABEL[s.state]}（${s.sectionId}）：亮的面積 ${pct(s.cover)}，平均亮度 ${s.mean.toFixed(2)}，最亮 ${s.max.toFixed(2)}，亮的形狀 ${s.subjects} 個（最大佔 ${pct(s.focus)}），中心 ${s.cx == null ? "—" : `(${s.cx.toFixed(2)}, ${(s.cy ?? 0.5).toFixed(2)})`}`);
+  const rows = c.check.states.map((s) => `- ${STATE_LABEL[s.state]}（${s.sectionId}）：亮的面積 ${pct(s.cover)}，平均亮度 ${s.mean.toFixed(2)}，最亮 ${s.max.toFixed(2)}，亮的形狀 ${s.subjects} 個（最大佔 ${pct(s.focus)}），中心 ${s.cx == null ? "—" : `(${s.cx.toFixed(2)}, ${(s.cy ?? 0.5).toFixed(2)})`}，字後面亮 ${pct(s.boxLit ?? 0)}、邊緣 ${pct(s.boxEdge ?? 0)}`);
   return [`在伺服器上把你的程式渲染出來量到的結果（通過 ${c.check.passed}／${c.check.total} 項）：`, ...rows, "", "沒有達標的項目：", ...c.failed.map((f) => `- ${f}`)].join("\n");
 }
 
