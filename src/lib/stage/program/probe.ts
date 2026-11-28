@@ -68,7 +68,33 @@ export interface ProbeSample {
   nan?: number;
   /** round 25: fraction of samples pushed to (near) white — sRGB luma above PROBE_WHITE */
   white?: number;
+  /**
+   * Round 27 (N1/N6): what the eye sees behind the words. With the words on screen (uTypeBox over the
+   * text box, uTypeAmt 1 — the program's wordsMask clears what it clears), sampled on a finer grid
+   * inside the padded box: the fraction of it lit above PROBE_BOX_LIT (light ink loses contrast there)…
+   */
+  boxLit?: number;
+  /** …and how busy it is: the fraction of neighbouring sample pairs whose luma differs by more than PROBE_EDGE */
+  boxEdge?: number;
 }
+
+/**
+ * Round 27: the text boxes a state is measured in — the section's zone, and in a chorus (where a line
+ * that cannot reach its floor becomes a poster across the readable width, type/compose.ts) the band
+ * x 0.06–0.94 at the zone's height. uv, y up: [x0, y0, x1, y1].
+ */
+export function textBoxes(zone: readonly number[], kind: string): Array<[number, number, number, number]> {
+  const z: [number, number, number, number] = [zone[0], zone[1], zone[2], zone[3]];
+  return kind === "chorus" ? [z, [0.06, zone[1], 0.94, zone[3]]] : [z];
+}
+/** Round 27: behind light ink, picture above this sRGB luma costs the line its contrast (≈ 4.5:1 against ink at 0.9). */
+export const PROBE_BOX_LIT = 0.4;
+/** Round 27: a luma step between neighbouring box samples that reads as an edge (a stripe, a ring, a disc's rim). */
+export const PROBE_EDGE = 0.12;
+/** Round 27: the sample grid inside a text box (finer than the frame grid: thin stripes must be seen). */
+export const PROBE_BOX_GRID: [number, number] = [28, 16];
+/** Round 27: the box is padded by this much (uv) on every side, as the type layer's glow and pocket reach. */
+export const PROBE_BOX_PAD = 0.02;
 
 /** Round 25: what reads as white on the wall (sRGB luma); a highlight may touch it, an area may not. */
 export const PROBE_WHITE = 0.95;
@@ -273,6 +299,43 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
           }
         }
       }
+      // round 27: the text boxes with the words on screen — lit and busy picture behind the words
+      let boxLit = 0;
+      let boxEdge = 0;
+      for (const tb of textBoxes(u.uZone, kind)) {
+        compiled.setUniforms({ ...u, uTypeBox: tb, uTypeAmt: 1 });
+        const [bc, br] = PROBE_BOX_GRID;
+        const x0 = Math.max(0, tb[0] - PROBE_BOX_PAD);
+        const y0 = Math.max(0, tb[1] - PROBE_BOX_PAD);
+        const x1 = Math.min(1, tb[2] + PROBE_BOX_PAD);
+        const y1 = Math.min(1, tb[3] + PROBE_BOX_PAD);
+        if (x1 <= x0 || y1 <= y0) continue;
+        const L = new Float64Array(bc * br);
+        let litN = 0;
+        for (let j = 0; j < br; j++)
+          for (let i = 0; i < bc; i++) {
+            const raw = luma(compiled.scene([(x0 + ((i + 0.5) / bc) * (x1 - x0)) * res[0], (y0 + ((j + 0.5) / br) * (y1 - y0)) * res[1]]).color);
+            const l = Number.isFinite(raw) ? raw : 0;
+            L[j * bc + i] = l;
+            if (l > PROBE_BOX_LIT) litN++;
+          }
+        let edges = 0;
+        let pairs = 0;
+        for (let j = 0; j < br; j++)
+          for (let i = 0; i < bc; i++) {
+            const l = L[j * bc + i];
+            if (i + 1 < bc) {
+              pairs++;
+              if (Math.abs(L[j * bc + i + 1] - l) > PROBE_EDGE) edges++;
+            }
+            if (j + 1 < br) {
+              pairs++;
+              if (Math.abs(L[(j + 1) * bc + i] - l) > PROBE_EDGE) edges++;
+            }
+          }
+        boxLit = Math.max(boxLit, litN / (bc * br));
+        boxEdge = Math.max(boxEdge, pairs ? edges / pairs : 0);
+      }
       // the same state with the words on screen: the type box over the zone, measured around it
       const box = u.uZone;
       compiled.setUniforms({ ...u, uTypeBox: box, uTypeAmt: 1 });
@@ -290,7 +353,7 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       }
       compiled.setUniforms(u);
       const r3 = (x: number) => Math.round(x * 1000) / 1000;
-      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null, cy: cover ? r3(cySum / cover) : null, max: r3(max), ...((({ subjects, focus }) => ({ subjects, focus: r3(focus) }))(litShapes(mask, cols, rows))), nan, white: r3(white / n) };
+      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null, cy: cover ? r3(cySum / cover) : null, max: r3(max), ...((({ subjects, focus }) => ({ subjects, focus: r3(focus) }))(litShapes(mask, cols, rows))), nan, white: r3(white / n), boxLit: r3(boxLit), boxEdge: r3(boxEdge) };
       seen.set(sig, sample);
       samples.push(sample);
     });

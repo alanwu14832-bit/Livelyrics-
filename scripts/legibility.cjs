@@ -10,7 +10,8 @@
 // contrast of the median glyph pixel against the 90th-percentile picture pixel in a ring 3 px – 1.2 %
 // of the short side around the glyphs (light ink; the 10th percentile for dark ink). `region`
 // ({ x0, y0, x1, y1 } fractions of the frame, y down) restricts the glyphs to that box (the display
-// word). Returns { ratio, ink, ring, glyphs, ringPx, decor, dark }. Runs in the page (a 2D canvas
+// word); `textBox` (round 27) adds boxLit / boxEdge, the picture behind the glyphs. Returns { ratio, ink,
+// ring, glyphs, ringPx, decor, dark, boxLit, boxEdge }. Runs in the page (a 2D canvas
 // decodes the PNGs), so it needs no dependency.
 //
 // As a script (round 10, B3): checks every sung line of the given projects (every project of the
@@ -29,10 +30,24 @@ const PROBE_PROGRAM = "vec3 scene(vec2 fc) {\n  return vec3(0.5);\n}\n";
 /** What every readable line must meet, and what a display word must meet (scenes/legibility.ts LEGIBLE_MIN / DISPLAY_MIN). */
 const LINE_MIN = 4.5;
 const DISPLAY_MIN = 7;
+/**
+ * Round 27 (N1/N6): behind the words. The contrast ring only sees a small pocket next to the glyphs, so
+ * a frame striped by threads or rings through the letters still passed. Inside the type box (padded by
+ * BOX_PAD; the glyphs' own bounding box from the probe), excluding the glyphs and the type's own decoration: picture lit against light ink (sRGB
+ * luma > BOX_LIT) may cover at most BOX_LIT_MAX of it, and at most BOX_EDGE_MAX of neighbouring cells
+ * may step by more than BOX_EDGE (busyness). Calibrated on the round-26 audit frames: the emo chorus
+ * under threads, the demo's last chorus (rings through the vertical line) and folk 「Oh,」 over the moon
+ * fail; city pop's chorus passes.
+ */
+const BOX_LIT = 0.4;
+const BOX_EDGE = 0.12;
+const BOX_PAD = 0.02;
+const BOX_LIT_MAX = 0.05;
+const BOX_EDGE_MAX = 0.05;
 
-async function measureContrast(page, frame, probe, region = null) {
+async function measureContrast(page, frame, probe, region = null, textBox = false) {
   return page.evaluate(
-    async ({ a, b, region }) => {
+    async ({ a, b, region, textBox, BOX }) => {
       const load = (src) =>
         new Promise((res, rej) => {
           const im = new Image();
@@ -143,9 +158,73 @@ async function measureContrast(page, frame, probe, region = null) {
       const g = gl[Math.floor(gl.length / 2)];
       const ring = ringL.length ? ringL[Math.floor(ringL.length * (lightInk ? 0.9 : 0.1))] : 0;
       const ratio = (Math.max(g, ring) + 0.05) / (Math.min(g, ring) + 0.05);
-      return { ratio, ink: g, ring, glyphs: gl.length, ringPx: ringL.length, decor: decorN, dark: !lightInk };
+      // round 27: what the eye sees behind the words — inside the padded type box, the picture pixels
+      // (not glyphs, their antialiased edge or the type's own decoration): the fraction lit against the
+      // ink (sRGB luma above BOX.lit for light ink, below 1 − BOX.lit for dark ink), and how busy it is
+      // (cells of ~1 % of the short side; the fraction of neighbouring cells whose mean luma steps by
+      // more than BOX.edge — a stripe, a ring, a disc's rim)
+      // the box is the glyphs' own bounding box (the probe's readable letters; the type layer's
+      // data-bounds also hold its ornaments and reach far past the words)
+      let boxLit = null;
+      let boxEdge = null;
+      if (textBox) {
+        let gx0 = W;
+        let gy0 = H;
+        let gx1 = -1;
+        let gy1 = -1;
+        for (let p = 0; p < N; p++) {
+          if (!glyph[p]) continue;
+          const x = p % W;
+          const y = (p - x) / W;
+          if (x < gx0) gx0 = x;
+          if (x > gx1) gx1 = x;
+          if (y < gy0) gy0 = y;
+          if (y > gy1) gy1 = y;
+        }
+        const bx0 = Math.max(0, Math.floor(gx0 - BOX.pad * W));
+        const by0 = Math.max(0, Math.floor(gy0 - BOX.pad * H));
+        const bx1 = Math.min(W, Math.ceil(gx1 + 1 + BOX.pad * W));
+        const by1 = Math.min(H, Math.ceil(gy1 + 1 + BOX.pad * H));
+        const cs = Math.max(4, Math.round(Math.min(W, H) * 0.01));
+        const ncx = Math.max(1, Math.floor((bx1 - bx0) / cs));
+        const ncy = Math.max(1, Math.floor((by1 - by0) / cs));
+        const sum = new Float64Array(ncx * ncy);
+        const cnt = new Uint32Array(ncx * ncy);
+        let litN = 0;
+        let picN = 0;
+        for (let y = by0; y < by1; y++)
+          for (let x = bx0; x < bx1; x++) {
+            const p = y * W + x;
+            if (glyph[p] || decor[p] || near[p] === 2) continue;
+            const i = p * 4;
+            const yl = (0.2126 * A[i] + 0.7152 * A[i + 1] + 0.0722 * A[i + 2]) / 255;
+            picN++;
+            if (lightInk ? yl > BOX.lit : yl < 1 - BOX.lit) litN++;
+            const cx = Math.min(ncx - 1, Math.floor((x - bx0) / cs));
+            const cy = Math.min(ncy - 1, Math.floor((y - by0) / cs));
+            sum[cy * ncx + cx] += yl;
+            cnt[cy * ncx + cx]++;
+          }
+        const full = cs * cs * 0.3;
+        let edges = 0;
+        let pairs = 0;
+        for (let j = 0; j < ncy; j++)
+          for (let i = 0; i < ncx; i++) {
+            const k = j * ncx + i;
+            if (cnt[k] < full) continue;
+            const v = sum[k] / cnt[k];
+            for (const n of [i + 1 < ncx ? k + 1 : -1, j + 1 < ncy ? k + ncx : -1]) {
+              if (n < 0 || cnt[n] < full) continue;
+              pairs++;
+              if (Math.abs(sum[n] / cnt[n] - v) > BOX.edge) edges++;
+            }
+          }
+        boxLit = picN ? litN / picN : null;
+        boxEdge = pairs ? edges / pairs : null;
+      }
+      return { ratio, ink: g, ring, glyphs: gl.length, ringPx: ringL.length, decor: decorN, dark: !lightInk, boxLit, boxEdge };
     },
-    { a: `data:image/png;base64,${frame.toString("base64")}`, b: `data:image/png;base64,${probe.toString("base64")}`, region },
+    { a: `data:image/png;base64,${frame.toString("base64")}`, b: `data:image/png;base64,${probe.toString("base64")}`, region, textBox, BOX: { lit: BOX_LIT, edge: BOX_EDGE, pad: BOX_PAD } },
   );
 }
 
@@ -190,7 +269,7 @@ const OUTSIDE_KEEP = 0.5;
 /** …measured only where the picture has some light to lose (mean luma, 0–255). */
 const OUTSIDE_FLOOR = 8;
 
-module.exports = { measureContrast, outsideLuma, PROBE_PROGRAM, LINE_MIN, DISPLAY_MIN, OUTSIDE_KEEP, OUTSIDE_FLOOR };
+module.exports = { measureContrast, outsideLuma, PROBE_PROGRAM, LINE_MIN, DISPLAY_MIN, OUTSIDE_KEEP, OUTSIDE_FLOOR, BOX_LIT, BOX_EDGE, BOX_LIT_MAX, BOX_EDGE_MAX };
 
 // ---------------------------------------------------------------------------
 // the check (run as a script)
@@ -214,6 +293,11 @@ if (require.main === module) {
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
   const ARGS = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required"];
   const ids = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  // LEGIBILITY_LINES=3,7,@28.1 — only these line indices / the lines sung at these song times (calibration runs)
+  const ONLY = (process.env.LEGIBILITY_LINES || "")
+    .split(",")
+    .filter(Boolean)
+    .map((x) => (x.startsWith("@") ? { t: Number(x.slice(1)) } : { index: Number(x) }));
   const W = Number(process.env.LEGIBILITY_WIDTH || 1280);
   const H = Math.round((W * 9) / 16);
 
@@ -224,6 +308,27 @@ if (require.main === module) {
   };
   /** the moment a line is read: settled after its entrance, well inside its time (capture.cjs uses the same) */
   const momentOf = (l) => Math.round((l.start + Math.min(2.2, Math.max(0.8, (l.end - l.start) * 0.55))) * 100) / 100;
+
+  // m11: the project whose program is swapped for the grey probe right now — restored on an error, on
+  // Ctrl-C (SIGINT) or a kill (SIGTERM), not only when the probe frames finish
+  let swapped = null;
+  // one restore in flight at a time: the signal handler and the error path (Playwright closes the
+  // browser on the same signal, so a grab throws) wait for the same request before exiting
+  let restoring = Promise.resolve();
+  const restore = () => {
+    if (swapped) {
+      const { id, plan } = swapped;
+      swapped = null;
+      restoring = restoring.then(() =>
+        api("PATCH", `/api/projects/${id}`, { plan }).then(
+          () => console.error(`（已還原 ${id} 的畫面程式）`),
+          (e) => console.error(`無法還原 ${id} 的畫面程式：${e.message}`),
+        ),
+      );
+    }
+    return restoring;
+  };
+  for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, () => restore().finally(() => process.exit(130)));
 
   (async () => {
     const browser = await chromium.launch({ args: ARGS });
@@ -259,7 +364,10 @@ if (require.main === module) {
         continue;
       }
       const duration = project.meta?.duration || project.analysis?.duration || 0;
-      const lines = (project.lyrics?.lines ?? []).map((l, i, all) => ({ ...l, end: l.end ?? all[i + 1]?.start ?? duration, index: i })).filter((l) => l.text && l.text.trim() && l.end - l.start > 0.9);
+      const lines = (project.lyrics?.lines ?? [])
+        .map((l, i, all) => ({ ...l, end: l.end ?? all[i + 1]?.start ?? duration, index: i }))
+        .filter((l) => l.text && l.text.trim() && l.end - l.start > 0.9)
+        .filter((l) => !ONLY.length || ONLY.some((o) => (o.t == null ? o.index === l.index : o.t >= l.start && o.t < l.end)));
       if (!lines.length) {
         console.log(`-- ${title}: no sung lines, skipped`);
         continue;
@@ -268,17 +376,18 @@ if (require.main === module) {
       // the probe: the same moments over flat grey (where the glyphs are)
       const probes = new Map();
       try {
+        swapped = { id, plan };
         if (program) await api("PATCH", `/api/projects/${id}`, { plan: { ...plan, sceneProgram: { ...program, source: PROBE_PROGRAM, title: "灰階探針" } } });
         else await api("PATCH", `/api/projects/${id}`, { plan: { ...plan, sceneProgram: { version: 1, engine: "manual", title: "灰階探針", concept: "", source: PROBE_PROGRAM, sections: [], enabled: true } } });
         for (const l of lines) probes.set(l.index, await grab(id, momentOf(l)));
       } finally {
-        await api("PATCH", `/api/projects/${id}`, { plan });
+        await restore();
       }
       for (const l of lines) {
         const t = momentOf(l);
         const probe = probes.get(l.index);
         const frame = await grab(id, t);
-        const all = await measureContrast(measurePage, frame.png, probe.png);
+        const all = await measureContrast(measurePage, frame.png, probe.png, null, true);
         let display = null;
         const box = (probe.display ?? frame.display ?? "").split(",").map(Number);
         if (box.length === 4 && box.every(Number.isFinite)) {
@@ -295,10 +404,12 @@ if (require.main === module) {
         const outBare = await outsideLuma(measurePage, bare.png, tbox);
         const keep = outWith != null && outBare != null && outBare >= OUTSIDE_FLOOR ? outWith / outBare : null;
         const pictureOk = keep == null || keep >= OUTSIDE_KEEP;
-        const ok = lineOk && displayOk && pictureOk;
+        // round 27: nothing fights the words — the box behind them is dark and calm
+        const boxOk = (all.boxLit == null || all.boxLit <= BOX_LIT_MAX) && (all.boxEdge == null || all.boxEdge <= BOX_EDGE_MAX);
+        const ok = lineOk && displayOk && pictureOk && boxOk;
         if (!ok) failures++;
-        rows.push({ project: title, id, line: l.index, t, text: l.text, recipe: frame.recipe, ratio: all.ratio, display: display?.ratio ?? null, glyphs: all.glyphs, outside: outWith, outsideBare: outBare, keep, ok });
-        console.log(`${ok ? "PASS" : "FAIL"} ${title} #${l.index} @${t}s ${frame.recipe ?? "?"} ${all.ratio == null ? "—" : all.ratio.toFixed(2)}:1${display ? ` display ${display.ratio == null ? "—" : display.ratio.toFixed(2)}:1` : ""} picture ${keep == null ? "—" : `${Math.round(keep * 100)}%`} 「${l.text}」`);
+        rows.push({ project: title, id, line: l.index, t, text: l.text, recipe: frame.recipe, ratio: all.ratio, display: display?.ratio ?? null, glyphs: all.glyphs, outside: outWith, outsideBare: outBare, keep, boxLit: all.boxLit, boxEdge: all.boxEdge, ok });
+        console.log(`${ok ? "PASS" : "FAIL"} ${title} #${l.index} @${t}s ${frame.recipe ?? "?"} ${all.ratio == null ? "—" : all.ratio.toFixed(2)}:1${display ? ` display ${display.ratio == null ? "—" : display.ratio.toFixed(2)}:1` : ""} picture ${keep == null ? "—" : `${Math.round(keep * 100)}%`} behind lit ${all.boxLit == null ? "—" : `${(all.boxLit * 100).toFixed(1)}%`} edges ${all.boxEdge == null ? "—" : `${(all.boxEdge * 100).toFixed(1)}%`} 「${l.text}」`);
         if (SHOTS) fs.writeFileSync(path.join(SHOTS, `legibility-${title.replace(/[^\w一-鿿-]+/g, "_")}-${l.index}.png`), frame.png);
       }
     }
@@ -310,10 +421,13 @@ if (require.main === module) {
     const worstDisplay = displays.length ? Math.min(...displays.map((r) => r.display)) : null;
     const keeps = rows.filter((r) => r.keep != null);
     const worstKeep = keeps.length ? Math.min(...keeps.map((r) => r.keep)) : null;
-    console.log(`\n${rows.length - failures}/${rows.length} lines pass (≥ ${LINE_MIN}:1 every line, ≥ ${DISPLAY_MIN}:1 display words, the picture outside the words ≥ ${OUTSIDE_KEEP * 100}% of its light with the lyrics off); picture kept at worst ${worstKeep == null ? "—" : `${Math.round(worstKeep * 100)}%`}; worst line ${worst == null ? "—" : worst.toFixed(2)}:1, worst display word ${worstDisplay == null ? "—" : worstDisplay.toFixed(2)}:1 over ${displays.length} display words`);
+    const worstBoxLit = Math.max(0, ...rows.map((r) => r.boxLit ?? 0));
+    const worstBoxEdge = Math.max(0, ...rows.map((r) => r.boxEdge ?? 0));
+    console.log(`\n${rows.length - failures}/${rows.length} lines pass (≥ ${LINE_MIN}:1 every line, ≥ ${DISPLAY_MIN}:1 display words, the picture outside the words ≥ ${OUTSIDE_KEEP * 100}% of its light with the lyrics off, behind the words ≤ ${BOX_LIT_MAX * 100}% lit and ≤ ${BOX_EDGE_MAX * 100}% edges); behind the words at worst ${(worstBoxLit * 100).toFixed(1)}% lit, ${(worstBoxEdge * 100).toFixed(1)}% edges; picture kept at worst ${worstKeep == null ? "—" : `${Math.round(worstKeep * 100)}%`}; worst line ${worst == null ? "—" : worst.toFixed(2)}:1, worst display word ${worstDisplay == null ? "—" : worstDisplay.toFixed(2)}:1 over ${displays.length} display words`);
     process.exit(failures ? 1 : 0);
-  })().catch((e) => {
+  })().catch(async (e) => {
     console.error(e);
+    await restore();
     process.exit(1);
   });
 }
