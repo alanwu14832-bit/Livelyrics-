@@ -131,9 +131,9 @@ describe("round 27: nothing fights the words", () => {
       const vi = sections.findIndex((s) => s.kind === "verse");
       const u = stateUniforms(prog, prog.sections[vi], plan.sections[vi], vi, sections.length, { palette: plan.keyVisual.palette.map((p) => p.hex) });
       const run = compileForCpu(checked.code, { ...u, uSectionProgress: 0.95 });
-      // the outer 4 % band of the frame carries no stroke
+      // the outer 6 % band at the top and bottom carries no stroke
       for (let i = 0; i < 64; i++)
-        for (const y of [0.015, 0.035, 0.965, 0.985]) {
+        for (const y of [0.015, 0.035, 0.055, 0.945, 0.965, 0.985]) {
           const c = run.scene([((i + 0.5) / 64) * 1920, y * 1080]).color;
           if (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > PROBE_COVER) failures.push(`seed ${seed}: lit at (${((i + 0.5) / 64).toFixed(2)}, ${y})`);
         }

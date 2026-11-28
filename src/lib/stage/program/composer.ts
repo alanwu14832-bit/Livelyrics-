@@ -272,7 +272,7 @@ float WORDS() { return 1.0; }
 float koMask(vec2 uv) {
   if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
   vec2 pad = vec2(0.022, 0.035);
-  vec2 fe = vec2(0.075 / max(aspect(), 1.0), 0.075);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
   vec2 lo = uTypeBox.xy - pad;
   vec2 hi = uTypeBox.zw + pad;
   vec2 a = smoothstep(lo - fe, lo, uv);
@@ -752,12 +752,12 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float around = closeUp * (1.0 - K_SHAPE) * step(0.8, aspect()) * step(zr * 1.34 + 0.01, 0.47);
   vec2 c = toP(mix(focalUv(), zc, around)) + mo() * (1.0 - around);
   float R = mix(0.24 * SC(), zr * 1.34 + 0.01, around);
-  // round 27 (m1): outside the chorus the whole stroke stays inside the safe area (5 % from every
-  // edge) — the verse arc was cut by the frame's top; the chorus still grows past the edge
+  // round 27 (m1): outside the chorus the whole stroke stays inside the safe area (8 % from the top
+  // and bottom, 5 % from the sides) — the verse arc was cut by the frame's top; the chorus still grows past the edge
   float hx = R * (K_SHAPE < 0.5 ? 1.15 : 1.75);
   float hy = R * (K_SHAPE < 0.5 ? 1.15 : 0.55);
   float limX = max(0.5 * aspect() - 0.05 - hx, 0.0);
-  float limY = max(0.45 - hy, 0.0);
+  float limY = max(0.42 - hy, 0.0);
   c = mix(c, clamp(c, vec2(-limX, -limY), vec2(limX, limY)), (1.0 - OPEN()) * (1.0 - around));
   float sweep = min(uParams.x, 0.08 + 0.92 * smoothstep(0.0, 0.7, uSectionProgress)) * 0.97;
   vec3 col = uBg * (0.9 + 0.1 * vnoise(fc * 0.02));
@@ -1025,8 +1025,14 @@ vec3 scene(vec2 fc) {
   // round 27 (N6): nothing fights the words. Whatever the form does — a sun, rings, a moon, slabs, a
   // stroke grown past the frame's edge in the last chorus — under the line on screen it settles into
   // the background, feathered (most of all where the chorus opens it: OPEN(), the build's end, ESC())
+  // the light is capped (the dim air keeps its tone, a disc or a ring sinks to it) and drawn toward the
+  // background, so no dark plate is cut out around the words
+  // (a chorus' rings run well past 1.0 before the display clips them: bound the light first, or 4 % of
+  // it would still cut through the words)
+  col = min(col, vec3(1.0));
   float ko = koMask(uv) * WORDS() * (0.72 + 0.24 * max(OPEN(), BUILD()) + 0.04 * ESC());
-  col = mix(col, uBg * 0.9 + (col - uBg) * 0.1, ko);
+  vec3 settled = mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2);
+  col = mix(col, settled, ko);
   // a lit relation: the image's light gathers behind the words
   if (uRelation > 2.5) col += mix(uPri, uAcc, 0.6) * typeGlow(uv, 0.016) * 0.12;
 ${instrumental ? "  col = quiet(fc, uv, col);\n" : ""}  vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
