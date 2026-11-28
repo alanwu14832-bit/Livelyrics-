@@ -80,19 +80,19 @@ vec3 character(vec2 uv, float aspect, float p, vec3 a, vec3 b) {
     float k = step(0.015, p);
     return mix(b, a, k) * (1.0 - k * (0.22 + 0.1 * lift) * exp(-p * 10.0));
   } else if (uChar < 4.5) {
-    // scanline wipe: rows reveal one after another, each with a thin scan line of the tint at its front
-    float rows = floor(5.0 + uWidth * 19.0);
-    float row = floor(uv.y * rows);
-    float order = dir.x >= 0.0 ? (rows - 1.0 - row) / max(rows - 1.0, 1.0) : row / max(rows - 1.0, 1.0);
-    float local = clamp((p - order * 0.45) / 0.55, 0.0, 1.0);
-    float xx = dir.x >= 0.0 ? uv.x : 1.0 - uv.x;
-    float front = local * 1.04 - 0.02;
-    float m = step(xx, front);
-    float inRow = step(0.001, local) * step(local, 0.999);
-    float line = exp(-abs(xx - front) * 140.0) * inRow;
-    float raster = 1.0 - 0.07 * bell * step(0.5, fract(gl_FragCoord.y * 0.5));
-    vec3 col = mix(b, a * raster, m);
-    return col + uTint * line * (0.12 + 0.45 * lift);
+    // round 27 (m9): a scan beam — one soft band of the tint travels down the frame (up on the mirrored
+    // sections) and the new picture comes in behind it through a fading raster, like a monitor
+    // refreshing. One continuous front: no row-by-row steps (the old row stagger drew a diagonal
+    // staircase of grey blocks across the frame).
+    float yy = dir.x >= 0.0 ? 1.0 - uv.y : uv.y;
+    float beam = 0.012 + 0.03 * uWidth;
+    float front = mix(-beam * 3.0, 1.0 + beam * 3.0, smoothstep(0.0, 1.0, p));
+    float m = smoothstep(front + beam, front - beam, yy);
+    float behind = max(front - yy, 0.0);
+    float raster = 1.0 - 0.1 * bell * exp(-behind * 6.0) * step(0.5, fract(gl_FragCoord.y * 0.5));
+    vec3 col = mix(b * (1.0 - 0.12 * bell), a * raster, m);
+    float line = exp(-abs(yy - front) / beam * 1.6) * bell;
+    return col + uTint * line * (0.08 + 0.3 * lift);
   } else if (uChar < 5.5) {
     // slow tide: a rolling front comes in from one side, a little foam of the tint on its crest
     float wave = 0.035 * sin(side * 9.0 + p * 5.0) + 0.02 * sin(side * 23.0 - p * 7.0);

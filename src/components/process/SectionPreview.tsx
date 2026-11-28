@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { StageView } from "@/components/stage/StageView";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PreviewPoster } from "@/components/stage/PreviewPoster";
+import { StageView, type StageStats } from "@/components/stage/StageView";
 import { createStageStore, initialStageState } from "@/lib/stage/protocol";
 import { lineIndexAt } from "@/lib/timeline";
 import type { Project } from "@/lib/types";
 
 /**
  * Silent, looping preview of one plan section through the real stage renderer
- * (scene + lyric presentation), driven by a virtual clock.
+ * (scene + lyric presentation), driven by a virtual clock. Round 27 (m6): the song's still or palette
+ * artwork with 「正在載入畫面…」 covers it until the stage draws (never a black box), as in the console.
  */
 export function SectionPreview({ project, sectionIndex, className }: { project: Project; sectionIndex: number; className?: string }) {
   const [store] = useState(() => createStageStore(initialStageState(project.id)));
   const holder = useRef<HTMLDivElement>(null);
   // the WebGL renderer only runs while the preview is on screen
   const [visible, setVisible] = useState(false);
+  const [stats, setStats] = useState<StageStats | null>(null);
+  const onStats = useCallback((s: StageStats) => setStats((prev) => (prev && prev.backend === s.backend && prev.program?.state === s.program?.state ? prev : s)), []);
 
   useEffect(() => {
     const el = holder.current;
@@ -52,8 +56,9 @@ export function SectionPreview({ project, sectionIndex, className }: { project: 
   }, [project, sectionIndex, store]);
 
   return (
-    <div ref={holder} className={className} style={{ aspectRatio: "16 / 9", background: "#000" }}>
-      {visible && <StageView project={project} store={store} renderScale={0.6} className="h-full w-full" />}
+    <div ref={holder} className={className} style={{ aspectRatio: "16 / 9", background: "#000", position: "relative" }}>
+      {visible && <StageView project={project} store={store} renderScale={0.6} onStats={onStats} className="h-full w-full" />}
+      <PreviewPoster project={project} stats={stats} />
     </div>
   );
 }

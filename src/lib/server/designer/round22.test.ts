@@ -8,23 +8,11 @@ import { composeProjectLine } from "@/lib/type/prepare";
 import { approxMeasure } from "@/lib/type/text";
 import { offlineDesign } from "./offline";
 import { normalizePlan } from "./normalize";
-import { AUDIT_SONGS, auditInput } from "./testing/audit-songs";
+import { AUDIT_SONGS, auditInput, EMO_LRC } from "./testing/audit-songs";
 import { demoInput } from "./testing/fixtures";
 import type { DesignerInput } from "./types";
 
-export const EMO_LRC = [
-  "[00:05.00]刀片劃過手腕 我數著血滴",
-  "[00:11.00]浴室的燈太亮 我想死在今晚",
-  "[00:17.00]他拿著刀 對準我的喉嚨",
-  "[00:24.00]殺了我 殺了我",
-  "[00:28.00]鮮血染紅這面牆",
-  "[00:33.00]Cut me open, let me bleed",
-  "[00:40.00]槍口對著你們每一個人",
-  "[00:48.00]殺了我 殺了我",
-  "[00:52.00]鮮血染紅這面牆",
-  "[00:58.00]我不想再醒來",
-  "[01:05.00]把藥全部吞下去",
-].join("\n");
+export { EMO_LRC } from "./testing/audit-songs";
 
 export function eightSongs(): Array<{ key: string; input: DesignerInput }> {
   const songs = AUDIT_SONGS.map((s) => ({ key: s.key, input: auditInput(s) }));

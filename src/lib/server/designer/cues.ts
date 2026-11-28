@@ -68,7 +68,8 @@ export function suggestCues(sections: readonly SectionDesign[], duration: number
       time: round2(Math.max(0, firstLine.start - 0.5)),
       title: "第一句歌詞",
       detail: "主唱開口前確認歌詞層已開啟（L）；若樂團拉長前奏，切到現場模式手動 cue 第一句。",
-      kind: "transition",
+      // round 27 (m10): the first lyric is a moment to catch, not a scene change
+      kind: "highlight",
     });
   }
   // round 24 (m9): the standing advice is said once — on the first chorus / quiet cue — not on every cue

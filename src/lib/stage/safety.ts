@@ -39,7 +39,7 @@ export interface SafetyPreset {
 export const SAFETY_PRESETS: readonly SafetyPreset[] = [
   { id: "indoor", label: "室內投影", short: "室內", brightness: 1, detail: "投影機或室內螢幕：不降亮度，只限制閃爍" },
   { id: "led", label: "LED 牆", short: "LED 牆", brightness: 0.7, detail: "一般 LED 牆：最高亮度 70%" },
-  { id: "outdoor", label: "戶外強光 LED", short: "戶外 LED", brightness: 0.55, detail: "戶外高亮度 LED：最高亮度 55%，保護前排觀眾" },
+  { id: "outdoor", label: "戶外強光 LED", short: "戶外", brightness: 0.55, detail: "戶外高亮度 LED：最高亮度 55%，保護前排觀眾" },
 ];
 
 export const SAFETY_MIN_BRIGHTNESS = 0.2;

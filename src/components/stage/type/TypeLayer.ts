@@ -207,12 +207,17 @@ export class TypeLayer {
       const b = cur.comp.bounds;
       if (b.w > 0 && b.h > 0) el.dataset.bounds = [b.x / W, b.y / H, (b.x + b.w) / W, (b.y + b.h) / H].map((v) => Math.min(1.2, Math.max(-0.2, v)).toFixed(4)).join(",");
       else delete el.dataset.bounds;
+      // round 27: the readable glyphs' box — what the scene program's wordsMask / knockout clears (uTypeBox)
+      const rb = cur.comp.readBounds;
+      if (rb.w > 0 && rb.h > 0) el.dataset.read = [rb.x / W, rb.y / H, (rb.x + rb.w) / W, (rb.y + rb.h) / H].map((v) => Math.min(1.2, Math.max(-0.2, v)).toFixed(4)).join(",");
+      else delete el.dataset.read;
     } else {
       delete el.dataset.recipe;
       delete el.dataset.voice;
       delete el.dataset.line;
       delete el.dataset.display;
       delete el.dataset.bounds;
+      delete el.dataset.read;
     }
   }
 
