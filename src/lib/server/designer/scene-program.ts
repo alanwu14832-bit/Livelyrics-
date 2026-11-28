@@ -18,6 +18,8 @@ import { composeSceneProgram, FORM_IDS, FORM_LABELS, MOTION_LABELS, TEXTURE_IDS,
 import { EXAMPLE_PROGRAMS, type ExampleProgram } from "@/lib/stage/program/examples";
 import { normalizeSceneProgram } from "@/lib/stage/program/model";
 import { probePlanProgram, type ProbeResult } from "@/lib/stage/program/probe";
+import { NEUTRAL_TUNE, offlineCheck, selfCheck, type SelfTune } from "@/lib/stage/program/self-check";
+import { selfCheckConfig } from "@/lib/stage/program/self-check-config";
 import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
 import { hasDarkWord } from "@/lib/type/sensitive";
@@ -475,12 +477,20 @@ export function songSeed(req: Pick<DesignerInput, "meta" | "songId">): number {
   return req.songId ? (base ^ hashString(req.songId)) >>> 0 : base;
 }
 
-/** The offline composer's program for a request (salt: 「重新產生畫面」 without Claude draws another). */
-export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt = 0, findings?: Findings): SceneProgram {
+/** Round 28: the self-checked programs of this process, by what they were composed from (the CPU render is the cost). */
+const CHECKED = new Map<string, SceneProgram>();
+
+/**
+ * The offline composer's program for a request (salt: 「重新產生畫面」 without Claude draws another).
+ * Round 28 (N3): unless `check` is false (default: on in production, off in the unit tests) the program is rendered on the CPU and measured by the same
+ * critique Claude's programs get (stage/program/self-check.ts); the composer's knobs are walked
+ * deterministically until it passes, and the result is recorded as `program.check` (the console line).
+ */
+export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt = 0, findings?: Findings, opts: { check?: boolean } = {}): SceneProgram {
   const f = findings ?? analyzeFindings(req);
   const lyrics = (req.lyrics?.lines ?? []).some((l) => typeof l?.text === "string" && l.text.trim());
   const wopts: FormWeightOptions = { lyrics, recentForms: req.recentForms };
-  const program = composeSceneProgram({
+  const input = {
     seed: songSeed(req),
     forms: sceneForms(f, wopts),
     weights: formWeights(f, wopts),
@@ -498,9 +508,22 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
     arousal: f.audio.arousal,
     title: req.meta?.title,
     salt,
-  });
-  const tagged = { ...program, recipe: `${program.recipe ?? ""}#${salt}` };
-  return normalizeSceneProgram(tagged, { sections: plan.sections }) ?? tagged;
+  };
+  const make = (t: SelfTune): SceneProgram => {
+    const program = composeSceneProgram({ ...input, tune: t, reroll: t.reroll });
+    const tagged = { ...program, recipe: `${program.recipe ?? ""}#${salt}` };
+    return normalizeSceneProgram(tagged, { sections: plan.sections }) ?? tagged;
+  };
+  if (!(opts.check ?? selfCheckConfig.enabled)) return make(NEUTRAL_TUNE);
+  const key = JSON.stringify([input, plan.keyVisual.palette.map((p) => p.hex), plan.sections.map((s) => s.kind + s.energy)]);
+  const hit = CHECKED.get(key);
+  if (hit) return hit;
+  const checked = selfCheck(make, plan);
+  const check = offlineCheck(checked);
+  const program = check ? { ...checked.program, check } : checked.program;
+  if (CHECKED.size >= 48) CHECKED.delete(CHECKED.keys().next().value as string);
+  CHECKED.set(key, program);
+  return program;
 }
 
 /**
@@ -589,14 +612,14 @@ export const SCENE_SYSTEM = `你是這個樂團的專職舞台視覺總監，也
 4. 一個世界、隨歌曲演變：用 uMode 與 uParams 讓同一個世界沿著歌曲的弧線變化——主歌稀疏、副歌打開、橋段換一個規則（例如形狀裂開、倒過來、靜止、反轉）、尾奏收回。
 5. 字與畫面一起構圖：為每一段指定文字區（畫面的留白），主角形狀放在文字區的另一側或圍著它；用 uZone 在程式裡避開或框住文字區；需要時用 typeMask／typeGlow 讓畫面回應字（字後面的光、被字切開的形狀）。關係選一種：plain、knockout、behind（程式要把前景形狀的覆蓋率寫進 gFront）、lit。
 6. 直式畫面（aspect() < 0.8）也要成立：系統會把左右的文字區改成上下的帶狀區（左→上、右→下），你的主角形狀放在 uZone 的另一半。
-7. 顏色只用 uniform 提供的配色（uBg、uPri、uAcc、uInk、uPal0…uPal5），不要寫死色相，這樣樂團的色盤與 LED 安全的調整才會生效。
+7. 顏色只用 uniform 提供的配色（uBg、uPri、uAcc、uInk、uPal0…uPal5），不要寫死色相，這樣樂團的色盤與 LED 安全的調整才會生效。主角在每一段都是同一個色相（uPri），換段只換 uAcc 與背景；亮處用 c / max(c.r, max(c.g, c.b)) 取同色的滿值，不要 mix 到 vec3(1.0)。
 8. 效能：這支程式每一格、每個像素都要跑，大螢幕是 1920×1080 以上。保持簡單：幾個距離場、兩三層雜訊就夠了。
 9. ${SENSITIVE_LYRICS_RULE}
 10. 著色器的寫法與送出前檢查：
    - 形狀用 2D 距離場：sdCircle／sdBox／sdSegment 加 fill／stroke（px() 抗鋸齒），min 聯集、max 交集；重複用 floor 取格子 id、hash 決定每格的差異。
    - 質地：vnoise／fbm3 做霧與紙紋；domain warp（先用 fbm 推動座標再取一次）做流動。
    - WebGL1／2 都要跑：迴圈上限是常數；除數用 max(x, 1e-4)，pow／sqrt 的底先 max(0.0)，atan 避開 (0,0)，normalize 避開零向量——不能有 NaN。
-   - 亮度有界：用 mix 疊色、少用一路相加；最亮處仍是 uPri／uAcc 的顏色，不會變白。
+   - 亮度有界：用 mix 疊色、少用一路相加；最亮處仍是 uPri／uAcc 的同色滿值，不會變白（不要 mix 到 vec3(1.0)）。
 11. 構圖與光的比例：
    - 一個主角，靠三分線、站在文字區的另一側；其他形狀用大小與對比讓位。
    - 安全區：主角與亮部離畫面邊緣 5% 以上（直式上 12%、下 18%）。

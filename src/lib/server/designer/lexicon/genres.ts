@@ -52,7 +52,7 @@ export const GENRE_RULES: readonly GenreRule[] = [
     typography: { cjkFont: "noto-serif-tc", latinFont: "space-grotesk", weight: 700, letterSpacing: 0.12, note: "安靜的宋體加寬字距，像電影字卡" },
     type: { voice: "mv-card", params: { density: 0.15, scaleContrast: 0.9, motionSpeed: 0.3 }, note: "大片留白的日系字卡：一個字巨大、其餘很小，跟著漸強慢慢出現" },
     motifs: ["長曝光的光軌", "漸強的光牆", "遠方的地平線"],
-    live: "漸強（crescendo）很長：畫面跟著慢慢堆疊，爆發點前一拍才放到最亮；安靜段真的收暗。",
+    live: "漸強很長：畫面跟著慢慢堆疊，爆發點前一拍才放到最亮；安靜段真的收暗。",
     why: "後搖靠長時間的漸強推進，畫面要有耐心：大片暗部、慢慢累積的光，最後一次才全開。",
   },
   {

@@ -105,10 +105,12 @@ const AUDIO_ADJ: Record<AudioMood["quadrant"], string> = {
 const LOUD_QUADRANTS = new Set<AudioMood["quadrant"]>(["release", "cold-drive", "warm-groove"]);
 
 /** One mood for the song: the words when they agree with the sound, else the sound (the energy decides). */
-export function songMood(lyrics: LyricAnalysis, audio: AudioMood): SongMood {
+export function songMood(lyrics: LyricAnalysis, audio: AudioMood, silent = false): SongMood {
   const loudSound = LOUD_QUADRANTS.has(audio.quadrant);
   const named = lyrics.lineCount > 0 && lyrics.emotion.hits > 0 && lyrics.emotion.label !== "情緒不明顯";
   const fromAudio = (why: string): SongMood => ({ label: audio.label, adj: AUDIO_ADJ[audio.quadrant], calm: !loudSound, source: "audio", why });
+  // round 28 (m7): a silent file has no energy to read — the words alone decide, and the note says so
+  if (silent) return named ? { label: lyrics.emotion.label, adj: EMOTION_ADJ[lyrics.emotion.label] ?? AUDIO_ADJ[audio.quadrant], calm: true, source: "lyrics", why: "這個檔案沒有聲音，情緒只看歌詞" } : fromAudio("這個檔案沒有聲音，沒有情緒可判斷");
   if (!named) return fromAudio(lyrics.lineCount > 0 ? "歌詞看不出情緒，由音訊決定" : "由音訊決定");
   const loudWords = lyrics.emotion.arousal >= 0.5;
   if (loudWords === loudSound)
@@ -213,7 +215,7 @@ export function analyzeFindings(input: DesignerInput, structure?: SongStructure)
   const fromGenre = genre?.motifs.slice(0, 2) ?? [];
   const motifs = [own[0], fromGenre[0], own[1], fromGenre[1], own[2]].filter((m): m is string => !!m).filter((m, i, a) => a.indexOf(m) === i).slice(0, 5);
   // round 20: mood words only, one reconciled mood (the images and the genre have rows of their own)
-  const mood = songMood(lyrics, audio);
+  const mood = songMood(lyrics, audio, st.silent);
   const keywords = [mood.label];
   const motion: MotionEnergy = genre?.motion ?? (audio.quadrant === "dark-slow" || audio.quadrant === "gentle-float" ? "soft" : "medium");
   return {

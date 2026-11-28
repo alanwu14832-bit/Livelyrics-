@@ -691,7 +691,10 @@ export function normalizePlanWithReport(raw: unknown, input: DesignerInput, opti
   if (drafts.map((d) => `${d.start}-${d.end}`).join(",") !== before) repairs.push("段落時間已對齊到 0 至歌曲結尾、無縫銜接");
 
   // round 24 (m6): no raw 「Verse 1」 reaches the operator
-  const sections: SectionDesign[] = readableLabels(drafts.map((d, i) => ({ id: `s${i}`, ...finishSection(d, lyricsLines) })));
+  const sections: SectionDesign[] = readableLabels(
+    drafts.map((d, i) => ({ id: `s${i}`, ...finishSection(d, lyricsLines) })),
+    { sung: lyricsLines.length > 0 },
+  );
   const lines = normalizeLines(root.lines, lyricsLines, repairs, fill);
 
   let cues = normalizeCues(root.cues, duration);

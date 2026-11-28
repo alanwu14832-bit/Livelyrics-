@@ -11,7 +11,7 @@ export const SIGNAL: ExampleProgram = {
   brief: "後龐克／電子，約 160 BPM，都市的噪音、訊號、反抗與速度",
   byKind: {
     intro: { mode: 0, params: [0.3, 0.35, 0.3, 0.3], zone: { x: 0.07, y: 0.16, w: 0.38, h: 0.56 }, relation: "plain", note: "斜線從右邊進場" },
-    verse: { mode: 0, params: [0.5, 0.45, 0.45, 0.5], zone: { x: 0.07, y: 0.14, w: 0.38, h: 0.58 }, relation: "plain", note: "斜線讓出左邊的字塊" },
+    verse: { mode: 0, params: [0.2, 0.3, 0.3, 0.4], zone: { x: 0.07, y: 0.14, w: 0.38, h: 0.58 }, relation: "plain", note: "斜線讓出左邊的字塊" },
     "pre-chorus": { mode: 1, params: [0.7, 0.6, 0.6, 0.7], zone: { x: 0.55, y: 0.14, w: 0.38, h: 0.58 }, relation: "plain", note: "斜線換邊、加密" },
     chorus: { mode: 2, params: [1.0, 0.8, 0.8, 0.9], zone: { x: 0.08, y: 0.18, w: 0.5, h: 0.52 }, relation: "knockout", note: "斜線穿過字，字從線條裡挖空" },
     bridge: { mode: 3, params: [0.4, 0.3, 0.35, 0.3], zone: { x: 0.08, y: 0.2, w: 0.4, h: 0.5 }, relation: "plain", note: "線條轉直、變安靜" },
@@ -19,6 +19,19 @@ export const SIGNAL: ExampleProgram = {
   },
   source: /* glsl */ `
 // 訊號 — screen-printed bars over halftone, segments that jump on the beat
+
+// a colour at full value (same pigment, never toward white); the line on screen gets the picture's quiet
+vec3 inkOf(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.02) * 0.92; }
+float koMask(vec2 uv) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 pad = vec2(0.022, 0.035);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
+  vec2 lo = uTypeBox.xy - pad;
+  vec2 hi = uTypeBox.zw + pad;
+  vec2 a = smoothstep(lo - fe, lo, uv);
+  vec2 b = 1.0 - smoothstep(hi, hi + fe, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
 
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
@@ -32,7 +45,7 @@ vec3 scene(vec2 fc) {
   float id = floor(s);
   float within = fract(s);
   float duty = mix(0.28, 0.5, uParams.x);
-  float present = step(0.28, hash11(id * 7.13 + uSeed));
+  float present = step(mix(0.58, 0.28, max(open, uParams.x)), hash11(id * 7.13 + uSeed));
   // segments along each bar; they shift on every other beat (a jump in position only)
   float step2 = floor(uBeatN * 0.5);
   float shift = (hash11(id * 3.7 + step2 * 1.3) - 0.5) * 0.6 * uReact * (1.0 - upright);
@@ -78,6 +91,11 @@ vec3 scene(vec2 fc) {
   col += uAcc * band * 0.06 * (1.0 - upright);
   // paper grain
   col += grain(fc, 0.06) * (0.4 + luma(col));
+  // one exposure for every palette: a dim palette (a slate) is lifted and a pastel is held back, so the
+  // lit area of a state does not depend on how bright the song's colours happen to be
+  col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.75, 2.0));
+  // the words come first: under the line on screen the picture settles into the ground, feathered
+  col = mix(col, mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2), koMask(uv) * 0.9);
   return col;
 }
 `,

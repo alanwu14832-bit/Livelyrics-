@@ -3,7 +3,7 @@
 // Centre column: the live preview (the projection's look, at the output window's aspect) with the
 // keyboard HUD over its lower third, and the readout of what is on stage now and next.
 
-import { isReadableLabel } from "@/lib/section-names";
+import { isReadableLabel, UNSUNG_CHORUS } from "@/lib/section-names";
 import { sectionWall } from "@/lib/stage/program/wall";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { StageView, type StageStats } from "@/components/stage/StageView";
@@ -41,7 +41,8 @@ export function sectionName(s: Pick<SectionDesign, "label" | "kind">): { label: 
   const kind = SECTION_KIND_LABELS[s.kind] ?? s.kind;
   // round 24 (m6): a raw 「Verse 1」 from an older plan reads as its kind
   const label = isReadableLabel(s.label) ? s.label : kind;
-  return { label, kind: kind && kind !== label ? kind : null };
+  // round 28 (m4): an unsung chorus is 「高潮／展開」; never also tag it 「副歌」
+  return { label, kind: kind && kind !== label && !label.startsWith(UNSUNG_CHORUS) ? kind : null };
 }
 
 /** Small label over the stage preview: solid (no backdrop-filter over the WebGL canvas). */

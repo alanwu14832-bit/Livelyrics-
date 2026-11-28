@@ -434,6 +434,8 @@ export const SceneProgramCheckSchema = z.object({
   firstPassed: z.number().optional(),
   /** the fix turn failed (an error or a refused program): the first version stays */
   fixFailed: z.boolean().optional(),
+  /** round 28: an offline program's self-check — how many times the composer re-rolled its knobs (0 = the first version passed) */
+  rerolls: z.number().optional(),
   /** the console line */
   summary: z.string(),
 });

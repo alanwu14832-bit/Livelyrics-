@@ -9,6 +9,7 @@
 
 import type { DesignPlan, SceneProgram, SceneProgramSection, SectionDesign } from "../../types";
 import { parseHex } from "../color";
+import { rgbToOklch } from "../oklch";
 import { compileForCpu, isGlslError, type Uniforms } from "./glsl-eval";
 import { RELATION_CODE, SECTION_KIND_CODE } from "./contract";
 import { canvasZone, KIND_DEFAULTS, normalizeZone } from "./model";
@@ -76,7 +77,19 @@ export interface ProbeSample {
   boxLit?: number;
   /** …and how busy it is: the fraction of neighbouring sample pairs whose luma differs by more than PROBE_EDGE */
   boxEdge?: number;
+  /**
+   * Round 28 (N2): the colour of what is lit — the mean OKLCH lightness and chroma of the samples above
+   * PROBE_COVER. A subject that reads near-white (L above PROBE_SUBJECT_L_MAX, chroma under
+   * PROBE_SUBJECT_C_MIN) has lost the palette's hue.
+   */
+  subjectL?: number;
+  subjectC?: number;
 }
+
+/** Round 28: a lit area's mean OKLCH chroma below this reads as grey or white, not as the palette's colour. */
+export const PROBE_SUBJECT_C_MIN = 0.03;
+/** Round 28: …and its mean OKLCH lightness above this is a white subject. */
+export const PROBE_SUBJECT_L_MAX = 0.9;
 
 /**
  * Round 27: the text boxes a state is measured in — the section's zone, and in a chorus (where a line
@@ -277,12 +290,15 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       let max = 0;
       let nan = 0;
       let white = 0;
+      let subL = 0;
+      let subC = 0;
       const mask: boolean[] = new Array(cols * rows).fill(false);
       const n = cols * rows;
       const at = (i: number, j: number): [number, number] => [((i + 0.5) / cols) * res[0], ((j + 0.5) / rows) * res[1]];
       for (let j = 0; j < rows; j++) {
         for (let i = 0; i < cols; i++) {
-          const raw = luma(compiled.scene(at(i, j)).color);
+          const col = compiled.scene(at(i, j)).color;
+          const raw = luma(col);
           if (!Number.isFinite(raw)) nan++;
           const l = Number.isFinite(raw) ? raw : 0;
           sum += l;
@@ -292,6 +308,9 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
           if (l < 0.04) dark++;
           if (l > PROBE_COVER) {
             cover++;
+            const ok = rgbToOklch([Math.max(0, Math.min(1, col[0])), Math.max(0, Math.min(1, col[1])), Math.max(0, Math.min(1, col[2]))]);
+            subL += ok.L;
+            subC += ok.C;
             cxSum += (i + 0.5) / cols;
             // fc has its origin at the bottom: row j counts up, cy reads from the top
             cySum += 1 - (j + 0.5) / rows;
@@ -353,7 +372,7 @@ export function probeSceneProgram(program: SceneProgram, opts: ProbeOptions = {}
       }
       compiled.setUniforms(u);
       const r3 = (x: number) => Math.round(x * 1000) / 1000;
-      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null, cy: cover ? r3(cySum / cover) : null, max: r3(max), ...((({ subjects, focus }) => ({ subjects, focus: r3(focus) }))(litShapes(mask, cols, rows))), nan, white: r3(white / n), boxLit: r3(boxLit), boxEdge: r3(boxEdge) };
+      const sample: ProbeSample = { sectionId: ps.sectionId, kind, mode: ps.mode, mean: r3(sum / n), lit: r3(lit / n), dark: r3(dark / n), around: r3(aroundN ? aroundSum / aroundN : sum / n), cover: r3(cover / n), cx: cover ? r3(cxSum / cover) : null, cy: cover ? r3(cySum / cover) : null, max: r3(max), ...((({ subjects, focus }) => ({ subjects, focus: r3(focus) }))(litShapes(mask, cols, rows))), nan, white: r3(white / n), boxLit: r3(boxLit), boxEdge: r3(boxEdge), subjectL: cover ? r3(subL / cover) : 0, subjectC: cover ? r3(subC / cover) : 0 };
       seen.set(sig, sample);
       samples.push(sample);
     });

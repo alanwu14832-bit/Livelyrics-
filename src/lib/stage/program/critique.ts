@@ -138,6 +138,12 @@ export function checkLine(check: SceneProgramCheck | null | undefined): string |
   const verse = check.states.find((s) => s.state === "verse");
   const nums = [verse && `主歌亮 ${pct(verse.cover)}`, chorus && `副歌 ${pct(chorus.cover)}`].filter(Boolean).join("、");
   const tally = `通過 ${check.passed}／${check.total} 項${nums ? `（${nums}）` : ""}`;
+  // round 28: the offline composer's own check (no Claude): what it did, in one honest line
+  if (check.rerolls != null) {
+    const miss = check.checks.filter((c) => !c.ok);
+    if (!miss.length) return check.rerolls === 0 ? `畫面自我檢查：${tally}，離線作曲器第一版就過` : `畫面自我檢查：離線作曲器第一版只通過 ${check.firstPassed ?? "?"}／${check.total} 項，自動調整形狀 ${check.rerolls} 次 → ${tally}`;
+    return `畫面自我檢查：離線作曲器自動調整 ${check.rerolls} 次，仍有 ${miss.length} 項沒達標（${miss.slice(0, 2).map((c) => c.label.split("（")[0]).join("、")}），保留最接近的一版；${tally}`;
+  }
   if (!check.fixTurn) return `畫面自我檢查：${tally}${check.passed === check.total ? "，不需修正" : ""}`;
   if (check.kept === "fixed") return `畫面自我檢查：第一版只通過 ${check.firstPassed ?? "?"}／${check.total} 項，Claude 修正一次 → ${tally}`;
   return `畫面自我檢查：${check.fixFailed ? "修正失敗" : "修正版沒有比較好"}，保留第一版，${tally}`;

@@ -30,6 +30,19 @@ vec3 skyAt(float y, float hz, float light) {
   return mix(low, uBg * 0.5, pow(up, 0.6));
 }
 
+// a colour at full value (same pigment, never toward white); the line on screen gets the picture's quiet
+vec3 inkOf(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.02) * 0.92; }
+float koMask(vec2 uv) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 pad = vec2(0.022, 0.035);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
+  vec2 lo = uTypeBox.xy - pad;
+  vec2 hi = uTypeBox.zw + pad;
+  vec2 a = smoothstep(lo - fe, lo, uv);
+  vec2 b = 1.0 - smoothstep(hi, hi + fe, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
+
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
@@ -37,12 +50,14 @@ vec3 scene(vec2 fc) {
   float tide = uParams.x;
   float light = uParams.z;
   float mirror = step(2.5, uMode);
+  // the chorus: the tide floods in — the water takes most of the flat and carries the sky
+  float flood = step(1.5, uMode) * (1.0 - mirror);
   // a small moon low over the sea, opposite the words
   float mx = aspect() < 0.8 ? 0.62 : (zoneCenter().x < 0.5 ? 0.72 : 0.28);
   vec2 mUv = vec2(mx, hz + 0.1 + 0.05 * light);
   vec2 mP = (mUv * uRes - 0.5 * uRes) / min(uRes.x, uRes.y);
   float mr = 0.03 + 0.008 * light;
-  vec3 moonC = mix(uInk, vec3(1.0), 0.35);
+  vec3 moonC = inkOf(mix(uPri, uAcc, 0.5));
 
   vec3 col;
   if (uv.y >= hz) {
@@ -63,13 +78,13 @@ vec3 scene(vec2 fc) {
     // water channels: iso-bands of the noise, wider as the tide comes in (a flood in mode 2)
     float width = mix(0.018, 0.11, tide) + mirror * 0.5;
     float water = 1.0 - smoothstep(width * 0.7, width, abs(f - 0.5));
-    water = max(water, mirror);
+    water = max(water, max(mirror, 0.8 * flood));
     // the wet sand, dark and warm, finer grain far away
     vec3 sand = mix(uBg * 0.9 + uPri * 0.04, uBg * 0.45, sat(depth * 1.8));
     sand *= 0.85 + 0.15 * vnoise(w * 6.0);
     // what the water reflects: the sky (mirrored), the moon's path of glints
     float ry = hz + (hz - uv.y) * (0.6 + 0.4 * mirror);
-    vec3 refl = skyAt(ry, hz, light) * (0.55 + 0.35 * mirror);
+    vec3 refl = skyAt(ry, hz, light) * (0.55 + 0.35 * mirror + 1.38 * flood);
     float dx = abs(uv.x - mx) * aspect();
     float path = exp(-dx * (9.0 - 5.0 * tide)) * (0.25 + 0.75 * light);
     float glint = smoothstep(0.55 - 0.15 * tide, 0.8 - 0.15 * tide, vnoise(vec2(w.x * 9.0, w.y * 3.0 + uTime * 0.25)));
@@ -84,6 +99,11 @@ vec3 scene(vec2 fc) {
   col = mix(col, mix(uBg, moonC, 0.3), mist * (0.45 - 0.2 * light));
   // the words sit on the flat: under a lit relation the water around them brightens a little
   if (uRelation > 2.5) col += moonC * typeGlow(uv, 0.014) * 0.1;
+  // one exposure for every palette: a dim palette (a slate) is lifted and a pastel is held back, so the
+  // lit area of a state does not depend on how bright the song's colours happen to be
+  col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.75, 2.0));
+  // the words come first: under the line on screen the picture settles into the ground, feathered
+  col = mix(col, mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2), koMask(uv) * 0.9);
   vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
   col *= mix(0.68, 1.0, smoothstep(1.15, 0.3, length(vq)));
   col += grain(fc, 0.04) * (0.3 + luma(col));
