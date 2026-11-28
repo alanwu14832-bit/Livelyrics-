@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { composeSceneProgram, FORM_IDS, INSTRUMENTAL_TITLES, isBuildSection } from "./composer";
 import { compileForCpu } from "./glsl-eval";
 import { PROBE_COVER, PROBE_LIT_MAX, probePlanProgram, stateUniforms } from "./probe";
+import { selfCheck } from "./self-check";
 import { validateProgram } from "./validate";
 
 const luma = (c: readonly number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
@@ -17,12 +18,13 @@ import { AUDIT_SONGS, auditInput } from "@/lib/server/designer/testing/audit-son
 const songs = AUDIT_SONGS.filter((s) => ["demo", "citypop", "punk", "folk"].includes(s.key)).map((song) => ({ song, plan: offlineDesign(auditInput(song)) }));
 
 describe("the chorus opens the wall (round 23)", () => {
-  it("every form: a chorus covers at least twice its verse, a verse stays sparse, the subject moves", { timeout: 180_000 }, () => {
+  it("every form: a chorus covers at least twice its verse, a verse stays sparse, the subject moves", { timeout: 400_000 }, () => {
     const failures: string[] = [];
     for (const { song, plan } of songs) {
       const sections = plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy }));
       for (const form of FORM_IDS) {
-        const prog = composeSceneProgram({ seed: 7, forms: [form], sections });
+        // round 28: the program the offline designer ships — the composer's output after its self-check
+        const prog = selfCheck((t) => composeSceneProgram({ seed: 7, forms: [form], sections, tune: t, reroll: t.reroll }), plan).program;
         const r = probePlanProgram(prog, plan);
         const tag = `${song.key}/${form}`;
         if (!r.ok) failures.push(`${tag}: ${r.errors.join("; ")}`);

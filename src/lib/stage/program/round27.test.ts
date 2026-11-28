@@ -17,6 +17,7 @@ import { composeSceneProgram, FORM_IDS } from "./composer";
 import { CRITIQUE_TARGETS, critiqueProgram, critiqueStates } from "./critique";
 import { compileForCpu } from "./glsl-eval";
 import { PROBE_COVER, probePlanProgram, stateUniforms } from "./probe";
+import { selfCheck } from "./self-check";
 import { validateProgram } from "./validate";
 
 const songs = [
@@ -47,8 +48,10 @@ describe("round 27: nothing fights the words", () => {
 
   it("the critique fails a form that runs through the text zone (the round-26 threads / rings), and passes the knocked-out one", () => {
     const { plan } = songs.find((s) => s.key === "demo")!;
-    const src = composeSceneProgram({ seed: 7, forms: ["orbits"], sections: sectionsOf(plan) });
-    // the same program without its knockout: the last chorus' rings cross the words
+    // (round 28: the orbits now clear the words on their own — their rings and wash fade under the line — so the
+    // slabs' rim light is the form that shows what the knockout is for)
+    const src = composeSceneProgram({ seed: 7, forms: ["pillars"], sections: sectionsOf(plan) });
+    // the same program without its knockout: the rim light of the grown slabs crosses the words
     const bare = { ...src, source: src.source.replace(/float ko = koMask\(uv\)[^;]*;/, "float ko = 0.0;") };
     expect(bare.source).not.toBe(src.source);
     const b = critiqueProgram(bare, plan)!;
@@ -58,13 +61,13 @@ describe("round 27: nothing fights the words", () => {
     expect(b.failed.join("\n")).toMatch(/wordsMask/);
   });
 
-  it("threads passes the whole critique on every audit song (near-white ≤ 3 %), a dark song too", { timeout: 120_000 }, () => {
+  it("threads passes the whole critique on every audit song (near-white ≤ 3 %), a dark song too", { timeout: 300_000 }, () => {
     const failures: string[] = [];
     for (const { key, plan } of songs) {
       for (const dark of [false, true]) {
-        const prog = composeSceneProgram({ seed: 7, forms: ["threads"], sections: sectionsOf(plan), dark });
-        const c = critiqueProgram(prog, plan)!;
-        if (c.check.passed !== c.check.total) failures.push(`${key}${dark ? " (dark)" : ""}: ${c.failed.join(" | ")}`);
+        // (round 28: through the composer's self-check, as every offline program is built)
+        const { program: prog, critique: c } = selfCheck((t) => composeSceneProgram({ seed: 7, forms: ["threads"], sections: sectionsOf(plan), dark, tune: t, reroll: t.reroll }), plan);
+        if (!c || c.check.passed !== c.check.total) failures.push(`${key}${dark ? " (dark)" : ""}: ${c?.failed.join(" | ")}`);
         const white = Math.max(...probePlanProgram(prog, plan).samples.map((s) => s.white ?? 0));
         if (white > CRITIQUE_TARGETS.whiteMax) failures.push(`${key}: near-white ${white}`);
       }

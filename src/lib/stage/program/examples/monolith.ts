@@ -23,6 +23,19 @@ vec2 uvToP(vec2 q) { return (q * uRes - 0.5 * uRes) / min(uRes.x, uRes.y); }
 
 float floorY() { return aspect() < 0.8 ? (zoneCenter().y > 0.5 ? 0.1 : 0.42) : 0.2; }
 
+// a colour at full value (same pigment, never toward white); the line on screen gets the picture's quiet
+vec3 inkOf(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.02) * 0.92; }
+float koMask(vec2 uv) {
+  if (uTypeAmt < 0.002 || uTypeBox.z <= uTypeBox.x || uTypeBox.w <= uTypeBox.y) return 0.0;
+  vec2 pad = vec2(0.022, 0.035);
+  vec2 fe = vec2(0.1 / max(aspect(), 1.0), 0.1);
+  vec2 lo = uTypeBox.xy - pad;
+  vec2 hi = uTypeBox.zw + pad;
+  vec2 a = smoothstep(lo - fe, lo, uv);
+  vec2 b = 1.0 - smoothstep(hi, hi + fe, uv);
+  return a.x * a.y * b.x * b.y * uTypeAmt;
+}
+
 vec3 scene(vec2 fc) {
   vec2 uv = fc / uRes;
   vec2 p = centered(fc);
@@ -57,9 +70,9 @@ vec3 scene(vec2 fc) {
   float glow = exp(-r * (7.0 - 3.5 * light)) * (0.2 + 0.9 * light + 0.15 * kick());
   float ang = atan(lq.y, lq.x);
   float rays = pow(vnoise(vec2(ang * 7.0 + uSeed, uTime * 0.08)), 3.0) * smoothstep(0.0, 0.15, r) * exp(-r * 1.6);
-  float rayAmt = smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode));
-  vec3 lc = mix(uAcc, vec3(1.0), 0.45);
-  col += lc * (glow + rays * rayAmt * (1.1 + 0.4 * kick())) * (0.8 + 0.2 * build);
+  float rayAmt = smoothstep(1.5, 2.0, uMode) * (1.0 - step(2.5, uMode)) * (1.0 - 0.3 * sat(uSongProgress * 1.4 - 0.4));
+  vec3 lc = mix(uAcc, inkOf(uAcc), 0.7);
+  col += lc * (glow + rays * rayAmt * (1.6 + 0.4 * kick())) * (0.8 + 0.2 * build);
   // dust in the air, rising with the build
   vec2 dp = fc / min(uRes.x, uRes.y) * 90.0 + vec2(0.0, -uTime * (0.3 + build));
   float dust = step(0.985, hash12(floor(dp))) * smoothstep(0.4, 0.0, length(fract(dp) - 0.5));
@@ -82,6 +95,11 @@ vec3 scene(vec2 fc) {
     float rs = fill(min(sdBox(rp - c + vec2(halfW * 0.5 + split, 0.0), vec2(halfW * 0.5, h * 0.5)), sdBox(rp - c - vec2(halfW * 0.5 + split, 0.0), vec2(halfW * 0.5, h * 0.5))));
     col = mix(col, col * 0.55, rs * 0.6 * smoothstep(0.0, 0.1, fy - uv.y));
   }
+  // one exposure for every palette: a dim palette (a slate) is lifted and a pastel is held back, so the
+  // lit area of a state does not depend on how bright the song's colours happen to be
+  col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.75, 2.0));
+  // the words come first: under the line on screen the picture settles into the ground, feathered
+  col = mix(col, mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2), koMask(uv) * 0.9);
   vec2 vq = (uv - 0.5) * vec2(aspect(), 1.0);
   col *= mix(0.6, 1.0, smoothstep(1.2, 0.25, length(vq)));
   col += grain(fc, 0.045) * (0.25 + luma(col));

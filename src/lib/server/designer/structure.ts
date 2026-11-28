@@ -5,6 +5,7 @@
 
 import { estimatedFlags } from "@/lib/lyrics/lrc";
 import { isNearlySilent } from "@/lib/silence";
+import { estimateEmotion } from "./lyric-analysis";
 import { lineAnchorTime, lineSpan } from "@/lib/timeline";
 import type { AudioAnalysis, Lyrics, SectionKind, SongMeta } from "@/lib/types";
 
@@ -40,6 +41,8 @@ export interface StructSection {
   repeatedRatio: number;
   /** CJK characters (or Latin words) per second of sung time; 0 without lines */
   density: number;
+  /** round 28 (m5): this 「chorus」 is the song's one non-repeating climax line, not a repeated hook */
+  climax?: boolean;
 }
 
 export interface SongStructure {
@@ -647,7 +650,7 @@ export function analyzeStructure(input: StructureInput): SongStructure {
   const vocal = sections.map((s) => meanEnvelope(input.analysis, "vocal", s.start, s.end));
   const firstSung = sortedTimed(lines)[0];
   const openTimed = !!firstSung && (!flags[firstSung.index] || rawLines[firstSung.index].aligned === true);
-  assignKinds(sections, source, meanEnergy, { flat, loud, vocal, openTimed });
+  assignKinds(sections, source, meanEnergy, { flat, loud, vocal, openTimed, lineText: new Map(lines.map((l) => [l.id, l.text])) });
   for (const s of sections) {
     if (s.kind === "chorus" && s.end - s.start > MAX_CHORUS_SECONDS + 0.5) s.kind = "verse";
     if (!isFiniteNumber(s.energy)) s.energy = KIND_ENERGY[s.kind];
@@ -686,6 +689,14 @@ interface KindContext {
   vocal: (number | null)[];
   /** the first sung line has a real or 「AI 自動對時」 start (not the 人聲-curve estimate) */
   openTimed: boolean;
+  /** line id → text (round 28: the lyric's own climax when nothing repeats) */
+  lineText?: ReadonlyMap<string, string>;
+}
+
+/** How intense one lyric line reads: the strength of its emotion words (|valence| and arousal), 0 when it has none. */
+function lineIntensity(text: string): number {
+  const e = estimateEmotion([text]);
+  return e.hits > 0 ? 0.5 * Math.abs(e.valence) + 0.5 * e.arousal : 0;
 }
 
 function assignKinds(sections: StructSection[], source: SongStructure["source"], meanEnergy: number, ctx: KindContext) {
@@ -735,6 +746,26 @@ function assignKinds(sections: StructSection[], source: SongStructure["source"],
     const sung = sections.filter((s) => s.lineIds.length && isFiniteNumber(s.energy));
     const top = Math.max(...sung.map((s) => s.energy), -1);
     for (const s of sung) if (s.energy >= Math.max(meanEnergy + 0.1, top - 0.08) && energyPeak(sections.indexOf(s))) s.kind = "chorus";
+    chorusFound = sections.some((s) => s.kind === "chorus");
+  }
+  // round 28 (m5): a ballad where nothing repeats still has a peak: its most intense line's section
+  // opens the picture (never the first or the last sung section — those are the opening and the closing)
+  if (!chorusFound && ctx.lineText) {
+    const sungIdx = sections.map((s, i) => (s.lineIds.length ? i : -1)).filter((i) => i >= 0);
+    const middle = sungIdx.length >= 3 ? sungIdx.slice(1, -1) : sungIdx.length === 2 ? sungIdx.slice(1) : [];
+    let best = -1;
+    let bestScore = 0.2;
+    for (const i of middle) {
+      const score = Math.max(0, ...sections[i].lineIds.map((id) => lineIntensity(ctx.lineText?.get(id) ?? "")));
+      if (score > bestScore) {
+        best = i;
+        bestScore = score;
+      }
+    }
+    if (best >= 0) {
+      sections[best].kind = "chorus";
+      sections[best].climax = true;
+    }
   }
 
   sections.forEach((s, i) => {

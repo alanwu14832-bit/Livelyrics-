@@ -104,14 +104,21 @@ export function critiqueProgram(program: SceneProgram, plan: Pick<DesignPlan, "s
   // round 27: nothing fights the words — the box behind them stays dark and calm in every arc state
   const boxLit = states.reduce((m, { state, s }) => ((s.boxLit ?? 0) > m.v ? { v: s.boxLit ?? 0, at: state } : m), { v: 0, at: "verse" as CheckState });
   const boxEdge = states.reduce((m, { state, s }) => ((s.boxEdge ?? 0) > m.v ? { v: s.boxEdge ?? 0, at: state } : m), { v: 0, at: "verse" as CheckState });
-  add("words-dark", boxLit.v <= T.boxLitMax, `字後面亮的面積最多 ${pct(boxLit.v)}（${STATE_LABEL[boxLit.at]}；目標 ≤ ${pct(T.boxLitMax)}）`, "形狀長大越過字的位置時，用 wordsMask(uv, 0.05) 把它在字的周圍淡出到背景色（羽化），不要讓亮部壓在字上", (boxLit.v - T.boxLitMax) / T.boxLitMax);
-  add("words-calm", boxEdge.v <= T.boxEdgeMax, `字後面的線條／邊緣密度最多 ${pct(boxEdge.v)}（${STATE_LABEL[boxEdge.at]}；目標 ≤ ${pct(T.boxEdgeMax)}）`, "字的周圍不要有細條紋、圓環或形狀的邊緣穿過；用 wordsMask 讓它們在字後面消失", (boxEdge.v - T.boxEdgeMax) / T.boxEdgeMax);
+  // (round 28: a song nobody sings has no words to protect — its labelled 「高潮／展開」 sections reserve no text zone)
+  const noWords = plan.sections.some((s) => s.kind === "chorus" && typeof s.label === "string" && s.label.startsWith("高潮／展開"));
+  if (!noWords) add("words-dark", boxLit.v <= T.boxLitMax, `字後面亮的面積最多 ${pct(boxLit.v)}（${STATE_LABEL[boxLit.at]}；目標 ≤ ${pct(T.boxLitMax)}）`, "形狀長大越過字的位置時，用 wordsMask(uv, 0.05) 把它在字的周圍淡出到背景色（羽化），不要讓亮部壓在字上", (boxLit.v - T.boxLitMax) / T.boxLitMax);
+  if (!noWords) add("words-calm", boxEdge.v <= T.boxEdgeMax, `字後面的線條／邊緣密度最多 ${pct(boxEdge.v)}（${STATE_LABEL[boxEdge.at]}；目標 ≤ ${pct(T.boxEdgeMax)}）`, "字的周圍不要有細條紋、圓環或形狀的邊緣穿過；用 wordsMask 讓它們在字後面消失", (boxEdge.v - T.boxEdgeMax) / T.boxEdgeMax);
   const whiteArea = Math.max(0, ...probe.samples.map((s) => s.white ?? 0));
   const maxMean = Math.max(0, ...probe.samples.map((s) => s.mean));
   add("no-white", whiteArea <= T.whiteMax && maxMean <= PROBE_MEAN_MAX, `接近白色的面積 ${pct(whiteArea)}、最亮的段落平均亮度 ${maxMean.toFixed(2)}（目標 ≤ ${pct(T.whiteMax)}、≤ ${PROBE_MEAN_MAX}）`, "最亮處也要是 uPri／uAcc 的顏色，用 mix 疊色，不要一路相加推到白", (whiteArea - T.whiteMax) * 10 + Math.max(0, maxMean - PROBE_MEAN_MAX) * 5);
   const nan = probe.samples.reduce((a, s) => a + (s.nan ?? 0), 0);
   const blank = states.filter(({ state, s }) => (state === "chorus" || state === "last-chorus" ? s.cover < 0.05 : s.mean < PROBE_BLACK_MEAN && s.cover === 0)).map(({ state }) => STATE_LABEL[state]);
   add("healthy", nan === 0 && blank.length === 0, nan ? `有 ${nan} 個取樣是 NaN` : blank.length ? `${blank.join("、")}的畫面幾乎是空的` : "沒有 NaN、沒有空白畫面", nan ? "除數加小量、pow／sqrt 的底先 max(0.0)、避開 atan(0,0) 與 normalize(0)" : "每一段都要有看得見的主角", 1);
+  // round 28 (m4): a song nobody sings has a 高潮, not a 副歌 (its sections are labelled 「高潮／展開」)
+  const unsung = plan.sections.some((s) => s.kind === "chorus" && typeof s.label === "string" && s.label.startsWith("高潮／展開"));
+  const say = (t: string) => (unsung ? t.replace(/副歌/g, "高潮") : t);
+  for (const c of checks) c.label = say(c.label);
+  for (let i = 0; i < failed.length; i++) failed[i] = say(failed[i]);
   const passed = checks.filter((c) => c.ok).length;
   return {
     check: {
@@ -138,6 +145,12 @@ export function checkLine(check: SceneProgramCheck | null | undefined): string |
   const verse = check.states.find((s) => s.state === "verse");
   const nums = [verse && `主歌亮 ${pct(verse.cover)}`, chorus && `副歌 ${pct(chorus.cover)}`].filter(Boolean).join("、");
   const tally = `通過 ${check.passed}／${check.total} 項${nums ? `（${nums}）` : ""}`;
+  // round 28: the offline composer's own check (no Claude): what it did, in one honest line
+  if (check.rerolls != null) {
+    const miss = check.checks.filter((c) => !c.ok);
+    if (!miss.length) return check.rerolls === 0 ? `畫面自我檢查：${tally}，離線作曲器第一版就過` : `畫面自我檢查：離線作曲器第一版只通過 ${check.firstPassed ?? "?"}／${check.total} 項，自動調整形狀 ${check.rerolls} 次 → ${tally}`;
+    return `畫面自我檢查：離線作曲器自動調整 ${check.rerolls} 次，仍有 ${miss.length} 項沒達標（${miss.slice(0, 2).map((c) => c.label.split("（")[0]).join("、")}），保留最接近的一版；${tally}`;
+  }
   if (!check.fixTurn) return `畫面自我檢查：${tally}${check.passed === check.total ? "，不需修正" : ""}`;
   if (check.kept === "fixed") return `畫面自我檢查：第一版只通過 ${check.firstPassed ?? "?"}／${check.total} 項，Claude 修正一次 → ${tally}`;
   return `畫面自我檢查：${check.fixFailed ? "修正失敗" : "修正版沒有比較好"}，保留第一版，${tally}`;

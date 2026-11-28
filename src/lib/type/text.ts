@@ -185,7 +185,9 @@ export function splitsWord(units: readonly TextUnit[], i: number): boolean {
 }
 
 /** Latin words a row (or a phrase of a long line) never ends on: 「light hums a / song it」. */
-const LATIN_NO_END = new Set(["a", "an", "the", "and", "or", "of", "to", "it", "in", "on", "at", "for", "with", "my", "your", "our"]);
+const LATIN_NO_END = new Set(["a", "an", "the", "and", "or", "of", "to", "it", "in", "on", "at", "for", "with", "my", "your", "our", "where", "when", "while", "but", "so", "from", "into", "that", "who", "if", "like", "as", "because", "until", "till", "than"]);
+/** Round 28 (m3): a particle that completes the verb before it (「lay me down」, 「turn it off」): a row does not start on it. */
+const LATIN_PARTICLE = new Set(["down", "up", "out", "away", "back", "off", "along", "around", "apart"]);
 
 /** The row would end on a Latin function word (the last word unit at or before `i`, spaces skipped). */
 export function endsOnFunctionWord(units: readonly TextUnit[], i: number): boolean {
@@ -249,6 +251,7 @@ export function latinBreakCost(units: readonly TextUnit[], k: number): number | 
   if (prev.kind !== "latin" || next.kind !== "latin") return -1.4;
   const pl = prev.text.toLowerCase();
   const nl = next.text.toLowerCase();
+  if (LATIN_PARTICLE.has(nl)) return 4.2;
   if (LATIN_BREAK_BEFORE.has(nl)) return -2.4;
   if (LATIN_LIGHT.has(pl) || LATIN_LIGHT.has(nl)) return -1.2;
   // a verb ends its own phrase (「carried / river stones」)

@@ -41,7 +41,8 @@ export function sectionName(s: Pick<SectionDesign, "label" | "kind">): { label: 
   const kind = SECTION_KIND_LABELS[s.kind] ?? s.kind;
   // round 24 (m6): a raw 「Verse 1」 from an older plan reads as its kind
   const label = isReadableLabel(s.label) ? s.label : kind;
-  return { label, kind: kind && kind !== label ? kind : null };
+  // round 28 (m4/m5): an unsung chorus is 「高潮／展開」 and a non-repeating climax 「高潮」; never also tag them 「副歌」
+  return { label, kind: kind && kind !== label && !label.startsWith("高潮") ? kind : null };
 }
 
 /** Small label over the stage preview: solid (no backdrop-filter over the WebGL canvas). */

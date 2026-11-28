@@ -16,12 +16,15 @@ export const SECTION_NAMES: Record<SectionKind, string> = {
   interlude: "間奏",
 };
 
+/** Round 28 (m4): a song with no singing has no 「副歌」 — its high-energy sections are the climax / development. */
+export const UNSUNG_CHORUS = "高潮／展開";
+
 const NUMS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
 const CJK = /\p{Script=Han}/u;
 
 /** 「主歌二」: the kind's name, numbered when the song has more than one of the kind. */
-export function kindLabel(kind: SectionKind, ordinal: number, total: number): string {
-  const base = SECTION_NAMES[kind] ?? "段落";
+export function kindLabel(kind: SectionKind, ordinal: number, total: number, sung = true): string {
+  const base = kind === "chorus" && !sung ? UNSUNG_CHORUS : (SECTION_NAMES[kind] ?? "段落");
   return total > 1 ? `${base}${NUMS[ordinal] ?? String(ordinal + 1)}` : base;
 }
 
@@ -31,13 +34,16 @@ export function isReadableLabel(label: string | null | undefined): boolean {
 }
 
 /** The sections with every unreadable label replaced (same objects when nothing changes). */
-export function readableLabels<T extends { kind: SectionKind; label: string }>(sections: readonly T[]): T[] {
+export function readableLabels<T extends { kind: SectionKind; label: string }>(sections: readonly T[], opts: { sung?: boolean } = {}): T[] {
+  const sung = opts.sung !== false;
   const total = new Map<SectionKind, number>();
   for (const s of sections) total.set(s.kind, (total.get(s.kind) ?? 0) + 1);
   const seen = new Map<SectionKind, number>();
   return sections.map((s) => {
     const n = seen.get(s.kind) ?? 0;
     seen.set(s.kind, n + 1);
-    return isReadableLabel(s.label) ? s : { ...s, label: kindLabel(s.kind, n, total.get(s.kind) ?? 1) };
+    // round 28 (m4): no singing, no 「副歌」 — the label of an unsung chorus is the climax / development
+    if (!sung && s.kind === "chorus" && s.label.includes("副歌")) return { ...s, label: kindLabel(s.kind, n, total.get(s.kind) ?? 1, false) };
+    return isReadableLabel(s.label) ? s : { ...s, label: kindLabel(s.kind, n, total.get(s.kind) ?? 1, sung) };
   });
 }
