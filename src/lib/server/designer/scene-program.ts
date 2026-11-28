@@ -20,6 +20,7 @@ import { normalizeSceneProgram } from "@/lib/stage/program/model";
 import { probePlanProgram, type ProbeResult } from "@/lib/stage/program/probe";
 import { validateProgram } from "@/lib/stage/program/validate";
 import type { DesignPlan, SceneId, SceneProgram } from "@/lib/types";
+import { hasDarkWord } from "@/lib/type/sensitive";
 import { hashString } from "./svg";
 import { analyzeFindings, type Findings } from "./findings";
 import { recentFactor, recentUses, RECENT_USE_FACTORS, RECENT_WINDOW, type RecentLook } from "./recent";
@@ -441,6 +442,23 @@ export function motionBias(findings: Findings): Partial<Record<MotionId, number>
   return out;
 }
 
+/**
+ * Round 27 (m1): the genre's own way of moving leads (punk sweeps, folk drifts, post-rock rises) —
+ * the composer's weighted draw let a punk brush drift. Null without a genre (the imagery decides).
+ */
+export function genreMotion(findings: Findings): MotionId | null {
+  const table = findings.genre && (isBallad(findings) ? BALLAD_MOTION : MOTION_BY_GENRE[findings.genre.id]);
+  const w: Partial<Record<MotionId, number>> = { ...(table || {}) };
+  if (isShout(findings)) w.sweep = Math.max(w.sweep ?? 1, 1.8);
+  const top = (Object.entries(w) as Array<[MotionId, number]>).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : null;
+}
+
+/** Round 27 (N1): a dark song — at least two lyric lines hold a dark word (blood, death, ending one's life). */
+export function isDarkSong(req: Pick<DesignerInput, "lyrics">): boolean {
+  return (req.lyrics?.lines ?? []).filter((l) => typeof l?.text === "string" && hasDarkWord(l.text)).length >= 2;
+}
+
 /** The form + texture pairs the band's other songs wear (most recent first), from their program recipes. */
 export function bandPairs(req: DesignerInput): ComposerPair[] {
   const out: ComposerPair[] = [];
@@ -470,6 +488,8 @@ export function offlineSceneProgram(req: DesignerInput, plan: DesignPlan, salt =
     avoid: bandPairs(req),
     surface: surfaceWeights(f, req.recentLooks),
     motionBias: motionBias(f),
+    motionLead: genreMotion(f),
+    dark: isDarkSong(req),
     lyrics,
     sections: plan.sections.map((s) => ({ id: s.id, kind: s.kind, energy: s.energy })),
     voice: plan.typeSystem?.voice ?? null,
@@ -581,6 +601,7 @@ export const SCENE_SYSTEM = `你是這個樂團的專職舞台視覺總監，也
    - 一個主角，靠三分線、站在文字區的另一側；其他形狀用大小與對比讓位。
    - 安全區：主角與亮部離畫面邊緣 5% 以上（直式上 12%、下 18%）。
    - 亮的面積（亮度 > 0.2）：主歌 < 10%，副歌 25–45%，副歌至少是主歌兩倍，最後一次副歌最大；用形狀變大、層數變多打開，不是整個畫面調亮。
+   - 字後面要暗而安靜：副歌的主角長大越過字的位置時，用 col = mix(col, uBg, wordsMask(uv, 0.05)) 把它在字周圍羽化淡出；字的方塊裡亮部 ≤ 6%，不要有細條紋、圓環或邊緣穿過字。
    - 顏色在感知空間裡走：同色相改明度與彩度，換段走鄰近色相、不經過灰；暗部帶一點主色。
 
 用繁體中文寫 title、concept、rationale 與每段的 note；程式碼只用 ASCII（註解可以中文）。`;
