@@ -478,7 +478,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   vec2 sp = fc / min(uRes.x, uRes.y) * 160.0;
   col += vec3(0.85) * step(0.993, hash12(floor(sp))) * smoothstep(0.35, 0.0, length(fract(sp) - 0.5)) * up * (1.0 - light) * 0.7;
   col += mix(uPri, uAcc, 0.5) * exp(-d * (6.0 - 2.5 * light) / (1.0 + 0.4 * OPEN())) * (0.12 + 0.4 * light) / (1.0 + 0.5 * OPEN()) * away;
-  vec3 disc = mix(mix(uPri, uAcc, 0.3), mix(uAcc, inkOf(uAcc), 0.6), smoothstep(-1.0, 1.0, q.y / r));
+  vec3 disc = mix(mix(uPri, uAcc, 0.3), mix(mix(uPri, uAcc, 0.15), inkOf(mix(uPri, uAcc, 0.15)), 0.6), smoothstep(-1.0, 1.0, q.y / r));
   float ny = q.y / r;
   float cut = K_BANDS > 0.5 ? step(fract((0.3 - ny) * K_BANDS * 0.5 + T() * 0.02), sat((0.15 - ny) * 0.5)) * step(ny, 0.15) : 0.0;
   // round 23: the chorus sun fills the sky and passes the frame's edge; rings of its light spread
@@ -686,7 +686,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   if (K_DISC > 0.5) {
     float d = length(p - c);
     col += mix(uPri, uAcc, 0.5) * exp(-d * 6.0) * (0.12 + 0.35 * light);
-    col = mix(col, mix(uAcc, inkOf(uAcc), 0.55), fill(d - dr));
+    col = mix(col, mix(mix(uPri, uAcc, 0.2), inkOf(mix(uPri, uAcc, 0.2)), 0.55), fill(d - dr));
   }
   float mirror = step(2.5, uMode);
   float y = uv.y;
@@ -789,6 +789,7 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
   float wash = fbm(uv * vec2(aspect(), 1.0) * 2.0 + vec2(T() * 0.01, 0.0));
   col = mix(col, mix(uBg, mix(uPri, uBg, 0.4), 0.3), smoothstep(0.62, 0.0, length((uv - vec2(zc.x < 0.5 ? 1.0 : 0.0, 0.0)) * vec2(aspect(), 1.0)) - wash * 0.3) * (0.2 + 0.25 * uParams.y));
   float ink = 0.0;
+  float inkB = 0.0; // round 28: the chorus' second and third strokes are the accent (a clash, not one colour)
   float w = R * (0.1 + 0.05 * uParams.y) * (1.0 + 0.9 * OPEN() * (1.0 - 0.45 * ESC()));
   if (uMode > 2.5) {
     float d = length(p - c);
@@ -802,8 +803,8 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     // round 23: the chorus draws a second ring inside the first (and the last chorus a third
     // outside it), each started a little later — the circle repeats instead of only brightening
     float t2 = fract(t + 0.37);
-    ink = max(ink, OPEN() * brushAt(t2, length(q) - R * 0.68, w * 0.7 * (0.3 + 0.9 * press)) * step(t2, sweep * 0.9));
-    ink = max(ink, OPEN() * step(0.5, ESC()) * brushAt(fract(t + 0.71), length(q) - R * 1.3, w * 0.25 * (0.3 + 0.9 * press)) * step(fract(t + 0.71), sweep * 0.85));
+    inkB = max(inkB, OPEN() * brushAt(t2, length(q) - R * 0.68, w * 0.7 * (0.3 + 0.9 * press)) * step(t2, sweep * 0.9));
+    inkB = max(inkB, OPEN() * step(0.5, ESC()) * brushAt(fract(t + 0.71), length(q) - R * 1.3, w * 0.25 * (0.3 + 0.9 * press)) * step(fract(t + 0.71), sweep * 0.85));
   } else {
     vec2 a = c - vec2(R * 1.6, 0.0);
     float t = sat((p.x - a.x) / (R * 3.2));
@@ -811,15 +812,17 @@ vec3 form(vec2 fc, vec2 uv, vec2 p) {
     float press = smoothstep(0.0, 0.05, t) * (1.0 - 0.75 * smoothstep(0.5, 1.0, t));
     ink = brushAt(t, p.y - yy, w * 1.3 * (0.3 + 0.9 * press)) * step(t, sweep) * step(0.0005, t) * step(t, 0.9995);
     // round 23: the chorus sweeps a second stroke under the first (a third above it in the last)
-    ink = max(ink, OPEN() * brushAt(t, p.y - yy + R * 0.62, w * 1.1 * (0.3 + 0.9 * press)) * step(t, sweep * 0.92) * step(0.0005, t) * step(t, 0.9995));
-    ink = max(ink, OPEN() * step(0.5, ESC()) * brushAt(t, p.y - yy - R * 0.6, w * 0.3 * (0.3 + 0.9 * press)) * step(t, sweep * 0.85) * step(0.0005, t) * step(t, 0.9995));
+    inkB = max(inkB, OPEN() * brushAt(t, p.y - yy + R * 0.62, w * 1.1 * (0.3 + 0.9 * press)) * step(t, sweep * 0.92) * step(0.0005, t) * step(t, 0.9995));
+    inkB = max(inkB, OPEN() * step(0.5, ESC()) * brushAt(t, p.y - yy - R * 0.6, w * 0.3 * (0.3 + 0.9 * press)) * step(t, sweep * 0.85) * step(0.0005, t) * step(t, 0.9995));
   }
   // round 13: in the chorus the paper warms around the stroke (the accent soaked into it)
   col += mix(uPri, uAcc, 0.6) * closeUp * 0.07 * smoothstep(1.0, 0.0, length(p - c) / (R * 1.8)) * (0.6 + 0.4 * uParams.z);
   // the stroke lifts off the paper under the words on screen (never under an empty zone)
   ink *= 1.0 - wordsMask(uv, 0.03) * (1.0 - around);
+  inkB *= 1.0 - wordsMask(uv, 0.03) * (1.0 - around);
   // the ink is the palette's (round 27: no stray accent dot beside the stroke — it read as a glitch)
-  col = mix(col, mix(uPri, inkOf(mix(uPri, uAcc, 0.25)), 0.55) * (0.8 + 0.2 * uParams.z), ink);
+  col = mix(col, mix(uPri, inkOf(uPri), 0.55) * (0.8 + 0.2 * uParams.z), ink);
+  col = mix(col, mix(uAcc, inkOf(uAcc), 0.55) * (0.8 + 0.2 * uParams.z), inkB);
   return col;
 }`,
       };
@@ -1043,6 +1046,7 @@ ${instrumental ? INSTRUMENTAL_COMMON(choice) : COMMON(choice, !!input.dark)}
 const float K_WASH = ${f(Math.max(0, (input.tune?.chorus ?? 1) - 1) * 0.5)};
 const float K_CAP = ${f(input.tune?.cap ?? 1)};
 const float K_QUIET = ${f(Math.min(1, input.tune?.verse ?? 1))};
+const float K_LOUD = ${f(Math.min(1, input.tune?.chorus ?? 1))};
 ${stageGrammar(choice.form, input.sections, input.tune?.chorus ?? 1)}
 ${motionGlsl(choice.motion)}
 ${instrumental ? fullFrame(form.code) : form.code}
@@ -1059,14 +1063,16 @@ vec3 scene(vec2 fc) {
   // background, so no dark plate is cut out around the words
   // (a chorus' rings run well past 1.0 before the display clips them: bound the light first, or 4 % of
   // it would still cut through the words)
-${instrumental ? "" : `  // round 28 (N3): the self-check's lever — when a form's chorus is not open enough (chorus-open) the chorus
+  // round 28 (N3): the self-check's lever — when a form's chorus is not open enough (chorus-open) the chorus
   // gathers a soft field of the subject's colour around the focal point (K_WASH 0 = as composed)
-  col += mix(uPri, uAcc, 0.35) * K_WASH * OPEN() * exp(-pow(length(p - toP(focalUv())) / (0.42 * SC()), 2.0));
-`}  // round 28: one exposure for every palette — a dim palette (a slate) is lifted and a pastel held back, so the
+  col += mix(uPri, uAcc, 0.35) * K_WASH * OPEN() * exp(-pow(length(p - ${instrumental ? "vec2(0.0)" : "toP(focalUv())"}) / (0.42 * SC()), 2.0));
+  // round 28: one exposure for every palette — a dim palette (a slate) is lifted and a pastel held back, so the
   // lit area of a state follows the composition, not how bright the song's colours happen to be
   col = mix(uBg, col, clamp(0.5 / max(0.12, luma(mix(uPri, uAcc, 0.5))), 0.8, 1.8));
   // the verses' lever (verse-quiet): everything outside a chorus or a build sinks toward the ground
-  col = mix(uBg, col, mix(1.0, K_QUIET, (1.0 - OPEN()) * (1.0 - BUILD())));
+  col = mix(uBg, col, mix(1.0, K_QUIET, (1.0 - OPEN()) * (1.0 - 0.6 * BUILD())));
+  // …and the chorus' (chorus-open too wide): the same, from the other side
+  col = mix(uBg, col, mix(1.0, K_LOUD, OPEN()));
   col = min(col, vec3(K_CAP));
   float ko = koMask(uv) * WORDS() * (0.72 + 0.24 * max(OPEN(), BUILD()) + 0.04 * ESC());
   vec3 settled = mix(col * min(1.0, 0.16 / max(luma(col), 1e-3)), uBg, 0.2);

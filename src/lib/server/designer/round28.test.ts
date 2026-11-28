@@ -34,7 +34,7 @@ describe("N2: the palette comes from the song", () => {
   it("the families have real OKLCH targets: every variant builds a palette inside its own ranges", () => {
     expect(PALETTE_FAMILY_IDS).toHaveLength(10);
     for (const id of PALETTE_FAMILY_IDS) expect(PALETTE_FAMILIES[id].variants.length).toBeGreaterThanOrEqual(2);
-    expect(PALETTE_TEACHING.length).toBeLessThan(560);
+    expect(PALETTE_TEACHING.length).toBeLessThan(345);
     expect(PALETTE_TEACHING).toContain("原色撞色");
   });
 
@@ -136,6 +136,20 @@ describe("N3: the app's own pictures pass its own self-check", () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it("the instrumental composer (no words, no text zone) passes its checks too — every form", { timeout: 300_000 }, () => {
+    const plan = planOf("instrumental");
+    const failures: string[] = [];
+    for (const form of FORM_IDS) {
+      const { critique: c } = selfCheck((t) => composeSceneProgram({ seed: 7, forms: [form], sections: sectionsOf("instrumental"), lyrics: false, tune: t, reroll: t.reroll }), plan);
+      const f = c ? failedChecks(c) : ["unsupported"];
+      if (f.length) failures.push(`${form}: ${f.join(",")}`);
+    }
+    expect(failures).toEqual([]);
+    // the console's wording follows the song: no 「副歌」 for a song nobody sings
+    const check = offlineDesign(songs.find((s) => s.key === "instrumental")!.input, { check: true }).sceneProgram!.check!;
+    expect(check.checks.map((x) => x.label).join("")).not.toContain("副歌");
   });
 
   it("the offline program is measured and re-rolled, and records one honest line for the console", { timeout: 300_000 }, () => {

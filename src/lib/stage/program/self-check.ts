@@ -25,14 +25,19 @@ export function nextTune(t: SelfTune, c: SceneCritique, stalled: number): SelfTu
   const ids = new Set(c.check.checks.filter((x) => !x.ok).map((x) => x.id));
   const chorus = c.check.states.find((s) => s.state === "chorus");
   let { scale, verse, chorus: ch, cap, reroll } = t;
+  // proportional steps (the further a state is from its target, the bigger the move), so the walk settles
+  // instead of swinging between too dim and too wide
+  const verseCover = c.check.states.find((s) => s.state === "verse")?.cover ?? 0;
   if (ids.has("verse-quiet") || ids.has("chorus-over-verse")) {
-    verse *= 0.72;
+    verse *= verseCover > 0.1 ? clamp(0.07 / verseCover, 0.3, 0.9) : 0.8;
     scale *= 0.96;
   }
   if (ids.has("chorus-open")) {
-    const low = (chorus?.cover ?? 0) < 0.25;
-    ch *= low ? 1.28 : 0.8;
-    scale *= low ? 1.06 : 0.95;
+    const cover = Math.max(0.02, chorus?.cover ?? 0);
+    const low = cover < 0.25;
+    // too wide: the form is made smaller (its size is the gentle lever), the chorus' drive eased a little
+    ch *= low ? clamp(0.33 / cover, 1.1, 1.7) : 0.92;
+    scale *= low ? 1.04 : clamp(0.37 / cover, 0.7, 0.95);
   }
   if (ids.has("last-grows")) ch *= 0.88;
   if (ids.has("build-rises")) verse *= 1.12;

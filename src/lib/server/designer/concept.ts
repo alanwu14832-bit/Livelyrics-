@@ -300,7 +300,7 @@ export function wallSentence(c: ConceptContext, skeleton: SkeletonId, w: WallFac
   const short = `「${w.title}」`;
   const v = (c.seed >>> 9) % 3;
   const small = ["小小地站在字的另一側", "退到字的另一側，只佔一角", "安靜地站在字的對面"][v];
-  const verse = w.builds ? `主歌時它${small}，進副歌前慢慢長大` : `主歌時它${small}`;
+  const verse = w.builds ? `主歌時它${small}，進${w.climaxOnly ? "最強烈的那一句" : "副歌"}前慢慢長大` : `主歌時它${small}`;
   let chorus: string;
   if (!w.chorusCount) chorus = `唱到最亮的那一段才長到最大${hook ? `，${hook}留在畫面上` : ""}`;
   else if (w.climaxOnly) chorus = `整首沒有重複的副歌，唱到最強烈的那一句時${short}才長到最大，不閃白、不硬切`;
