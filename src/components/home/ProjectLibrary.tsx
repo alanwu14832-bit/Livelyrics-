@@ -167,7 +167,7 @@ export function ProjectLibrary({
           <label className="relative w-64 max-w-full">
             <span className="sr-only">搜尋作品</span>
             <MagnifyingGlassIcon size={16} className="pointer-events-none absolute top-1/2 left-2.5 z-[1] -translate-y-1/2 text-label-2" />
-            <TextField type="search" aria-label="搜尋歌名或樂團" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜尋歌名或樂團" className="pl-8!" />
+            <TextField type="search" aria-label="搜尋作品庫" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜尋歌名或樂團" className="pl-8!" />
           </label>
         )}
       </div>

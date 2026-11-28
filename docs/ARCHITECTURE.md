@@ -1986,6 +1986,45 @@ isolation (COOP / COEP) would let ONNX Runtime use threads: the obvious next spe
   the library / process copy followed `taste-skill` (Leonxlnx/taste-skill: every visual renders, never an empty
   ground) and the console changes `frontend-ui-engineering` (loading states instead of a blank box).
 
+### Round 27: nothing fights the words
+
+- **What the eye sees behind the words** (`probe.ts`, `critique.ts`, `scripts/legibility.cjs`): the probe renders
+  each state again with the words on screen (`uTypeBox` over the text box, `uTypeAmt` 1) and samples the padded box
+  (`PROBE_BOX_PAD` 0.02) on a finer grid (`PROBE_BOX_GRID` 28 × 16): `boxLit` (fraction above `PROBE_BOX_LIT`
+  0.4 — light ink loses its 4.5 : 1 there) and `boxEdge` (fraction of neighbouring samples stepping more than
+  `PROBE_EDGE` 0.12: stripes, rings, a disc's rim). The boxes (`textBoxes`) are the section's zone and, in a
+  chorus, the poster band x 0.06–0.94 at the zone's height (a line that cannot reach its floor spans the readable
+  width). Two critique checks (`words-dark` ≤ 6 %, `words-calm` ≤ 6 %; the check is now 10–11 items), calibrated
+  on the audit: threads 11–22 % / 0.20–0.26, pillars 15–21 %, the folk moon in the poster band 10–16 %, demo's
+  last-chorus rings 7 % / 0.12 fail; city pop's sun 0 % / 0.01 passes. `SCENE_SYSTEM` item 11 asks for the
+  feathered `wordsMask` knockout. `legibility.cjs` measures the same in the real frame: inside the glyphs' own
+  bounding box from the grey probe (+ 2 %), not glyphs / their edge / the type's decoration: lit against the
+  ink ≤ `BOX_LIT_MAX` 5 %, cells of 1 % of the short side stepping > 0.12 ≤ `BOX_EDGE_MAX` 5 %
+  (audit frames: emo chorus 13.8 % / 19 %, demo last chorus 6.8 %, folk 「Oh,」 7.2 % fail; city pop passes).
+  `LEGIBILITY_LINES=3,@28.1` measures chosen lines; the swapped program is restored on an error, SIGINT or
+  SIGTERM (one restore request, awaited before exit).
+- **Every form knocks itself out under the line** (`composer.ts koMask`, `scene()`): the colour is bounded at 1.0
+  (a chorus' rings run far past it before the display clips), then over the type's read box (+ a small pad,
+  feathered 0.1 outward) its light is capped at luma 0.16 and drawn 20 % toward `uBg` — 72 % in a verse,
+  96 % + `ESC()` where the chorus or the build's end opens it — so the dim air keeps its tone (no dark plate)
+  while rings, the moon disc, slabs and strokes grown past the frame's edge sink under the words; an
+  instrumental (`WORDS()` 0) has none. The type layer exposes the read box as `data-read` (what `uTypeBox` is).
+- **Threads** (N1): mixed to palette levels (`atL`: the hue kept, the brightest channel ≤ 0.9), never added
+  toward white; the chorus pours in one band on the form's side (`hw` 0.33 + 0.04 `ESC()`), its air takes the
+  primary at luma ≈ 0.29, the words' side keeps a verse's rain; a pool of light where the threads land is the
+  verse's subject (it changes sides with the words). A dark song (`isDarkSong`: ≥ 2 lyric lines with a dark
+  word → `ComposerInput.dark`, `K_DARK`) keeps its chorus light near the verse's. threads passes the whole
+  critique on every audit song, dark or not (`round27.test.ts`).
+- **m1**: outside the chorus the brush's stroke is clamped inside the safe area; the stray accent dot is gone.
+  The genre's motion leads (`genreMotion` → `ComposerInput.motionLead`: punk sweeps whatever the form or salt).
+- **m9**: the scan transition is one soft beam travelling down (up when mirrored) with a fading raster behind it,
+  not row-staggered hard steps (the diagonal staircase of grey blocks).
+- **N4 / m6 (process page)**: `KeyVisualSummary` names sections with `sectionWall()` (strip, detail, rows) and shows
+  the built-in scene only as 「備用內建場景」; `SectionPreview` carries the console's poster
+  (`components/stage/PreviewPoster.tsx`, shared) until the stage draws. **m10**: the library search field has a
+  label, the LED preset reads 「戶外」, the first-lyric cue is a 重點 (highlight), not a 轉場.
+  m8 (2× library thumbs) is not done: the CPU frame costs ~18× at 546 px on every saved plan.
+
 ### Cloud mode (Vercel)
 
 Vercel functions have a read-only, ephemeral filesystem (except `/tmp`), no shared memory between
